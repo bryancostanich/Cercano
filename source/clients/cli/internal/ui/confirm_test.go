@@ -126,13 +126,30 @@ func TestRenderConfirmPrompt_RequestAutonomousExit_AsksForReview(t *testing.T) {
 		Args:       `{"summary":"done","verification":"targeted tests passed"}`,
 		Permission: "X",
 	}))
-	for _, want := range []string{"review decisions and exit autonomous mode", "Summary: done", "Verification: targeted tests passed"} {
+	for _, want := range []string{"begin final decision review", "Summary: done", "Verification: targeted tests passed"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("request_autonomous_exit prompt missing %q: %q", want, s)
 		}
 	}
 	if strings.Contains(s, "DESTRUCTIVE") || strings.Contains(s, "⚠") {
 		t.Errorf("request_autonomous_exit must not be DESTRUCTIVE/⚠: %q", s)
+	}
+}
+
+func TestRenderConfirmPrompt_CompleteAutonomousReview_AsksToExit(t *testing.T) {
+	m := minimalModel()
+	s := stripAnsiCSI(m.renderConfirmPrompt(&pendingToolCall{
+		Name:       "complete_autonomous_review",
+		Args:       `{"summary":"decisions accepted"}`,
+		Permission: "X",
+	}))
+	for _, want := range []string{"Final autonomous review accepted", "Summary: decisions accepted"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("complete_autonomous_review prompt missing %q: %q", want, s)
+		}
+	}
+	if strings.Contains(s, "DESTRUCTIVE") || strings.Contains(s, "⚠") {
+		t.Errorf("complete_autonomous_review must not be DESTRUCTIVE/⚠: %q", s)
 	}
 }
 

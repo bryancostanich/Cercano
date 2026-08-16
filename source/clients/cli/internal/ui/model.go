@@ -3801,7 +3801,7 @@ func confirmPromptDetails(p *pendingToolCall) []string {
 		}
 		if summary := oneLine(stringArg(obj, "summary")); summary != "" {
 			label := "Plan: "
-			if p.Name == "request_autonomous_exit" {
+			if p.Name == "request_autonomous_exit" || p.Name == "complete_autonomous_review" {
 				label = "Summary: "
 			}
 			details = append(details, label+truncateArgs(summary, 200))
@@ -3862,7 +3862,7 @@ func isDispatchTool(name string) bool {
 // instead of the raw "name arg=val" dump.
 func isSessionControlTool(name string) bool {
 	switch name {
-	case "suggest_plan", "request_plan_approval", "plan_exit", "suggest_autonomous", "request_autonomous_exit", "auto_exit":
+	case "suggest_plan", "request_plan_approval", "plan_exit", "suggest_autonomous", "request_autonomous_exit", "complete_autonomous_review", "auto_exit":
 		return true
 	}
 	return false
@@ -3883,7 +3883,9 @@ func sessionControlPromptTitle(p *pendingToolCall) string {
 	case "suggest_autonomous":
 		return "Start autonomous mode with this run brief?"
 	case "request_autonomous_exit":
-		return "Autonomous run complete — review decisions and exit autonomous mode?"
+		return "Autonomous run complete — begin final decision review?"
+	case "complete_autonomous_review":
+		return "Final autonomous review accepted — exit autonomous mode?"
 	case "auto_exit":
 		return "Leave autonomous mode?"
 	}

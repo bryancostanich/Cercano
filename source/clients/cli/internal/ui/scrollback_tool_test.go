@@ -50,6 +50,27 @@ func TestToolEntry_DaylightHeaderAndArgsUseReadableThemeColors(t *testing.T) {
 	}
 }
 
+func TestToolEntry_DaylightExpandedRawArgsUseReadablePrimaryColor(t *testing.T) {
+	daylight := builtinToolPaletteForTest("daylight")
+	out := renderToolEntry(ToolEntry{
+		ToolName:    "dispatch",
+		ArgsSummary: "conversation_id= cwd=/Users/bryancostanich/git_repos/bryan_costanich/Cercano",
+		FullArgs:    `{"intent":"offload read-heavy recon","path":"/Users/bryancostanich/git_repos/bryan_costanich/Cercano","task":"Investigate source/clients/cli tool output rendering"}`,
+		Status:      ToolStatusComplete,
+		Folded:      false,
+	}, 80, false, theme.NewStyles(daylight), render.NewMarkdown(theme.MarkdownStyle(daylight)))
+	plain := stripAnsiCSI(out)
+	if !strings.Contains(plain, "args:") {
+		t.Fatalf("test setup expected expanded raw args line, got:\n%s", plain)
+	}
+	if !strings.Contains(out, "38;2;59;48;32") {
+		t.Fatalf("expanded raw args should use daylight primary (#3B3020), got %q", out)
+	}
+	if strings.Contains(out, "38;2;111;106;85margs:") {
+		t.Fatalf("expanded raw args should not use low-contrast daylight muted (#6F6A55), got %q", out)
+	}
+}
+
 func builtinToolPaletteForTest(name string) theme.Palette {
 	for _, builtin := range theme.BuiltinThemes() {
 		if builtin.Name == name {

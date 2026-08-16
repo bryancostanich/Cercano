@@ -255,7 +255,10 @@ func renderToolEntry(e ToolEntry, width int, focused bool, styles theme.Styles, 
 			if aw < 8 {
 				aw = 8
 			}
-			argsBody := toolEntrySubtle.Render("args: " + expandTabs(e.FullArgs))
+			// Expanded raw arguments are body content, not secondary metadata.
+			// Muted gray was too low-contrast in light themes, especially after
+			// wrapping long dispatch prompts across several lines.
+			argsBody := styles.Primary.Render("args: " + expandTabs(e.FullArgs))
 			for _, l := range strings.Split(ansi.Wrap(argsBody, aw, ""), "\n") {
 				body = append(body, "    "+l)
 			}

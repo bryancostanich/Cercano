@@ -399,6 +399,7 @@ func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
 	slash.RegisterMcp(reg, ag)
 	slash.RegisterPermissions(reg, ag)
 	slash.RegisterPlan(reg, ag)
+	slash.RegisterAuto(reg, ag)
 	// currentConv is captured by reference so it always returns the active
 	// conversation id even after /resume swaps it.
 	convRef := &struct{ id string }{}
@@ -2797,6 +2798,13 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 		}
 		m.mainChat().AppendNotice(&Entry{Role: RoleSystem, Content: "Mode → " + label})
 		m.refreshViewport()
+	case slash.ResultSubmitPrompt:
+		if m.streaming {
+			m.mainChat().Enqueue(res.Text, nil)
+			m.relayout()
+			return m, nil
+		}
+		return m.submit(res.Text, nil)
 	case slash.ResultInvokeTool:
 		// Decide locally whether to prompt: R-tier runs silently, W/X
 		// queues a pending confirm.
@@ -3648,8 +3656,8 @@ func (m Model) renderConfirmRequest(c *confirmRequest) string {
 // gets a red ⚠ destructive emphasis. MCP tools get an additional [a]lways key.
 func (m Model) renderConfirmPrompt(p *pendingToolCall) string {
 	head := m.styles.Accent.Render("▸ ")
-	if isPlanningTool(p.Name) {
-		// Session-control prompts (enter/exit planning, request approval) are
+	if isSessionControlTool(p.Name) {
+		// Session-control prompts (enter/exit planning or autonomous mode) are
 		// X-tier so the gate always fires, but they destroy nothing — never
 		// render the red DESTRUCTIVE emphasis. A calm marker instead.
 		head = m.styles.Accent.Render("▸ ")
@@ -3697,7 +3705,7 @@ func (m Model) confirmPromptHints(p *pendingToolCall) string {
 }
 
 func confirmPromptTitle(p *pendingToolCall) string {
-	if title := planningPromptTitle(p); title != "" {
+	if title := sessionControlPromptTitle(p); title != "" {
 		return title
 	}
 	if isDispatchTool(p.Name) {
@@ -3746,15 +3754,27 @@ func confirmPromptDetails(p *pendingToolCall) []string {
 		return nil
 	}
 	details := make([]string, 0, 2)
-	if isPlanningTool(p.Name) {
-		// Show the model's rationale (suggest_plan) or plan summary
-		// (request_plan_approval) as the "why", keeping the title a clean
-		// question. plan_exit carries neither and shows no detail.
+	if isSessionControlTool(p.Name) {
+		// Show the model's rationale, plan summary, or autonomous brief as
+		// supporting detail while keeping the title a clean question.
 		if reason := oneLine(stringArg(obj, "reason")); reason != "" {
 			details = append(details, "Why: "+truncateArgs(reason, 200))
 		}
 		if summary := oneLine(stringArg(obj, "summary")); summary != "" {
-			details = append(details, "Plan: "+truncateArgs(summary, 200))
+			label := "Plan: "
+			if p.Name == "request_autonomous_exit" {
+				label = "Summary: "
+			}
+			details = append(details, label+truncateArgs(summary, 200))
+		}
+		if goal := oneLine(stringArg(obj, "goal")); goal != "" {
+			details = append(details, "Goal: "+truncateArgs(goal, 200))
+		}
+		if done := summarizeStringSlice(obj["done_when"]); done != "" {
+			details = append(details, "Done when: "+truncateArgs(done, 200))
+		}
+		if verification := oneLine(stringArg(obj, "verification")); verification != "" {
+			details = append(details, "Verification: "+truncateArgs(verification, 200))
 		}
 		if effort := oneLine(stringArg(obj, "effort")); effort != "" {
 			details = append(details, "Effort: "+truncateArgs(effort, 80))
@@ -3797,23 +3817,23 @@ func isDispatchTool(name string) bool {
 	return name == "dispatch" || name == "workflow"
 }
 
-// isPlanningTool reports whether a confirm prompt is a session-control planning
+// isSessionControlTool reports whether a confirm prompt is a session-control
 // action rather than a real tool invocation. These are X-tier (so the gate
 // always fires) but destroy nothing, and deserve a plain-English question
 // instead of the raw "name arg=val" dump.
-func isPlanningTool(name string) bool {
+func isSessionControlTool(name string) bool {
 	switch name {
-	case "suggest_plan", "request_plan_approval", "plan_exit":
+	case "suggest_plan", "request_plan_approval", "plan_exit", "suggest_autonomous", "request_autonomous_exit", "auto_exit":
 		return true
 	}
 	return false
 }
 
-// planningPromptTitle returns the human-facing question for a planning
-// session-control prompt, or "" if p is not a planning tool. The supporting
-// reason/summary is surfaced separately in confirmPromptDetails, so the title
-// stays a clean one-liner.
-func planningPromptTitle(p *pendingToolCall) string {
+// sessionControlPromptTitle returns the human-facing question for planning and
+// autonomous session-control prompts. Supporting reason/summary/brief details
+// are surfaced separately in confirmPromptDetails, so the title stays a clean
+// one-liner.
+func sessionControlPromptTitle(p *pendingToolCall) string {
 	switch p.Name {
 	case "suggest_plan":
 		return "Enter plan mode to work this out before making changes?"
@@ -3821,6 +3841,12 @@ func planningPromptTitle(p *pendingToolCall) string {
 		return "Plan is ready — leave plan mode and start executing it?"
 	case "plan_exit":
 		return "Leave plan mode?"
+	case "suggest_autonomous":
+		return "Start autonomous mode with this run brief?"
+	case "request_autonomous_exit":
+		return "Autonomous run complete — review decisions and exit autonomous mode?"
+	case "auto_exit":
+		return "Leave autonomous mode?"
 	}
 	return ""
 }
@@ -3837,6 +3863,20 @@ func boolArg(obj map[string]any, key string) bool {
 		return b
 	}
 	return false
+}
+
+func summarizeStringSlice(v any) string {
+	items, ok := v.([]any)
+	if !ok || len(items) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(items))
+	for _, item := range items {
+		if s, ok := item.(string); ok && s != "" {
+			parts = append(parts, s)
+		}
+	}
+	return strings.Join(parts, "; ")
 }
 
 func summarizeToolList(v any) string {

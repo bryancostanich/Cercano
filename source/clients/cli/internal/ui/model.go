@@ -5398,7 +5398,7 @@ func (m Model) renderPermissionModeChip() string {
 }
 
 func (m Model) statusDivider() string {
-	return m.styles.BorderDim.Render("·")
+	return m.styles.Muted.Render(" · ")
 }
 
 // renderDevChip shows a lime DEV marker while the /d workDir override is

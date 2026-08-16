@@ -18,6 +18,10 @@ func MarkdownStyle(p Palette) ansi.StyleConfig {
 
 	sc.Document.Margin = uintp(0)
 	sc.Document.Color = strp(Hex(p.Primary))
+	sc.Text.Color = strp(Hex(p.Primary))
+	sc.Paragraph.Color = strp(Hex(p.Primary))
+	sc.BlockQuote.Color = strp(Hex(p.Primary))
+	sc.BlockQuote.IndentToken = strp("│ ")
 
 	sc.Heading.Color = strp(Hex(p.Bright))
 	sc.Heading.Bold = boolp(true)
@@ -62,6 +66,7 @@ func MarkdownStyle(p Palette) ansi.StyleConfig {
 	sc.LinkText.Color = strp(Hex(p.BufferLink))
 
 	sc.HorizontalRule.Color = strp(Hex(p.Muted))
+	sc.Table.Color = strp(Hex(p.Primary))
 
 	return sc
 }

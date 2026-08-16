@@ -34,6 +34,18 @@ func newMdChatViewWithTheme(name string) *chatView {
 	return newMdChatView()
 }
 
+func TestAssistantMarkdown_DaylightBlockQuoteDoesNotUseDraculaYellow(t *testing.T) {
+	cv := newMdChatViewWithTheme("daylight")
+	e := &Entry{Role: RoleAssistant, Content: "> After the user says push, should one approval correspond to one actual push attempt?\n"}
+	out := cv.renderAssistantMarkdown(e, 80)
+	if strings.Contains(out, "38;2;241;250;140") {
+		t.Fatalf("daylight blockquote should not inherit Dracula yellow, got %q", out)
+	}
+	if !strings.Contains(out, "38;2;59;48;32") {
+		t.Fatalf("daylight blockquote should use primary text (#3B3020), got %q", out)
+	}
+}
+
 // Renders an assistant entry the way renderEntry does for committed blocks,
 // proving prose is Glamour-formatted and tables go through render.Table.
 func TestAssistantMarkdown_LinksHaveClickableHitRegions(t *testing.T) {

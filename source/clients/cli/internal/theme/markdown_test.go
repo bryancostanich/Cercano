@@ -13,6 +13,12 @@ func TestMarkdownStyleUsesPaletteColors(t *testing.T) {
 	if sc.Emph.Color == nil || *sc.Emph.Color != "#ea8212" {
 		t.Fatalf("Emph.Color = %v, want #ea8212", sc.Emph.Color)
 	}
+	if sc.BlockQuote.Color == nil || *sc.BlockQuote.Color != "#ea8212" {
+		t.Fatalf("BlockQuote.Color = %v, want #ea8212", sc.BlockQuote.Color)
+	}
+	if sc.Table.Color == nil || *sc.Table.Color != "#ea8212" {
+		t.Fatalf("Table.Color = %v, want #ea8212", sc.Table.Color)
+	}
 	if sc.CodeBlock.BackgroundColor == nil || *sc.CodeBlock.BackgroundColor != "#1a1a1a" {
 		t.Fatalf("CodeBlock.BackgroundColor = %v, want #1a1a1a", sc.CodeBlock.BackgroundColor)
 	}

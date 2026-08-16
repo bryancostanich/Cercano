@@ -5297,15 +5297,15 @@ func (m Model) renderStatus() string {
 	cloudPart := ""
 	switch m.cloudState {
 	case "NONE":
-		cloudPart = m.styles.BorderDim.Render("  ·  ") + m.styles.Muted.Render("cloud:") + m.styles.Error.Render(" NONE")
+		cloudPart = m.statusDivider() + m.styles.Muted.Render("cloud:") + m.styles.Error.Render(" NONE")
 	case "ok":
-		cloudPart = m.styles.BorderDim.Render("  ·  ") + m.styles.Muted.Render("cloud:") + m.styles.Success.Render(" ok")
+		cloudPart = m.statusDivider() + m.styles.Muted.Render("cloud:") + m.styles.Success.Render(" ok")
 	}
 	// Show the token counter only once a turn has completed — no "0↑/0↓" on a
 	// fresh session — and label it "last turn" since it's the prior turn's total.
 	turnPart := ""
 	if m.hadTurn {
-		turnPart = m.styles.BorderDim.Render("  ·  ") +
+		turnPart = m.statusDivider() +
 			m.styles.Muted.Render(fmt.Sprintf("last turn %d↑/%d↓", m.tokIn, m.tokOut))
 	}
 	parts := []string{
@@ -5315,7 +5315,7 @@ func (m Model) renderStatus() string {
 		m.renderConnStateChip(),
 		m.renderPermissionModeChip(),
 		m.renderDevChip(),
-		m.styles.BorderDim.Render("  ·  "),
+		m.statusDivider(),
 		help,
 	}
 	return lipgloss.NewStyle().Width(m.width).Render(strings.Join(parts, ""))
@@ -5335,9 +5335,9 @@ func (m Model) renderConnStateChip() string {
 			// lane, so a bounded "(N/3)" would be a lie.
 			label = fmt.Sprintf("⚠ agent down — retrying every 10s (attempt %d)…", m.connAttempt)
 		}
-		return m.styles.BorderDim.Render("  ·  ") + m.styles.Primary.Render(label)
+		return m.statusDivider() + m.styles.Primary.Render(label)
 	case agentclient.ConnStateFailed:
-		return m.styles.BorderDim.Render("  ·  ") + m.styles.Error.Render("✕ agent unreachable")
+		return m.statusDivider() + m.styles.Error.Render("✕ agent unreachable")
 	default:
 		return ""
 	}
@@ -5392,9 +5392,13 @@ func (m Model) renderPermissionModeChip() string {
 		}
 	}
 
-	return m.styles.BorderDim.Render("  ·  ") +
+	return m.statusDivider() +
 		m.styles.Muted.Render("mode:") +
 		" " + val
+}
+
+func (m Model) statusDivider() string {
+	return m.styles.BorderDim.Render("·")
 }
 
 // renderDevChip shows a lime DEV marker while the /d workDir override is
@@ -5403,7 +5407,7 @@ func (m Model) renderDevChip() string {
 	if m.workDirOverride == "" {
 		return ""
 	}
-	return m.styles.BorderDim.Render("  ·  ") + m.styles.Accent.Render("DEV")
+	return m.statusDivider() + m.styles.Accent.Render("DEV")
 }
 
 func (m Model) renderContextMeter() string {
@@ -5451,7 +5455,7 @@ func (m Model) renderContextMeter() string {
 	badge := ""
 	if m.ctxRaw > used && used > 0 {
 		saved := int(100 * (1 - float64(used)/float64(m.ctxRaw)))
-		badge = m.styles.Muted.Render(fmt.Sprintf("  ·  ▣ %d%%↓", saved))
+		badge = m.statusDivider() + m.styles.Muted.Render(fmt.Sprintf("▣ %d%%↓", saved))
 	}
 	return strings.Join([]string{
 		m.styles.Muted.Render("ctx "),

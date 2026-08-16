@@ -59,6 +59,25 @@ func TestFooterHiddenBeforeFirstTurn(t *testing.T) {
 	}
 }
 
+func TestFooterDividersAreCompact(t *testing.T) {
+	m := newStreamTestModel()
+	m.width = 200
+	m.modelMaxTokens = 1000
+	m.cumIn = 500
+	m.ctxRaw = 1000
+	m.permissionMode = "permissive"
+	m.workDirOverride = "/tmp/cercano-dev"
+	driveStreamDone(t, &m, 12, 34, "", "qwen3-coder")
+
+	plain := stripAnsiCSI(m.renderStatus())
+	if strings.Contains(plain, " ·") || strings.Contains(plain, "· ") {
+		t.Fatalf("footer dividers should have no surrounding spaces; got: %q", plain)
+	}
+	if strings.Count(plain, "·") < 4 {
+		t.Fatalf("test setup did not render multiple dividers; got: %q", plain)
+	}
+}
+
 // TestApplyTelemetry exercises applyTurnTelemetry directly, asserting that
 // each footer field is set correctly from the event.
 func TestApplyTelemetry(t *testing.T) {

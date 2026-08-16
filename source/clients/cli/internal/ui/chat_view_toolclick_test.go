@@ -108,3 +108,38 @@ func TestMouseToggleFold_EntryArrowTogglesAndBodyFallsThrough(t *testing.T) {
 		t.Fatal("entry-rail click did not re-fold the entry")
 	}
 }
+
+// A collapsed multi-tool run renders completed calls as the group summary and
+// keeps the in-flight call as a live row below it. Clicking that live row should
+// expand only the running call so its details can be inspected while the rest of
+// the run remains rolled up.
+func TestMouseToggleFold_CollapsedGroupRunningEntryExpandsIndependently(t *testing.T) {
+	p := theme.Cracker()
+	c := newChatView(theme.NewStyles(p), p, "", "", 100, 40)
+	entries := []*Entry{
+		{Role: RoleUser, Content: "do stuff"},
+		{Tool: &ToolEntry{ToolName: "Read", ArgsSummary: "a.go", FullArgs: `{"path":"a.go"}`, Status: ToolStatusComplete, Duration: 5 * time.Millisecond, Folded: true}},
+		{Tool: &ToolEntry{ToolName: "local", ArgsSummary: "context= model= prompt=heartbeat", FullArgs: `{"prompt":"heartbeat"}`, Status: ToolStatusInProgress, StartedAt: time.Now().Add(-2 * time.Second), Folded: true}},
+	}
+	c.SetEntriesSlice(entries)
+	c.rebuild()
+
+	if c.groupExpanded[1] {
+		t.Fatal("test setup expected the multi-tool group to start collapsed")
+	}
+	runningLine := findPlainLine(t, &c, "heartbeat")
+	if !c.MouseToggleFold(2, runningLine) {
+		t.Fatalf("click on running tool row %d was not claimed", runningLine)
+	}
+	if entries[2].Tool.Folded {
+		t.Fatal("running tool row click did not unfold that entry")
+	}
+	if c.groupExpanded[1] {
+		t.Fatal("running tool row click should not expand the whole group")
+	}
+
+	c.rebuild()
+	if !strings.Contains(strings.Join(c.PlainLines(), "\n"), `"prompt":"heartbeat"`) {
+		t.Fatalf("expanded running tool details were not rendered:\n%s", strings.Join(c.PlainLines(), "\n"))
+	}
+}

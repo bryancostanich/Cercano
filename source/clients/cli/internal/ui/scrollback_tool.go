@@ -527,9 +527,10 @@ func renderToolGroupSpans(entries []ToolEntry, width int, styles theme.Styles, m
 	}
 	for _, i := range activeIdx {
 		e := entries[i]
-		// In-progress entries always render folded — they are the live row.
-		// No per-entry focus in collapsed view; focus belongs to the group.
-		e.Folded = true
+		// In-progress entries stay visible as live rows below the collapsed
+		// completed-call summary. Respect their own Folded state so clicking a
+		// live row expands just that running call; when it completes it stops
+		// being an active row and folds back into the group summary.
 		rows = append(rows, toolArrowRow{Line: len(lines), Entry: i, Group: false})
 		lines = append(lines, renderToolEntry(e, width, false, styles, md))
 	}

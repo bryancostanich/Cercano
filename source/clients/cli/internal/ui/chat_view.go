@@ -1251,6 +1251,10 @@ func (c *chatView) renderEntry(e *Entry, idx int) string {
 		return indentBlock(pad, renderToolEntry(*e.Tool, textW, idx == c.focusedToolIdx, c.styles, c.md))
 	}
 
+	if e.SubAgentStart != nil {
+		return indentBlock(pad, c.renderSubAgentStartCard(e.SubAgentStart, textW))
+	}
+
 	// Banner entry: the fixed-width wordmark block when it fits, otherwise a
 	// compact one-liner — the 62-col chrome wraps catastrophically below that.
 	if e.Banner != nil {

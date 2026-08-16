@@ -74,7 +74,7 @@ func (c *chatView) markTranscriptDirty() {
 // banner (wall-clock shimmer), the streaming assistant entry (live tail +
 // animated status line), and tool rows (cached at group level instead).
 func (c *chatView) renderEntryCached(e *Entry, idx int) string {
-	if e.Banner != nil || e.Tool != nil || e.Streaming {
+	if e.Banner != nil || e.Tool != nil || e.Streaming || e.SubAgentStart != nil {
 		return c.renderEntry(e, idx)
 	}
 	key := entryCacheKey{

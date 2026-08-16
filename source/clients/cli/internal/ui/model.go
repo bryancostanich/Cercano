@@ -45,6 +45,11 @@ type Entry struct {
 	Role      Role
 	Content   string // grows live for streaming assistant turns
 	Streaming bool   // true while tokens are flowing in
+
+	// SubAgentStart, when non-nil, renders the synthetic launch metadata for a
+	// delegated child tab as a measured card. Role/Content are ignored; the card
+	// is live-updated as the start, tool-grant, and prompt events arrive.
+	SubAgentStart *subAgentStartEntry
 	// Status is the current pre-stream progress note (e.g. "classifying
 	// intent", "selecting provider", "generating response"). Set by
 	// progress messages while Content is empty; shown in place of the

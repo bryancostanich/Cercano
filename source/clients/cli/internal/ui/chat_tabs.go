@@ -15,6 +15,7 @@ type chatTab struct {
 	title    string
 	tools    []string
 	view     chatView
+	startup  *subAgentStartEntry
 	done     bool
 	errored  bool
 	// restored marks a tab rebuilt from persisted transcripts on resume
@@ -106,6 +107,10 @@ func (m *Model) ensureSubAgentTab(id, parentID, title string, tools []string) *c
 		}
 		if len(tools) > 0 {
 			tab.tools = append([]string(nil), tools...)
+			if tab.startup != nil {
+				tab.startup.Tools = append([]string(nil), tools...)
+				tab.view.markTranscriptDirty()
+			}
 		}
 		return &tab.view
 	}
@@ -123,8 +128,14 @@ func (m *Model) ensureSubAgentTab(id, parentID, title string, tools []string) *c
 	if strings.HasPrefix(id, "activity:") {
 		kind = "Activity"
 	}
-	view.AppendEntry(&Entry{Role: RoleSystem, Content: fmt.Sprintf("%s %s started", kind, title)})
-	tab := &chatTab{id: id, parentID: parentID, title: title, tools: append([]string(nil), tools...), view: view}
+	var startup *subAgentStartEntry
+	if strings.HasPrefix(id, "activity:") {
+		view.AppendEntry(&Entry{Role: RoleSystem, Content: fmt.Sprintf("%s %s started", kind, title)})
+	} else {
+		startup = &subAgentStartEntry{Kind: kind, Title: title, Tools: append([]string(nil), tools...)}
+		view.AppendEntry(&Entry{SubAgentStart: startup})
+	}
+	tab := &chatTab{id: id, parentID: parentID, title: title, tools: append([]string(nil), tools...), view: view, startup: startup}
 	m.chatTabs.tabs[id] = tab
 	m.chatTabs.order = append(m.chatTabs.order, id)
 	// Deliberately do NOT steal focus: the parent turn is still streaming in
@@ -383,6 +394,9 @@ func subAgentTabHasSubstantiveTranscript(tab *chatTab) bool {
 		if e.Tool != nil {
 			return true
 		}
+		if e.SubAgentStart != nil && strings.TrimSpace(e.SubAgentStart.Task) != "" {
+			return true
+		}
 		content := strings.TrimSpace(e.Content)
 		if e.Role == RoleAssistant && content != "" {
 			return true
@@ -458,7 +472,12 @@ func (m *Model) applySubAgentEvent(ev subAgentEventMsg) {
 		m.mainChat().attachSubAgentToTool(ev.toolUseID, ev.id)
 	}
 	if len(ev.tools) > 0 && ev.kind == "started" {
-		view.AppendEntry(&Entry{Role: RoleSystem, Content: "Tools: " + strings.Join(ev.tools, ", ")})
+		if tab := m.chatTabs.tabs[ev.id]; tab != nil && tab.startup != nil {
+			tab.startup.Tools = append([]string(nil), ev.tools...)
+			view.markTranscriptDirty()
+		} else {
+			view.AppendEntry(&Entry{Role: RoleSystem, Content: "Tools: " + strings.Join(ev.tools, ", ")})
+		}
 	}
 	if len(ev.ignored) > 0 {
 		view.AppendEntry(&Entry{Role: RoleSystem, Content: "Ignored requested tools: " + strings.Join(ev.ignored, ", ")})
@@ -466,9 +485,13 @@ func (m *Model) applySubAgentEvent(ev subAgentEventMsg) {
 	if ev.inner != nil {
 		view.Apply(ev.inner)
 	} else if ev.text != "" {
-		role, content, show := formatActivityOrSubAgentText(ev)
-		if show {
-			view.AppendEntry(&Entry{Role: role, Content: content})
+		if tab := m.chatTabs.tabs[ev.id]; tab != nil && tab.startup != nil && updateSubAgentStartCard(tab.startup, ev) {
+			view.markTranscriptDirty()
+		} else {
+			role, content, show := formatActivityOrSubAgentText(ev)
+			if show {
+				view.AppendEntry(&Entry{Role: role, Content: content})
+			}
 		}
 	}
 	if tab := m.chatTabs.tabs[ev.id]; tab != nil {

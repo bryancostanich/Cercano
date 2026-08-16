@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 func TestSubAgentEventCreatesEphemeralTabWithGrant(t *testing.T) {
@@ -32,16 +33,16 @@ func TestSubAgentEventCreatesEphemeralTabWithGrant(t *testing.T) {
 	if tab.title != "sub 1" {
 		t.Fatalf("title = %q, want sub 1", tab.title)
 	}
-	var joined []string
-	for _, e := range tab.view.Entries() {
-		joined = append(joined, e.Content)
+	entries := tab.view.Entries()
+	if len(entries) != 1 || entries[0].SubAgentStart == nil {
+		t.Fatalf("expected one startup-card entry, got %+v", entries)
 	}
-	content := strings.Join(joined, "\n")
-	if !strings.Contains(content, "Tools: Read, Grep") {
-		t.Fatalf("grant not rendered in tab entries:\n%s", content)
+	card := entries[0].SubAgentStart
+	if strings.Join(card.Tools, ", ") != "Read, Grep" {
+		t.Fatalf("grant not recorded in startup card: %+v", card)
 	}
-	if !strings.Contains(content, "sub-agent start") {
-		t.Fatalf("lifecycle text not rendered in tab entries:\n%s", content)
+	if card.Kind != "Sub-agent" || card.Title != "sub 1" {
+		t.Fatalf("startup title not recorded in card: %+v", card)
 	}
 }
 
@@ -241,12 +242,55 @@ func TestSubAgentPromptEventRendersLaunchingPrompt(t *testing.T) {
 		t.Fatal("missing child tab")
 	}
 	entries := tab.view.Entries()
-	if len(entries) < 3 {
-		t.Fatalf("expected started/tools/prompt entries, got %+v", entries)
+	if len(entries) != 1 || entries[0].SubAgentStart == nil {
+		t.Fatalf("expected prompt to update the startup-card entry, got %+v", entries)
 	}
-	last := entries[len(entries)-1]
-	if last.Role != RoleUser || last.Content != "Trace the dispatch behavior and return file:line evidence." {
-		t.Fatalf("launch prompt rendered incorrectly: role=%v content=%q entries=%+v", last.Role, last.Content, entries)
+	card := entries[0].SubAgentStart
+	if card.Task != "Trace the dispatch behavior and return file:line evidence." {
+		t.Fatalf("launch prompt rendered incorrectly in card: %+v", card)
+	}
+	rendered := stripAnsiCSI(tab.view.renderEntry(entries[0], 0))
+	if !strings.Contains(rendered, "Task") || !strings.Contains(rendered, "│ Trace the dispatch behavior") {
+		t.Fatalf("startup card did not render task with pipe rail:\n%s", rendered)
+	}
+}
+
+func TestSubAgentStartCardRendersContiguousMeasuredBox(t *testing.T) {
+	m := New(nil, false)
+	m = send(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+
+	m.applySubAgentEvent(subAgentEventMsg{
+		id:    "child-1",
+		kind:  "started",
+		tools: []string{"git_info", "git_push"},
+		text:  "sub-agent start: conv=3e33d6c1870b75a5fedadf4e route=open provider=mistralrs model=qwen3-30b-a3b-instruct-2507 tier=fast_light tools=git_info,git_push",
+	})
+	m.applySubAgentEvent(subAgentEventMsg{
+		id:   "child-1",
+		kind: "prompt",
+		text: "In /Users/bryancostanich/git_repos/bryan_costanich/Cercano, inspect the current git branch/ahead state and push the current main branch to origin if it is ahead. Do not modify files.",
+	})
+
+	tab := m.chatTabs.tabs["child-1"]
+	if tab == nil || len(tab.view.Entries()) != 1 || tab.view.Entries()[0].SubAgentStart == nil {
+		t.Fatalf("missing startup card entry: %+v", tab)
+	}
+	rendered := stripAnsiCSI(tab.view.renderEntry(tab.view.Entries()[0], 0))
+	lines := strings.Split(rendered, "\n")
+	if len(lines) < 8 {
+		t.Fatalf("startup card too short:\n%s", rendered)
+	}
+	wantW := lipgloss.Width(lines[0])
+	for _, line := range lines {
+		if got := lipgloss.Width(line); got != wantW {
+			t.Fatalf("card line width = %d, want %d for line %q\nfull card:\n%s", got, wantW, line, rendered)
+		}
+	}
+	body := strings.Join(lines, "\n")
+	for _, want := range []string{"╭─ Sub-agent sub 1 started", "Route", "open / mistralrs", "Model", "qwen3-30b-a3b-instruct-2507", "Tier", "fast_light", "Tools", "git_info, git_push", "Task", "│ In /Users"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("startup card missing %q:\n%s", want, body)
+		}
 	}
 }
 

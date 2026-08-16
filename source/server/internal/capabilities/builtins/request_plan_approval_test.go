@@ -45,7 +45,7 @@ func TestRequestPlanApproval_Execute_LeavesPlanningProfile(t *testing.T) {
 	if entered != "default" {
 		t.Fatalf("EnterProfile called with %q, want default", entered)
 	}
-	for _, must := range []string{"Plan approved", "efforts/migrate-config-loader", "loader", "spec.md", "plan.md"} {
+	for _, must := range []string{"Plan approved", "efforts/migrate-config-loader", "loader", "spec.md", "plan.md", "suggest_autonomous", "autonomous run brief"} {
 		if !strings.Contains(res.Text, must) {
 			t.Fatalf("result %q missing %q", res.Text, must)
 		}

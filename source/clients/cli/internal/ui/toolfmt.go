@@ -85,6 +85,9 @@ func relPath(p, root, home string) string {
 // humanizeArgs turns a tool's raw call JSON into a one-line argument summary.
 // Unknown tools fall back to sorted "key=value" pairs of their scalar args.
 func humanizeArgs(tool, argsJSON, root, home string) string {
+	if isSessionControlTool(tool) {
+		return ""
+	}
 	var m map[string]any
 	if err := json.Unmarshal([]byte(argsJSON), &m); err != nil {
 		return strings.Join(strings.Fields(argsJSON), " ")

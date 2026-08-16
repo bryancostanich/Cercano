@@ -3960,6 +3960,32 @@ func isSessionControlTool(name string) bool {
 	return false
 }
 
+// sessionControlToolRowLabel returns the short user-facing label for a
+// session-control tool when it appears in scrollback. It intentionally hides the
+// raw tool name and argument dump so mode transitions read like product actions,
+// not dangerous implementation calls.
+func sessionControlToolRowLabel(name string) string {
+	switch name {
+	case "suggest_plan":
+		return "Plan mode"
+	case "request_plan_approval":
+		return "Plan approval"
+	case "plan_exit":
+		return "Leave plan mode"
+	case "suggest_autonomous":
+		return "Autonomous run brief"
+	case "request_autonomous_execution":
+		return "Autonomous execution"
+	case "request_autonomous_exit":
+		return "Autonomous final review"
+	case "complete_autonomous_review":
+		return "Autonomous review complete"
+	case "auto_exit":
+		return "Leave autonomous mode"
+	}
+	return ""
+}
+
 // sessionControlPromptTitle returns the human-facing question for planning and
 // autonomous session-control prompts. Supporting reason/summary/brief details
 // are surfaced separately in confirmPromptDetails, so the title stays a clean

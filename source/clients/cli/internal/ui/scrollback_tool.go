@@ -136,7 +136,9 @@ func renderToolEntry(e ToolEntry, width int, focused bool, styles theme.Styles, 
 	// summary, so misalignment versus completed entries (which use the noun
 	// form) isn't a concern.
 	displayName := e.ToolName
-	if e.Status == ToolStatusInProgress {
+	if label := sessionControlToolRowLabel(e.ToolName); label != "" {
+		displayName = label
+	} else if e.Status == ToolStatusInProgress {
 		displayName = verbForInProgress(e.ToolName)
 	}
 	// Pad short tool names to a fixed column so the args lines up down the list.
@@ -152,6 +154,9 @@ func renderToolEntry(e ToolEntry, width int, focused bool, styles theme.Styles, 
 	// the right-aligned status, segment-elide (paths) or middle-elide so the
 	// line fits one row. width<=0 disables this (no budget known).
 	argsText := flattenSummary(e.ArgsSummary)
+	if isSessionControlTool(e.ToolName) {
+		argsText = ""
+	}
 	if width > 0 {
 		budget := width - lipgloss.Width(prefix) - lipgloss.Width(statusBit) - 3 // 3 = inter-column gap
 		argsText = elideArgs(argsText, budget)
@@ -226,7 +231,7 @@ func renderToolEntry(e ToolEntry, width int, focused bool, styles theme.Styles, 
 		railBody(body, styles)
 		return strings.Join(body, "\n")
 	}
-	if e.FullArgs != "" {
+	if e.FullArgs != "" && !isSessionControlTool(e.ToolName) {
 		// Edits/writes render as a formatted +/- diff; other tools show the
 		// raw args JSON.
 		if diff := renderToolArgsDiff(e.ToolName, e.FullArgs, e.StartLine, width, styles); diff != nil {

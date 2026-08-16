@@ -59,6 +59,52 @@ func builtinToolPaletteForTest(name string) theme.Palette {
 	return theme.Cracker()
 }
 
+func TestToolEntry_SessionControlUsesProductLabelAndHidesArgs(t *testing.T) {
+	e := ToolEntry{
+		ToolName:      "suggest_autonomous",
+		ArgsSummary:   "constraints=[very long raw args] goal=ship",
+		Status:        ToolStatusComplete,
+		ResultSummary: "5ms",
+		Folded:        true,
+	}
+	s := stripAnsiCSI(renderToolEntry(e, 100, false, theme.NewStyles(theme.Cracker()), render.NewMarkdown(theme.MarkdownStyle(theme.Cracker()))))
+	if !strings.Contains(s, "Autonomous run brief") {
+		t.Fatalf("session-control tool should use product label, got: %q", s)
+	}
+	for _, bad := range []string{"suggest_autonomous", "constraints=[", "goal=ship", "DESTRUCTIVE", "⚠"} {
+		if strings.Contains(s, bad) {
+			t.Fatalf("session-control tool row leaked %q: %q", bad, s)
+		}
+	}
+}
+
+func TestToolEntry_SessionControlExpandedStillHidesArgs(t *testing.T) {
+	e := ToolEntry{
+		ToolName:      "suggest_autonomous",
+		ArgsSummary:   "constraints=[very long raw args]",
+		FullArgs:      `{"goal":"ship","constraints":["do not push"]}`,
+		Status:        ToolStatusComplete,
+		ResultSummary: "5ms",
+		Folded:        false,
+	}
+	s := stripAnsiCSI(renderToolEntry(e, 100, false, theme.NewStyles(theme.Cracker()), render.NewMarkdown(theme.MarkdownStyle(theme.Cracker()))))
+	if !strings.Contains(s, "Autonomous run brief") {
+		t.Fatalf("session-control tool should use product label, got: %q", s)
+	}
+	for _, bad := range []string{"suggest_autonomous", "constraints=[", `"goal"`, `"constraints"`, "args:"} {
+		if strings.Contains(s, bad) {
+			t.Fatalf("expanded session-control tool leaked %q: %q", bad, s)
+		}
+	}
+}
+
+func TestHumanizeArgs_SessionControlSuppressesRawArgs(t *testing.T) {
+	got := humanizeArgs("suggest_autonomous", `{"goal":"ship","constraints":["do not push"]}`, "/repo", "/Users/me")
+	if got != "" {
+		t.Fatalf("session-control args should be suppressed, got %q", got)
+	}
+}
+
 func TestToolEntry_ArgsColumnAligned(t *testing.T) {
 	// Short tool names pad to a fixed column so args start at the same offset
 	// regardless of name length.

@@ -231,6 +231,15 @@ func renderToolEntry(e ToolEntry, width int, focused bool, styles theme.Styles, 
 		railBody(body, styles)
 		return strings.Join(body, "\n")
 	}
+	if e.Status == ToolStatusInProgress {
+		// A running tool may already have its full args available from the store,
+		// but expanding it should not make the output pane look like a giant raw
+		// JSON blob. The header already shows the humanized invocation; until the
+		// tool returns, the body is just a concise live no-output state.
+		body = append(body, "    "+toolEntrySubtle.Render(animateToolSpinnerWithStyle(toolEntrySubtle)+" no output yet"))
+		railBody(body, styles)
+		return strings.Join(body, "\n")
+	}
 	if e.FullArgs != "" && !isSessionControlTool(e.ToolName) {
 		// Edits/writes render as a formatted +/- diff; other tools show the
 		// raw args JSON.

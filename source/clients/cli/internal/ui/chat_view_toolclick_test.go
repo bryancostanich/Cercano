@@ -139,7 +139,11 @@ func TestMouseToggleFold_CollapsedGroupRunningEntryExpandsIndependently(t *testi
 	}
 
 	c.rebuild()
-	if !strings.Contains(strings.Join(c.PlainLines(), "\n"), `"prompt":"heartbeat"`) {
-		t.Fatalf("expanded running tool details were not rendered:\n%s", strings.Join(c.PlainLines(), "\n"))
+	plain := strings.Join(c.PlainLines(), "\n")
+	if !strings.Contains(plain, "no output yet") {
+		t.Fatalf("expanded running tool no-output state was not rendered:\n%s", plain)
+	}
+	if strings.Contains(plain, `"prompt":"heartbeat"`) {
+		t.Fatalf("expanded running tool should not render raw args as output:\n%s", plain)
 	}
 }

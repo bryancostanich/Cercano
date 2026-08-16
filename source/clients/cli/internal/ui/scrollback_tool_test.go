@@ -146,6 +146,27 @@ func TestToolEntry_ExpandedRender(t *testing.T) {
 	}
 }
 
+func TestToolEntry_ExpandedInProgressDoesNotRenderRawArgsAsOutput(t *testing.T) {
+	longArgs := `{"cmd":["bash","-lc","printf 'first\\n'; printf 'second\\n'; printf 'third\\n'"]}`
+	e := ToolEntry{
+		ToolName:    "Bash",
+		ArgsSummary: "bash -lc 'printf ...'",
+		FullArgs:    longArgs,
+		Status:      ToolStatusInProgress,
+		Folded:      false,
+	}
+	s := stripAnsiCSI(renderToolEntry(e, 50, false, theme.NewStyles(theme.Cracker()), render.NewMarkdown(theme.MarkdownStyle(theme.Cracker()))))
+	if strings.Contains(s, "args:") || strings.Contains(s, `"cmd"`) {
+		t.Fatalf("expanded running tool should not render raw args as output:\n%s", s)
+	}
+	if !strings.Contains(s, "no output yet") {
+		t.Fatalf("expanded running tool should show a concise no-output state, got:\n%s", s)
+	}
+	if strings.Count(s, "\n") > 2 {
+		t.Fatalf("expanded running tool should not produce noisy extra lines, got:\n%s", s)
+	}
+}
+
 func TestToolEntry_InProgress(t *testing.T) {
 	// In-progress entries display the verb form of the tool name
 	// ("grep" → "Searching") so the line reads like a live status.

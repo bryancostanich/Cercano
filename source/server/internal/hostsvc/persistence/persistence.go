@@ -488,6 +488,7 @@ func (x *svc) ResumeConversation(ctx context.Context, req *proto.ResumeConversat
 			TokensOut:      int32(t.TokensOut),
 			LatencyMs:      int32(t.LatencyMs),
 			CreatedAt:      t.CreatedAt.Unix(),
+			ContentJson:    t.BlocksJSON,
 		})
 	}
 	return out, nil

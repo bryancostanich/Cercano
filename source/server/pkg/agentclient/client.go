@@ -462,6 +462,7 @@ type PersistedTurn struct {
 	TokensOut      int
 	LatencyMs      int
 	CreatedAt      time.Time
+	ContentJSON    string
 }
 
 // ListConversations returns the persisted conversation history.
@@ -508,6 +509,7 @@ func (c *Client) ResumeConversation(ctx context.Context, conversationID string) 
 			TokensOut:      int(t.GetTokensOut()),
 			LatencyMs:      int(t.GetLatencyMs()),
 			CreatedAt:      time.Unix(t.GetCreatedAt(), 0),
+			ContentJSON:    t.GetContentJson(),
 		})
 	}
 	return out, nil

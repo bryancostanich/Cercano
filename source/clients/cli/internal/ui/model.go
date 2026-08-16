@@ -3548,6 +3548,7 @@ func (m Model) applyResume(conversationID string) (Model, tea.Cmd) {
 		frozenThrough = cs.FrozenThrough
 	}
 	m.mainChat().SetEntriesSlice(resumeEntries(turns, frozenThrough))
+	m.hydrateTaskPaneFromResumedTurns(turns)
 	// Seed ↑/↓ prompt recall from the resumed session's submitted prompts so
 	// the user can replay prior inputs immediately, exactly as they could
 	// before the CLI restarted. historyIdx parks at the live input (past the

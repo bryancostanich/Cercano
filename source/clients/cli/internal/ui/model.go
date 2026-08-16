@@ -224,6 +224,11 @@ type Model struct {
 	// /rename or /resume sets one).
 	sessionTitle string
 
+	// headerSelection backs drag-select/copy for the centered session title. The
+	// terminal mouse mode used for scrollback selection prevents native terminal
+	// selection, so header text needs the same app-owned selection path.
+	headerSelection textSelection
+
 	// toolCache is the registry of available tools, fetched at startup so
 	// the CLI can decide locally (no extra RPC) whether to prompt before
 	// invoking a tool. Keyed by tool name.
@@ -996,6 +1001,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		mouse := msg.Mouse()
+		if mouse.Button == tea.MouseLeft && m.mouseInHeaderTitle(mouse.X, mouse.Y) {
+			m.beginHeaderSelection(mouse.X)
+			return m, nil
+		}
+		m.headerSelection = textSelection{}
 		if m.contentPageActive() {
 			if mouse.Button != tea.MouseLeft {
 				return m, nil
@@ -1080,8 +1090,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.MouseMotionMsg:
+		mouse := msg.Mouse()
+		if m.headerSelection.Dragging {
+			m.updateHeaderSelection(mouse.X)
+			return m, nil
+		}
 		if m.contentPageActive() {
-			mouse := msg.Mouse()
 			if m.contentScrollbarDragging {
 				if scroller, state, ok := m.activeContentScroller(); ok {
 					scroller.ScrollTo(scrollOffsetFromClick(mouse.Y, m.contentTop(), state.Height, state.Total))
@@ -1095,7 +1109,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.input.CancelDrag()
 			return m, nil
 		}
-		mouse := msg.Mouse()
 		if m.taskPane.Dragging {
 			axis, state, pos, ok := m.taskPaneScrollbarAt(mouse.X, mouse.Y)
 			if !ok || axis != m.taskPane.Drag {
@@ -1125,11 +1138,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case tea.MouseReleaseMsg:
+		mouse := msg.Mouse()
+		if m.headerSelection.Dragging {
+			m.updateHeaderSelection(mouse.X)
+			m.headerSelection.Dragging = false
+			if m.headerSelection.empty() {
+				m.headerSelection = textSelection{}
+				return m, nil
+			}
+			if text := m.selectedHeaderText(); text != "" {
+				m.selectionNotice = "copied selection"
+				return m, selectionClipboardCmd(text)
+			}
+			return m, nil
+		}
 		if m.contentPageActive() {
 			m.contentScrollbarDragging = false
 			return m, nil
 		}
-		mouse := msg.Mouse()
 		if m.taskPane.Dragging {
 			m.clearTaskPaneDrag()
 			return m, nil
@@ -5222,6 +5248,58 @@ func (m Model) renderHeaderRight(maxWidth int) string {
 	return right
 }
 
+func (m Model) headerTitleRange() (int, int, bool) {
+	if m.sessionTitle == "" || m.width <= 0 {
+		return 0, 0, false
+	}
+	leftW := headerTextWidth("▓▓ CERCANO v0.1.0")
+	titlePlain := "░▒▓ " + m.sessionTitle + " ▓▒░"
+	titleW := headerTextWidth(titlePlain)
+	titleStart := (m.width - titleW) / 2
+	gapBefore := titleStart - leftW
+	if gapBefore < 2 {
+		gapBefore = 2
+	}
+	start := leftW + gapBefore + headerTextWidth("░▒▓ ")
+	end := start + headerTextWidth(m.sessionTitle)
+	return start, end, start < end
+}
+
+func (m Model) mouseInHeaderTitle(x, y int) bool {
+	start, end, ok := m.headerTitleRange()
+	return ok && y == 0 && x >= start && x <= end
+}
+
+func (m *Model) beginHeaderSelection(x int) {
+	start, end, ok := m.headerTitleRange()
+	if !ok {
+		return
+	}
+	pt := selectionPoint{Line: 0, Col: clampInt(x, start, end)}
+	m.headerSelection = textSelection{Active: true, Dragging: true, Anchor: pt, Cursor: pt}
+}
+
+func (m *Model) updateHeaderSelection(x int) {
+	if !m.headerSelection.Active {
+		return
+	}
+	start, end, ok := m.headerTitleRange()
+	if !ok {
+		m.headerSelection = textSelection{}
+		return
+	}
+	m.headerSelection.Cursor = selectionPoint{Line: 0, Col: clampInt(x, start, end)}
+}
+
+func (m Model) selectedHeaderText() string {
+	if !m.headerSelection.hasRange() {
+		return ""
+	}
+	plain := ansi.Strip(m.renderHeader())
+	start, end := m.headerSelection.ordered()
+	return ansi.Cut(plain, start.Col, end.Col)
+}
+
 func (m Model) renderHeader() string {
 	// Three regions:
 	//   left   — brand + version, anchored at column 0
@@ -5245,7 +5323,7 @@ func (m Model) renderHeader() string {
 		if gap < 1 {
 			gap = 1
 		}
-		return left + strings.Repeat(" ", gap) + right
+		return m.renderHeaderSelection(left + strings.Repeat(" ", gap) + right)
 	}
 
 	titlePlain := "░▒▓ " + m.sessionTitle + " ▓▒░"
@@ -5267,11 +5345,19 @@ func (m Model) renderHeader() string {
 	if gapAfter < 2 {
 		gapAfter = 2 // collision guard with the model strip
 	}
-	return left +
+	return m.renderHeaderSelection(left +
 		strings.Repeat(" ", gapBefore) +
 		title +
 		strings.Repeat(" ", gapAfter) +
-		right
+		right)
+}
+
+func (m Model) renderHeaderSelection(line string) string {
+	start, end, ok := m.headerSelection.lineRange(0, m.width)
+	if !ok {
+		return line
+	}
+	return highlightRange(line, start, end, theme.SelectionBackgroundSGR(m.palette))
 }
 
 func (m Model) renderStatus() string {

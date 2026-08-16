@@ -84,6 +84,42 @@ func TestSelectionPointFromMouseUsesViewportOffset(t *testing.T) {
 	}
 }
 
+func TestHeaderTitleDragSelectionCopiesText(t *testing.T) {
+	p := theme.Cracker()
+	m := Model{
+		styles:       theme.NewStyles(p),
+		palette:      p,
+		width:        80,
+		sessionTitle: "Selectable Title",
+	}
+	start, end, ok := m.headerTitleRange()
+	if !ok {
+		t.Fatal("header title range missing")
+	}
+
+	next, _ := m.Update(tea.MouseClickMsg{X: start, Y: 0, Button: tea.MouseLeft})
+	m = next.(Model)
+	if !m.headerSelection.Dragging {
+		t.Fatal("header title mouse down should start a header selection drag")
+	}
+	next, _ = m.Update(tea.MouseMotionMsg{X: end, Y: 0, Button: tea.MouseLeft})
+	m = next.(Model)
+	if got := m.selectedHeaderText(); got != "Selectable Title" {
+		t.Fatalf("selectedHeaderText() = %q, want title", got)
+	}
+	next, cmd := m.Update(tea.MouseReleaseMsg{X: end, Y: 0, Button: tea.MouseLeft})
+	if cmd == nil {
+		t.Fatal("header title mouse release should copy non-empty selection")
+	}
+	m = next.(Model)
+	if m.headerSelection.Dragging {
+		t.Fatal("header selection drag should stop on release")
+	}
+	if m.selectionNotice != "copied selection" {
+		t.Fatalf("selectionNotice = %q, want copied selection", m.selectionNotice)
+	}
+}
+
 func TestMouseReleaseCopiesDragSelection(t *testing.T) {
 	p := theme.Cracker()
 	cv := newChatView(theme.NewStyles(p), p, "", "", 20, 4)

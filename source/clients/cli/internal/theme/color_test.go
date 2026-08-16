@@ -66,7 +66,7 @@ func TestBuiltinThemeTextColorsMeetContrastBaseline(t *testing.T) {
 	}
 }
 
-func TestDaylightTextTokensAvoidSaturatedYellowHue(t *testing.T) {
+func TestDaylightTextTokensAvoidUnwantedHues(t *testing.T) {
 	daylight := paletteByNameForColorTest("daylight")
 	tokens := []struct {
 		name  string
@@ -75,11 +75,15 @@ func TestDaylightTextTokensAvoidSaturatedYellowHue(t *testing.T) {
 		{name: "primary", color: daylight.Primary},
 		{name: "warn", color: daylight.Warn},
 		{name: "meter_label_on_fill", color: daylight.MeterLabelOnFill},
+		{name: "buffer_code", color: daylight.BufferCode},
 	}
 	for _, token := range tokens {
 		hue, saturation := hueSaturation(token.color)
 		if hue >= 30 && hue <= 65 && saturation >= 0.5 {
 			t.Fatalf("daylight %s is saturated yellow/orange (hue %.1f sat %.2f): %s", token.name, hue, saturation, Hex(token.color))
+		}
+		if hue >= 255 && hue <= 320 && saturation >= 0.35 {
+			t.Fatalf("daylight %s is purple/magenta (hue %.1f sat %.2f): %s", token.name, hue, saturation, Hex(token.color))
 		}
 	}
 }

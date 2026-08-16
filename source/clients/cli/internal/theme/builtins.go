@@ -46,7 +46,7 @@ func daylightPalette() Palette {
 		Primary: hc("#3B3020"), Bright: hc("#7A4E0A"), Dim: hc("#C9B68C"), Accent: hc("#1E7A3C"),
 		Info: hc("#1763A0"), Muted: hc("#6F6A55"), Success: hc("#2E7D32"), Warn: hc("#9A2D00"), Error: hc("#B23A3A"),
 		SelectionBg: hc("#58829E"), CodeBlockBg: hc("#1A1A1A"), BypassText: hc("#FBF3E0"), ActivityBase: hc("#1E7A3C"), ActivityPeak: hc("#104321"), WordmarkPeak: hc("#7A4E0A"), SpinnerBase: hc("#3B3020"), SpinnerPeak: hc("#7A4E0A"), MeterLabelOnFill: hc("#3B3020"), SelectionCaret: hc("#7A1E2C"),
-		BufferLink: hc("#1763A0"), BufferCode: hc("#6A4BA3"), BufferLime: hc("#1E7A3C"), BufferError: hc("#B23A3A"), BufferUserBg: hc("#E6D7B0"),
+		BufferLink: hc("#1763A0"), BufferCode: hc("#174E7A"), BufferLime: hc("#1E7A3C"), BufferError: hc("#B23A3A"), BufferUserBg: hc("#E6D7B0"),
 	}
 }
 

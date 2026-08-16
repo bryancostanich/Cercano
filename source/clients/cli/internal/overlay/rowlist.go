@@ -152,7 +152,7 @@ func (r RowList) Update(msg tea.KeyPressMsg, styles theme.Styles) (RowList, tea.
 			return r, nil, false
 		case row.Editable:
 			ti := textinput.New()
-			ti.Prompt = styles.Accent.Render("▸ ")
+			ti.Prompt = styles.SelectionCaret.Render("▸ ")
 			ti.CharLimit = 0
 			blinkCmd := ti.Focus()
 			if !row.Masked {

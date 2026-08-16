@@ -31,9 +31,10 @@ type Styles struct {
 	MeterEmpty       lipgloss.Style // dim-amber block
 	BypassFlag       lipgloss.Style // red ! BYPASS block
 
-	ToolSuccess lipgloss.Style // muted lime ✓ glyph
-	ToolError   lipgloss.Style // muted red ⚠ glyph
-	ToolFocus   lipgloss.Style // muted lime ▶ nav caret
+	ToolSuccess    lipgloss.Style // muted lime ✓ glyph
+	ToolError      lipgloss.Style // muted red ⚠ glyph
+	ToolFocus      lipgloss.Style // high-contrast ▶ nav caret
+	SelectionCaret lipgloss.Style // high-contrast active row/list caret
 }
 
 // NewStyles builds a Styles bundle from a Palette.
@@ -65,6 +66,7 @@ func NewStyles(p Palette) Styles {
 		BypassFlag:       lipgloss.NewStyle().Foreground(p.BypassText).Background(p.Error).Bold(true),
 		ToolSuccess:      lipgloss.NewStyle().Foreground(p.BufferLime),
 		ToolError:        lipgloss.NewStyle().Foreground(p.BufferError),
-		ToolFocus:        lipgloss.NewStyle().Foreground(p.BufferLime),
+		ToolFocus:        lipgloss.NewStyle().Foreground(p.BgDeep).Background(p.SelectionCaret).Bold(true),
+		SelectionCaret:   lipgloss.NewStyle().Foreground(p.BgDeep).Background(p.SelectionCaret).Bold(true),
 	}
 }

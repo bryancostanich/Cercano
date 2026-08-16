@@ -1147,7 +1147,7 @@ func (d *runtimeDashboard) renderCatalogModelRow(model agentclient.RuntimeModel,
 	if selected {
 		if listFocused {
 			// Active selection: bright arrow + bright name.
-			marker = d.styles.Accent.Render("▶ ")
+			marker = d.styles.SelectionCaret.Render("▶ ")
 			nameStyle = d.styles.Bright
 		} else {
 			// Parked selection (focus is on the filter or actions): show a
@@ -1565,7 +1565,7 @@ func (d *runtimeDashboard) renderActionRow(row runtimeDashboardActionRow, select
 	if row.Action.Kind != "" {
 		marker = "  "
 		if selected {
-			marker = d.styles.Accent.Render("▶ ")
+			marker = d.styles.SelectionCaret.Render("▶ ")
 		}
 	}
 	bodyW := width - lipgloss.Width(marker)

@@ -314,8 +314,8 @@ func (d *mcpDashboard) stateStyle(state string) lipgloss.Style {
 
 // --- scroller (thin: the row list is short) -------------------------------
 
-func (d *mcpDashboard) ScrollBy(int)  {}
-func (d *mcpDashboard) ScrollTo(int)  {}
+func (d *mcpDashboard) ScrollBy(int) {}
+func (d *mcpDashboard) ScrollTo(int) {}
 func (d *mcpDashboard) ScrollState() contentPageScrollState {
 	return contentPageScrollState{Total: len(d.servers), Height: d.height, Offset: 0}
 }
@@ -389,7 +389,7 @@ func (d *mcpDashboard) renderList() string {
 			marker := "  "
 			nameStyle := d.styles.Primary
 			if selected {
-				marker = d.styles.Accent.Render("▶ ")
+				marker = d.styles.SelectionCaret.Render("▶ ")
 				nameStyle = d.styles.Bright
 			}
 			name := nameStyle.Render(padRightPlain(truncatePlain(s.Name, nameW), nameW))

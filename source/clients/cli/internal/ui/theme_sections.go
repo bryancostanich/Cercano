@@ -22,7 +22,7 @@ var semanticColorRows = []struct{ key, label string }{
 	{"selection_bg", "selection-bg"}, {"code_block_bg", "code-bg"}, {"bypass_text", "bypass-text"},
 	{"activity_base", "activity-base"}, {"activity_peak", "activity-peak"},
 	{"spinner_base", "spinner-base"}, {"spinner_peak", "spinner-peak"},
-	{"meter_label_on_fill", "meter-label"},
+	{"meter_label_on_fill", "meter-label"}, {"selection_caret", "selection-caret"},
 }
 
 // paletteHex returns the #RRGGBB hex for a yaml color key of a palette.

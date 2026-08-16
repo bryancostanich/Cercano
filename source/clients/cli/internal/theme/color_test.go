@@ -52,6 +52,7 @@ func TestBuiltinThemeTextColorsMeetContrastBaseline(t *testing.T) {
 		{name: "buffer_code", color: func(p Palette) color.Color { return p.BufferCode }, minContrast: 4.5},
 		{name: "buffer_lime", color: func(p Palette) color.Color { return p.BufferLime }, minContrast: 4.5},
 		{name: "buffer_error", color: func(p Palette) color.Color { return p.BufferError }, minContrast: 4.5},
+		{name: "selection_caret", color: func(p Palette) color.Color { return p.SelectionCaret }, minContrast: 4.5},
 		{name: "muted", color: func(p Palette) color.Color { return p.Muted }, minContrast: 3.0},
 	}
 	for _, builtin := range BuiltinThemes() {

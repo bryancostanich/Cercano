@@ -3637,7 +3637,7 @@ func (m Model) rolloverConfirm(ev rolloverOfferedMsg) *confirmRequest {
 // pending: why it's offered, a short preview of the handoff that would seed the
 // new session, and the y/n hints on their own line.
 func (m Model) renderRolloverPrompt(ev rolloverOfferedMsg) string {
-	head := m.styles.Accent.Render("▸ ")
+	head := m.styles.SelectionCaret.Render("▸ ")
 	title := "Start a fresh session? " + ev.reason
 	lines := []string{head + m.styles.AgentProse.Render(title)}
 	if p := rolloverPreviewSnippet(ev.preview); p != "" {
@@ -3679,7 +3679,7 @@ func (m Model) renderConfirmRequest(c *confirmRequest) string {
 	if c.tool != nil {
 		return m.renderConfirmPrompt(c.tool)
 	}
-	head := m.styles.Accent.Render("▸ ")
+	head := m.styles.SelectionCaret.Render("▸ ")
 	lines := []string{head + m.styles.AgentProse.Render(c.title)}
 	for _, detail := range c.details {
 		lines = append(lines, "  "+m.styles.AgentProse.Render(detail))
@@ -3694,12 +3694,12 @@ func (m Model) renderConfirmRequest(c *confirmRequest) string {
 // line so long summaries never wrap mid-hint. W-tier renders normally; X-tier
 // gets a red ⚠ destructive emphasis. MCP tools get an additional [a]lways key.
 func (m Model) renderConfirmPrompt(p *pendingToolCall) string {
-	head := m.styles.Accent.Render("▸ ")
+	head := m.styles.SelectionCaret.Render("▸ ")
 	if isSessionControlTool(p.Name) {
 		// Session-control prompts (enter/exit planning or autonomous mode) are
 		// X-tier so the gate always fires, but they destroy nothing — never
 		// render the red DESTRUCTIVE emphasis. A calm marker instead.
-		head = m.styles.Accent.Render("▸ ")
+		head = m.styles.SelectionCaret.Render("▸ ")
 	} else if p.Permission == "X" {
 		if isDispatchTool(p.Name) {
 			head = m.styles.Error.Render("▸ ⚠ DELEGATED ")

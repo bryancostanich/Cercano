@@ -366,6 +366,29 @@ func TestHistoryUpdate_ScrollToCursor(t *testing.T) {
 	}
 }
 
+func TestHistoryRowsLines_DaylightSelectedArrowUsesSelectionCaret(t *testing.T) {
+	var p theme.Palette
+	for _, builtin := range theme.BuiltinThemes() {
+		if builtin.Name == "daylight" {
+			p = builtin.Palette
+			break
+		}
+	}
+	h := &historyView{
+		styles: theme.NewStyles(p),
+		width:  100, height: 30,
+		allRows: []histRow{{id: "a", name: "selected conversation", meta: "now"}},
+		cursor:  0,
+		md:      newHistoryMarkdown(p),
+	}
+	h.applyFilter()
+	lines, _ := h.rowsLines()
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "38;2;251;243;224") || !strings.Contains(joined, "48;2;178;58;58") {
+		t.Fatalf("selected history arrow should render as a high-contrast caret chip (daylight bg on selection-caret red), got %q", joined)
+	}
+}
+
 func TestHistoryRowsLines_HeadingAndTwoLineRows(t *testing.T) {
 	rows := []histRow{
 		{id: "a", name: "read the cercano readme", recap: "Familiarized with the CLI", meta: "14 turns · 1h ago · opus-4-7"},

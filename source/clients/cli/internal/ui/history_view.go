@@ -374,7 +374,7 @@ func (h *historyView) appendRow(lines *[]string, meta *[]histLineMeta, i, panelW
 	titleStyle := h.styles.Bright.Bold(true)
 	var arrow string
 	if i == h.cursor {
-		arrow = h.styles.Accent.Render(glyph)
+		arrow = h.styles.SelectionCaret.Render(glyph)
 	} else {
 		arrow = h.styles.Muted.Render(glyph)
 	}

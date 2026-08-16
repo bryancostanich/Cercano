@@ -270,7 +270,7 @@ func (wp *wizardPage) commitAPIKey(key string) error {
 // startKeyEntry opens the masked key prompt. Returns the cursor-blink cmd.
 func (wp *wizardPage) startKeyEntry() tea.Cmd {
 	ti := textinput.New()
-	ti.Prompt = wp.styles.Accent.Render("▸ ")
+	ti.Prompt = wp.styles.SelectionCaret.Render("▸ ")
 	ti.EchoMode = textinput.EchoPassword
 	cmd := ti.Focus()
 	wp.keyInput = ti
@@ -1042,7 +1042,7 @@ func (wp *wizardPage) View() string {
 		case r.Disabled:
 			label = wp.styles.Muted.Render(label)
 		case i == wp.cursor:
-			caret = wp.styles.Accent.Render("▶ ")
+			caret = wp.styles.SelectionCaret.Render("▶ ")
 			label = wp.styles.Bright.Render(label)
 		default:
 			label = wp.styles.Primary.Render(label)

@@ -402,7 +402,7 @@ func (v *trajectoryExportView) renderRow(i, w int) []string {
 	r := v.rows[i]
 	arrow := v.styles.Muted.Render("▸ ")
 	if i == v.cursor {
-		arrow = v.styles.Accent.Render("▸ ")
+		arrow = v.styles.SelectionCaret.Render("▸ ")
 	}
 	meta := v.styles.Muted.Render(r.meta)
 	metaW := lipgloss.Width(meta)

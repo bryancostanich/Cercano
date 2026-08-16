@@ -35,6 +35,7 @@ type Palette struct {
 	SpinnerBase      color.Color // live spinner pulse base
 	SpinnerPeak      color.Color // live spinner pulse peak
 	MeterLabelOnFill color.Color // context-meter label text on filled cells
+	SelectionCaret   color.Color // active row/list selection caret
 
 	// Content colors (scrollback + markdown prose).
 	BufferLink   color.Color // markdown links
@@ -94,6 +95,7 @@ func Cracker() Palette {
 		SpinnerBase:      lipgloss.Color(hexPrimary),
 		SpinnerPeak:      lipgloss.Color(hexBright),
 		MeterLabelOnFill: lipgloss.Color(hexBgDeep),
+		SelectionCaret:   lipgloss.Color(hexError),
 
 		BufferLink:   lipgloss.Color(bufLinkHex),
 		BufferCode:   lipgloss.Color(bufCodeHex),

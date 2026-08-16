@@ -102,6 +102,40 @@ func TestRenderConfirmPrompt_RequestPlanApproval_AsksToExecute(t *testing.T) {
 	}
 }
 
+func TestRenderConfirmPrompt_SuggestAutonomous_AsksToStartWithBrief(t *testing.T) {
+	m := minimalModel()
+	s := stripAnsiCSI(m.renderConfirmPrompt(&pendingToolCall{
+		Name:       "suggest_autonomous",
+		Args:       `{"reason":"plan accepted","goal":"implement autonomous mode","done_when":["profile active","tests pass"],"constraints":["do not push"]}`,
+		Permission: "X",
+	}))
+	for _, want := range []string{"Start autonomous mode with this run brief?", "Why: plan accepted", "Goal: implement autonomous mode", "Done when: profile active; tests pass"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("suggest_autonomous prompt missing %q: %q", want, s)
+		}
+	}
+	if strings.Contains(s, "DESTRUCTIVE") || strings.Contains(s, "⚠") {
+		t.Errorf("suggest_autonomous is X-tier but destroys nothing; must not be DESTRUCTIVE/⚠: %q", s)
+	}
+}
+
+func TestRenderConfirmPrompt_RequestAutonomousExit_AsksForReview(t *testing.T) {
+	m := minimalModel()
+	s := stripAnsiCSI(m.renderConfirmPrompt(&pendingToolCall{
+		Name:       "request_autonomous_exit",
+		Args:       `{"summary":"done","verification":"targeted tests passed"}`,
+		Permission: "X",
+	}))
+	for _, want := range []string{"review decisions and exit autonomous mode", "Summary: done", "Verification: targeted tests passed"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("request_autonomous_exit prompt missing %q: %q", want, s)
+		}
+	}
+	if strings.Contains(s, "DESTRUCTIVE") || strings.Contains(s, "⚠") {
+		t.Errorf("request_autonomous_exit must not be DESTRUCTIVE/⚠: %q", s)
+	}
+}
+
 func TestRenderConfirmPrompt_DestructiveMCP_HasWarnGlyph(t *testing.T) {
 	m := minimalModel()
 	s := stripAnsiCSI(m.renderConfirmPrompt(&pendingToolCall{

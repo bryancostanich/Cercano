@@ -44,6 +44,7 @@ const (
 	ResultClearCompactedContext // drop compaction state; rehydrate from raw turns (no re-summarize)
 	ResultElideContext          // stub all tool-result bodies in the context up to now (in-memory)
 	ResultSetSessionProfile     // SessionProfile carries the profile name ("plan"|"default"|future)
+	ResultSubmitPrompt          // Text carries a prompt to submit as a normal user turn
 	ResultRestartAgent          // bounce the agent process; CLI reconnect loop brings up a fresh one
 )
 

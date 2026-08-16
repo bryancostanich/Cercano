@@ -60,6 +60,7 @@ func Register(reg *capabilities.Registry) {
 	reg.MustRegister(SuggestAutonomous())
 	reg.MustRegister(RequestAutonomousExit())
 	reg.MustRegister(AutoExit())
+	reg.MustRegister(CaptureDecision())
 	reg.MustRegister(PlanSetStatus())
 	reg.MustRegister(GitWorktree())
 	reg.MustRegister(Checkpoint())

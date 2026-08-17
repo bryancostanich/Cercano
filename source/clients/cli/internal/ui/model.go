@@ -2648,7 +2648,7 @@ func (m *Model) applyDevMode(repo string) string {
 	if m.wdRef != nil {
 		m.wdRef.dir = repo
 	}
-	m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: "dev mode: working on " + repo})
+	m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: "dev mode: working on " + repo + "\nDebug controls enabled. Try /debug help."})
 	return slash.DevKickoff(repo)
 }
 
@@ -2750,6 +2750,15 @@ func (m *Model) clearTurnAnimationState() {
 }
 
 func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
+	if strings.HasPrefix(strings.TrimSpace(line), "/debug") {
+		args := strings.Fields(strings.TrimSpace(line))
+		if len(args) > 0 {
+			args = args[1:]
+		}
+		m.mainChat().AppendNotice(&Entry{Role: RoleSystem, Content: m.runDebugTaskPaneSlash(args)})
+		m.refreshViewport()
+		return m, nil
+	}
 	res, _ := m.registry.Dispatch(line)
 	switch res.Kind {
 	case slash.ResultQuit:
@@ -2875,6 +2884,15 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 		}
 		return m.submit(res.Text, nil)
 	case slash.ResultInvokeTool:
+		if res.ToolName == debugTaskPaneToolName {
+			msg, err := m.runDebugTaskPaneTool(res.ToolArgs)
+			if err != nil {
+				msg = "debug task pane: " + err.Error()
+			}
+			m.mainChat().AppendNotice(&Entry{Role: RoleSystem, Content: msg})
+			m.refreshViewport()
+			return m, nil
+		}
 		// Decide locally whether to prompt: R-tier runs silently, W/X
 		// queues a pending confirm.
 		info := m.toolCache[res.ToolName]

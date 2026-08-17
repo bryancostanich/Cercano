@@ -366,7 +366,7 @@ func (c *Core) RunTurn(
 			"trigger_error":       errorString(loopErr),
 		})
 		if !fellBack && res.CrossAllowed && fbProv != nil {
-			tightContextFallback := !fbCloud && llm.ClassOf(loopErr) == llm.ErrContextOverflow
+			tightContextFallback := !fbCloud && isContextOverflowForFallback(loopErr)
 			fallbackNotice = fmt.Sprintf("⚠ %s failed (%v) — retrying on %s", provider.Name(), loopErr, fbProv.Name())
 			sink.Emit(Event{Kind: EventProgress, Text: fallbackNotice})
 			sink.Emit(Event{
@@ -429,6 +429,17 @@ func (c *Core) RunTurn(
 
 // runLoop is the single-provider tool-loop invocation, factored so the
 // cross-tier fallback can reuse it without duplicating the RunToolLoop call.
+func isContextOverflowForFallback(err error) bool {
+	if err == nil {
+		return false
+	}
+	if llm.ClassOf(err) == llm.ErrContextOverflow {
+		return true
+	}
+	overflow, _, _ := llm.DetectContextOverflow(err.Error())
+	return overflow
+}
+
 func (c *Core) runLoop(
 	ctx context.Context,
 	req Request,

@@ -63,6 +63,8 @@ type cancelProvider struct{}
 
 type contextOverflowProvider struct{}
 
+type invalidContextTextProvider struct{}
+
 func (p *cancelProvider) Name() string { return "cancel" }
 func (p *cancelProvider) Capabilities() inference.Capabilities {
 	return inference.Capabilities{SupportsTools: true}
@@ -83,6 +85,17 @@ func (p *contextOverflowProvider) Chat(context.Context, llm.ChatRequest) (llm.Ch
 }
 func (p *contextOverflowProvider) StreamChat(context.Context, llm.ChatRequest) (llm.StreamReader, error) {
 	return nil, &llm.Error{Class: llm.ErrContextOverflow, Provider: "test", Used: 10, Limit: 5, Err: errors.New("too large")}
+}
+
+func (p *invalidContextTextProvider) Name() string { return "cloud-invalid-context" }
+func (p *invalidContextTextProvider) Capabilities() inference.Capabilities {
+	return inference.Capabilities{SupportsTools: true}
+}
+func (p *invalidContextTextProvider) Chat(context.Context, llm.ChatRequest) (llm.ChatResponse, error) {
+	return llm.ChatResponse{}, &llm.Error{Class: llm.ErrInvalidRequest, Provider: "test", Err: errors.New("Your input exceeds the context window of this model. Please adjust your input and try again.")}
+}
+func (p *invalidContextTextProvider) StreamChat(context.Context, llm.ChatRequest) (llm.StreamReader, error) {
+	return nil, &llm.Error{Class: llm.ErrInvalidRequest, Provider: "test", Err: errors.New("Your input exceeds the context window of this model. Please adjust your input and try again.")}
 }
 
 func (p *spyProvider) Name() string { return "spy" }
@@ -320,13 +333,22 @@ func TestCore_ContextCanceledDoesNotCrossTierFallback(t *testing.T) {
 // exact regression the whole-branch review caught. This test fails if the
 // runner ever reverts to reading a captured value instead of the accessor.
 func TestCore_ContextOverflowFallbackUsesCompactLocalCatalog(t *testing.T) {
+	assertCompactFallbackForPrimary(t, &contextOverflowProvider{})
+}
+
+func TestCore_ContextOverflowTextFallbackUsesCompactLocalCatalog(t *testing.T) {
+	assertCompactFallbackForPrimary(t, &invalidContextTextProvider{})
+}
+
+func assertCompactFallbackForPrimary(t *testing.T, primary inference.Provider) {
+	t.Helper()
 	openSpy := &spyProvider{}
-	deps := buildDeps(&contextOverflowProvider{})
+	deps := buildDeps(primary)
 	reg := agenttools.NewRegistry()
 	reg.MustRegister(testTool{name: "Read", perm: agenttools.PermR})
 	reg.MustRegister(testTool{name: "git_push", perm: agenttools.PermX})
 	deps.Tools = &fakeToolSvc{reg: reg}
-	deps.Providers = &fakeResolver{prov: &contextOverflowProvider{}, open: openSpy}
+	deps.Providers = &fakeResolver{prov: primary, open: openSpy}
 	core := New(deps)
 
 	_, err := core.RunTurn(context.Background(), Request{

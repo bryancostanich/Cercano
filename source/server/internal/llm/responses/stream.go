@@ -184,15 +184,21 @@ func classifyStreamError(env streamEnvelope, raw string) error {
 		}
 	}
 	class := llm.ErrBusy
+	used, limit := 0, 0
 	lower := strings.ToLower(msg)
-	switch {
-	case code == "insufficient_quota" || typ == "insufficient_quota" ||
-		strings.Contains(lower, "quota") || strings.Contains(lower, "usage limit"):
-		class = llm.ErrQuota
-	case strings.Contains(code, "invalid") || strings.Contains(typ, "invalid_request"):
-		class = llm.ErrInvalidRequest
+	if overflow, u, l := llm.DetectContextOverflow(msg); overflow {
+		class = llm.ErrContextOverflow
+		used, limit = u, l
+	} else {
+		switch {
+		case code == "insufficient_quota" || typ == "insufficient_quota" ||
+			strings.Contains(lower, "quota") || strings.Contains(lower, "usage limit"):
+			class = llm.ErrQuota
+		case strings.Contains(code, "invalid") || strings.Contains(typ, "invalid_request"):
+			class = llm.ErrInvalidRequest
+		}
 	}
-	return &llm.Error{Class: class, Provider: "openai-responses",
+	return &llm.Error{Class: class, Provider: "openai-responses", Used: used, Limit: limit,
 		Err: fmt.Errorf("stream error: %s", msg)}
 }
 

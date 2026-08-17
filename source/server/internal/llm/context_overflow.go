@@ -33,6 +33,10 @@ func DetectContextOverflow(msg string) (overflow bool, used, limit int) {
 		return true, 0, 0
 	case strings.Contains(lower, "exceeds the available context size"):
 		return true, 0, 0
+	case strings.Contains(lower, "input exceeds the context window"):
+		return true, 0, 0
+	case strings.Contains(lower, "context window") && strings.Contains(lower, "exceed"):
+		return true, 0, 0
 	case strings.Contains(lower, "maximum context length") && strings.Contains(lower, "token"):
 		// OpenAI's classic phrasing: "This model's maximum context length is
 		// 8192 tokens, however you requested 9000 tokens".

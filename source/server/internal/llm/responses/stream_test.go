@@ -123,7 +123,9 @@ func TestStreamReaderError_Classified(t *testing.T) {
 			llm.ErrBusy, "You can retry your request"},
 		{"quota marker", "data: {\"type\":\"error\",\"code\":\"insufficient_quota\",\"message\":\"You exceeded your current quota.\"}\n\n",
 			llm.ErrQuota, "quota"},
-		{"invalid marker", "data: {\"type\":\"error\",\"code\":\"invalid_prompt\",\"message\":\"bad input\"}\n\n",
+		{"context-window invalid request", "data: {\"type\":\"error\",\"code\":\"invalid_request\",\"message\":\"Your input exceeds the context window of this model. Please adjust your input and try again.\"}\n\n",
+			llm.ErrContextOverflow, "context window"},
+		{"generic invalid marker", "data: {\"type\":\"error\",\"code\":\"invalid_prompt\",\"message\":\"bad input\"}\n\n",
 			llm.ErrInvalidRequest, "bad input"},
 	}
 	for _, tc := range cases {

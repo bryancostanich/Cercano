@@ -81,7 +81,10 @@ type ToolEntry struct {
 // which entry the up/down nav cursor is currently on. When false, a two-space
 // gutter holds the slot so toggling fold doesn't shift the body horizontally.
 func renderToolEntry(e ToolEntry, width int, focused bool, styles theme.Styles, md *render.Markdown) string {
-	toolEntrySubtle := styles.Muted
+	// Tool rows carry dense operational detail: args, durations, and sub-agent
+	// affordances. Keep that text readable even on light themes/terminal color
+	// profiles where the general Muted color can wash out against the background.
+	toolEntrySubtle := styles.Primary
 	toolEntrySuccess := styles.ToolSuccess
 	toolEntryError := styles.ToolError
 

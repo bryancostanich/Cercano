@@ -31,7 +31,7 @@ func TestToolEntry_FoldedRender(t *testing.T) {
 	}
 }
 
-func TestToolEntry_DaylightHeaderAndArgsUseReadableThemeColors(t *testing.T) {
+func TestToolEntry_DaylightHeaderAndArgsUseReadablePrimaryColor(t *testing.T) {
 	daylight := builtinToolPaletteForTest("daylight")
 	out := renderToolEntry(ToolEntry{
 		ToolName:    "Bash",
@@ -45,8 +45,8 @@ func TestToolEntry_DaylightHeaderAndArgsUseReadableThemeColors(t *testing.T) {
 	if !strings.Contains(out, "38;2;59;48;32") {
 		t.Fatalf("tool marker/name should use daylight primary (#3B3020), got %q", out)
 	}
-	if !strings.Contains(out, "38;2;111;106;85") {
-		t.Fatalf("tool args/status should use daylight muted (#6F6A55), got %q", out)
+	if strings.Contains(out, "38;2;111;106;85") {
+		t.Fatalf("tool args/status should not use daylight muted (#6F6A55), got %q", out)
 	}
 }
 

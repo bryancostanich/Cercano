@@ -3744,7 +3744,7 @@ func (m Model) renderConfirmPrompt(p *pendingToolCall) string {
 	}
 
 	lines := []string{head + m.styles.AgentProse.Render(confirmPromptTitle(p))}
-	if p.Name == "suggest_autonomous" {
+	if p.Name == "suggest_autonomous" || p.Name == "request_autonomous_execution" {
 		lines = append(lines, m.renderAutonomousBriefConfirmDetails(p)...)
 	} else {
 		for _, detail := range confirmPromptDetails(p) {
@@ -3871,6 +3871,10 @@ func (m Model) renderAutonomousBriefConfirmDetails(p *pendingToolCall) []string 
 			}
 		}
 	}
+	addTextSection("Plan", stringArg(obj, "summary"))
+	addTextSection("Effort", stringArg(obj, "effort"))
+	addTextSection("Spec", stringArg(obj, "spec_path"))
+	addTextSection("Plan file", stringArg(obj, "plan_path"))
 	addTextSection("Why", stringArg(obj, "reason"))
 	addTextSection("Goal", stringArg(obj, "goal"))
 	addListSection("Done when", stringSliceArg(obj["done_when"]))
@@ -3904,11 +3908,23 @@ func confirmPromptDetails(p *pendingToolCall) []string {
 		if done := summarizeStringSlice(obj["done_when"]); done != "" {
 			details = append(details, "Done when: "+truncateArgs(done, 200))
 		}
+		if constraints := summarizeStringSlice(obj["constraints"]); constraints != "" {
+			details = append(details, "Constraints: "+truncateArgs(constraints, 200))
+		}
+		if review := summarizeStringSlice(obj["review_points"]); review != "" {
+			details = append(details, "Review points: "+truncateArgs(review, 200))
+		}
 		if verification := oneLine(stringArg(obj, "verification")); verification != "" {
 			details = append(details, "Verification: "+truncateArgs(verification, 200))
 		}
 		if effort := oneLine(stringArg(obj, "effort")); effort != "" {
 			details = append(details, "Effort: "+truncateArgs(effort, 80))
+		}
+		if spec := oneLine(stringArg(obj, "spec_path")); spec != "" {
+			details = append(details, "Spec: "+truncateArgs(spec, 120))
+		}
+		if plan := oneLine(stringArg(obj, "plan_path")); plan != "" {
+			details = append(details, "Plan file: "+truncateArgs(plan, 120))
 		}
 		return details
 	}
@@ -4001,7 +4017,7 @@ func sessionControlPromptTitle(p *pendingToolCall) string {
 	case "suggest_autonomous":
 		return "Start autonomous mode with this run brief?"
 	case "request_autonomous_execution":
-		return "Plan approved. Would you like me to execute it to completion autonomously?"
+		return "Plan approved. Execute it autonomously with this run brief?"
 	case "request_autonomous_exit":
 		return "Autonomous run complete — begin final decision review?"
 	case "complete_autonomous_review":

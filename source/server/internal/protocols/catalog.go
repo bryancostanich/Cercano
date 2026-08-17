@@ -556,16 +556,16 @@ approved plan. The Markdown file remains canon: keep it current while you work.
 
 ## Optional Autonomous Bridge
 
-After approval, do not silently begin implementation. First call
-` + "`request_autonomous_execution`" + ` to ask the execution-style follow-up:
-"Plan approved. Would you like me to execute it to completion autonomously?"
-This is a normal y/n/d/c prompt. If the user says yes, derive a concise run brief
-from the approved ` + "`spec.md`" + ` / ` + "`plan.md`" + ` with ` + "`goal`" + `, ` + "`done_when`" + `,
-` + "`constraints`" + `, and ` + "`review_points`" + `, then call ` + "`suggest_autonomous`" + ` with
-` + "`source_plan_path`" + ` and ` + "`source_spec_path`" + ` for the separate run-brief approval.
-If the user says no, continue step-by-step under this protocol. Do not enter
-autonomous mode just because the plan was approved; ` + "`suggest_autonomous`" + ` remains a
-second approval boundary for the concrete run brief.
+After approval, do not silently begin implementation. First draft a concise run
+brief from the approved ` + "`spec.md`" + ` / ` + "`plan.md`" + ` with ` + "`goal`" + `, ` + "`done_when`" + `,
+` + "`constraints`" + `, and ` + "`review_points`" + `, then call
+` + "`request_autonomous_execution`" + ` to ask the single execution-style follow-up:
+"Plan approved. Execute it autonomously with this run brief?" This is a normal
+` + "`y/n/d/c`" + ` prompt that shows both the plan context and the brief. If the user says
+yes, that approval starts autonomous mode for the approved plan. If the user says
+no, continue step-by-step under this protocol. Do not call ` + "`suggest_autonomous`" + `
+after ` + "`request_autonomous_execution`" + ` in approved-plan flows; ` + "`suggest_autonomous`" + ` is reserved
+for direct autonomous requests that do not originate from an approved plan.
 
 ## Core Loop
 
@@ -702,11 +702,13 @@ Once the spec is approved, write **` + "`efforts/<slug>/plan.md`" + `** in the f
 below. Then call ` + "`request_plan_approval`" + ` with the effort path and a concise
 summary of the plan. That W-tier capability raises the standard ` + "`y/n/d/c`" + `
 gate; approval leaves the read-only planning profile so execution can begin.
-After that approval, call ` + "`request_autonomous_execution`" + ` to ask: "Plan approved.
-Would you like me to execute it to completion autonomously?" If the user says
-yes, draft a lightweight autonomous run brief from ` + "`spec.md`" + ` / ` + "`plan.md`" + ` and call
-` + "`suggest_autonomous`" + ` for a separate y/n/d/c run-brief approval. If the user says
-no, proceed step-by-step under the executing-plans protocol.
+After that approval, draft a lightweight autonomous run brief from ` + "`spec.md`" + ` /
+` + "`plan.md`" + ` and call ` + "`request_autonomous_execution`" + ` to ask: "Plan approved. Execute
+it autonomously with this run brief?" If the user says yes, that single approval
+starts autonomous mode for the approved plan. If the user says no, proceed
+step-by-step under the executing-plans protocol. Do not call ` + "`suggest_autonomous`" + `
+after ` + "`request_autonomous_execution`" + ` for approved-plan execution; ` + "`suggest_autonomous`" + ` is only
+for direct autonomous requests.
 
 ## Decisions During Generation (mandatory)
 

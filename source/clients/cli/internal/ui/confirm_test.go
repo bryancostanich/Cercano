@@ -137,20 +137,23 @@ func TestRenderConfirmPrompt_SuggestAutonomous_WrapsBriefBody(t *testing.T) {
 	}
 }
 
-func TestRenderConfirmPrompt_RequestAutonomousExecution_AsksFollowupChoice(t *testing.T) {
+func TestRenderConfirmPrompt_RequestAutonomousExecution_AsksCombinedPlanAndBriefQuestion(t *testing.T) {
 	m := minimalModel()
 	s := stripAnsiCSI(m.renderConfirmPrompt(&pendingToolCall{
 		Name:       "request_autonomous_execution",
-		Args:       `{"summary":"three phases","effort":"efforts/demo"}`,
+		Args:       `{"summary":"three phases","effort":"efforts/demo","spec_path":"efforts/demo/spec.md","plan_path":"efforts/demo/plan.md","reason":"bounded approved plan","goal":"ship demo","done_when":["tests pass"],"constraints":["do not push"],"review_points":["protocol wording"]}`,
 		Permission: "X",
 	}))
-	for _, want := range []string{"Plan approved. Would you like me to execute it to completion autonomously?", "Plan: three phases", "Effort: efforts/demo"} {
+	for _, want := range []string{"Plan approved. Execute it autonomously with this run brief?", "Plan\n    three phases", "Effort\n    efforts/demo", "Spec\n    efforts/demo/spec.md", "Plan file\n    efforts/demo/plan.md", "Why\n    bounded approved plan", "Goal\n    ship demo", "Done when\n    • tests pass", "Constraints\n    • do not push", "Review points\n    • protocol wording"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("request_autonomous_execution prompt missing %q: %q", want, s)
 		}
 	}
 	if strings.Contains(s, "DESTRUCTIVE") || strings.Contains(s, "⚠") {
 		t.Errorf("request_autonomous_execution must not be DESTRUCTIVE/⚠: %q", s)
+	}
+	if strings.Contains(s, `{"summary"`) || strings.Contains(s, "suggest_autonomous") {
+		t.Errorf("request_autonomous_execution prompt should not dump raw args or mention second gate: %q", s)
 	}
 }
 

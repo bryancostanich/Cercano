@@ -56,21 +56,53 @@ func (suggestAutonomousCap) Execute(ctx context.Context, call *capabilities.Call
 			return nil, fmt.Errorf("suggest_autonomous: parse args: %w", err)
 		}
 	}
-	if strings.TrimSpace(a.Goal) == "" {
-		return nil, fmt.Errorf("suggest_autonomous: goal is required")
+	msg, err := enterAutonomousMode(ctx, call, autonomousEntryRequest{
+		Reason:         a.Reason,
+		Goal:           a.Goal,
+		DoneWhen:       a.DoneWhen,
+		Constraints:    a.Constraints,
+		ReviewPoints:   a.ReviewPoints,
+		SourcePlanPath: a.SourcePlanPath,
+		SourceSpecPath: a.SourceSpecPath,
+		ErrPrefix:      "suggest_autonomous",
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &capabilities.Result{Type: capabilities.ResultText, Text: msg}, nil
+}
+
+type autonomousEntryRequest struct {
+	Reason         string
+	Goal           string
+	DoneWhen       []string
+	Constraints    []string
+	ReviewPoints   []string
+	SourcePlanPath string
+	SourceSpecPath string
+	ErrPrefix      string
+}
+
+func enterAutonomousMode(ctx context.Context, call *capabilities.Call, req autonomousEntryRequest) (string, error) {
+	prefix := strings.TrimSpace(req.ErrPrefix)
+	if prefix == "" {
+		prefix = "autonomous"
+	}
+	if strings.TrimSpace(req.Goal) == "" {
+		return "", fmt.Errorf("%s: goal is required", prefix)
 	}
 	brief := conversation.AutonomyBrief{
-		Goal:         strings.TrimSpace(a.Goal),
-		DoneWhen:     compactStrings(a.DoneWhen),
-		Constraints:  compactStrings(a.Constraints),
-		ReviewPoints: compactStrings(a.ReviewPoints),
+		Goal:         strings.TrimSpace(req.Goal),
+		DoneWhen:     compactStrings(req.DoneWhen),
+		Constraints:  compactStrings(req.Constraints),
+		ReviewPoints: compactStrings(req.ReviewPoints),
 	}
 	if call.Svc.Conversations != nil && strings.TrimSpace(call.ConversationID) != "" {
 		briefJSON, err := json.Marshal(brief)
 		if err != nil {
-			return nil, fmt.Errorf("suggest_autonomous: marshal brief: %w", err)
+			return "", fmt.Errorf("%s: marshal brief: %w", prefix, err)
 		}
-		reason := strings.TrimSpace(a.Reason)
+		reason := strings.TrimSpace(req.Reason)
 		if reason == "" {
 			reason = "initial autonomous brief"
 		}
@@ -82,37 +114,37 @@ func (suggestAutonomousCap) Execute(ctx context.Context, call *capabilities.Call
 			Brief:     brief,
 		}})
 		if err != nil {
-			return nil, fmt.Errorf("suggest_autonomous: marshal brief revisions: %w", err)
+			return "", fmt.Errorf("%s: marshal brief revisions: %w", prefix, err)
 		}
 		sourceKind := "direct_user_request"
-		if strings.TrimSpace(a.SourcePlanPath) != "" || strings.TrimSpace(a.SourceSpecPath) != "" {
+		if strings.TrimSpace(req.SourcePlanPath) != "" || strings.TrimSpace(req.SourceSpecPath) != "" {
 			sourceKind = "accepted_plan"
 		}
 		if err := call.Svc.Conversations.SaveAutonomyRun(ctx, conversation.AutonomyRun{
 			ConversationID: call.ConversationID,
 			State:          "running",
 			SourceKind:     sourceKind,
-			SourcePlanPath: strings.TrimSpace(a.SourcePlanPath),
-			SourceSpecPath: strings.TrimSpace(a.SourceSpecPath),
+			SourcePlanPath: strings.TrimSpace(req.SourcePlanPath),
+			SourceSpecPath: strings.TrimSpace(req.SourceSpecPath),
 			BriefJSON:      string(briefJSON),
 			RevisionsJSON:  string(revsJSON),
 			DecisionsJSON:  "[]",
 			ReviewJSON:     "{}",
 		}); err != nil {
-			return nil, fmt.Errorf("suggest_autonomous: save autonomy ledger: %w", err)
+			return "", fmt.Errorf("%s: save autonomy ledger: %w", prefix, err)
 		}
 	}
 	if call.Svc.EnterProfile == nil {
-		return nil, fmt.Errorf("suggest_autonomous: autonomous mode is not available (no profile broker wired)")
+		return "", fmt.Errorf("%s: autonomous mode is not available (no profile broker wired)", prefix)
 	}
 	if err := call.Svc.EnterProfile(call.ConversationID, "autonomous"); err != nil {
-		return nil, fmt.Errorf("suggest_autonomous: entering autonomous mode: %w", err)
+		return "", fmt.Errorf("%s: entering autonomous mode: %w", prefix, err)
 	}
 	msg := "Entered autonomous mode. Work to the approved run brief, capture meaningful in-scope decisions, continue unless a high-risk boundary is crossed, and request autonomous exit when the brief is satisfied."
-	if r := strings.TrimSpace(a.Reason); r != "" {
+	if r := strings.TrimSpace(req.Reason); r != "" {
 		msg = "Entered autonomous mode: " + r + ".\n\n" + msg
 	}
-	return &capabilities.Result{Type: capabilities.ResultText, Text: msg}, nil
+	return msg, nil
 }
 
 type autoExitCap struct{}

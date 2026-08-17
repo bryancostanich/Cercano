@@ -272,9 +272,14 @@ func TestPlanningModeNamesRequestPlanApprovalForHandoff(t *testing.T) {
 	if !strings.Contains(p.Body, "leaves the read-only planning profile") && !strings.Contains(p.Body, "drops the read-only fence") {
 		t.Fatal("planning-mode body must explain that approval leaves the read-only planning profile")
 	}
-	for _, want := range []string{"request_autonomous_execution", "Would you like me to execute it to completion autonomously?", "suggest_autonomous", "lightweight autonomous run brief", "separate y/n/d/c"} {
+	for _, want := range []string{"request_autonomous_execution", "Execute\nit autonomously with this run brief?", "lightweight autonomous run brief", "single approval"} {
 		if !strings.Contains(p.Body, want) {
 			t.Fatalf("planning-mode body must document optional autonomous bridge; missing %q", want)
+		}
+	}
+	for _, old := range []string{"separate y/n/d/c run-brief approval", "second approval boundary"} {
+		if strings.Contains(p.Body, old) {
+			t.Fatalf("planning-mode body must not preserve duplicate autonomous gate wording %q", old)
 		}
 	}
 }
@@ -329,9 +334,14 @@ func TestExecutingPlansStructuralHandoffUsesApprovalGate(t *testing.T) {
 
 func TestExecutingPlansDocumentsOptionalAutonomousBridge(t *testing.T) {
 	p, _ := Get("executing-plans")
-	for _, want := range []string{"Optional Autonomous Bridge", "request_autonomous_execution", "Would you like me to execute it to completion autonomously?", "suggest_autonomous", "source_plan_path", "source_spec_path", "second approval boundary"} {
+	for _, want := range []string{"Optional Autonomous Bridge", "request_autonomous_execution", "Execute it autonomously with this run brief?", "goal", "done_when", "constraints", "review_points", "single execution-style follow-up"} {
 		if !strings.Contains(p.Body, want) {
 			t.Fatalf("executing-plans must document autonomous bridge; missing %q", want)
+		}
+	}
+	for _, old := range []string{"separate run-brief approval", "second approval boundary", "call `suggest_autonomous` with"} {
+		if strings.Contains(p.Body, old) {
+			t.Fatalf("executing-plans must not preserve duplicate autonomous gate wording %q", old)
 		}
 	}
 }

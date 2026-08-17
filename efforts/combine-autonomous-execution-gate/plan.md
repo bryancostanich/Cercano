@@ -77,4 +77,4 @@ Tests to write/run:
 - [x] Run targeted confirm prompt tests under `source/clients/cli/internal/ui`.
 - [x] Run targeted protocol tests under `source/server/internal/protocols`.
 - [x] Run broader dependent package tests as needed.
-- [ ] Commit the completed implementation with a conventional-commit message.
+- [x] Commit the completed implementation with a conventional-commit message.

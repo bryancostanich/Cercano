@@ -3764,6 +3764,8 @@ func (m Model) renderConfirmPrompt(p *pendingToolCall) string {
 	lines := []string{head + m.styles.AgentProse.Render(confirmPromptTitle(p))}
 	if p.Name == "suggest_autonomous" || p.Name == "request_autonomous_execution" {
 		lines = append(lines, m.renderAutonomousBriefConfirmDetails(p)...)
+	} else if p.Name == "request_autonomous_exit" {
+		lines = append(lines, m.renderAutonomousExitConfirmDetails(p)...)
 	} else {
 		for _, detail := range confirmPromptDetails(p) {
 			lines = append(lines, "  "+m.styles.AgentProse.Render(detail))
@@ -3845,10 +3847,7 @@ func (m Model) renderAutonomousBriefConfirmDetails(p *pendingToolCall) []string 
 	if !ok {
 		return nil
 	}
-	bodyWidth := m.width - 6
-	if bodyWidth < 40 {
-		bodyWidth = 80
-	}
+	bodyWidth := m.confirmBlockBodyWidth()
 	lines := make([]string, 0, 16)
 	addTextSection := func(heading, text string) {
 		text = strings.TrimSpace(text)
@@ -3899,6 +3898,42 @@ func (m Model) renderAutonomousBriefConfirmDetails(p *pendingToolCall) []string 
 	addListSection("Constraints", stringSliceArg(obj["constraints"]))
 	addListSection("Review points", stringSliceArg(obj["review_points"]))
 	return lines
+}
+
+func (m Model) renderAutonomousExitConfirmDetails(p *pendingToolCall) []string {
+	obj, ok := decodeArgObject(p.Args)
+	if !ok {
+		return nil
+	}
+	bodyWidth := m.confirmBlockBodyWidth()
+	lines := make([]string, 0, 6)
+	addTextSection := func(heading, text string) {
+		text = strings.TrimSpace(text)
+		if text == "" {
+			return
+		}
+		if len(lines) > 0 {
+			lines = append(lines, "")
+		}
+		lines = append(lines, "  "+m.styles.Accent.Bold(true).Render(heading))
+		wrapped := strings.Split(ansi.Wrap(oneLine(text), bodyWidth, ""), "\n")
+		for _, line := range wrapped {
+			if strings.TrimSpace(line) != "" {
+				lines = append(lines, "    "+m.styles.AgentProse.Render(line))
+			}
+		}
+	}
+	addTextSection("Summary", stringArg(obj, "summary"))
+	addTextSection("Verification", stringArg(obj, "verification"))
+	return lines
+}
+
+func (m Model) confirmBlockBodyWidth() int {
+	bodyWidth := m.width - 6
+	if bodyWidth < 40 {
+		bodyWidth = 80
+	}
+	return bodyWidth
 }
 
 func confirmPromptDetails(p *pendingToolCall) []string {
@@ -4037,7 +4072,7 @@ func sessionControlPromptTitle(p *pendingToolCall) string {
 	case "request_autonomous_execution":
 		return "Plan approved. Execute it autonomously with this run brief?"
 	case "request_autonomous_exit":
-		return "Autonomous run complete — begin final decision review?"
+		return "Autonomous run complete — review completion details?"
 	case "complete_autonomous_review":
 		return "Final autonomous review accepted — exit autonomous mode?"
 	case "auto_exit":

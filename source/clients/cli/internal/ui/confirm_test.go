@@ -157,20 +157,46 @@ func TestRenderConfirmPrompt_RequestAutonomousExecution_AsksCombinedPlanAndBrief
 	}
 }
 
-func TestRenderConfirmPrompt_RequestAutonomousExit_AsksForReview(t *testing.T) {
+func TestRenderConfirmPrompt_RequestAutonomousExit_ShowsCompletionDetailsAsBlocks(t *testing.T) {
 	m := minimalModel()
 	s := stripAnsiCSI(m.renderConfirmPrompt(&pendingToolCall{
 		Name:       "request_autonomous_exit",
 		Args:       `{"summary":"done","verification":"targeted tests passed"}`,
 		Permission: "X",
 	}))
-	for _, want := range []string{"begin final decision review", "Summary: done", "Verification: targeted tests passed"} {
+	for _, want := range []string{"Autonomous run complete — review completion details?", "Summary\n    done", "Verification\n    targeted tests passed"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("request_autonomous_exit prompt missing %q: %q", want, s)
 		}
 	}
+	if strings.Contains(s, "begin final decision review") || strings.Contains(s, "Summary: done") || strings.Contains(s, "Verification: targeted tests passed") {
+		t.Errorf("request_autonomous_exit should render prose as block sections, not inline metadata rows: %q", s)
+	}
 	if strings.Contains(s, "DESTRUCTIVE") || strings.Contains(s, "⚠") {
 		t.Errorf("request_autonomous_exit must not be DESTRUCTIVE/⚠: %q", s)
+	}
+}
+
+func TestRenderConfirmPrompt_RequestAutonomousExit_WrapsLongPayloadsWithoutEllipsis(t *testing.T) {
+	m := minimalModel()
+	m.width = 58
+	s := stripAnsiCSI(m.renderConfirmPrompt(&pendingToolCall{
+		Name:       "request_autonomous_exit",
+		Args:       `{"summary":"Implemented dev-mode-gated task pane debug controls with a shared controller and slash commands","verification":"Ran cd source/clients/cli && go test ./internal/ui -run TestDebugTaskPane -count=1"}`,
+		Permission: "X",
+	}))
+	for _, want := range []string{
+		"Summary\n    Implemented dev-mode-gated task pane debug controls",
+		"    with a shared controller and slash commands",
+		"Verification\n    Ran cd source/clients/cli && go test ./internal/ui -",
+		"    run TestDebugTaskPane -count=1",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("wrapped request_autonomous_exit prompt missing %q: %q", want, s)
+		}
+	}
+	if strings.Contains(s, "…") {
+		t.Errorf("request_autonomous_exit summary and verification should wrap instead of truncate: %q", s)
 	}
 }
 

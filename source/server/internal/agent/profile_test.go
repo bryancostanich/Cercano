@@ -73,6 +73,30 @@ func TestAutonomousProfile_AllowsEveryKnownTierButSignalsActiveProfile(t *testin
 	}
 }
 
+func TestIsSessionControlTool(t *testing.T) {
+	control := []string{
+		"suggest_plan",
+		"request_plan_approval",
+		"plan_exit",
+		"suggest_autonomous",
+		"request_autonomous_execution",
+		"request_autonomous_exit",
+		"complete_autonomous_review",
+		"auto_exit",
+	}
+	for _, name := range control {
+		if !IsSessionControlTool(name) {
+			t.Errorf("IsSessionControlTool(%q) = false, want true", name)
+		}
+	}
+	ordinary := []string{"Read", "Write", "Bash", "capture_decision", "plan_set_status", "get_protocol"}
+	for _, name := range ordinary {
+		if IsSessionControlTool(name) {
+			t.Errorf("IsSessionControlTool(%q) = true, want false", name)
+		}
+	}
+}
+
 // --- D: advertisement filter ----------------------------------------------
 
 func TestPlanProfile_FiltersExecToolsButKeepsFileWrites(t *testing.T) {

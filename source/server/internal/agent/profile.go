@@ -103,6 +103,27 @@ func ToolLiftsPlanFence(toolName string) bool {
 	return toolName == "plan_exit" || toolName == "request_plan_approval"
 }
 
+// IsSessionControlTool reports whether a tool changes, requests, or finalizes
+// the session's supervisory profile/state rather than performing ordinary work.
+// These tools are explicit control boundaries: a redirect/denial-with-message or
+// execution error must stop the current tool turn instead of being fed back to
+// the model as ordinary steerable tool output.
+func IsSessionControlTool(toolName string) bool {
+	switch toolName {
+	case "suggest_plan",
+		"request_plan_approval",
+		"plan_exit",
+		"suggest_autonomous",
+		"request_autonomous_execution",
+		"request_autonomous_exit",
+		"complete_autonomous_review",
+		"auto_exit":
+		return true
+	default:
+		return false
+	}
+}
+
 // PlanProfile is the read-only exploration fence for planning mode (Fork 1):
 // read-tier tools plus the file-write tools needed to author spec.md/plan.md and
 // the approval handoff tool, nothing else. Exec tools (bash), git mutations, and

@@ -797,12 +797,19 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 				var followUp *FollowUpDenial
 				if errors.As(err, &followUp) {
 					// "Chat about this": the user declined the tool but sent a redirect.
-					// Record it as this call's tool_result and CONTINUE the turn so the
-					// model responds to the redirect inline rather than on a fresh turn.
+					// Ordinary tools keep the historical behavior: record the redirect as
+					// this call's tool_result and continue so the model answers inline.
+					// Session-control tools are different: the requested mode/state
+					// transition did not happen, so continuing the same turn would let the
+					// model improvise past a failed control boundary.
 					results = append(results, llm.Block{
 						Type: llm.BlockToolResult, ToolUseRef: pc.block.ToolUseID,
 						Content: followUp.Message, IsError: true,
 					})
+					if IsSessionControlTool(pc.block.ToolName) {
+						appendTurn(llm.Message{Role: llm.RoleUser, Blocks: results})
+						return ToolLoopResult{FinalText: finalText, Iterations: iter + 1, History: hist, InputTokens: lastIn, OutputTokens: lastOut, CalledTools: calledTools}, nil
+					}
 					continue
 				}
 				if err != nil {
@@ -828,6 +835,10 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 				out.IsError = true
 				emit(LoopEvent{Kind: LoopToolExecComplete, ToolUseID: pc.block.ToolUseID, ToolName: pc.block.ToolName, Summary: err.Error(), IsError: true})
 				results = append(results, out)
+				if IsSessionControlTool(pc.block.ToolName) {
+					appendTurn(llm.Message{Role: llm.RoleUser, Blocks: results})
+					return ToolLoopResult{FinalText: finalText, Iterations: iter + 1, History: hist, InputTokens: lastIn, OutputTokens: lastOut, CalledTools: calledTools}, nil
+				}
 			} else {
 				out.Content = res.LLMContent()
 				out.StartLine = res.StartLine

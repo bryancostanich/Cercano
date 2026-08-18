@@ -84,7 +84,7 @@ Spec: `efforts/fix-fallback-overflow-classification-and-compaction-budget/spec.m
 - [x] Review logs/test assertions for the two original failure shapes:
   - [x] cloud context-window stream error activates compact local fallback,
   - [x] oversized local compaction input is chunked/deferred locally, not sent as a doomed single request.
-- [ ] Checkpoint the completed work with a clear commit subject and body.
+- [x] Checkpoint the completed work with a clear commit subject and body.
 
 ## Notes
 

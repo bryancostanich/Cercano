@@ -16,6 +16,7 @@ import (
 	"cercano/source/server/internal/agenttools"
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
+	"cercano/source/server/internal/localruntime/llamaserver"
 	"cercano/source/server/internal/locus"
 	"cercano/source/server/internal/protocols"
 	"cercano/source/server/internal/routinglog"
@@ -59,18 +60,45 @@ func errorString(err error) string {
 	return err.Error()
 }
 
-func localContextWindow(cfg config.Config) int {
+// localContextWindow reports the context window the local runtime will
+// actually serve for model, which is NOT always the configured value: a
+// catalog model may pin its own --ctx-size in ExtraArgs, and because per-model
+// flags are appended last, llama-server honors that one instead of the config's.
+// Budgeting against the config number alone produced false preflight
+// context_overflow rejections for requests the running server would have
+// accepted (config said 16384 while the process served 32768).
+//
+// model is the resolved local model ID; empty falls back to the config value.
+func localContextWindow(cfg config.Config, model string) int {
 	switch cfg.OpenRuntime {
 	case "mistralrs":
 		return cfg.MistralRS.MaxSeqLen
 	case "llama_server":
-		return cfg.LlamaServer.ContextSize
+		return llamaServerWindow(cfg.LlamaServer.ContextSize, model)
 	default:
 		if cfg.LlamaServer.ContextSize > 0 {
-			return cfg.LlamaServer.ContextSize
+			return llamaServerWindow(cfg.LlamaServer.ContextSize, model)
 		}
 		return cfg.MistralRS.MaxSeqLen
 	}
+}
+
+// llamaServerWindow applies the catalog's per-model --ctx-size override to the
+// configured context size. The model ID carries provider/catalog prefixes in
+// routing form (e.g. "llama_server:catalog:glm-4.5-air-q4_k_m"); the catalog is
+// keyed by the bare ID, so match on the final segment.
+func llamaServerWindow(configured int, model string) int {
+	if model == "" {
+		return configured
+	}
+	bare := model
+	if i := strings.LastIndex(bare, ":"); i >= 0 {
+		bare = bare[i+1:]
+	}
+	if n := llamaserver.ModelContextOverride(bare); n > 0 {
+		return n
+	}
+	return configured
 }
 
 func addCloudProfileFields(fields routinglog.Event, prefix string, cfg config.Config, name string) {
@@ -457,7 +485,7 @@ func (c *Core) runLoop(
 		cfgSnap := c.d.Config.Get()
 		maxIterations = cfgSnap.ToolLoop.MaxIterations
 		if !isCloud {
-			contextWindow = localContextWindow(cfgSnap)
+			contextWindow = localContextWindow(cfgSnap, model)
 		}
 	}
 

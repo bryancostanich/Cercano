@@ -557,7 +557,12 @@ func (p *Provider) argsFor(cfg config.LlamaServerConfig, model localruntime.Mode
 		// completions endpoints.
 		args = append(args, "--embedding")
 	}
-	if cfg.ContextSize > 0 {
+	// A per-model --ctx-size in the catalog's ExtraArgs is authoritative: those
+	// flags are appended last and llama-server takes the LAST occurrence, so
+	// emitting the config value too would put a losing duplicate on the command
+	// line and leave the agent budgeting against a window the server isn't
+	// using. EffectiveContextSize applies the same precedence.
+	if cfg.ContextSize > 0 && !hasFlag(model.ExtraArgs, "--ctx-size") {
 		args = append(args, "--ctx-size", strconv.Itoa(cfg.ContextSize))
 	}
 	if cfg.Threads > 0 {

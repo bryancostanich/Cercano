@@ -839,14 +839,19 @@ func NewServer(a *agent.Agent, router RouterCloudUpdater, coordinator *loop.ADKC
 		s.persistSvc.PersistTurn,
 	)
 	// Wire the dispatch pre-flight context-window resolver. Local sub-agents run
-	// on the managed llama-server, whose input window is config.LlamaServer.
-	// ContextSize; a cloud sub-agent's window we don't track, so return 0 to
-	// disable the guard (the provider's own overflow error remains the backstop).
+	// on the managed llama-server; a cloud sub-agent's window we don't track, so
+	// return 0 to disable the guard (the provider's own overflow error remains
+	// the backstop).
+	//
+	// The window is NOT simply config.LlamaServer.ContextSize: a catalog model
+	// may pin its own --ctx-size, which wins at launch because per-model flags
+	// are appended last. Resolving it here keeps sub-agents from inheriting a
+	// phantom ceiling and rejecting work the server would have accepted.
 	s.toolSvc.SetContextWindowResolver(func(model string, isCloud bool) int {
 		if isCloud {
 			return 0
 		}
-		return s.cfgSvc.Get().LlamaServer.ContextSize
+		return localModelContextWindow(s.cfgSvc.Get().LlamaServer.ContextSize, model)
 	})
 	// Wire the in-process turn runner with nil Perms (permBroker not yet set).
 	// Rebuilt in SetPermissions once the broker is wired. workerRunner stays nil
@@ -2522,6 +2527,24 @@ func buildToolLoopSystem(env loopEnv, steering, dirSnapshot, projectContext stri
 
 // buildSystemPrompt gathers live environment grounding for workDir and renders
 // the tool-loop system prompt.
+// localModelContextWindow resolves the context window a local model is really
+// served with, applying the catalog's per-model --ctx-size override on top of
+// the configured value. The model ID arrives in routing form
+// ("llama_server:catalog:<id>"), while the catalog is keyed by the bare ID.
+func localModelContextWindow(configured int, model string) int {
+	if model == "" {
+		return configured
+	}
+	bare := model
+	if i := strings.LastIndex(bare, ":"); i >= 0 {
+		bare = bare[i+1:]
+	}
+	if n := llamaserver.ModelContextOverride(bare); n > 0 {
+		return n
+	}
+	return configured
+}
+
 func (s *Server) buildSystemPrompt(workDir string) string {
 	env := loopEnv{
 		WorkDir:  workDir,

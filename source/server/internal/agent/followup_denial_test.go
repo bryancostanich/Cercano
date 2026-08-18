@@ -130,7 +130,7 @@ func TestToolLoop_SessionControlExecutionErrorTerminatesTurn(t *testing.T) {
 	if prov.calls != 1 {
 		t.Fatalf("session-control execution error should terminate the turn; provider calls=%d, want 1", prov.calls)
 	}
-	if !resultHasToolResultContaining(result, "u1", "autonomous mode is not available", true) {
+	if !resultHasToolResultContaining(result, "u1", "autonomy ledger is not available", true) {
 		t.Fatalf("expected execution error tool_result for request_autonomous_execution")
 	}
 	if resultHasToolResult(result, "u2", "", false) {

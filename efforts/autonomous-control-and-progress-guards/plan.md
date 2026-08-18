@@ -100,12 +100,12 @@ Objective: run targeted and then package-level tests, remove temporary compatibi
 Files: affected package tests and any effort notes.
 Tests: targeted tests for agent tool loop, built-in capabilities, conversation store/migration, server session profile, worker routing if touched, and CLI UI; broader package tests for affected directories.
 
-- [ ] Run targeted agent/tool-loop tests
-- [ ] Run targeted autonomous capability tests
-- [ ] Run targeted conversation store/migration tests
-- [ ] Run targeted server session-profile/autonomous integration tests
-- [ ] Run targeted CLI UI tests
-- [ ] Run broader affected package tests
-- [ ] Inspect git diff for accidental tool-loop cap changes or unrelated edits
-- [ ] Update effort notes or follow-up list for semantic-yield/watchdog work if needed
+- [x] Run targeted agent/tool-loop tests
+- [x] Run targeted autonomous capability tests
+- [x] Run targeted conversation store/migration tests
+- [x] Run targeted server session-profile/autonomous integration tests
+- [x] Run targeted CLI UI tests
+- [x] Run broader affected package tests
+- [x] Inspect git diff for accidental tool-loop cap changes or unrelated edits
+- [x] Update effort notes or follow-up list for semantic-yield/watchdog work if needed
 - [ ] Commit the completed unit with a conventional checkpoint subject and explanatory body

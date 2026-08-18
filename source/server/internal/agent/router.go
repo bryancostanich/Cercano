@@ -67,6 +67,7 @@ type Request struct {
 	WorkDir        string
 	FileName       string
 	ConversationID string
+	RequestID      string
 	DirectOpen     bool   // Skip SmartRouter, go directly to local provider
 	ModelOverride  string // Use this model instead of the configured default (per-request)
 	// Temperature overrides the engine's sampling temperature for this request.
@@ -78,8 +79,11 @@ type Request struct {
 	// llm.ChatRequest.Tier so the cloud failover composite can re-resolve the
 	// same tier in the backup vendor's namespace instead of degrading to the
 	// backup's default model. Empty = provider default, no translation needed.
-	Tier   string
-	Coproc bool // Route per Locus Mode's co-processor tier (local/cloud)
+	Tier string
+	// MaxTokens overrides the output budget for one-shot Process calls. 0 keeps
+	// the provider default.
+	MaxTokens int
+	Coproc    bool // Route per Locus Mode's co-processor tier (local/cloud)
 	// Images are user-attached images; buildUserBlocks splices them into the
 	// user message at "[image N]" markers in Input.
 	Images []InlineImage

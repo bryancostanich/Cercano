@@ -5,6 +5,7 @@ package compactiongen
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -201,6 +202,11 @@ func (g *Generator) runCompaction(ctx context.Context, conversationID string) er
 
 	newState, changed, more, err := compactor.Advance(ctx, turns, state, g.summarize, g.cfg, g.tok)
 	if err != nil {
+		var deferral *compaction.DeferralError
+		if errors.As(err, &deferral) {
+			g.logf("[compaction] pass deferred %s after %s: %v\n", conversationID, time.Since(start).Round(time.Millisecond), err)
+			return nil
+		}
 		g.logf("[compaction] pass FAILED %s after %s: %v\n", conversationID, time.Since(start).Round(time.Millisecond), err)
 		return err
 	}

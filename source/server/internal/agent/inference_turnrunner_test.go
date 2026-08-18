@@ -14,6 +14,8 @@ type fakeLLM struct {
 	gotMaxTokens int
 	gotTemp      *float64
 	gotTier      string
+	gotConvID    string
+	gotReqID     string
 	servedModel  string // reported back as ChatResponse.Model when non-empty
 }
 
@@ -24,6 +26,8 @@ func (f *fakeLLM) Chat(ctx context.Context, req llm.ChatRequest) (llm.ChatRespon
 	f.gotMaxTokens = req.MaxTokens
 	f.gotTemp = req.Temperature
 	f.gotTier = req.Tier
+	f.gotConvID = req.ConversationID
+	f.gotReqID = req.RequestID
 	return llm.ChatResponse{
 		Blocks:       []llm.Block{{Type: llm.BlockText, Text: "echo:" + req.Messages[0].Blocks[0].Text}},
 		InputTokens:  3,
@@ -58,6 +62,28 @@ func TestLLMModelProviderProcessSetsMaxTokens(t *testing.T) {
 	}
 	if fake.gotMaxTokens <= 0 {
 		t.Fatalf("Chat received MaxTokens = %d, want > 0", fake.gotMaxTokens)
+	}
+}
+
+func TestLLMModelProviderProcessThreadsDiagnosticIDs(t *testing.T) {
+	fake := &fakeLLM{name: "openai"}
+	mp := InferenceTurnRunner(fake, "gpt-5")
+	if _, err := mp.Process(context.Background(), &Request{Input: "hi", ConversationID: "conv-1", RequestID: "compact-1"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fake.gotConvID != "conv-1" || fake.gotReqID != "compact-1" {
+		t.Fatalf("diagnostic IDs = %q/%q, want conv-1/compact-1", fake.gotConvID, fake.gotReqID)
+	}
+}
+
+func TestLLMModelProviderProcessMaxTokensOverride(t *testing.T) {
+	fake := &fakeLLM{name: "anthropic"}
+	mp := InferenceTurnRunner(fake, "claude-opus-5")
+	if _, err := mp.Process(context.Background(), &Request{Input: "hi", MaxTokens: 777}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fake.gotMaxTokens != 777 {
+		t.Fatalf("Chat received MaxTokens = %d, want override 777", fake.gotMaxTokens)
 	}
 }
 

@@ -292,9 +292,12 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 			// window swung 0/7 to 7/7 on anchor retention between samples, while
 			// temperature 0 reproduced exactly and kept every proposal anchor.
 			greedy := engine.Greedy()
-			req := &agent.Request{Input: compaction.BuildSummaryPrompt(msgs), Temperature: greedy.Temperature, Tier: string(config.TierFastLightText)}
-			if summarizerModel != "" {
-				req.ModelOverride = summarizerModel
+			localSummaryWindow := contextmeter.ModelMax(summarizerModel)
+			if localSummaryWindow <= 0 {
+				localSummaryWindow = cfg.LlamaServer.ContextSize
+			}
+			if localSummaryWindow <= 0 {
+				localSummaryWindow = cfg.MistralRS.MaxSeqLen
 			}
 			parseLogged := func(output, via string) compaction.StructuredSummary {
 				s := compaction.ParseSummary(output)
@@ -310,7 +313,24 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 				}
 				return s
 			}
-			resp, err := openProvider.Process(ctx, req)
+			compactionReqID := fmt.Sprintf("compaction-%d", time.Now().UnixNano())
+			summary, stats, err := compaction.SummarizeBudgetedLocal(ctx, msgs, localSummaryWindow, compaction.DefaultSummaryOutputReserve, func(ctx context.Context, prompt string, maxTokens int) (compaction.StructuredSummary, error) {
+				budget := compaction.EstimateSummaryBudget(prompt, maxTokens, localSummaryWindow)
+				fmt.Fprintf(os.Stderr, "[compaction] local summarizer request: request_id=%s route=local prompt_tokens=%d output_reserve=%d limit=%d budget=%d fits=%t\n", compactionReqID, budget.PromptTokens, budget.OutputReserve, budget.Limit, budget.Budget, budget.Fits)
+				req := &agent.Request{Input: prompt, Temperature: greedy.Temperature, Tier: string(config.TierFastLightText), MaxTokens: maxTokens, RequestID: compactionReqID}
+				if summarizerModel != "" {
+					req.ModelOverride = summarizerModel
+				}
+				resp, err := openProvider.Process(ctx, req)
+				if err != nil {
+					return compaction.StructuredSummary{}, err
+				}
+				return parseLogged(resp.Output, "local"), nil
+			})
+			if err == nil {
+				fmt.Fprintf(os.Stderr, "[compaction] local summarizer complete: request_id=%s chunks=%d merged=%t prompt_tokens=%v output_reserve=%d limit=%d\n", compactionReqID, stats.Chunks, stats.Merged, stats.PromptTokens, compaction.DefaultSummaryOutputReserve, localSummaryWindow)
+				return summary, nil
+			}
 			if err != nil {
 				// Local summarizer unavailable (e.g. the fast-light-text model is
 				// still downloading, or the runtime is down). Fall back to the
@@ -323,7 +343,7 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 				if cloud := lazyRouter.Tiers().Cloud; cloud != nil {
 					// Tier rides along so a mid-call failover re-resolves the
 					// backup vendor's economy model instead of its default.
-					cloudReq := &agent.Request{Input: compaction.BuildSummaryPrompt(msgs), Temperature: greedy.Temperature, Tier: string(config.TierFastLightText)}
+					cloudReq := &agent.Request{Input: compaction.BuildSummaryPrompt(msgs), Temperature: greedy.Temperature, Tier: string(config.TierFastLightText), MaxTokens: compaction.DefaultSummaryOutputReserve, RequestID: compactionReqID + ":cloud"}
 					// Summarization is fast_light_text work — resolve the
 					// vendor's economy model (live, follows profile switches)
 					// instead of burning the premium chat model on it.
@@ -342,11 +362,11 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 					// swallowed, which made "it should have used the cloud"
 					// undiagnosable from the log.
 					fmt.Fprintf(os.Stderr, "[compaction] cloud fallback FAILED: %v\n", cerr)
-					return compaction.StructuredSummary{}, fmt.Errorf("local summarizer: %v; cloud fallback: %w", err, cerr)
+					return compaction.StructuredSummary{}, fmt.Errorf("local summarizer: %w; cloud fallback: %v", err, cerr)
 				}
 				return compaction.StructuredSummary{}, err
 			}
-			return parseLogged(resp.Output, "local"), nil
+			return compaction.StructuredSummary{}, fmt.Errorf("local summarizer returned without summary or error")
 		}
 		// Budget the compacted backlog as a fraction of the chat model's context
 		// window (default compactedBudgetDefaultPct), never below a floor so a

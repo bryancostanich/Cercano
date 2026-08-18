@@ -38,11 +38,17 @@ func (a *inferenceTurnRunner) Process(ctx context.Context, req *Request) (*Respo
 	if req.ModelOverride != "" {
 		model = req.ModelOverride
 	}
+	maxTokens := processMaxTokens
+	if req.MaxTokens > 0 {
+		maxTokens = req.MaxTokens
+	}
 	chatResp, err := a.p.Chat(ctx, llm.ChatRequest{
-		Model:       model,
-		MaxTokens:   processMaxTokens,
-		Temperature: req.Temperature,
-		Tier:        req.Tier,
+		Model:          model,
+		MaxTokens:      maxTokens,
+		Temperature:    req.Temperature,
+		Tier:           req.Tier,
+		ConversationID: req.ConversationID,
+		RequestID:      req.RequestID,
 		Messages: []llm.Message{
 			{
 				Role:   llm.RoleUser,

@@ -3783,7 +3783,7 @@ func (m Model) confirmPromptHints(p *pendingToolCall) string {
 		m.styles.Muted.Render("]o / [") +
 		m.styles.Accent.Render("d") +
 		m.styles.Muted.Render("]etails")
-	if p.ToolUseID != "" {
+	if p.ToolUseID != "" && !isSessionControlTool(p.Name) {
 		hints += m.styles.Muted.Render(" / [") +
 			m.styles.Accent.Render("c") +
 			m.styles.Muted.Render("]hat / type below + press [") +
@@ -4214,6 +4214,12 @@ func (m Model) steerPendingConfirm(text string) (Model, tea.Cmd) {
 		}
 		return m, cmd
 	}
+	if c.tool != nil && isSessionControlTool(c.tool.Name) {
+		m.input.SetValue("")
+		m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: m.styles.Muted.Render("Session-control prompts require an explicit key: press y to approve, n to decline, or d for details.")})
+		m.refreshViewport()
+		return m, nil
+	}
 	id := ""
 	if c.tool != nil {
 		id = c.tool.ToolUseID
@@ -4420,9 +4426,11 @@ func toolConfirm(tc *pendingToolCall) *confirmRequest {
 		},
 	}
 	// [c]hat about this: dismiss the confirm and drop into the compose sub-state.
-	// Only for stream-origin calls — a local /tool invoke has no server tool loop
-	// to redirect.
-	if tc.ToolUseID != "" {
+	// Only for stream-origin ordinary tools — a local /tool invoke has no server
+	// tool loop to redirect, and session-control prompts are explicit y/n/d gates
+	// because redirecting them would deny the control transition while feeding the
+	// user's text back to the model.
+	if tc.ToolUseID != "" && !isSessionControlTool(tc.Name) {
 		enterCompose := func(m Model) (Model, tea.Cmd) {
 			m.pendingConfirm = nil
 			m.composeToolUseID = tc.ToolUseID

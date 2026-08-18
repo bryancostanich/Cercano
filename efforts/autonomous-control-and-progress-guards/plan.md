@@ -22,13 +22,13 @@ Objective: remove free-text steering and `[c]hat about this` from session-contro
 Files: `source/clients/cli/internal/ui/model.go`, `source/clients/cli/internal/ui/confirm_test.go` or related UI tests.
 Tests: session-control confirm prompt does not render `[c]hat`; typed free text while a session-control prompt is pending does not call `DenyToolCallWithMessage` and instead shows a local instruction to press `y`, `n`, or `d`; ordinary tool prompts still support `[c]hat` and steering.
 
-- [ ] Remove `[c]hat about this` action from session-control prompt construction
-- [ ] Block free-text `steerPendingConfirm` for session-control prompts
-- [ ] Show a clear local message explaining that session-control prompts require `y`, `n`, or `d`
-- [ ] Preserve slash-command handling while a session-control prompt is pending
-- [ ] Preserve free-text steering for ordinary tool confirmations
-- [ ] Add UI tests for session-control prompt actions and typed-text behavior
-- [ ] Add UI tests confirming ordinary tool steering is unchanged
+- [x] Remove `[c]hat about this` action from session-control prompt construction
+- [x] Block free-text `steerPendingConfirm` for session-control prompts
+- [x] Show a clear local message explaining that session-control prompts require `y`, `n`, or `d`
+- [x] Preserve slash-command handling while a session-control prompt is pending
+- [x] Preserve free-text steering for ordinary tool confirmations
+- [x] Add UI tests for session-control prompt actions and typed-text behavior
+- [x] Add UI tests confirming ordinary tool steering is unchanged
 
 ## Phase 3 — Append-only autonomy ledger schema and store API
 

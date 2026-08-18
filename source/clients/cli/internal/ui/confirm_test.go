@@ -474,6 +474,33 @@ func TestConfirmPromptHintsAdvertiseEnterSteer(t *testing.T) {
 	}
 }
 
+func TestConfirmPromptHintsOmitEnterSteerForSessionControl(t *testing.T) {
+	m := minimalModel()
+	out := m.confirmPromptHints(&pendingToolCall{ToolUseID: "tool-1", Name: "request_autonomous_execution"})
+	plain := stripAnsiCSI(out)
+	if strings.Contains(plain, "[c]hat") || strings.Contains(plain, "press [enter] to steer convo") {
+		t.Fatalf("session-control hints should not advertise chat/steer, got %q", plain)
+	}
+	for _, want := range []string{"[y]es", "[n]o", "[d]etails"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("session-control hints should keep explicit %s action, got %q", want, plain)
+		}
+	}
+}
+
+func TestToolConfirm_SessionControlDoesNotExposeChatExtra(t *testing.T) {
+	c := toolConfirm(&pendingToolCall{ToolUseID: "tool-1", Name: "request_autonomous_execution", Args: `{}`, Permission: "X"})
+	if _, ok := c.extras["c"]; ok {
+		t.Fatal("session-control prompts must not expose lowercase chat extra")
+	}
+	if _, ok := c.extras["C"]; ok {
+		t.Fatal("session-control prompts must not expose uppercase chat extra")
+	}
+	if _, ok := c.extras["d"]; !ok {
+		t.Fatal("session-control prompts should still expose details")
+	}
+}
+
 func TestConfirmPending_SlashCommandRunsInsteadOfSteering(t *testing.T) {
 	m := New(nil, false)
 	m = send(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
@@ -535,6 +562,40 @@ func TestConfirmPending_TypingThenEnterSteersToolCall(t *testing.T) {
 	}
 }
 
+func TestConfirmPending_TypingThenEnterDoesNotSteerSessionControl(t *testing.T) {
+	m := New(nil, false)
+	m.pendingConfirm = toolConfirm(&pendingToolCall{ToolUseID: "tool-1", Name: "request_autonomous_execution", Args: `{}`, Permission: "X"})
+
+	next, _ := m.Update(tea.KeyPressMsg{Code: 'o', Text: "o"})
+	m = next.(Model)
+	next, _ = m.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
+	m = next.(Model)
+	if m.input.Value() != "ok" {
+		t.Fatalf("typing while confirm pending should edit prompt, got %q", m.input.Value())
+	}
+
+	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = next.(Model)
+	if m.pendingConfirm == nil {
+		t.Fatal("session-control typed enter must keep pending confirm")
+	}
+	if m.input.Value() != "" {
+		t.Fatalf("session-control typed enter should clear the ambiguous prompt text, got %q", m.input.Value())
+	}
+	foundGuidance := false
+	for _, e := range m.mainChat().Entries() {
+		if strings.Contains(e.Content, "Session-control prompts require an explicit key") {
+			foundGuidance = true
+		}
+		if strings.Contains(e.Content, "↳ steer: ok") {
+			t.Fatal("session-control typed text must not be sent as steer text")
+		}
+	}
+	if !foundGuidance {
+		t.Fatal("session-control typed enter should append explicit y/n/d guidance")
+	}
+}
+
 func TestConfirmPending_EmptyEnterStartsChatSteer(t *testing.T) {
 	for _, msg := range []tea.KeyPressMsg{{Code: tea.KeyEnter}, {Code: tea.KeyEnter, Text: "\n"}} {
 		m := New(nil, false)
@@ -548,6 +609,20 @@ func TestConfirmPending_EmptyEnterStartsChatSteer(t *testing.T) {
 		if m.composeToolUseID != "tool-1" {
 			t.Fatalf("composeToolUseID = %q", m.composeToolUseID)
 		}
+	}
+}
+
+func TestConfirmPending_EmptyEnterDoesNotStartChatSteerForSessionControl(t *testing.T) {
+	m := New(nil, false)
+	m.pendingConfirm = toolConfirm(&pendingToolCall{ToolUseID: "tool-1", Name: "request_autonomous_execution", Args: `{}`, Permission: "X"})
+
+	next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = next.(Model)
+	if m.pendingConfirm == nil {
+		t.Fatal("empty enter on session-control prompt should keep confirm pending")
+	}
+	if m.composeToolUseID != "" {
+		t.Fatalf("session-control prompt should not enter compose mode, composeToolUseID=%q", m.composeToolUseID)
 	}
 }
 

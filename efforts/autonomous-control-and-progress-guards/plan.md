@@ -86,13 +86,13 @@ Objective: improve high-level UI visibility for long non-autonomous tool-heavy t
 Files: `source/clients/cli/internal/ui/model.go`, possible status/footer rendering files, UI tests.
 Tests: footer/status includes useful current-tool and tool-count/progress information during tool-heavy turns; state clears at turn completion; ordinary event rendering remains stable; no runner/tool-loop execution semantics change.
 
-- [ ] Inventory existing tool lifecycle events consumed by the CLI
-- [ ] Add lightweight per-turn tool activity counters/state in the UI model
-- [ ] Render current tool plus useful progress context in the footer/status area
-- [ ] Clear/reset progress state when a turn completes or is interrupted
-- [ ] Add UI tests for progress state updates from tool start/complete events
-- [ ] Add UI tests for progress reset after completion
-- [ ] Confirm no changes were made to `tool_loop.max_iterations` or forced-yield semantics
+- [x] Inventory existing tool lifecycle events consumed by the CLI
+- [x] Add lightweight per-turn tool activity counters/state in the UI model
+- [x] Render current tool plus useful progress context in the footer/status area
+- [x] Clear/reset progress state when a turn completes or is interrupted
+- [x] Add UI tests for progress state updates from tool start/complete events
+- [x] Add UI tests for progress reset after completion
+- [x] Confirm no changes were made to `tool_loop.max_iterations` or forced-yield semantics
 
 ## Phase 7 — Verification and cleanup
 

@@ -21,6 +21,23 @@ func formatElapsed(d time.Duration) string {
 	return fmt.Sprintf("%dm%02ds", secs/60, secs%60)
 }
 
+// toolProgressActivity composes the activity label for tool-heavy turns. It is
+// intentionally visibility-only: it gives the user high-level progress without
+// altering runner/tool-loop execution semantics.
+func toolProgressActivity(tool string, started, done int) string {
+	tool = strings.TrimSpace(tool)
+	if tool == "" {
+		tool = "tool"
+	}
+	if started <= 0 {
+		return "running " + tool
+	}
+	if done < 0 {
+		done = 0
+	}
+	return fmt.Sprintf("running %s (tool %d, %d done)", tool, started, done)
+}
+
 // turnStatusLine composes the live status content. The token count is shown
 // only once output has started, and the engine badge only once the route is
 // known.

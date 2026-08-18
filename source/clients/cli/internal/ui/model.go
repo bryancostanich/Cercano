@@ -169,12 +169,14 @@ type Model struct {
 
 	// Live turn telemetry, surfaced by renderStatus while a turn streams. Reset
 	// when a turn begins; the engine fields fill in on the RouteSelected event.
-	turnStart    time.Time // wall clock when streaming began (for elapsed)
-	turnActivity string    // current verb: thinking → routing → running <tool> → writing
-	turnTokOut   int       // output tokens seen so far this turn (approximate, live)
-	turnModel    string    // engine handling the turn (from RouteSelected)
-	turnCloud    bool      // true when the turn routed to a cloud engine
-	hadTurn      bool      // a turn has completed; gate the idle token counter
+	turnStart       time.Time // wall clock when streaming began (for elapsed)
+	turnActivity    string    // current verb: thinking → routing → running <tool> → writing
+	turnTokOut      int       // output tokens seen so far this turn (approximate, live)
+	turnModel       string    // engine handling the turn (from RouteSelected)
+	turnCloud       bool      // true when the turn routed to a cloud engine
+	turnToolStarted int       // tool calls started in this turn, for long-turn progress visibility
+	turnToolDone    int       // tool executions completed in this turn, for long-turn progress visibility
+	hadTurn         bool      // a turn has completed; gate the idle token counter
 
 	content contentPage
 
@@ -1698,13 +1700,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.chatDirty = true
 			return m, tea.Batch(msg.next, m.ensureAnimTick())
 		case toolEntryStartMsg:
-			m.turnActivity = "running " + ev.name
+			m.turnToolStarted++
+			m.turnActivity = toolProgressActivity(ev.name, m.turnToolStarted, m.turnToolDone)
 			m.mainChat().Apply(ev)
 			// Re-arm the spinner loop if it stopped (the placeholder loop
 			// dies once tokens begin streaming), and fall through to the
 			// shared repaint so the new tool row appears immediately.
 			m.refreshViewport()
 			return m, tea.Batch(msg.next, m.ensureAnimTick())
+		case toolEntryExecCompleteMsg:
+			if m.turnToolDone < m.turnToolStarted {
+				m.turnToolDone++
+			}
+			if m.turnToolStarted > 0 {
+				m.turnActivity = fmt.Sprintf("completed %d/%d tools", m.turnToolDone, m.turnToolStarted)
+			}
+			m.mainChat().Apply(ev)
 		case subAgentEventMsg:
 			m.applySubAgentEvent(ev)
 			m.refreshViewport()
@@ -1716,6 +1727,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case chatDoneMsg:
 			m.applyTurnTelemetry(ev) // footer fields
 			m.mainChat().Apply(ev)   // transcript finalize + notice
+			m.turnToolStarted = 0
+			m.turnToolDone = 0
 			m.finishStaleSubAgentTabs("sub-agent stopped without a terminal event")
 			// Turn done: retire finished sub-agent tabs now (ephemeral tabs)
 			// instead of waiting for the next turn to start. The sweep spares
@@ -1740,6 +1753,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pendingConfirm = m.rolloverConfirm(ev)
 			m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: m.renderRolloverPrompt(ev)})
 		case chatErrorMsg:
+			m.turnToolStarted = 0
+			m.turnToolDone = 0
 			m.finishStaleSubAgentTabs("sub-agent stopped after parent stream error")
 			m.mainChat().Apply(ev)
 			if m.hasSubAgentTabs() {
@@ -2593,6 +2608,8 @@ func (m Model) submit(text string, images []agentclient.InlineImage) (tea.Model,
 	m.turnTokOut = 0
 	m.turnModel = ""
 	m.turnCloud = false
+	m.turnToolStarted = 0
+	m.turnToolDone = 0
 	m.mainChat().SetAnimationTime(m.turnStart)
 	m.mainChat().AppendEntry(&Entry{Role: RoleUser, Content: content})
 	// Assistant placeholder

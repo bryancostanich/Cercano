@@ -81,10 +81,7 @@ type ToolEntry struct {
 // which entry the up/down nav cursor is currently on. When false, a two-space
 // gutter holds the slot so toggling fold doesn't shift the body horizontally.
 func renderToolEntry(e ToolEntry, width int, focused bool, styles theme.Styles, md *render.Markdown) string {
-	// Tool rows carry dense operational detail: args, durations, and sub-agent
-	// affordances. Keep that text readable even on light themes/terminal color
-	// profiles where the general Muted color can wash out against the background.
-	toolEntrySubtle := styles.Primary
+	toolEntrySubtle := styles.Muted
 	toolEntrySuccess := styles.ToolSuccess
 	toolEntryError := styles.ToolError
 
@@ -258,10 +255,7 @@ func renderToolEntry(e ToolEntry, width int, focused bool, styles theme.Styles, 
 			if aw < 8 {
 				aw = 8
 			}
-			// Expanded raw arguments are body content, not secondary metadata.
-			// Muted gray was too low-contrast in light themes, especially after
-			// wrapping long dispatch prompts across several lines.
-			argsBody := styles.Primary.Render("args: " + expandTabs(e.FullArgs))
+			argsBody := toolEntrySubtle.Render("args: " + expandTabs(e.FullArgs))
 			for _, l := range strings.Split(ansi.Wrap(argsBody, aw, ""), "\n") {
 				body = append(body, "    "+l)
 			}

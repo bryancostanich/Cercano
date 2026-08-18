@@ -54,7 +54,7 @@ func TestBuiltinThemeTextColorsMeetContrastBaseline(t *testing.T) {
 		{name: "buffer_lime", color: func(p Palette) color.Color { return p.BufferLime }, minContrast: 4.5},
 		{name: "buffer_error", color: func(p Palette) color.Color { return p.BufferError }, minContrast: 4.5},
 		{name: "selection_caret", color: func(p Palette) color.Color { return p.SelectionCaret }, minContrast: 4.5},
-		{name: "muted", color: func(p Palette) color.Color { return p.Muted }, minContrast: 3.0},
+		{name: "muted", color: func(p Palette) color.Color { return p.Muted }, minContrast: 3.75},
 	}
 	for _, builtin := range BuiltinThemes() {
 		for _, r := range roles {
@@ -63,6 +63,13 @@ func TestBuiltinThemeTextColorsMeetContrastBaseline(t *testing.T) {
 				t.Fatalf("%s %s contrast on BgDeep = %.2f, want >= %.2f", builtin.Name, r.name, got, r.minContrast)
 			}
 		}
+	}
+}
+
+func TestCrackerMutedKeepsContrastAgainstLightTerminalBackground(t *testing.T) {
+	white := mustHex("#ffffff")
+	if got := contrastRatio(Cracker().Muted, white); got < 4.5 {
+		t.Fatalf("cr4k3r_j4x muted contrast on white terminal background = %.2f, want >= 4.50", got)
 	}
 }
 

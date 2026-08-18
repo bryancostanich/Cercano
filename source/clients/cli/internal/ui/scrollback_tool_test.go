@@ -31,7 +31,7 @@ func TestToolEntry_FoldedRender(t *testing.T) {
 	}
 }
 
-func TestToolEntry_DaylightHeaderAndArgsUseReadablePrimaryColor(t *testing.T) {
+func TestToolEntry_DaylightHeaderAndArgsUseReadableMutedColor(t *testing.T) {
 	daylight := builtinToolPaletteForTest("daylight")
 	out := renderToolEntry(ToolEntry{
 		ToolName:    "Bash",
@@ -45,12 +45,12 @@ func TestToolEntry_DaylightHeaderAndArgsUseReadablePrimaryColor(t *testing.T) {
 	if !strings.Contains(out, "38;2;59;48;32") {
 		t.Fatalf("tool marker/name should use daylight primary (#3B3020), got %q", out)
 	}
-	if strings.Contains(out, "38;2;111;106;85") {
-		t.Fatalf("tool args/status should not use daylight muted (#6F6A55), got %q", out)
+	if !strings.Contains(out, "38;2;111;106;85") {
+		t.Fatalf("tool args/status should use readable daylight muted (#6F6A55), got %q", out)
 	}
 }
 
-func TestToolEntry_DaylightExpandedRawArgsUseReadablePrimaryColor(t *testing.T) {
+func TestToolEntry_DaylightExpandedRawArgsUseReadableMutedColor(t *testing.T) {
 	daylight := builtinToolPaletteForTest("daylight")
 	out := renderToolEntry(ToolEntry{
 		ToolName:    "dispatch",
@@ -63,11 +63,8 @@ func TestToolEntry_DaylightExpandedRawArgsUseReadablePrimaryColor(t *testing.T) 
 	if !strings.Contains(plain, "args:") {
 		t.Fatalf("test setup expected expanded raw args line, got:\n%s", plain)
 	}
-	if !strings.Contains(out, "38;2;59;48;32") {
-		t.Fatalf("expanded raw args should use daylight primary (#3B3020), got %q", out)
-	}
-	if strings.Contains(out, "38;2;111;106;85margs:") {
-		t.Fatalf("expanded raw args should not use low-contrast daylight muted (#6F6A55), got %q", out)
+	if !strings.Contains(out, "38;2;111;106;85margs:") {
+		t.Fatalf("expanded raw args should use readable daylight muted (#6F6A55), got %q", out)
 	}
 }
 

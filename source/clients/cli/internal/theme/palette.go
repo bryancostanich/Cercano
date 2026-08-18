@@ -59,7 +59,7 @@ const (
 	hexDim       = "#8A5810"
 	hexAccent    = "#BDF000"
 	hexInfo      = "#00C8E8"
-	hexMuted     = "#888888"
+	hexMuted     = "#767676"
 	hexSuccess   = "#6FCF6F"
 	hexWarn      = "#FFD24D"
 	hexError     = "#E84D4D"

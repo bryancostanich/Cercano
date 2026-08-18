@@ -396,6 +396,19 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 	if in.MaxTokensPerTurn > 0 {
 		maxTokens = in.MaxTokensPerTurn
 	}
+	if in.TightContextFallback && in.ContextWindow > 0 {
+		// A cloud-sized output reserve can consume most of a small local
+		// context before the compact tool catalog and system prompt are sent.
+		// Keep enough room for the prompt while still allowing a useful local
+		// response. Normal local and cloud turns retain the configured budget.
+		localOutputLimit := in.ContextWindow / 4
+		if localOutputLimit < 1024 {
+			localOutputLimit = 1024
+		}
+		if maxTokens > localOutputLimit {
+			maxTokens = localOutputLimit
+		}
+	}
 
 	hist := append([]llm.Message{}, in.ConvHistory...)
 	hist = append(hist, llm.Message{

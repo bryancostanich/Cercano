@@ -65,6 +65,8 @@ type contextOverflowProvider struct{}
 
 type invalidContextTextProvider struct{}
 
+type busyProvider struct{}
+
 func (p *cancelProvider) Name() string { return "cancel" }
 func (p *cancelProvider) Capabilities() inference.Capabilities {
 	return inference.Capabilities{SupportsTools: true}
@@ -96,6 +98,17 @@ func (p *invalidContextTextProvider) Chat(context.Context, llm.ChatRequest) (llm
 }
 func (p *invalidContextTextProvider) StreamChat(context.Context, llm.ChatRequest) (llm.StreamReader, error) {
 	return nil, &llm.Error{Class: llm.ErrInvalidRequest, Provider: "test", Err: errors.New("Your input exceeds the context window of this model. Please adjust your input and try again.")}
+}
+
+func (p *busyProvider) Name() string { return "openai-responses" }
+func (p *busyProvider) Capabilities() inference.Capabilities {
+	return inference.Capabilities{SupportsTools: true}
+}
+func (p *busyProvider) Chat(context.Context, llm.ChatRequest) (llm.ChatResponse, error) {
+	return llm.ChatResponse{}, &llm.Error{Class: llm.ErrBusy, Provider: "openai-responses", Err: errors.New("server busy")}
+}
+func (p *busyProvider) StreamChat(context.Context, llm.ChatRequest) (llm.StreamReader, error) {
+	return nil, &llm.Error{Class: llm.ErrBusy, Provider: "openai-responses", Err: errors.New("server busy")}
 }
 
 func (p *spyProvider) Name() string { return "spy" }
@@ -340,6 +353,10 @@ func TestCore_ContextOverflowTextFallbackUsesCompactLocalCatalog(t *testing.T) {
 	assertCompactFallbackForPrimary(t, &invalidContextTextProvider{})
 }
 
+func TestCore_BusyFallbackUsesCompactLocalCatalog(t *testing.T) {
+	assertCompactFallbackForPrimary(t, &busyProvider{})
+}
+
 func assertCompactFallbackForPrimary(t *testing.T, primary inference.Provider) {
 	t.Helper()
 	openSpy := &spyProvider{}
@@ -372,7 +389,7 @@ func assertCompactFallbackForPrimary(t *testing.T, primary inference.Provider) {
 		t.Fatalf("compact fallback should include core Read tool, got %v", tools)
 	}
 	if tools["git_push"] {
-		t.Fatalf("context-overflow fallback to local should use compact catalog and hide git_push, got %v", tools)
+		t.Fatalf("local fallback should use compact catalog and hide git_push, got %v", tools)
 	}
 }
 

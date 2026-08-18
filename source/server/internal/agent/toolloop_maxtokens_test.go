@@ -49,3 +49,21 @@ func TestToolLoop_MaxTokensPerTurnOverride(t *testing.T) {
 		t.Errorf("MaxTokens = %d, want override 1234", got)
 	}
 }
+
+func TestToolLoop_TightFallbackBoundsOutputForSmallContext(t *testing.T) {
+	prov := &mockProvider{
+		scripts: [][]llm.Block{{{Type: llm.BlockText, Text: "hi"}}},
+		caps:    inference.Capabilities{SupportsTools: true},
+	}
+	perms, _ := LoadPermissionStore(t.TempDir() + "/perms.yaml")
+
+	if _, err := RunToolLoop(t.Context(), ToolLoopInput{
+		Provider: prov, Registry: testDefaultRegistry(), Permissions: perms,
+		UserInput: "x", ContextWindow: 16384, TightContextFallback: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := prov.reqs[0].MaxTokens, 4096; got != want {
+		t.Errorf("MaxTokens = %d, want tight-fallback limit %d", got, want)
+	}
+}

@@ -36,18 +36,18 @@ Objective: replace one-row-per-conversation upsert semantics with append-only pe
 Files: `source/server/internal/conversation/autonomy.go`, `source/server/internal/conversation/store.go`, conversation migration/schema files if separate, `source/server/internal/conversation/*test.go`.
 Tests: migration preserves existing rows as historical runs; creating multiple completed/abandoned runs for one conversation is allowed; creating a second `running` or `review_pending` run fails; active-run lookup returns only `running` or `review_pending`; latest-run/list behavior is deterministic; old one-row data is copied with decisions/review/brief intact.
 
-- [ ] Inspect existing conversation schema/migration mechanism and identify where to add the autonomy migration
-- [ ] Add `run_id` to the autonomy run model
-- [ ] Implement append-only schema migration for `autonomy_runs`
-- [ ] Add index for deterministic latest/list lookup by conversation and updated time
-- [ ] Add unique active-run index for `running` and `review_pending` states per conversation
-- [ ] Replace upsert-style save with explicit create/update operations
-- [ ] Add `CreateAutonomyRun` store method
-- [ ] Add `GetActiveAutonomyRun` store method
-- [ ] Add update-by-run-id store support for state, decisions, and review fields
-- [ ] Add latest/list helper only if required by existing callers or tests
-- [ ] Update existing store callers to use active-run semantics instead of one-row semantics
-- [ ] Add migration and store tests for historical preservation and active-run uniqueness
+- [x] Inspect existing conversation schema/migration mechanism and identify where to add the autonomy migration
+- [x] Add `run_id` to the autonomy run model
+- [x] Implement append-only schema migration for `autonomy_runs`
+- [x] Add index for deterministic latest/list lookup by conversation and updated time
+- [x] Add unique active-run index for `running` and `review_pending` states per conversation
+- [x] Replace upsert-style save with explicit create/update operations
+- [x] Add `CreateAutonomyRun` store method
+- [x] Add `GetActiveAutonomyRun` store method
+- [x] Add update-by-run-id store support for state, decisions, and review fields
+- [x] Add latest/list helper only if required by existing callers or tests
+- [x] Update existing store callers to use active-run semantics instead of one-row semantics
+- [x] Add migration and store tests for historical preservation and active-run uniqueness
 
 ## Phase 4 — Strict autonomous state-machine enforcement
 
@@ -55,16 +55,16 @@ Objective: enforce strict preconditions on all autonomous state-changing capabil
 Files: `source/server/internal/capabilities/builtins/autonomous.go`, `source/server/internal/capabilities/builtins/autonomous_execution_choice.go`, `source/server/internal/capabilities/builtins/capture_decision.go`, related tests.
 Tests: missing conversation id/store errors; enter rejects when an active run exists; enter creates a new run when no active run exists even if historical completed/abandoned runs exist; `capture_decision` requires `running`; `request_autonomous_exit` requires `running` and transitions to `review_pending`; `complete_autonomous_review` requires `review_pending` and transitions to `completed`; `auto_exit` requires `running` or `review_pending` and transitions to `abandoned`; invalid transitions leave state unchanged.
 
-- [ ] Add shared helpers for requiring conversation id and conversation store
-- [ ] Add shared helper for requiring active autonomous run in specific states
-- [ ] Update autonomous entry to create a new append-only run and reject existing active runs
-- [ ] Update `capture_decision` to require active `running` run and update by run id
-- [ ] Update `request_autonomous_exit` to require active `running` run and update by run id
-- [ ] Update `complete_autonomous_review` to require active `review_pending` run and update by run id
-- [ ] Update `auto_exit` to require active `running` or `review_pending` run and update by run id
-- [ ] Ensure profile switching is ordered safely around durable state changes
-- [ ] Add strict-state tests for every valid and invalid transition
-- [ ] Update existing autonomous capability tests that assumed permissive no-op behavior
+- [x] Add shared helpers for requiring conversation id and conversation store
+- [x] Add shared helper for requiring active autonomous run in specific states
+- [x] Update autonomous entry to create a new append-only run and reject existing active runs
+- [x] Update `capture_decision` to require active `running` run and update by run id
+- [x] Update `request_autonomous_exit` to require active `running` run and update by run id
+- [x] Update `complete_autonomous_review` to require active `review_pending` run and update by run id
+- [x] Update `auto_exit` to require active `running` or `review_pending` run and update by run id
+- [x] Ensure profile switching is ordered safely around durable state changes
+- [x] Add strict-state tests for every valid and invalid transition
+- [x] Update existing autonomous capability tests that assumed permissive no-op behavior
 
 ## Phase 5 — Profile rehydration and session-control integration audit
 

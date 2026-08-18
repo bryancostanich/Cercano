@@ -66,13 +66,14 @@ CREATE TABLE IF NOT EXISTS conversation_compaction (
     updated_at        INTEGER NOT NULL DEFAULT 0
 );
 
--- autonomy_runs: one lightweight autonomous-run ledger per conversation. The
--- profile remains conversation-scoped; this table stores the durable contract
--- and review trail for that profile without introducing a separate job system.
+-- autonomy_runs: append-only autonomous-run ledger. The profile remains
+-- conversation-scoped, but each approved autonomous run gets its own durable row
+-- so later runs do not overwrite earlier briefs, decisions, or review records.
 -- Briefs, revisions, decisions, and review state are JSON so V1 stays compact;
 -- the table boundary leaves room to normalize later if the review UI needs it.
 CREATE TABLE IF NOT EXISTS autonomy_runs (
-    conversation_id   TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
+    run_id            TEXT PRIMARY KEY,
+    conversation_id   TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
     state             TEXT NOT NULL DEFAULT 'proposed',
     source_kind       TEXT NOT NULL DEFAULT '',
     source_plan_path  TEXT NOT NULL DEFAULT '',
@@ -84,3 +85,8 @@ CREATE TABLE IF NOT EXISTS autonomy_runs (
     created_at        INTEGER NOT NULL,
     updated_at        INTEGER NOT NULL
 );
+CREATE INDEX IF NOT EXISTS idx_autonomy_runs_conversation_updated
+    ON autonomy_runs(conversation_id, updated_at DESC, created_at DESC, run_id DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_autonomy_runs_one_active
+    ON autonomy_runs(conversation_id)
+    WHERE state IN ('running', 'review_pending');

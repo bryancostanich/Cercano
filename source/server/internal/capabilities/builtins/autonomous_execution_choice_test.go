@@ -84,6 +84,39 @@ func TestRequestAutonomousExecution_ExecuteStartsAutonomousForApprovedPlan(t *te
 	}
 }
 
+func TestRequestAutonomousExecution_RejectsExistingActiveRun(t *testing.T) {
+	store, err := conversation.Open(":memory:")
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	if err := store.EnsureConversation(ctx, "conv-active", "/proj", "model"); err != nil {
+		t.Fatalf("EnsureConversation: %v", err)
+	}
+	if _, err := store.CreateAutonomyRun(ctx, conversation.AutonomyRun{ConversationID: "conv-active", State: "running", BriefJSON: `{"goal":"first"}`}); err != nil {
+		t.Fatalf("CreateAutonomyRun: %v", err)
+	}
+	_, err = RequestAutonomousExecution().Execute(ctx, &capabilities.Call{
+		ConversationID: "conv-active",
+		Args:           []byte(`{"goal":"second"}`),
+		Svc: capabilities.Services{
+			Conversations: store,
+			EnterProfile:  func(string, string) error { return nil },
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "already active") {
+		t.Fatalf("expected active-run rejection, got %v", err)
+	}
+	runs, listErr := store.ListAutonomyRuns(ctx, "conv-active")
+	if listErr != nil {
+		t.Fatalf("ListAutonomyRuns: %v", listErr)
+	}
+	if len(runs) != 1 || runs[0].State != "running" || runs[0].BriefJSON != `{"goal":"first"}` {
+		t.Fatalf("active-run rejection should leave existing run unchanged: %+v", runs)
+	}
+}
+
 func TestRequestAutonomousExecution_RequiresGoal(t *testing.T) {
 	_, err := RequestAutonomousExecution().Execute(context.Background(), &capabilities.Call{
 		Args: []byte(`{"effort":"efforts/demo"}`),

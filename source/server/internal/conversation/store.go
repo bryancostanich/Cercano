@@ -128,9 +128,10 @@ type AutonomyDecision struct {
 	StopReason       string                            `json:"stop_reason,omitempty"`
 }
 
-// AutonomyRun is the durable per-conversation ledger for autonomous mode. JSON
-// fields stay opaque to the store until richer review APIs need normalization.
+// AutonomyRun is one durable append-only autonomous-mode run record. JSON fields
+// stay opaque to the store until richer review APIs need normalization.
 type AutonomyRun struct {
+	RunID          string
 	ConversationID string
 	State          string
 	SourceKind     string
@@ -224,10 +225,24 @@ type Store interface {
 	// SaveCompaction upserts the derived compaction state.
 	SaveCompaction(ctx context.Context, c Compaction) error
 
-	// SaveAutonomyRun upserts the per-conversation autonomous run ledger.
+	// CreateAutonomyRun inserts one append-only autonomous run record. It fails if
+	// the new run would violate the one-active-run-per-conversation invariant.
+	CreateAutonomyRun(ctx context.Context, r AutonomyRun) (AutonomyRun, error)
+	// UpdateAutonomyRun updates an existing autonomous run by run id.
+	UpdateAutonomyRun(ctx context.Context, r AutonomyRun) error
+	// GetActiveAutonomyRun returns the current running/review_pending autonomous
+	// run for a conversation, or sql.ErrNoRows when none is active.
+	GetActiveAutonomyRun(ctx context.Context, conversationID string) (AutonomyRun, error)
+	// GetLatestAutonomyRun returns the newest autonomous run for a conversation,
+	// or sql.ErrNoRows when no autonomous run has been created for it.
+	GetLatestAutonomyRun(ctx context.Context, conversationID string) (AutonomyRun, error)
+	// ListAutonomyRuns returns all autonomous runs for a conversation, newest first.
+	ListAutonomyRuns(ctx context.Context, conversationID string) ([]AutonomyRun, error)
+
+	// SaveAutonomyRun and GetAutonomyRun are deprecated compatibility methods for
+	// callers being migrated to append-only run semantics. Save creates when RunID
+	// is empty and updates by RunID otherwise; Get returns the latest run.
 	SaveAutonomyRun(ctx context.Context, r AutonomyRun) error
-	// GetAutonomyRun returns the autonomous run ledger for a conversation, or
-	// sql.ErrNoRows when no autonomous run has been created for it.
 	GetAutonomyRun(ctx context.Context, conversationID string) (AutonomyRun, error)
 
 	// DeleteTurns removes the named turns from a conversation. Unknown ids are
@@ -306,6 +321,10 @@ func Open(path string) (Store, error) {
 	if _, err := db.Exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON;"); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("pragma setup: %w", err)
+	}
+	if err := migrateAutonomyRunsToAppendOnly(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate autonomy runs: %w", err)
 	}
 	if _, err := db.Exec(schemaSQL); err != nil {
 		db.Close()

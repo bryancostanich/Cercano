@@ -2,7 +2,9 @@ package builtins
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -91,53 +93,64 @@ func enterAutonomousMode(ctx context.Context, call *capabilities.Call, req auton
 	if strings.TrimSpace(req.Goal) == "" {
 		return "", fmt.Errorf("%s: goal is required", prefix)
 	}
+	store, convID, err := requireAutonomyStore(call, prefix)
+	if err != nil {
+		return "", err
+	}
+	if active, err := store.GetActiveAutonomyRun(ctx, convID); err == nil {
+		return "", fmt.Errorf("%s: autonomous run already active for conversation %s (run %s is %s)", prefix, convID, active.RunID, active.State)
+	} else if !isNoRows(err) {
+		return "", fmt.Errorf("%s: check active autonomy run: %w", prefix, err)
+	}
+
 	brief := conversation.AutonomyBrief{
 		Goal:         strings.TrimSpace(req.Goal),
 		DoneWhen:     compactStrings(req.DoneWhen),
 		Constraints:  compactStrings(req.Constraints),
 		ReviewPoints: compactStrings(req.ReviewPoints),
 	}
-	if call.Svc.Conversations != nil && strings.TrimSpace(call.ConversationID) != "" {
-		briefJSON, err := json.Marshal(brief)
-		if err != nil {
-			return "", fmt.Errorf("%s: marshal brief: %w", prefix, err)
-		}
-		reason := strings.TrimSpace(req.Reason)
-		if reason == "" {
-			reason = "initial autonomous brief"
-		}
-		revsJSON, err := json.Marshal([]conversation.AutonomyBriefRevision{{
-			Number:    1,
-			Actor:     "assistant",
-			Reason:    reason,
-			Timestamp: time.Now(),
-			Brief:     brief,
-		}})
-		if err != nil {
-			return "", fmt.Errorf("%s: marshal brief revisions: %w", prefix, err)
-		}
-		sourceKind := "direct_user_request"
-		if strings.TrimSpace(req.SourcePlanPath) != "" || strings.TrimSpace(req.SourceSpecPath) != "" {
-			sourceKind = "accepted_plan"
-		}
-		if err := call.Svc.Conversations.SaveAutonomyRun(ctx, conversation.AutonomyRun{
-			ConversationID: call.ConversationID,
-			State:          "running",
-			SourceKind:     sourceKind,
-			SourcePlanPath: strings.TrimSpace(req.SourcePlanPath),
-			SourceSpecPath: strings.TrimSpace(req.SourceSpecPath),
-			BriefJSON:      string(briefJSON),
-			RevisionsJSON:  string(revsJSON),
-			DecisionsJSON:  "[]",
-			ReviewJSON:     "{}",
-		}); err != nil {
-			return "", fmt.Errorf("%s: save autonomy ledger: %w", prefix, err)
-		}
+	briefJSON, err := json.Marshal(brief)
+	if err != nil {
+		return "", fmt.Errorf("%s: marshal brief: %w", prefix, err)
+	}
+	reason := strings.TrimSpace(req.Reason)
+	if reason == "" {
+		reason = "initial autonomous brief"
+	}
+	revsJSON, err := json.Marshal([]conversation.AutonomyBriefRevision{{
+		Number:    1,
+		Actor:     "assistant",
+		Reason:    reason,
+		Timestamp: time.Now(),
+		Brief:     brief,
+	}})
+	if err != nil {
+		return "", fmt.Errorf("%s: marshal brief revisions: %w", prefix, err)
+	}
+	sourceKind := "direct_user_request"
+	if strings.TrimSpace(req.SourcePlanPath) != "" || strings.TrimSpace(req.SourceSpecPath) != "" {
+		sourceKind = "accepted_plan"
+	}
+	run, err := store.CreateAutonomyRun(ctx, conversation.AutonomyRun{
+		ConversationID: convID,
+		State:          "running",
+		SourceKind:     sourceKind,
+		SourcePlanPath: strings.TrimSpace(req.SourcePlanPath),
+		SourceSpecPath: strings.TrimSpace(req.SourceSpecPath),
+		BriefJSON:      string(briefJSON),
+		RevisionsJSON:  string(revsJSON),
+		DecisionsJSON:  "[]",
+		ReviewJSON:     "{}",
+	})
+	if err != nil {
+		return "", fmt.Errorf("%s: create autonomy run: %w", prefix, err)
 	}
 	if call.Svc.EnterProfile == nil {
+		markAutonomyRunAbandoned(ctx, store, run)
 		return "", fmt.Errorf("%s: autonomous mode is not available (no profile broker wired)", prefix)
 	}
-	if err := call.Svc.EnterProfile(call.ConversationID, "autonomous"); err != nil {
+	if err := call.Svc.EnterProfile(convID, "autonomous"); err != nil {
+		markAutonomyRunAbandoned(ctx, store, run)
 		return "", fmt.Errorf("%s: entering autonomous mode: %w", prefix, err)
 	}
 	msg := "Entered autonomous mode. Work to the approved run brief, capture meaningful in-scope decisions, continue unless a high-risk boundary is crossed, and request autonomous exit when the brief is satisfied."
@@ -173,7 +186,13 @@ func (autoExitCap) Execute(ctx context.Context, call *capabilities.Call) (*capab
 			return nil, fmt.Errorf("auto_exit: parse args: %w", err)
 		}
 	}
-	if err := updateAutonomyRunState(ctx, call, "abandoned"); err != nil {
+	store, run, err := requireActiveAutonomyRun(ctx, call, "auto_exit", "running", "review_pending")
+	if err != nil {
+		return nil, err
+	}
+	run.State = "abandoned"
+	run.UpdatedAt = time.Now()
+	if err := store.UpdateAutonomyRun(ctx, run); err != nil {
 		return nil, fmt.Errorf("auto_exit: update autonomy ledger: %w", err)
 	}
 	if call.Svc.EnterProfile == nil {
@@ -233,8 +252,6 @@ func (requestAutonomousExitCap) Execute(ctx context.Context, call *capabilities.
 	}
 	if run.ConversationID != "" {
 		parts = append(parts, formatAutonomousDecisionReview(decisions))
-	} else {
-		parts = append(parts, "No autonomy ledger was available; review any decisions recorded in the transcript, then call complete_autonomous_review if appropriate.")
 	}
 	return &capabilities.Result{Type: capabilities.ResultText, Text: strings.Join(parts, "\n")}, nil
 }
@@ -294,28 +311,59 @@ func compactStrings(in []string) []string {
 	return out
 }
 
-func updateAutonomyRunState(ctx context.Context, call *capabilities.Call, state string) error {
-	if call.Svc.Conversations == nil || strings.TrimSpace(call.ConversationID) == "" {
-		return nil
+func requireAutonomyStore(call *capabilities.Call, prefix string) (conversation.Store, string, error) {
+	if call == nil {
+		return nil, "", fmt.Errorf("%s: capability call is required", prefix)
 	}
-	run, err := call.Svc.Conversations.GetAutonomyRun(ctx, call.ConversationID)
+	if call.Svc.Conversations == nil {
+		return nil, "", fmt.Errorf("%s: autonomy ledger is not available", prefix)
+	}
+	convID := strings.TrimSpace(call.ConversationID)
+	if convID == "" {
+		return nil, "", fmt.Errorf("%s: conversation id is required", prefix)
+	}
+	return call.Svc.Conversations, convID, nil
+}
+
+func requireActiveAutonomyRun(ctx context.Context, call *capabilities.Call, prefix string, states ...string) (conversation.Store, conversation.AutonomyRun, error) {
+	store, convID, err := requireAutonomyStore(call, prefix)
 	if err != nil {
-		// Exiting autonomous mode should remain possible even if the run predates
-		// the ledger or the ledger was unavailable in this execution environment.
-		return nil
+		return nil, conversation.AutonomyRun{}, err
 	}
-	run.State = state
+	run, err := store.GetActiveAutonomyRun(ctx, convID)
+	if err != nil {
+		if isNoRows(err) {
+			return nil, conversation.AutonomyRun{}, fmt.Errorf("%s: no active autonomous run for conversation %s", prefix, convID)
+		}
+		return nil, conversation.AutonomyRun{}, fmt.Errorf("%s: load active autonomy run: %w", prefix, err)
+	}
+	if !autonomyStateAllowed(run.State, states...) {
+		return nil, conversation.AutonomyRun{}, fmt.Errorf("%s: active autonomous run %s is %s; want %s", prefix, run.RunID, run.State, strings.Join(states, " or "))
+	}
+	return store, run, nil
+}
+
+func autonomyStateAllowed(state string, states ...string) bool {
+	for _, want := range states {
+		if state == want {
+			return true
+		}
+	}
+	return false
+}
+
+func isNoRows(err error) bool { return errors.Is(err, sql.ErrNoRows) }
+
+func markAutonomyRunAbandoned(ctx context.Context, store conversation.Store, run conversation.AutonomyRun) {
+	run.State = "abandoned"
 	run.UpdatedAt = time.Now()
-	return call.Svc.Conversations.SaveAutonomyRun(ctx, run)
+	_ = store.UpdateAutonomyRun(ctx, run)
 }
 
 func updateAutonomyRunReviewPending(ctx context.Context, call *capabilities.Call, summary, verification string) (conversation.AutonomyRun, []conversation.AutonomyDecision, error) {
-	if call.Svc.Conversations == nil || strings.TrimSpace(call.ConversationID) == "" {
-		return conversation.AutonomyRun{}, nil, nil
-	}
-	run, err := call.Svc.Conversations.GetAutonomyRun(ctx, call.ConversationID)
+	store, run, err := requireActiveAutonomyRun(ctx, call, "request_autonomous_exit", "running")
 	if err != nil {
-		return conversation.AutonomyRun{}, nil, nil
+		return conversation.AutonomyRun{}, nil, err
 	}
 	decisions, err := decodeAutonomyDecisions(run.DecisionsJSON)
 	if err != nil {
@@ -332,19 +380,16 @@ func updateAutonomyRunReviewPending(ctx context.Context, call *capabilities.Call
 	run.State = "review_pending"
 	run.ReviewJSON = string(reviewJSON)
 	run.UpdatedAt = time.Now()
-	if err := call.Svc.Conversations.SaveAutonomyRun(ctx, run); err != nil {
+	if err := store.UpdateAutonomyRun(ctx, run); err != nil {
 		return conversation.AutonomyRun{}, nil, err
 	}
 	return run, decisions, nil
 }
 
 func updateAutonomyRunCompleted(ctx context.Context, call *capabilities.Call, summary string) error {
-	if call.Svc.Conversations == nil || strings.TrimSpace(call.ConversationID) == "" {
-		return nil
-	}
-	run, err := call.Svc.Conversations.GetAutonomyRun(ctx, call.ConversationID)
+	store, run, err := requireActiveAutonomyRun(ctx, call, "complete_autonomous_review", "review_pending")
 	if err != nil {
-		return nil
+		return err
 	}
 	var review map[string]any
 	if strings.TrimSpace(run.ReviewJSON) != "" {
@@ -364,7 +409,7 @@ func updateAutonomyRunCompleted(ctx context.Context, call *capabilities.Call, su
 	run.State = "completed"
 	run.ReviewJSON = string(reviewJSON)
 	run.UpdatedAt = time.Now()
-	return call.Svc.Conversations.SaveAutonomyRun(ctx, run)
+	return store.UpdateAutonomyRun(ctx, run)
 }
 
 func decodeAutonomyDecisions(raw string) ([]conversation.AutonomyDecision, error) {

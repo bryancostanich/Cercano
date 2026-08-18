@@ -3239,7 +3239,7 @@ func (s *Server) GetSessionProfile(ctx context.Context, req *proto.GetSessionPro
 	convID := req.GetConversationId()
 	active := s.profileBroker.ActiveName(convID)
 	if active == agent.DefaultProfileName && convID != "" && s.persistSvc != nil && s.persistSvc.Store() != nil {
-		if run, err := s.persistSvc.Store().GetAutonomyRun(ctx, convID); err == nil && (run.State == "running" || run.State == "review_pending") {
+		if run, err := s.persistSvc.Store().GetActiveAutonomyRun(ctx, convID); err == nil && (run.State == "running" || run.State == "review_pending") {
 			// ProfileBroker is intentionally in-memory for normal session posture, but
 			// autonomous mode has a durable ledger. Rehydrate the active profile from
 			// that ledger so reconnect/resume restores the status chip and prompt

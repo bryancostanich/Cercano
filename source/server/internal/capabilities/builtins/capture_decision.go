@@ -2,7 +2,6 @@ package builtins
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -75,18 +74,9 @@ func (captureDecisionCap) Execute(ctx context.Context, call *capabilities.Call) 
 	if err := validateDecisionArgs(a); err != nil {
 		return nil, fmt.Errorf("capture_decision: %w", err)
 	}
-	if call.Svc.Conversations == nil {
-		return nil, fmt.Errorf("capture_decision: autonomy ledger is not available")
-	}
-	if strings.TrimSpace(call.ConversationID) == "" {
-		return nil, fmt.Errorf("capture_decision: conversation id is required")
-	}
-	run, err := call.Svc.Conversations.GetAutonomyRun(ctx, call.ConversationID)
+	store, run, err := requireActiveAutonomyRun(ctx, call, "capture_decision", "running")
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("capture_decision: no autonomous run ledger for conversation %s", call.ConversationID)
-		}
-		return nil, fmt.Errorf("capture_decision: load autonomy ledger: %w", err)
+		return nil, err
 	}
 	var decisions []conversation.AutonomyDecision
 	if strings.TrimSpace(run.DecisionsJSON) != "" {
@@ -114,7 +104,7 @@ func (captureDecisionCap) Execute(ctx context.Context, call *capabilities.Call) 
 	}
 	run.DecisionsJSON = string(decisionsJSON)
 	run.UpdatedAt = time.Now()
-	if err := call.Svc.Conversations.SaveAutonomyRun(ctx, run); err != nil {
+	if err := store.UpdateAutonomyRun(ctx, run); err != nil {
 		return nil, fmt.Errorf("capture_decision: save autonomy ledger: %w", err)
 	}
 	return &capabilities.Result{Type: capabilities.ResultText, Text: fmt.Sprintf("Captured autonomous decision #%d: %s", entry.Sequence, entry.DecisionPoint)}, nil

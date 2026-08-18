@@ -72,13 +72,13 @@ Objective: ensure session profile rehydration and control-tool semantics use the
 Files: `source/server/internal/server/server.go`, `source/server/internal/worker/*.go` as needed, `source/server/internal/capabilities/mcpadapter/*.go` if affected, related tests.
 Tests: `GetSessionProfile` rehydrates autonomous only from an active `running` or `review_pending` run; completed/abandoned historical runs do not rehydrate autonomous; request-autonomous-execution rejection does not save a run or enter profile; request-autonomous-execution approval creates exactly one active run and enters profile; stale review-pending behavior is explicit and tested.
 
-- [ ] Update profile rehydration to call `GetActiveAutonomyRun`
-- [ ] Verify completed and abandoned historical runs do not activate autonomous profile
-- [ ] Verify `review_pending` remains autonomous unless a distinct future review profile is designed
-- [ ] Audit worker profile bridges for conversation id propagation under the new store API
-- [ ] Audit MCP/capability adapter paths for strict conversation id requirements
-- [ ] Add integration tests for approved autonomous entry creating active run and switching profile
-- [ ] Add integration tests for rejected/redirected autonomous entry leaving no active run and not continuing execution
+- [x] Update profile rehydration to call `GetActiveAutonomyRun`
+- [x] Verify completed and abandoned historical runs do not activate autonomous profile
+- [x] Verify `review_pending` remains autonomous unless a distinct future review profile is designed
+- [x] Audit worker profile bridges for conversation id propagation under the new store API
+- [x] Audit MCP/capability adapter paths for strict conversation id requirements
+- [x] Add integration tests for approved autonomous entry creating active run and switching profile
+- [x] Add integration tests for rejected/redirected autonomous entry leaving no active run and not continuing execution
 
 ## Phase 6 — Long ordinary-turn progress visibility
 

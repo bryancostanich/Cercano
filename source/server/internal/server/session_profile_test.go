@@ -129,6 +129,29 @@ func TestSessionProfile_RehydratesAutonomousFromRunningLedger(t *testing.T) {
 	}
 }
 
+func TestSessionProfile_RehydratesAutonomousFromActiveRunNotLatestHistoricalRun(t *testing.T) {
+	srv, store := newServerWithStore(t)
+	ctx := context.Background()
+	const conv = "conv-auto-active-with-history"
+	if err := store.EnsureConversation(ctx, conv, "/proj", "model"); err != nil {
+		t.Fatalf("EnsureConversation: %v", err)
+	}
+	if _, err := store.CreateAutonomyRun(ctx, conversation.AutonomyRun{ConversationID: conv, State: "running", BriefJSON: `{"goal":"ship"}`}); err != nil {
+		t.Fatalf("CreateAutonomyRun running: %v", err)
+	}
+	if _, err := store.CreateAutonomyRun(ctx, conversation.AutonomyRun{ConversationID: conv, State: "completed", BriefJSON: `{"goal":"older history"}`}); err != nil {
+		t.Fatalf("CreateAutonomyRun completed: %v", err)
+	}
+
+	got, err := srv.GetSessionProfile(ctx, &proto.GetSessionProfileRequest{ConversationId: conv})
+	if err != nil {
+		t.Fatalf("GetSessionProfile: %v", err)
+	}
+	if got.GetActive() != "autonomous" {
+		t.Fatalf("active = %q, want autonomous", got.GetActive())
+	}
+}
+
 func TestSessionProfile_DoesNotRehydrateAutonomousFromTerminalLedger(t *testing.T) {
 	srv, store := newServerWithStore(t)
 	ctx := context.Background()

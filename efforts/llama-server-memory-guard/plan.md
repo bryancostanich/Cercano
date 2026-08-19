@@ -48,7 +48,7 @@ platforms return the unknown sentinel; callers can distinguish unknown from zero
 - [x] Add `NonEvictable()` to `sysram` following the existing per-OS build-tag structure
 - [x] Implement the darwin probe by parsing `/usr/bin/vm_stat` (see decision #2: no
   sysctl exposes wired/compressor counts, and `host_statistics64` would require
-            cgo in a deliberately pure-Go repo)
+                          cgo in a deliberately pure-Go repo)
 - [x] Implement or explicitly decline the linux probe, returning unknown if declined
 - [x] Keep `sysram_other.go` returning the unknown sentinel
 - [x] Run `go test ./internal/sysram/...`
@@ -65,12 +65,12 @@ ignoring SIGTERM is escalated to SIGKILL and still confirmed dead; the wait is
 bounded and returns an error rather than hanging forever; concurrent `Start` calls
 are not blocked while a teardown waits.
 
-- [ ] Make `killProcess` wait for confirmed death via bounded `processAlive` polling
-- [ ] Confirm death after SIGKILL escalation in `terminateGroup` too
-- [ ] Audit `Provider.Stop` and `Provider.kill` so no wait happens while holding `p.mu`
-- [ ] Emit a `stop` runtime event recording wait duration and SIGKILL escalation
-- [ ] Keep `process_other.go` in sync so non-Unix builds compile
-- [ ] Run `go test ./internal/localruntime/...`
+- [x] Make `killProcess` wait for confirmed death via bounded `processAlive` polling
+- [x] Confirm death after SIGKILL escalation in `terminateGroup` too
+- [x] Audit `Provider.Stop` and `Provider.kill` so no wait happens while holding `p.mu`
+- [x] Emit a `stop` runtime event recording wait duration and SIGKILL escalation
+- [x] Keep `process_other.go` in sync so non-Unix builds compile
+- [x] Run `go test ./internal/localruntime/...`
 
 ## Phase 4 — Pre-spawn reap barrier and memory guard
 

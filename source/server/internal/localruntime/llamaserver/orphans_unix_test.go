@@ -37,7 +37,12 @@ func spawnVictim(t *testing.T) *exec.Cmd {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_ = killProcess(cmd.Process)
+		// Tests own this child directly, so kill-and-wait here instead
+		// of killProcess. killProcess confirms disappearance via
+		// processAlive, and a dead child remains "alive" as a zombie until
+		// this Wait reaps it. Provider.Stop has a watch goroutine doing
+		// that Wait concurrently; this cleanup path does not.
+		_ = cmd.Process.Kill()
 		_, _ = cmd.Process.Wait()
 	})
 	return cmd
@@ -72,11 +77,15 @@ func TestSweepOrphans_ReapsDeadOwnersServers(t *testing.T) {
 		}},
 	})
 
+	// terminateGroup polls processAlive until the PID disappears. Because
+	// this test process owns the victim, disappearance requires Wait to
+	// reap the zombie, so the waiter must run concurrently with the sweep.
+	done := make(chan error, 1)
+	go func() { _, err := victim.Process.Wait(); done <- err }()
+
 	p := &Provider{running: map[string]*managedInstance{}, registry: &pidRegistry{dir: dir}}
 	p.SweepOrphans(nil)
 
-	done := make(chan error, 1)
-	go func() { _, err := victim.Process.Wait(); done <- err }()
 	select {
 	case <-done:
 		// reaped

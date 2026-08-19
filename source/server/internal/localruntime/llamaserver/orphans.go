@@ -176,18 +176,30 @@ func (p *Provider) SweepOrphans(sink localruntime.LogSink) {
 			if !serverStillOurs(server) {
 				continue
 			}
-			terminateGroup(server.PID)
+			res, err := terminateGroup(server.PID)
 			msg := fmt.Sprintf("reaped orphaned llama-server pid %d (model %s, owner pid %d died without cleanup)",
 				server.PID, filepath.Base(server.ModelPath), state.OwnerPID)
+			if err != nil {
+				msg = fmt.Sprintf("failed to confirm orphaned llama-server pid %d died (model %s, owner pid %d): %v",
+					server.PID, filepath.Base(server.ModelPath), state.OwnerPID, err)
+			}
 			p.emit(sink, "warn", "", "", msg)
+			extra := map[string]any{
+				"owner_pid":     state.OwnerPID,
+				"model_path":    server.ModelPath,
+				"trigger":       "startup_sweep",
+				"wait_ms":       res.Wait.Milliseconds(),
+				"escalated":     res.Escalated,
+				"already_gone":  res.AlreadyGone,
+				"confirmed_dead": err == nil,
+			}
+			if err != nil {
+				extra["error"] = err.Error()
+			}
 			p.event(crashlog.EventReap, msg, crashlog.RuntimeInfo{
 				PID:  server.PID,
 				Port: server.Port,
-			}, map[string]any{
-				"owner_pid":  state.OwnerPID,
-				"model_path": server.ModelPath,
-				"trigger":    "startup_sweep",
-			})
+			}, extra)
 		}
 		_ = os.Remove(path)
 	}

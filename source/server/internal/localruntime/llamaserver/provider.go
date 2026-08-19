@@ -451,9 +451,13 @@ func (p *Provider) Stop(_ context.Context, instanceID string) error {
 		return nil
 	}
 	pid := cmd.Process.Pid
-	started := time.Now()
-	err := killProcess(cmd.Process)
-	extra := map[string]any{"wait_ms": time.Since(started).Milliseconds()}
+	res, err := killProcessWithResult(cmd.Process)
+	extra := map[string]any{
+		"wait_ms":       res.Wait.Milliseconds(),
+		"escalated":     res.Escalated,
+		"already_gone":  res.AlreadyGone,
+		"confirmed_dead": err == nil,
+	}
 	reason := "stopped llama-server"
 	if err != nil {
 		extra["error"] = err.Error()

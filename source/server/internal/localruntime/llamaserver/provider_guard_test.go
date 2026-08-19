@@ -102,6 +102,30 @@ func TestStart_MemoryGuardPermitsWhenProjectionFits(t *testing.T) {
 	}
 }
 
+func TestDeadAdoptedInstanceDoesNotBlockRestart(t *testing.T) {
+	p := NewProvider(config.LlamaServerConfig{})
+	deadPID := 99999999
+	if processAlive(deadPID) {
+		t.Fatalf("test picked an unexpectedly live pid: %d", deadPID)
+	}
+	p.running["adopted-dead"] = &managedInstance{
+		adopted: true,
+		model:   localruntime.ModelRecord{Path: "/tmp/glm.gguf", SizeBytes: 68 * gib},
+		record:  localruntime.InstanceRecord{ID: "adopted-dead", PID: deadPID, Port: 59339, State: localruntime.InstanceRunning},
+	}
+
+	if got := p.liveInstance(localruntime.ModelRecord{Path: "/tmp/glm.gguf"}, nil); got != nil {
+		t.Fatalf("dead adopted instance was reused: %+v", got)
+	}
+	p.pruneDeadAdoptedInstances()
+	if len(p.running) != 0 {
+		t.Fatalf("dead adopted instance was not pruned: %#v", p.running)
+	}
+	if estimate := p.registryResidentEstimate(); estimate != 0 {
+		t.Fatalf("dead adopted instance contributed %d bytes to registry floor", estimate)
+	}
+}
+
 func TestMemoryGuardUsesRegistryAsFloorWhenProbeLags(t *testing.T) {
 	p := NewProvider(config.LlamaServerConfig{})
 	p.totalRAM = func() int64 { return 128 * gib }

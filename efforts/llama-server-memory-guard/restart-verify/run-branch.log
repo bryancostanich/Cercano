@@ -1,0 +1,116 @@
+
+[2026-08-19T18:05:13Z] branch restart verifier starting
+
+[2026-08-19T18:05:13Z] cd '/Users/bryancostanich/git_repos/bryan_costanich/Cercano' && git rev-parse --abbrev-ref HEAD && git rev-parse HEAD
+llama-server-memory-guard
+59d35e1396d2fa37ec4d13d0ba943c13e4667c02
+
+[2026-08-19T18:05:13Z] building branch binary under test
+
+[2026-08-19T18:05:16Z] baseline crash.log lines=     347
+
+[2026-08-19T18:05:16Z] ps -Ao pid,ppid,pgid,rss,comm,args | grep -E '[c]ercano(.*/)? agent|[.]cercano-libexec/cercano agent' || true
+13321 10736 13321 103712 /Users/bryancost /Users/bryancostanich/bin/.cercano-libexec/cercano agent
+14002 13951 13321   2192 bash             bash -lc ps -Ao pid,ppid,pgid,rss,comm,args | grep -E '[c]ercano(.*/)? agent|[.]cercano-libexec/cercano agent' || true
+14007 14002 13321   1520 grep             grep -E [c]ercano(.*/)? agent|[.]cercano-libexec/cercano agent
+
+[2026-08-19T18:05:16Z] baseline llama-server processes
+14014 14011 13321   1648 awk              awk /\/llama-server --model/ {print}
+
+[2026-08-19T18:05:17Z] sending SIGTERM to old agent 13321
+
+[2026-08-19T18:05:17Z] sampling llama-server processes during shutdown window
+sample=01 14029 14027 13321   1648 awk              awk /\/llama-server --model/ {print}
+sample=02 14037 14035 13321   1648 awk              awk /\/llama-server --model/ {print}
+sample=03 14045 14043 13321   1648 awk              awk /\/llama-server --model/ {print}
+sample=04 14053 14051 13321   1648 awk              awk /\/llama-server --model/ {print}
+sample=05 14061 14059 13321   1648 awk              awk /\/llama-server --model/ {print}
+sample=06 14069 14067 13321   1648 awk              awk /\/llama-server --model/ {print}
+sample=07 14077 14075 13321   1632 awk              awk /\/llama-server --model/ {print}
+sample=08 14085 14083 13321   1648 awk              awk /\/llama-server --model/ {print}
+sample=09 14093 14091 13321   1648 awk              awk /\/llama-server --model/ {print}
+sample=10 14101 14099 13321   1648 awk              awk /\/llama-server --model/ {print}
+sample=11 14109 14107 13321   1648 awk              awk /\/llama-server --model/ {print}
+sample=12 14117 14115 13321   1648 awk              awk /\/llama-server --model/ {print}
+sample=13 14125 14123 13321   1648 awk              awk /\/llama-server --model/ {print}
+sample=14 14133 14131 13321   1648 awk              awk /\/llama-server --model/ {print}
+sample=15 14141 14139 13321   1648 awk              awk /\/llama-server --model/ {print}
+sample=16 14149 14147 13321   1648 awk              awk /\/llama-server --model/ {print}
+sample=17 14157 14155 13321   1648 awk              awk /\/llama-server --model/ {print}
+sample=18 14165 14163 13321   1632 awk              awk /\/llama-server --model/ {print}
+sample=19 14173 14171 13321   1648 awk              awk /\/llama-server --model/ {print}
+sample=20 14181 14179 13321   1648 awk              awk /\/llama-server --model/ {print}
+sample=21 14189 14187 13321   1648 awk              awk /\/llama-server --model/ {print}
+sample=22 14197 14195 13321   1648 awk              awk /\/llama-server --model/ {print}
+sample=23 14205 14203 13321   1648 awk              awk /\/llama-server --model/ {print}
+sample=24 14213 14211 13321   1648 awk              awk /\/llama-server --model/ {print}
+sample=25 14221 14219 13321   1648 awk              awk /\/llama-server --model/ {print}
+sample=26 14229 14227 13321   1648 awk              awk /\/llama-server --model/ {print}
+sample=27 14237 14235 13321   1648 awk              awk /\/llama-server --model/ {print}
+sample=28 14246 14241 14246   5840 /opt/homebrew/bi /opt/homebrew/bin/llama-server --model /Users/bryancostanich/.cercano/models/glm-4.5-air-q4_k_m/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf --host 127.0.0.1 --port 60538 --gpu-layers auto --jinja --ctx-size 32768 --cache-type-k q8_0 --cache-type-v q8_0
+14251 14249 13321   1648 awk              awk /\/llama-server --model/ {print}
+sample=29 14246 14241 14246 126544 /opt/homebrew/bi /opt/homebrew/bin/llama-server --model /Users/bryancostanich/.cercano/models/glm-4.5-air-q4_k_m/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf --host 127.0.0.1 --port 60538 --gpu-layers auto --jinja --ctx-size 32768 --cache-type-k q8_0 --cache-type-v q8_0
+14262 14260 13321   1648 awk              awk /\/llama-server --model/ {print}
+sample=30 14246 14241 14246 6383568 /opt/homebrew/bi /opt/homebrew/bin/llama-server --model /Users/bryancostanich/.cercano/models/glm-4.5-air-q4_k_m/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf --host 127.0.0.1 --port 60538 --gpu-layers auto --jinja --ctx-size 32768 --cache-type-k q8_0 --cache-type-v q8_0
+14273 14271 13321   1648 awk              awk /\/llama-server --model/ {print}
+sample=31 14246 14241 14246 18297248 /opt/homebrew/bi /opt/homebrew/bin/llama-server --model /Users/bryancostanich/.cercano/models/glm-4.5-air-q4_k_m/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf --host 127.0.0.1 --port 60538 --gpu-layers auto --jinja --ctx-size 32768 --cache-type-k q8_0 --cache-type-v q8_0
+14282 14280 13321   1648 awk              awk /\/llama-server --model/ {print}
+sample=32 14246 14241 14246 30820960 /opt/homebrew/bi /opt/homebrew/bin/llama-server --model /Users/bryancostanich/.cercano/models/glm-4.5-air-q4_k_m/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf --host 127.0.0.1 --port 60538 --gpu-layers auto --jinja --ctx-size 32768 --cache-type-k q8_0 --cache-type-v q8_0
+14292 14290 13321   1648 awk              awk /\/llama-server --model/ {print}
+sample=33 14246 14241 14246 43524176 /opt/homebrew/bi /opt/homebrew/bin/llama-server --model /Users/bryancostanich/.cercano/models/glm-4.5-air-q4_k_m/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf --host 127.0.0.1 --port 60538 --gpu-layers auto --jinja --ctx-size 32768 --cache-type-k q8_0 --cache-type-v q8_0
+14300 14298 13321   1648 awk              awk /\/llama-server --model/ {print}
+sample=34 14246 14241 14246 55648720 /opt/homebrew/bi /opt/homebrew/bin/llama-server --model /Users/bryancostanich/.cercano/models/glm-4.5-air-q4_k_m/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf --host 127.0.0.1 --port 60538 --gpu-layers auto --jinja --ctx-size 32768 --cache-type-k q8_0 --cache-type-v q8_0
+14308 14306 13321   1648 awk              awk /\/llama-server --model/ {print}
+sample=35 14246 14241 14246 67693760 /opt/homebrew/bi /opt/homebrew/bin/llama-server --model /Users/bryancostanich/.cercano/models/glm-4.5-air-q4_k_m/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf --host 127.0.0.1 --port 60538 --gpu-layers auto --jinja --ctx-size 32768 --cache-type-k q8_0 --cache-type-v q8_0
+14316 14314 13321   1648 awk              awk /\/llama-server --model/ {print}
+sample=36 14246 14241 14246 70988496 /opt/homebrew/bi /opt/homebrew/bin/llama-server --model /Users/bryancostanich/.cercano/models/glm-4.5-air-q4_k_m/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf --host 127.0.0.1 --port 60538 --gpu-layers auto --jinja --ctx-size 32768 --cache-type-k q8_0 --cache-type-v q8_0
+14324 14322 13321   1648 awk              awk /\/llama-server --model/ {print}
+sample=37 14246 14241 14246 69094928 /opt/homebrew/bi /opt/homebrew/bin/llama-server --model /Users/bryancostanich/.cercano/models/glm-4.5-air-q4_k_m/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf --host 127.0.0.1 --port 60538 --gpu-layers auto --jinja --ctx-size 32768 --cache-type-k q8_0 --cache-type-v q8_0
+14332 14330 13321   1648 awk              awk /\/llama-server --model/ {print}
+sample=38 14246 14241 14246 72381856 /opt/homebrew/bi /opt/homebrew/bin/llama-server --model /Users/bryancostanich/.cercano/models/glm-4.5-air-q4_k_m/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf --host 127.0.0.1 --port 60538 --gpu-layers auto --jinja --ctx-size 32768 --cache-type-k q8_0 --cache-type-v q8_0
+14341 14339 13321   1648 awk              awk /\/llama-server --model/ {print}
+sample=39 14246 14241 14246 72381856 /opt/homebrew/bi /opt/homebrew/bin/llama-server --model /Users/bryancostanich/.cercano/models/glm-4.5-air-q4_k_m/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf --host 127.0.0.1 --port 60538 --gpu-layers auto --jinja --ctx-size 32768 --cache-type-k q8_0 --cache-type-v q8_0
+14349 14347 13321   1648 awk              awk /\/llama-server --model/ {print}
+sample=40 14246 14241 14246 72381856 /opt/homebrew/bi /opt/homebrew/bin/llama-server --model /Users/bryancostanich/.cercano/models/glm-4.5-air-q4_k_m/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf --host 127.0.0.1 --port 60538 --gpu-layers auto --jinja --ctx-size 32768 --cache-type-k q8_0 --cache-type-v q8_0
+14357 14355 13321   1648 awk              awk /\/llama-server --model/ {print}
+sample=41 14246 14241 14246 72381856 /opt/homebrew/bi /opt/homebrew/bin/llama-server --model /Users/bryancostanich/.cercano/models/glm-4.5-air-q4_k_m/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf --host 127.0.0.1 --port 60538 --gpu-layers auto --jinja --ctx-size 32768 --cache-type-k q8_0 --cache-type-v q8_0
+14365 14363 13321   1648 awk              awk /\/llama-server --model/ {print}
+sample=42 14246 14241 14246 72381856 /opt/homebrew/bi /opt/homebrew/bin/llama-server --model /Users/bryancostanich/.cercano/models/glm-4.5-air-q4_k_m/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf --host 127.0.0.1 --port 60538 --gpu-layers auto --jinja --ctx-size 32768 --cache-type-k q8_0 --cache-type-v q8_0
+14373 14371 13321   1648 awk              awk /\/llama-server --model/ {print}
+sample=43 14246 14241 14246 72381856 /opt/homebrew/bi /opt/homebrew/bin/llama-server --model /Users/bryancostanich/.cercano/models/glm-4.5-air-q4_k_m/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf --host 127.0.0.1 --port 60538 --gpu-layers auto --jinja --ctx-size 32768 --cache-type-k q8_0 --cache-type-v q8_0
+14381 14379 13321   1648 awk              awk /\/llama-server --model/ {print}
+sample=44 14246 14241 14246 72381856 /opt/homebrew/bi /opt/homebrew/bin/llama-server --model /Users/bryancostanich/.cercano/models/glm-4.5-air-q4_k_m/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf --host 127.0.0.1 --port 60538 --gpu-layers auto --jinja --ctx-size 32768 --cache-type-k q8_0 --cache-type-v q8_0
+14389 14387 13321   1648 awk              awk /\/llama-server --model/ {print}
+sample=45 14246 14241 14246 72381856 /opt/homebrew/bi /opt/homebrew/bin/llama-server --model /Users/bryancostanich/.cercano/models/glm-4.5-air-q4_k_m/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf --host 127.0.0.1 --port 60538 --gpu-layers auto --jinja --ctx-size 32768 --cache-type-k q8_0 --cache-type-v q8_0
+14397 14395 13321   1648 awk              awk /\/llama-server --model/ {print}
+sample=46 14246 14241 14246 72381856 /opt/homebrew/bi /opt/homebrew/bin/llama-server --model /Users/bryancostanich/.cercano/models/glm-4.5-air-q4_k_m/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf --host 127.0.0.1 --port 60538 --gpu-layers auto --jinja --ctx-size 32768 --cache-type-k q8_0 --cache-type-v q8_0
+14405 14403 13321   1648 awk              awk /\/llama-server --model/ {print}
+sample=47 14246 14241 14246 72381856 /opt/homebrew/bi /opt/homebrew/bin/llama-server --model /Users/bryancostanich/.cercano/models/glm-4.5-air-q4_k_m/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf --host 127.0.0.1 --port 60538 --gpu-layers auto --jinja --ctx-size 32768 --cache-type-k q8_0 --cache-type-v q8_0
+14413 14411 13321   1632 awk              awk /\/llama-server --model/ {print}
+sample=48 14246 14241 14246 72381856 /opt/homebrew/bi /opt/homebrew/bin/llama-server --model /Users/bryancostanich/.cercano/models/glm-4.5-air-q4_k_m/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf --host 127.0.0.1 --port 60538 --gpu-layers auto --jinja --ctx-size 32768 --cache-type-k q8_0 --cache-type-v q8_0
+14421 14419 13321   1648 awk              awk /\/llama-server --model/ {print}
+
+[2026-08-19T18:05:32Z] starting branch agent under test
+
+[2026-08-19T18:05:32Z] waiting for agent port 50052
+
+[2026-08-19T18:05:32Z] agent port is listening
+
+[2026-08-19T18:05:32Z] ps -Ao pid,ppid,pgid,rss,comm,args | grep -E '[c]ercano(.*/)? agent|[.]cercano-libexec/cercano agent|restart-verify/cercano-under-test agent' || true
+14241  2360 14241  81712 /Users/bryancost /Users/bryancostanich/bin/.cercano-libexec/cercano agent
+14428 13951 13321     32 /Users/bryancost /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/cercano-under-test agent
+14440 13951 13321   2192 bash             bash -lc ps -Ao pid,ppid,pgid,rss,comm,args | grep -E '[c]ercano(.*/)? agent|[.]cercano-libexec/cercano agent|restart-verify/cercano-under-test agent' || true
+14445 14440 13321   1536 grep             grep -E [c]ercano(.*/)? agent|[.]cercano-libexec/cercano agent|restart-verify/cercano-under-test agent
+
+[2026-08-19T18:05:32Z] llama-server processes before GLM restart
+14246 14241 14246 72381856 /opt/homebrew/bi /opt/homebrew/bin/llama-server --model /Users/bryancostanich/.cercano/models/glm-4.5-air-q4_k_m/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf --host 127.0.0.1 --port 60538 --gpu-layers auto --jinja --ctx-size 32768 --cache-type-k q8_0 --cache-type-v q8_0
+14452 14449 13321   1648 awk              awk /\/llama-server --model/ {print}
+
+[2026-08-19T18:05:32Z] starting GLM through StartRuntimeModel after restart
+glm_model_id=llama_server:catalog:glm-4.5-air-q4_k_m display="GLM-4.5-Air Q4_K_M" state=stopped
+panic: llama-server memory guard refused to start GLM-4.5-Air Q4_K_M: projected non-evictable memory 154.89 GiB exceeds limit 118.00 GiB (current 81.05 GiB, model 67.96 GiB, KV 5.88 GiB for 32768 ctx tokens, headroom 10.00 GiB, total 128.00 GiB, largest live instance llama_server:690083de81a3:60538 pid 14246 port 60538)
+
+goroutine 1 [running]:
+main.main()
+	/Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/start_glm_client.go:27 +0x338
+exit status 2

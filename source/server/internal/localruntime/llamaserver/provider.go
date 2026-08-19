@@ -294,6 +294,7 @@ func (p *Provider) Start(ctx context.Context, req localruntime.StartRequest, sin
 	}
 
 	p.spawnMu.Lock()
+	p.pruneDeadAdoptedInstances()
 	if existing := p.liveInstance(model, sink); existing != nil {
 		p.spawnMu.Unlock()
 		return existing, nil
@@ -560,6 +561,7 @@ func (p *Provider) checkMemoryBudget(model localruntime.ModelRecord) (memoryProj
 		nonEvictableFn = sysram.NonEvictable
 	}
 
+	p.pruneDeadAdoptedInstances()
 	projection := memoryProjection{
 		TotalBytes:     totalFn(),
 		ModelBytes:     model.SizeBytes,
@@ -635,7 +637,7 @@ func (p *Provider) registryResidentEstimate() int64 {
 	defer p.mu.RUnlock()
 	var total int64
 	for _, inst := range p.running {
-		if inst == nil || inst.record.State != localruntime.InstanceRunning && inst.record.State != localruntime.InstanceStarting {
+		if !countsTowardMemoryFloor(inst) {
 			continue
 		}
 		total += inst.model.SizeBytes
@@ -651,7 +653,7 @@ func (p *Provider) largestLiveInstance() (id string, pid int, port int) {
 		if inst == nil || inst.model.SizeBytes <= max {
 			continue
 		}
-		if inst.record.State != localruntime.InstanceRunning && inst.record.State != localruntime.InstanceStarting {
+		if !countsTowardMemoryFloor(inst) {
 			continue
 		}
 		max = inst.model.SizeBytes
@@ -660,6 +662,23 @@ func (p *Provider) largestLiveInstance() (id string, pid int, port int) {
 		port = inst.record.Port
 	}
 	return id, pid, port
+}
+
+func countsTowardMemoryFloor(inst *managedInstance) bool {
+	if inst == nil {
+		return false
+	}
+	if inst.record.State != localruntime.InstanceRunning && inst.record.State != localruntime.InstanceStarting {
+		return false
+	}
+	// Adopted processes are owned and reaped by another agent. If that
+	// owner killed the process during shutdown, this provider may still
+	// have a stale in-memory record. Do not let that dead record poison
+	// the registry floor and block a legitimate restart.
+	if inst.adopted && inst.record.PID > 0 && !processAlive(inst.record.PID) {
+		return false
+	}
+	return true
 }
 
 func blockingInstanceSuffix(m memoryProjection) string {
@@ -910,6 +929,33 @@ func (p *Provider) waitReady(ctx context.Context, instanceID, endpoint string) e
 	}
 }
 
+func (p *Provider) pruneDeadAdoptedInstances() {
+	type deadAdopted struct {
+		id      string
+		modelID string
+		pid     int
+		port    int
+	}
+	var removed []deadAdopted
+	p.mu.Lock()
+	for id, inst := range p.running {
+		if inst == nil || !inst.adopted || inst.record.PID <= 0 || processAlive(inst.record.PID) {
+			continue
+		}
+		removed = append(removed, deadAdopted{id: id, modelID: inst.record.ModelID, pid: inst.record.PID, port: inst.record.Port})
+		delete(p.running, id)
+	}
+	p.mu.Unlock()
+	for _, r := range removed {
+		p.event(crashlog.EventStop, "dropped dead adopted llama-server record", crashlog.RuntimeInfo{
+			InstanceID: r.id,
+			ModelID:    r.modelID,
+			PID:        r.pid,
+			Port:       r.port,
+		}, map[string]any{"adopted": true, "confirmed_dead": true, "trigger": "prune_dead_adopted"})
+	}
+}
+
 func (p *Provider) liveInstance(model localruntime.ModelRecord, sink localruntime.LogSink) *localruntime.InstanceRecord {
 	p.mu.RLock()
 	var record localruntime.InstanceRecord
@@ -935,6 +981,9 @@ func (p *Provider) liveInstance(model localruntime.ModelRecord, sink localruntim
 func (p *Provider) liveInstanceForLocked(model localruntime.ModelRecord) *managedInstance {
 	for _, inst := range p.running {
 		if inst.stopping || !canReuseInstanceForModel(inst.model, model) {
+			continue
+		}
+		if inst.adopted && inst.record.PID > 0 && !processAlive(inst.record.PID) {
 			continue
 		}
 		switch inst.record.State {

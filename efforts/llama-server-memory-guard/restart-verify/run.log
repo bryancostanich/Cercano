@@ -1,0 +1,203 @@
+
+[2026-08-19T17:59:24Z] restart verifier starting
+
+[2026-08-19T17:59:24Z] cd '/Users/bryancostanich/git_repos/bryan_costanich/Cercano' && git rev-parse --abbrev-ref HEAD && git rev-parse HEAD
+llama-server-memory-guard
+59d35e1396d2fa37ec4d13d0ba943c13e4667c02
+
+[2026-08-19T17:59:24Z] baseline crash.log lines=     343
+
+[2026-08-19T17:59:24Z] ps -Ao pid,ppid,pgid,rss,comm,args | grep -E '[c]ercano(.*/)? agent|[.]cercano-libexec/cercano agent' || true
+10805 10736 10805 2077472 /Users/bryancost /Users/bryancostanich/bin/.cercano-libexec/cercano agent
+13215 13194 10805   2192 bash             bash -lc ps -Ao pid,ppid,pgid,rss,comm,args | grep -E '[c]ercano(.*/)? agent|[.]cercano-libexec/cercano agent' || true
+13220 13215 10805   1424 grep             grep -E [c]ercano(.*/)? agent|[.]cercano-libexec/cercano agent
+
+[2026-08-19T17:59:24Z] ps -Ao pid,ppid,pgid,rss,comm,args | grep -i '[l]lama-server' || true
+10810 10805 10810 81036576 /opt/homebrew/bi /opt/homebrew/bin/llama-server --model /Users/bryancostanich/.cercano/models/glm-4.5-air-q4_k_m/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf --host 127.0.0.1 --port 59339 --gpu-layers auto --jinja --ctx-size 32768 --cache-type-k q8_0 --cache-type-v q8_0
+13187     1 10805   2208 bash             bash -lc sleep 1; '/Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh'
+13194 13187 10805   2240 bash             bash /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh
+13225 13194 10805   1264 tee              tee -a /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/run.log
+
+[2026-08-19T17:59:24Z] old_agent=10805
+
+[2026-08-19T17:59:24Z] sending SIGTERM to old agent 10805
+
+[2026-08-19T17:59:24Z] sampling llama-server processes during shutdown window
+sample=01 10810 10805 10810 81036576 /opt/homebrew/bin/llama-server --model /Users/bryancostanich/.cercano/models/glm-4.5-air-q4_k_m/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf --host 127.0.0.1 --port 59339 --gpu-layers auto --jinja --ctx-size 32768 --cache-type-k q8_0 --cache-type-v q8_0
+13187     1 10805   2208 bash -lc sleep 1; '/Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh'
+13194 13187 10805   2256 bash /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh
+13247 13194 10805   1264 tee -a /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/run.log
+sample=02 10810 10805 10810 81036576 /opt/homebrew/bin/llama-server --model /Users/bryancostanich/.cercano/models/glm-4.5-air-q4_k_m/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf --host 127.0.0.1 --port 59339 --gpu-layers auto --jinja --ctx-size 32768 --cache-type-k q8_0 --cache-type-v q8_0
+13187     1 10805   2208 bash -lc sleep 1; '/Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh'
+13194 13187 10805   2256 bash /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh
+13253 13194 10805   1264 tee -a /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/run.log
+sample=03 10810 10805 10810 81036576 /opt/homebrew/bin/llama-server --model /Users/bryancostanich/.cercano/models/glm-4.5-air-q4_k_m/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf --host 127.0.0.1 --port 59339 --gpu-layers auto --jinja --ctx-size 32768 --cache-type-k q8_0 --cache-type-v q8_0
+13187     1 10805   2208 bash -lc sleep 1; '/Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh'
+13194 13187 10805   2256 bash /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh
+13259 13194 10805   1264 tee -a /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/run.log
+sample=04 10810 10805 10810 81036576 /opt/homebrew/bin/llama-server --model /Users/bryancostanich/.cercano/models/glm-4.5-air-q4_k_m/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf --host 127.0.0.1 --port 59339 --gpu-layers auto --jinja --ctx-size 32768 --cache-type-k q8_0 --cache-type-v q8_0
+13187     1 10805   2208 bash -lc sleep 1; '/Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh'
+13194 13187 10805   2256 bash /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh
+13265 13194 10805   1264 tee -a /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/run.log
+sample=05 10810 10805 10810 81036576 /opt/homebrew/bin/llama-server --model /Users/bryancostanich/.cercano/models/glm-4.5-air-q4_k_m/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf --host 127.0.0.1 --port 59339 --gpu-layers auto --jinja --ctx-size 32768 --cache-type-k q8_0 --cache-type-v q8_0
+13187     1 10805   2208 bash -lc sleep 1; '/Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh'
+13194 13187 10805   2256 bash /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh
+13271 13194 10805   1264 tee -a /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/run.log
+sample=06 10810 10805 10810 81036576 /opt/homebrew/bin/llama-server --model /Users/bryancostanich/.cercano/models/glm-4.5-air-q4_k_m/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf --host 127.0.0.1 --port 59339 --gpu-layers auto --jinja --ctx-size 32768 --cache-type-k q8_0 --cache-type-v q8_0
+13187     1 10805   2208 bash -lc sleep 1; '/Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh'
+13194 13187 10805   2256 bash /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh
+13277 13194 10805   1264 tee -a /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/run.log
+sample=07 10810 10805 10810 81036576 /opt/homebrew/bin/llama-server --model /Users/bryancostanich/.cercano/models/glm-4.5-air-q4_k_m/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf --host 127.0.0.1 --port 59339 --gpu-layers auto --jinja --ctx-size 32768 --cache-type-k q8_0 --cache-type-v q8_0
+13187     1 10805   2208 bash -lc sleep 1; '/Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh'
+13194 13187 10805   2256 bash /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh
+13283 13194 10805   1264 tee -a /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/run.log
+sample=08 10810 10805 10810 81036576 /opt/homebrew/bin/llama-server --model /Users/bryancostanich/.cercano/models/glm-4.5-air-q4_k_m/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf --host 127.0.0.1 --port 59339 --gpu-layers auto --jinja --ctx-size 32768 --cache-type-k q8_0 --cache-type-v q8_0
+13187     1 10805   2208 bash -lc sleep 1; '/Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh'
+13194 13187 10805   2256 bash /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh
+13289 13194 10805   1264 tee -a /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/run.log
+sample=09 10810 10805 10810 81036576 /opt/homebrew/bin/llama-server --model /Users/bryancostanich/.cercano/models/glm-4.5-air-q4_k_m/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf --host 127.0.0.1 --port 59339 --gpu-layers auto --jinja --ctx-size 32768 --cache-type-k q8_0 --cache-type-v q8_0
+13187     1 10805   2208 bash -lc sleep 1; '/Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh'
+13194 13187 10805   2256 bash /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh
+13295 13194 10805   1264 tee -a /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/run.log
+sample=10 10810 10805 10810 81036576 /opt/homebrew/bin/llama-server --model /Users/bryancostanich/.cercano/models/glm-4.5-air-q4_k_m/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf --host 127.0.0.1 --port 59339 --gpu-layers auto --jinja --ctx-size 32768 --cache-type-k q8_0 --cache-type-v q8_0
+13187     1 10805   2208 bash -lc sleep 1; '/Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh'
+13194 13187 10805   2256 bash /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh
+13301 13194 10805   1264 tee -a /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/run.log
+sample=11 10810 10805 10810 81036576 /opt/homebrew/bin/llama-server --model /Users/bryancostanich/.cercano/models/glm-4.5-air-q4_k_m/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf --host 127.0.0.1 --port 59339 --gpu-layers auto --jinja --ctx-size 32768 --cache-type-k q8_0 --cache-type-v q8_0
+13187     1 10805   2208 bash -lc sleep 1; '/Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh'
+13194 13187 10805   2256 bash /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh
+13307 13194 10805   1264 tee -a /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/run.log
+sample=12 10810 10805 10810 81036576 /opt/homebrew/bin/llama-server --model /Users/bryancostanich/.cercano/models/glm-4.5-air-q4_k_m/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf --host 127.0.0.1 --port 59339 --gpu-layers auto --jinja --ctx-size 32768 --cache-type-k q8_0 --cache-type-v q8_0
+13187     1 10805   2208 bash -lc sleep 1; '/Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh'
+13194 13187 10805   2256 bash /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh
+13313 13194 10805   1264 tee -a /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/run.log
+sample=13 10810 10805 10810 81036576 /opt/homebrew/bin/llama-server --model /Users/bryancostanich/.cercano/models/glm-4.5-air-q4_k_m/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf --host 127.0.0.1 --port 59339 --gpu-layers auto --jinja --ctx-size 32768 --cache-type-k q8_0 --cache-type-v q8_0
+13187     1 10805   2208 bash -lc sleep 1; '/Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh'
+13194 13187 10805   2256 bash /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh
+13319 13194 10805   1264 tee -a /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/run.log
+sample=14 10810 10805 10810 81036576 /opt/homebrew/bin/llama-server --model /Users/bryancostanich/.cercano/models/glm-4.5-air-q4_k_m/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf --host 127.0.0.1 --port 59339 --gpu-layers auto --jinja --ctx-size 32768 --cache-type-k q8_0 --cache-type-v q8_0
+13187     1 10805   2208 bash -lc sleep 1; '/Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh'
+13194 13187 10805   2256 bash /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh
+13326 13194 10805   1264 tee -a /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/run.log
+sample=15 10810 10805 10810 81036640 /opt/homebrew/bin/llama-server --model /Users/bryancostanich/.cercano/models/glm-4.5-air-q4_k_m/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf --host 127.0.0.1 --port 59339 --gpu-layers auto --jinja --ctx-size 32768 --cache-type-k q8_0 --cache-type-v q8_0
+13187     1 10805   2208 bash -lc sleep 1; '/Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh'
+13194 13187 10805   2256 bash /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh
+13341 13194 10805   1264 tee -a /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/run.log
+sample=16 10810 10805 10810 81036640 /opt/homebrew/bin/llama-server --model /Users/bryancostanich/.cercano/models/glm-4.5-air-q4_k_m/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf --host 127.0.0.1 --port 59339 --gpu-layers auto --jinja --ctx-size 32768 --cache-type-k q8_0 --cache-type-v q8_0
+13187     1 10805   2208 bash -lc sleep 1; '/Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh'
+13194 13187 10805   2256 bash /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh
+13350 13194 10805   1264 tee -a /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/run.log
+sample=17 10810 10805 10810 81036640 /opt/homebrew/bin/llama-server --model /Users/bryancostanich/.cercano/models/glm-4.5-air-q4_k_m/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf --host 127.0.0.1 --port 59339 --gpu-layers auto --jinja --ctx-size 32768 --cache-type-k q8_0 --cache-type-v q8_0
+13187     1 10805   2208 bash -lc sleep 1; '/Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh'
+13194 13187 10805   2256 bash /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh
+13356 13194 10805   1280 tee -a /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/run.log
+sample=18 10810 10805 10810 81036640 /opt/homebrew/bin/llama-server --model /Users/bryancostanich/.cercano/models/glm-4.5-air-q4_k_m/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf --host 127.0.0.1 --port 59339 --gpu-layers auto --jinja --ctx-size 32768 --cache-type-k q8_0 --cache-type-v q8_0
+13187     1 10805   2208 bash -lc sleep 1; '/Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh'
+13194 13187 10805   2256 bash /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh
+13362 13194 10805   1264 tee -a /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/run.log
+sample=19 10810 10805 10810 81036640 /opt/homebrew/bin/llama-server --model /Users/bryancostanich/.cercano/models/glm-4.5-air-q4_k_m/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf --host 127.0.0.1 --port 59339 --gpu-layers auto --jinja --ctx-size 32768 --cache-type-k q8_0 --cache-type-v q8_0
+13187     1 10805   2208 bash -lc sleep 1; '/Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh'
+13194 13187 10805   2256 bash /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh
+13369 13194 10805   1264 tee -a /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/run.log
+sample=20 10810 10805 10810 81036640 /opt/homebrew/bin/llama-server --model /Users/bryancostanich/.cercano/models/glm-4.5-air-q4_k_m/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf --host 127.0.0.1 --port 59339 --gpu-layers auto --jinja --ctx-size 32768 --cache-type-k q8_0 --cache-type-v q8_0
+13187     1 10805   2208 bash -lc sleep 1; '/Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh'
+13194 13187 10805   2256 bash /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh
+13377 13194 10805   1264 tee -a /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/run.log
+sample=21 10810 10805 10810 81036640 /opt/homebrew/bin/llama-server --model /Users/bryancostanich/.cercano/models/glm-4.5-air-q4_k_m/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf --host 127.0.0.1 --port 59339 --gpu-layers auto --jinja --ctx-size 32768 --cache-type-k q8_0 --cache-type-v q8_0
+13187     1 10805   2208 bash -lc sleep 1; '/Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh'
+13194 13187 10805   2256 bash /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh
+13383 13194 10805   1264 tee -a /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/run.log
+sample=22 10810 10805 10810 81036640 /opt/homebrew/bin/llama-server --model /Users/bryancostanich/.cercano/models/glm-4.5-air-q4_k_m/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf --host 127.0.0.1 --port 59339 --gpu-layers auto --jinja --ctx-size 32768 --cache-type-k q8_0 --cache-type-v q8_0
+13187     1 10805   2208 bash -lc sleep 1; '/Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh'
+13194 13187 10805   2256 bash /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh
+13389 13194 10805   1264 tee -a /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/run.log
+sample=23 10810 10805 10810 81036640 /opt/homebrew/bin/llama-server --model /Users/bryancostanich/.cercano/models/glm-4.5-air-q4_k_m/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf --host 127.0.0.1 --port 59339 --gpu-layers auto --jinja --ctx-size 32768 --cache-type-k q8_0 --cache-type-v q8_0
+13187     1 10805   2208 bash -lc sleep 1; '/Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh'
+13194 13187 10805   2256 bash /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh
+13395 13194 10805   1264 tee -a /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/run.log
+sample=24 10810 10805 10810 81036640 /opt/homebrew/bin/llama-server --model /Users/bryancostanich/.cercano/models/glm-4.5-air-q4_k_m/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf --host 127.0.0.1 --port 59339 --gpu-layers auto --jinja --ctx-size 32768 --cache-type-k q8_0 --cache-type-v q8_0
+13187     1 10805   2208 bash -lc sleep 1; '/Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh'
+13194 13187 10805   2256 bash /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh
+13401 13194 10805   1264 tee -a /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/run.log
+sample=25 10810 10805 10810 81036640 /opt/homebrew/bin/llama-server --model /Users/bryancostanich/.cercano/models/glm-4.5-air-q4_k_m/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf --host 127.0.0.1 --port 59339 --gpu-layers auto --jinja --ctx-size 32768 --cache-type-k q8_0 --cache-type-v q8_0
+13187     1 10805   2208 bash -lc sleep 1; '/Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh'
+13194 13187 10805   2256 bash /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh
+13408 13194 10805   1264 tee -a /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/run.log
+sample=26 10810 10805 10810 81036640 /opt/homebrew/bin/llama-server --model /Users/bryancostanich/.cercano/models/glm-4.5-air-q4_k_m/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf --host 127.0.0.1 --port 59339 --gpu-layers auto --jinja --ctx-size 32768 --cache-type-k q8_0 --cache-type-v q8_0
+13187     1 10805   2208 bash -lc sleep 1; '/Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh'
+13194 13187 10805   2256 bash /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh
+13414 13194 10805   1264 tee -a /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/run.log
+sample=27 10810 10805 10810 81036640 /opt/homebrew/bin/llama-server --model /Users/bryancostanich/.cercano/models/glm-4.5-air-q4_k_m/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf --host 127.0.0.1 --port 59339 --gpu-layers auto --jinja --ctx-size 32768 --cache-type-k q8_0 --cache-type-v q8_0
+13187     1 10805   2208 bash -lc sleep 1; '/Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh'
+13194 13187 10805   2256 bash /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh
+13420 13194 10805   1264 tee -a /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/run.log
+sample=28 10810 10805 10810 81036640 /opt/homebrew/bin/llama-server --model /Users/bryancostanich/.cercano/models/glm-4.5-air-q4_k_m/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf --host 127.0.0.1 --port 59339 --gpu-layers auto --jinja --ctx-size 32768 --cache-type-k q8_0 --cache-type-v q8_0
+13187     1 10805   2208 bash -lc sleep 1; '/Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh'
+13194 13187 10805   2256 bash /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh
+13426 13194 10805   1264 tee -a /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/run.log
+sample=29 10810 10805 10810 81036512 /opt/homebrew/bin/llama-server --model /Users/bryancostanich/.cercano/models/glm-4.5-air-q4_k_m/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf --host 127.0.0.1 --port 59339 --gpu-layers auto --jinja --ctx-size 32768 --cache-type-k q8_0 --cache-type-v q8_0
+13187     1 10805   2208 bash -lc sleep 1; '/Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh'
+13194 13187 10805   2256 bash /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh
+13432 13194 10805   1264 tee -a /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/run.log
+sample=30 10810 10805 10810 81036512 /opt/homebrew/bin/llama-server --model /Users/bryancostanich/.cercano/models/glm-4.5-air-q4_k_m/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf --host 127.0.0.1 --port 59339 --gpu-layers auto --jinja --ctx-size 32768 --cache-type-k q8_0 --cache-type-v q8_0
+13187     1 10805   2208 bash -lc sleep 1; '/Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh'
+13194 13187 10805   2256 bash /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh
+13438 13194 10805   1264 tee -a /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/run.log
+sample=31 10810 10805 10810 81036512 /opt/homebrew/bin/llama-server --model /Users/bryancostanich/.cercano/models/glm-4.5-air-q4_k_m/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf --host 127.0.0.1 --port 59339 --gpu-layers auto --jinja --ctx-size 32768 --cache-type-k q8_0 --cache-type-v q8_0
+13187     1 10805   2208 bash -lc sleep 1; '/Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh'
+13194 13187 10805   2256 bash /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh
+13444 13194 10805   1264 tee -a /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/run.log
+sample=32 10810 10805 10810 81036512 /opt/homebrew/bin/llama-server --model /Users/bryancostanich/.cercano/models/glm-4.5-air-q4_k_m/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf --host 127.0.0.1 --port 59339 --gpu-layers auto --jinja --ctx-size 32768 --cache-type-k q8_0 --cache-type-v q8_0
+13187     1 10805   2208 bash -lc sleep 1; '/Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh'
+13194 13187 10805   2256 bash /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh
+13450 13194 10805   1264 tee -a /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/run.log
+sample=33 10810 10805 10810 81036512 /opt/homebrew/bin/llama-server --model /Users/bryancostanich/.cercano/models/glm-4.5-air-q4_k_m/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf --host 127.0.0.1 --port 59339 --gpu-layers auto --jinja --ctx-size 32768 --cache-type-k q8_0 --cache-type-v q8_0
+13187     1 10805   2208 bash -lc sleep 1; '/Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh'
+13194 13187 10805   2256 bash /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh
+13456 13194 10805   1264 tee -a /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/run.log
+sample=34 10810 10805 10810 81036512 /opt/homebrew/bin/llama-server --model /Users/bryancostanich/.cercano/models/glm-4.5-air-q4_k_m/GLM-4.5-Air-Q4_K_M-00001-of-00002.gguf --host 127.0.0.1 --port 59339 --gpu-layers auto --jinja --ctx-size 32768 --cache-type-k q8_0 --cache-type-v q8_0
+13187     1 10805   2208 bash -lc sleep 1; '/Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh'
+13194 13187 10805   2256 bash /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh
+13462 13194 10805   1264 tee -a /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/run.log
+sample=35 10810 10805 10810      0 (llama-server)
+13187     1 10805   2208 bash -lc sleep 1; '/Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh'
+13194 13187 10805   2256 bash /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh
+13468 13194 10805   1264 tee -a /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/run.log
+sample=36 13187     1 10805   2208 bash -lc sleep 1; '/Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh'
+13194 13187 10805   2256 bash /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh
+13474 13194 10805   1264 tee -a /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/run.log
+sample=37 13187     1 10805   2208 bash -lc sleep 1; '/Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh'
+13194 13187 10805   2256 bash /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh
+13480 13194 10805   1264 tee -a /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/run.log
+sample=38 13187     1 10805   2208 bash -lc sleep 1; '/Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh'
+13194 13187 10805   2256 bash /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh
+13486 13194 10805   1264 tee -a /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/run.log
+sample=39 13187     1 10805   2208 bash -lc sleep 1; '/Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh'
+13194 13187 10805   2256 bash /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh
+13492 13194 10805   1264 tee -a /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/run.log
+sample=40 13187     1 10805   2208 bash -lc sleep 1; '/Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh'
+13194 13187 10805   2256 bash /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh
+13498 13194 10805   1264 tee -a /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/run.log
+
+[2026-08-19T17:59:37Z] waiting for agent port 50052
+
+[2026-08-19T17:59:37Z] agent port is listening
+
+[2026-08-19T17:59:37Z] ps -Ao pid,ppid,pgid,rss,comm,args | grep -E '[c]ercano(.*/)? agent|[.]cercano-libexec/cercano agent' || true
+13321 10736 13321  79968 /Users/bryancost /Users/bryancostanich/bin/.cercano-libexec/cercano agent
+13512 13194 10805   2192 bash             bash -lc ps -Ao pid,ppid,pgid,rss,comm,args | grep -E '[c]ercano(.*/)? agent|[.]cercano-libexec/cercano agent' || true
+13517 13512 10805   1472 grep             grep -E [c]ercano(.*/)? agent|[.]cercano-libexec/cercano agent
+
+[2026-08-19T17:59:37Z] ps -Ao pid,ppid,pgid,rss,comm,args | grep -i '[l]lama-server' || true
+13187     1 10805   2208 bash             bash -lc sleep 1; '/Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh'
+13194 13187 10805   2256 bash             bash /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/verify_restart.sh
+13522 13194 10805   1264 tee              tee -a /Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/run.log
+
+[2026-08-19T17:59:37Z] starting GLM through StartRuntimeModel after restart
+glm_model_id=llama_server:catalog:glm-4.5-air-q4_k_m display="GLM-4.5-Air Q4_K_M" state=stopped
+panic: llama-server memory guard refused to start GLM-4.5-Air Q4_K_M: projected non-evictable memory 141.80 GiB exceeds limit 118.00 GiB (current 67.96 GiB, model 67.96 GiB, KV 5.88 GiB for 32768 ctx tokens, headroom 10.00 GiB, total 128.00 GiB, largest live instance llama_server:690083de81a3:59339 pid 10810 port 59339)
+
+goroutine 1 [running]:
+main.main()
+	/Users/bryancostanich/git_repos/bryan_costanich/Cercano/efforts/llama-server-memory-guard/restart-verify/start_glm_client.go:27 +0x338
+exit status 2

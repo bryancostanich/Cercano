@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"cercano/source/server/internal/crashlog"
 	"cercano/source/server/internal/gguf"
 	"cercano/source/server/internal/localruntime"
 	"cercano/source/server/pkg/config"
@@ -52,6 +53,40 @@ type Provider struct {
 	// corrupt file doesn't get re-read every tick.
 	headerMu    sync.Mutex
 	headerCache map[string]headerIdentity
+
+	// events is the durable operational log. Lifecycle transitions
+	// (spawn/reuse/adopt/reap/stop/refused) are written here so they
+	// survive the process — the in-memory LogSink that feeds the UI
+	// evaporates on exit, which is exactly when the records matter.
+	// Nil disables durable event recording; every write goes through
+	// p.event, which tolerates a nil writer.
+	events *crashlog.Writer
+}
+
+// SetEventLog attaches the durable operational log. Separate from
+// NewProvider so existing callers and tests are unaffected: a provider
+// without an event log simply records nothing durably, exactly as
+// before.
+func (p *Provider) SetEventLog(w *crashlog.Writer) {
+	p.mu.Lock()
+	p.events = w
+	p.mu.Unlock()
+}
+
+// event records a lifecycle transition to the durable log. It is
+// deliberately separate from emit: emit also carries piped llama-server
+// stdout (see pipeLogs), which would swamp the durable log, and emit's
+// signature has no PID or port to record. Safe with a nil writer and
+// safe to call without holding p.mu.
+func (p *Provider) event(verb, reason string, info crashlog.RuntimeInfo, extra map[string]any) {
+	p.mu.RLock()
+	w := p.events
+	p.mu.RUnlock()
+	if w == nil {
+		return
+	}
+	info.Runtime = runtimeName
+	w.LogRuntimeEvent(verb, reason, info, extra)
 }
 
 // headerIdentity is the cached result of reading a GGUF's identity
@@ -273,11 +308,25 @@ func (p *Provider) Start(ctx context.Context, req localruntime.StartRequest, sin
 		record := existing.record
 		p.mu.Unlock()
 		p.emit(sink, "info", record.ID, model.ID, "reusing running llama-server for "+model.DisplayName)
+		p.event(crashlog.EventReuse, "reusing running llama-server for "+model.DisplayName, crashlog.RuntimeInfo{
+			InstanceID: record.ID,
+			ModelID:    model.ID,
+			PID:        record.PID,
+			Port:       record.Port,
+		}, nil)
 		return &record, nil
 	}
 	p.running[id] = instance
 	p.mu.Unlock()
 	p.emit(sink, "info", id, model.ID, "starting llama-server for "+model.DisplayName)
+	p.event(crashlog.EventSpawn, "starting llama-server for "+model.DisplayName, crashlog.RuntimeInfo{
+		InstanceID: id,
+		ModelID:    model.ID,
+		Port:       port,
+	}, map[string]any{
+		"model_size_bytes": model.SizeBytes,
+		"model_path":       model.Path,
+	})
 
 	if err := p.startProcess(id, binary, sink); err != nil {
 		p.updateRecord(id, sink, func(record *localruntime.InstanceRecord) {
@@ -358,7 +407,14 @@ func (p *Provider) adoptLiveSibling(ctx context.Context, model localruntime.Mode
 	}
 	p.running[id] = inst
 	p.mu.Unlock()
-	p.emit(sink, "info", id, model.ID, fmt.Sprintf("adopted llama-server sidecar pid %d from owner pid %d for %s", sibling.server.PID, sibling.owner.OwnerPID, model.DisplayName))
+	msg := fmt.Sprintf("adopted llama-server sidecar pid %d from owner pid %d for %s", sibling.server.PID, sibling.owner.OwnerPID, model.DisplayName)
+	p.emit(sink, "info", id, model.ID, msg)
+	p.event(crashlog.EventAdopt, msg, crashlog.RuntimeInfo{
+		InstanceID: id,
+		ModelID:    model.ID,
+		PID:        sibling.server.PID,
+		Port:       sibling.server.Port,
+	}, map[string]any{"previous_owner_pid": sibling.owner.OwnerPID})
 	out := inst.record
 	return &out, true
 }
@@ -372,17 +428,44 @@ func (p *Provider) Stop(_ context.Context, instanceID string) error {
 	}
 	instance.stopping = true
 	cmd := instance.cmd
+	modelID := instance.record.ModelID
+	port := instance.record.Port
 	instance.record.State = localruntime.InstanceStopped
 	if instance.adopted {
+		ownerPID := instance.ownerPID
+		pid := instance.record.PID
 		delete(p.running, instanceID)
 		p.mu.Unlock()
+		// An adopted instance is someone else's process: we drop our
+		// record but must not kill it out from under its owner.
+		p.event(crashlog.EventStop, "released adopted llama-server (not killed; owned elsewhere)", crashlog.RuntimeInfo{
+			InstanceID: instanceID,
+			ModelID:    modelID,
+			PID:        pid,
+			Port:       port,
+		}, map[string]any{"adopted": true, "owner_pid": ownerPID})
 		return nil
 	}
 	p.mu.Unlock()
 	if cmd == nil || cmd.Process == nil {
 		return nil
 	}
-	return killProcess(cmd.Process)
+	pid := cmd.Process.Pid
+	started := time.Now()
+	err := killProcess(cmd.Process)
+	extra := map[string]any{"wait_ms": time.Since(started).Milliseconds()}
+	reason := "stopped llama-server"
+	if err != nil {
+		extra["error"] = err.Error()
+		reason = "llama-server stop did not confirm death"
+	}
+	p.event(crashlog.EventStop, reason, crashlog.RuntimeInfo{
+		InstanceID: instanceID,
+		ModelID:    modelID,
+		PID:        pid,
+		Port:       port,
+	}, extra)
+	return err
 }
 
 func (p *Provider) Probe(ctx context.Context, instanceID string) (*localruntime.InstanceHealth, error) {

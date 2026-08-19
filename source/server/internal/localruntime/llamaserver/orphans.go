@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"cercano/source/server/internal/crashlog"
 	"cercano/source/server/internal/localruntime"
 )
 
@@ -176,9 +177,17 @@ func (p *Provider) SweepOrphans(sink localruntime.LogSink) {
 				continue
 			}
 			terminateGroup(server.PID)
-			p.emit(sink, "warn", "", "",
-				fmt.Sprintf("reaped orphaned llama-server pid %d (model %s, owner pid %d died without cleanup)",
-					server.PID, filepath.Base(server.ModelPath), state.OwnerPID))
+			msg := fmt.Sprintf("reaped orphaned llama-server pid %d (model %s, owner pid %d died without cleanup)",
+				server.PID, filepath.Base(server.ModelPath), state.OwnerPID)
+			p.emit(sink, "warn", "", "", msg)
+			p.event(crashlog.EventReap, msg, crashlog.RuntimeInfo{
+				PID:  server.PID,
+				Port: server.Port,
+			}, map[string]any{
+				"owner_pid":  state.OwnerPID,
+				"model_path": server.ModelPath,
+				"trigger":    "startup_sweep",
+			})
 		}
 		_ = os.Remove(path)
 	}

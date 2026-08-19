@@ -219,6 +219,130 @@ func TestLatestSummary_EmptyForMissingLog(t *testing.T) {
 	}
 }
 
+func TestLogRuntimeEvent_RoundTripsStructuredFields(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "crash.log")
+	w, err := NewWriter(path, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.LogRuntimeEvent(EventSpawn, "starting llama-server for GLM", RuntimeInfo{
+		Runtime:    "llama_server",
+		InstanceID: "llama_server:abc:8080",
+		ModelID:    "glm-4.5-air-q4_k_m",
+		PID:        4242,
+		Port:       8080,
+	}, map[string]any{"projected_bytes": float64(1 << 30)})
+	w.Close()
+
+	entries, err := TailEntries(path, 10)
+	if err != nil {
+		t.Fatalf("TailEntries: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("got %d entries, want 1", len(entries))
+	}
+	e := entries[0]
+	if e.Kind != KindRuntimeEvent {
+		t.Errorf("Kind = %q, want %q", e.Kind, KindRuntimeEvent)
+	}
+	if e.Event != EventSpawn {
+		t.Errorf("Event = %q, want %q", e.Event, EventSpawn)
+	}
+	if e.Runtime == nil {
+		t.Fatal("Runtime payload is nil")
+	}
+	if e.Runtime.ModelID != "glm-4.5-air-q4_k_m" {
+		t.Errorf("Runtime.ModelID = %q", e.Runtime.ModelID)
+	}
+	if e.Runtime.PID != 4242 || e.Runtime.Port != 8080 {
+		t.Errorf("Runtime PID/Port = %d/%d, want 4242/8080", e.Runtime.PID, e.Runtime.Port)
+	}
+	if e.Extra["projected_bytes"] != float64(1<<30) {
+		t.Errorf("Extra projected_bytes = %v", e.Extra["projected_bytes"])
+	}
+	// Routine events must not carry goroutine dumps — a stack per spawn
+	// would bury the records that actually matter.
+	if e.Stack != "" {
+		t.Errorf("runtime event carried a stack trace (%d bytes), want none", len(e.Stack))
+	}
+}
+
+func TestLogRuntimeEvent_NilWriterIsNoOp(t *testing.T) {
+	var w *Writer // deliberately nil: providers constructed without a log
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("nil writer panicked: %v", r)
+		}
+	}()
+	w.LogRuntimeEvent(EventStop, "stopping", RuntimeInfo{PID: 1}, nil)
+}
+
+func TestLogRuntimeEvent_AppendsAlongsideCrashRecords(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "crash.log")
+	w, err := NewWriter(path, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.LogRuntimeEvent(EventSpawn, "spawn", RuntimeInfo{PID: 1}, nil)
+	w.LogPanic("boom", nil, nil)
+	w.LogRuntimeEvent(EventStop, "stop", RuntimeInfo{PID: 1}, nil)
+	w.Close()
+
+	entries, err := TailEntries(path, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("got %d entries, want 3 (events must append, not truncate)", len(entries))
+	}
+	// Most-recent first.
+	if entries[0].Event != EventStop || entries[2].Event != EventSpawn {
+		t.Errorf("ordering wrong: %q ... %q", entries[0].Event, entries[2].Event)
+	}
+	if entries[1].Kind != KindPanic {
+		t.Errorf("middle entry Kind = %q, want panic", entries[1].Kind)
+	}
+}
+
+func TestLatestSummary_SkipsRuntimeEventsToFindRealCrash(t *testing.T) {
+	// The regression this guards: once lifecycle events share the crash
+	// log, the newest entry is almost always a routine spawn. Reporting
+	// "agent crashed: runtime_event" on every reconnect would be worse
+	// than saying nothing.
+	path := filepath.Join(t.TempDir(), "crash.log")
+	w, err := NewWriter(path, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.LogPanic("real crash here", nil, nil)
+	for i := 0; i < 5; i++ {
+		w.LogRuntimeEvent(EventSpawn, "routine spawn", RuntimeInfo{PID: i}, nil)
+	}
+	w.Close()
+
+	summary := LatestSummary(path)
+	if !strings.Contains(summary, "real crash here") {
+		t.Errorf("summary = %q, want the panic behind the runtime-event noise", summary)
+	}
+	if strings.Contains(summary, string(KindRuntimeEvent)) {
+		t.Errorf("summary surfaced a runtime event: %q", summary)
+	}
+}
+
+func TestLatestSummary_EmptyWhenOnlyRuntimeEvents(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "crash.log")
+	w, err := NewWriter(path, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.LogRuntimeEvent(EventSpawn, "spawn", RuntimeInfo{PID: 1}, nil)
+	w.Close()
+
+	if s := LatestSummary(path); s != "" {
+		t.Errorf("summary = %q, want empty when no crash has occurred", s)
+	}
+}
+
 func TestRecoverAndLog_CapturesPanicAndDoesNotRepanic(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "crash.log")
 	w, err := NewWriter(path, "test")

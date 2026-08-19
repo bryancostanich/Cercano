@@ -15,7 +15,7 @@ func TestBuildRuntimeManagerRegistersManagedRuntimeCatalogsWhenOllamaActive(t *t
 	cfg.MistralRS.Enabled = false
 	cfg.MistralRS.DefaultModel = ""
 
-	manager := buildRuntimeManager(cfg)
+	manager := buildRuntimeManager(cfg, nil) // nil event log: durable recording is a no-op
 	models, err := manager.Inventory(context.Background())
 	if err != nil {
 		t.Fatalf("Inventory returned error: %v", err)

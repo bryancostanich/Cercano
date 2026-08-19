@@ -1,6 +1,17 @@
-// Package crashlog captures process-level agent crashes to a persistent
-// newline-delimited-JSON file so operators can debug why the server died
-// after the fact.
+// Package crashlog is Cercano's durable operational event log: a
+// persistent newline-delimited-JSON file recording both process-level
+// crashes and the runtime lifecycle events leading up to them, so
+// operators can debug why the server (or the whole machine) died after
+// the fact.
+//
+// The name is historical — it began as crash-only capture. It now also
+// carries KindRuntimeEvent records for llama-server spawn/reuse/adopt/
+// reap/stop transitions. That widening is deliberate: after a machine
+// lockup the question is "what was the runtime doing in the seconds
+// before this signal?", and that is only answerable when lifecycle
+// events and crash records share one file and one clock. Runtime events
+// are per-spawn (rare), not per-request, so the volume cost is
+// negligible.
 //
 // The gRPC-handler recovery interceptors (see server/recovery.go) already
 // catch panics inside RPC calls so one bad handler can't take down the
@@ -49,7 +60,47 @@ const (
 	// signal name (e.g. "SIGTERM"). Stack is a full goroutine dump —
 	// useful for OOM-killer investigations.
 	KindSignal Kind = "signal"
+	// KindRuntimeEvent is a local-runtime lifecycle transition — a
+	// llama-server being spawned, reused, adopted, reaped, or stopped.
+	// Not a crash, but recorded here so the events preceding a crash or
+	// a machine lockup sit on the same timeline as the crash record.
+	// Event carries the verb; RuntimeInfo carries the structured detail.
+	KindRuntimeEvent Kind = "runtime_event"
 )
+
+// Runtime event verbs. These are the values that appear in Entry.Event
+// for a KindRuntimeEvent record.
+const (
+	// EventSpawn is a new runtime process being launched. Extra should
+	// carry the memory projection that permitted it, so projected-vs-
+	// actual can be reconciled later.
+	EventSpawn = "spawn"
+	// EventReuse is an existing in-process instance handed back instead
+	// of spawning a duplicate.
+	EventReuse = "reuse"
+	// EventAdopt is a healthy sibling-owned process adopted rather than
+	// spawning a second copy of the same model.
+	EventAdopt = "adopt"
+	// EventReap is an orphaned or doomed process being terminated.
+	EventReap = "reap"
+	// EventStop is an owned process being shut down deliberately.
+	EventStop = "stop"
+	// EventRefused is a spawn declined by the memory guard. Extra should
+	// carry the projection figures that motivated the refusal.
+	EventRefused = "refused"
+)
+
+// RuntimeInfo is the structured payload of a KindRuntimeEvent. It is
+// deliberately a fixed struct rather than free-form Extra so the common
+// fields are greppable and jq-addressable without guessing key names;
+// anything situational still goes in Entry.Extra.
+type RuntimeInfo struct {
+	Runtime    string `json:"runtime,omitempty"`
+	InstanceID string `json:"instance_id,omitempty"`
+	ModelID    string `json:"model_id,omitempty"`
+	PID        int    `json:"pid,omitempty"`
+	Port       int    `json:"port,omitempty"`
+}
 
 // Entry is one crash record. Serialized to JSON as one line in the
 // crash log. All timestamps are RFC3339 in UTC so log correlation
@@ -67,6 +118,13 @@ type Entry struct {
 	CercanoVersion string         `json:"cercano_version,omitempty"`
 	Uptime         time.Duration  `json:"uptime_seconds,omitempty"`
 	Extra          map[string]any `json:"extra,omitempty"`
+
+	// Event is the runtime-event verb (spawn, reuse, adopt, reap, stop,
+	// refused) for a KindRuntimeEvent record. Empty for crash records.
+	Event string `json:"event,omitempty"`
+	// Runtime is the structured runtime-event payload. Nil for crash
+	// records.
+	Runtime *RuntimeInfo `json:"runtime,omitempty"`
 }
 
 // Writer appends crash entries to a file. All operations are safe for
@@ -163,6 +221,27 @@ func (w *Writer) LogSignal(signal string, extra map[string]any) {
 		Signal: signal,
 		Stack:  string(buf[:n]),
 		Extra:  extra,
+	})
+}
+
+// LogRuntimeEvent records a local-runtime lifecycle transition (spawn,
+// reuse, adopt, reap, stop, refused). reason is a short human-readable
+// message; info carries the structured detail; extra may be nil.
+//
+// Unlike the crash paths this captures no stack trace: these events are
+// routine, and a goroutine dump per spawn would bury the records that
+// matter. A nil Writer is a no-op, so callers that were constructed
+// without a log (tests, embedders) need no nil checks.
+func (w *Writer) LogRuntimeEvent(event, reason string, info RuntimeInfo, extra map[string]any) {
+	if w == nil {
+		return
+	}
+	w.write(Entry{
+		Kind:    KindRuntimeEvent,
+		Event:   event,
+		Reason:  reason,
+		Runtime: &info,
+		Extra:   extra,
 	})
 }
 

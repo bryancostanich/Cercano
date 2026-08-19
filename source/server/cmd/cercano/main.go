@@ -149,7 +149,9 @@ const (
 
 // startGRPCServer initializes all providers and starts the gRPC server.
 // Returns the listener address and a cleanup function.
-func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error) {
+// events may be nil (MCP embedded mode opens no log); a nil writer makes
+// durable runtime-event recording a no-op rather than a crash.
+func startGRPCServer(cfg config.Config, bindAddr string, events *crashlog.Writer) (string, func(), error) {
 	if warn := ollamaStartupWarning(checkOllama, cfg.OllamaURL); warn != "" {
 		fmt.Fprintln(os.Stderr, warn)
 	}
@@ -160,7 +162,7 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	registry.RegisterEmbedder(ollamaEng)
 	// llamaEng registers below once constructed — see RegisterEmbedder there.
 
-	runtimeManager := buildRuntimeManager(cfg)
+	runtimeManager := buildRuntimeManager(cfg, events)
 	llamaEng := llamaengine.NewEngine(runtimeManager)
 	registry.RegisterEngine(llamaEng)
 	registry.RegisterEmbedder(llamaEng)
@@ -675,7 +677,7 @@ func startGRPCServer(cfg config.Config, bindAddr string) (string, func(), error)
 	return lis.Addr().String(), cleanup, nil
 }
 
-func buildRuntimeManager(cfg config.Config) localruntime.Manager {
+func buildRuntimeManager(cfg config.Config, events *crashlog.Writer) localruntime.Manager {
 	manager := localruntime.NewManager(
 		localruntime.WithEndpoints(localruntime.EndpointsFromConfig(cfg, openChatModel(cfg), openEmbeddingModel(cfg))),
 		// Re-read config from disk on restart so a runtime relaunch picks up
@@ -687,6 +689,10 @@ func buildRuntimeManager(cfg config.Config) localruntime.Manager {
 	)
 	sweepStalePartials(cfg, manager)
 	provider := runtimellama.NewProvider(cfg.LlamaServer)
+	// Attach the durable event log before the sweep: reaping an orphan at
+	// startup is precisely the event worth recording, and a nil writer is
+	// a documented no-op.
+	provider.SetEventLog(events)
 	// Reap llama-servers orphaned by cercano processes that died without
 	// cleanup — before the enabled check, because orphans from when the
 	// runtime WAS enabled hold GPU memory regardless of current config.
@@ -1788,7 +1794,7 @@ func runServerMode(cfg config.Config) {
 		fmt.Printf("Crash log: %s\n", crashLogPath)
 	}
 
-	addr, cleanup, err := startGRPCServer(cfg, ":"+cfg.Port)
+	addr, cleanup, err := startGRPCServer(cfg, ":"+cfg.Port, crashWriter)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "\n[ERROR] %v\n", err)
 		if crashWriter != nil {
@@ -1856,7 +1862,9 @@ func runMCPMode(cfg config.Config, externalGRPC string) {
 		fmt.Fprintf(os.Stderr, "Cercano MCP server (v%s) starting with embedded gRPC server...\n", version)
 		fmt.Fprintf(os.Stderr, "Local model: %s | Ollama: %s\n", openChatModel(cfg), cfg.OllamaURL)
 
-		addr, _, err := startGRPCServer(cfg, "localhost:0")
+		// MCP embedded mode opens no crash log; runtime events are a
+		// no-op here rather than a second writer on the same file.
+		addr, _, err := startGRPCServer(cfg, "localhost:0", nil)
 		if err != nil {
 			// Start in degraded mode so the MCP pipe stays alive and
 			// the client gets a clear error instead of "Failed to reconnect".

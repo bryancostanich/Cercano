@@ -60,29 +60,58 @@ func TailEntries(path string, n int) ([]Entry, error) {
 	return all, nil
 }
 
+// IsCrash reports whether a kind represents an actual crash, as opposed
+// to a routine operational record such as KindRuntimeEvent. Used to keep
+// lifecycle noise out of crash-facing surfaces now that both share one
+// file.
+func IsCrash(k Kind) bool {
+	switch k {
+	case KindPanic, KindGoroutinePanic, KindSignal:
+		return true
+	default:
+		return false
+	}
+}
+
+// summaryScanWindow is how many trailing entries LatestSummary inspects
+// looking for a crash. Runtime events are far more frequent than
+// crashes, so the most recent entry is usually a spawn or stop; we scan
+// back far enough to find the real crash behind that noise, but not so
+// far that we resurrect an ancient one.
+const summaryScanWindow = 200
+
 // LatestSummary returns a compact one-line description of the most
 // recent crash for surfacing in the CLI's disconnect message. Empty
-// string if the log is missing or empty. Never returns an error —
-// summary-attach is best-effort; if the log can't be read we just
-// don't have a summary to show.
+// string if the log is missing, empty, or contains no crash within the
+// recent window. Never returns an error — summary-attach is
+// best-effort; if the log can't be read we just don't have a summary.
+//
+// Non-crash records (KindRuntimeEvent) are skipped: reporting "agent
+// crashed: runtime_event" on every reconnect would be actively
+// misleading.
 func LatestSummary(path string) string {
-	entries, err := TailEntries(path, 1)
-	if err != nil || len(entries) == 0 {
+	entries, err := TailEntries(path, summaryScanWindow)
+	if err != nil {
 		return ""
 	}
-	e := entries[0]
-	label := string(e.Kind)
-	switch e.Kind {
-	case KindPanic, KindGoroutinePanic:
-		if e.Reason != "" {
-			return label + ": " + firstLine(e.Reason)
+	for _, e := range entries { // most-recent first
+		if !IsCrash(e.Kind) {
+			continue
 		}
-	case KindSignal:
-		if e.Signal != "" {
-			return label + ": " + e.Signal
+		label := string(e.Kind)
+		switch e.Kind {
+		case KindPanic, KindGoroutinePanic:
+			if e.Reason != "" {
+				return label + ": " + firstLine(e.Reason)
+			}
+		case KindSignal:
+			if e.Signal != "" {
+				return label + ": " + e.Signal
+			}
 		}
+		return label
 	}
-	return label
+	return ""
 }
 
 // firstLine returns the first newline-terminated substring of s so a

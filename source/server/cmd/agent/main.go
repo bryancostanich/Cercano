@@ -13,6 +13,7 @@ import (
 
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/cloudfactory"
+	"cercano/source/server/internal/crashlog"
 	"cercano/source/server/internal/engine"
 	llamaengine "cercano/source/server/internal/engine/llamaserver"
 	mistralengine "cercano/source/server/internal/engine/mistralrs"
@@ -75,12 +76,25 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Durable operational log, shared with cmd/cercano. This binary
+	// spawns llama-servers, so without it the lifecycle events that
+	// explain a machine lockup are never written anywhere persistent.
+	// Failure to open is non-fatal: recording is nice-to-have.
+	eventLogPath := filepath.Join(filepath.Dir(config.DefaultPath()), "crash.log")
+	eventLog, elErr := crashlog.NewWriter(eventLogPath, version)
+	if elErr != nil {
+		fmt.Fprintf(os.Stderr, "[WARN] Failed to open event log at %s: %v (continuing without durable runtime events)\n", eventLogPath, elErr)
+	} else {
+		defer eventLog.Close()
+		fmt.Printf("Event log: %s\n", eventLogPath)
+	}
+
 	registry := engine.NewEngineRegistry()
 	ollamaEng := ollama.NewOllamaEngine(cfg.OllamaURL)
 	registry.RegisterEngine(ollamaEng)
 	registry.RegisterEmbedder(ollamaEng)
 
-	runtimeManager := buildRuntimeManager(cfg)
+	runtimeManager := buildRuntimeManager(cfg, eventLog)
 	llamaEng := llamaengine.NewEngine(runtimeManager)
 	registry.RegisterEngine(llamaEng)
 	mistralEng := mistralengine.NewEngine(runtimeManager)
@@ -184,10 +198,14 @@ func main() {
 	}
 }
 
-func buildRuntimeManager(cfg config.Config) localruntime.Manager {
+func buildRuntimeManager(cfg config.Config, events *crashlog.Writer) localruntime.Manager {
 	manager := localruntime.NewManager(localruntime.WithEndpoints(localruntime.EndpointsFromConfig(cfg, openChatModel(cfg), openEmbeddingModel(cfg))))
 	sweepStalePartials(cfg, manager)
 	provider := runtimellama.NewProvider(cfg.LlamaServer)
+	// Attach the durable event log before the sweep: reaping an orphan at
+	// startup is precisely the event worth recording, and a nil writer is
+	// a documented no-op.
+	provider.SetEventLog(events)
 	// Reap llama-servers orphaned by cercano processes that died without
 	// cleanup — before the enabled check, because orphans from when the
 	// runtime WAS enabled hold GPU memory regardless of current config.

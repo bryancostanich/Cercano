@@ -49,6 +49,19 @@ func GateDecision(mode PermissionMode, tier llm.Permission) bool {
 	return true
 }
 
+// GateDecisionForTool extends GateDecision with tool-specific policy.
+// Delegation tools can be dynamically escalated to X when their granted toolset
+// includes write-capable tools. That X means "confirm the sub-agent grant once"
+// in strict/permissive modes; in bypass mode, the user has explicitly asked to
+// skip those gates, so delegation must not prompt solely because its grant is
+// write-capable. Ordinary X-tier tools still confirm under bypass.
+func GateDecisionForTool(mode PermissionMode, tier llm.Permission, toolName string, isMCP, allowlisted bool) bool {
+	if mode == ModeBypass && tier == llm.PermX && (toolName == "dispatch" || toolName == "workflow") {
+		return false
+	}
+	return GateDecisionForMCP(mode, tier, isMCP, allowlisted)
+}
+
 // GateDecisionForMCP extends GateDecision with MCP origin. MCP tools are
 // untrusted third-party code: they confirm by default even in permissive mode,
 // unless allowlisted. Bypass suppresses non-X MCP prompts; X-tier calls still

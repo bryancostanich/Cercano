@@ -144,6 +144,17 @@ func TestPermissionStore_RetainsModeOnBadFile(t *testing.T) {
 	}
 }
 
+func TestGateDecisionForTool_BypassSkipsDelegationGrantConfirm(t *testing.T) {
+	for _, name := range []string{"dispatch", "workflow"} {
+		if GateDecisionForTool(ModeBypass, llm.PermX, name, false, false) {
+			t.Fatalf("%s should not prompt in bypass even when its granted toolset escalates it to X", name)
+		}
+	}
+	if !GateDecisionForTool(ModeBypass, llm.PermX, "git_push", false, false) {
+		t.Fatal("ordinary X-tier tools should still prompt in bypass")
+	}
+}
+
 func TestGateDecisionForMCP(t *testing.T) {
 	cases := []struct {
 		mode        PermissionMode

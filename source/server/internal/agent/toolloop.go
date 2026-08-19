@@ -804,7 +804,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 			isMCP := agenttools.OriginOf(pc.tool) == agenttools.OriginMCP
 			allowlisted := in.Permissions != nil && in.Permissions.IsMCPAllowed(pc.block.ToolName)
 			preauthorized := toolPreauthorized(in.PreauthorizedTools, pc.block.ToolName)
-			if !watchdogApproved && !preauthorized && GateDecisionForMCP(mode, pc.tier, isMCP, allowlisted) {
+			if !watchdogApproved && !preauthorized && GateDecisionForTool(mode, pc.tier, pc.block.ToolName, isMCP, allowlisted) {
 				if in.PermissionRequester == nil {
 					results = append(results, llm.Block{
 						Type: llm.BlockToolResult, ToolUseRef: pc.block.ToolUseID,

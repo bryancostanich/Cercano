@@ -48,7 +48,7 @@ platforms return the unknown sentinel; callers can distinguish unknown from zero
 - [x] Add `NonEvictable()` to `sysram` following the existing per-OS build-tag structure
 - [x] Implement the darwin probe by parsing `/usr/bin/vm_stat` (see decision #2: no
   sysctl exposes wired/compressor counts, and `host_statistics64` would require
-                          cgo in a deliberately pure-Go repo)
+                                              cgo in a deliberately pure-Go repo)
 - [x] Implement or explicitly decline the linux probe, returning unknown if declined
 - [x] Keep `sysram_other.go` returning the unknown sentinel
 - [x] Run `go test ./internal/sysram/...`
@@ -76,7 +76,9 @@ are not blocked while a teardown waits.
 
 Objective: the surviving process defends itself at the moment of danger — confirm no
 doomed-but-resident server holds memory, then refuse the spawn if the projection
-exceeds physical RAM (Decision 2 second half, Decisions 3 and 4).
+exceeds physical RAM (Decision 2 second half, Decisions 3 and 4). During execution
+this also gained a provider-level `spawnMu` (decision #6) so two different large
+models in one agent cannot both sample memory before either is registered.
 Files: `source/server/internal/localruntime/llamaserver/provider.go` (`Start` line
 222, `startProcess` line 490), `orphans.go` (`SweepOrphans` line 140, `ownerAlive`
 line 190), `provider_reuse_test.go` or a new `provider_guard_test.go`.
@@ -85,15 +87,16 @@ guard permits when it fits; unknown probe falls back to registry arithmetic rath
 than refusing outright; the barrier reaps a doomed server and then permits the spawn;
 error text contains the real figures; existing reuse/adopt tests still pass.
 
-- [ ] Add the reap barrier to `Start` before `choosePort` and `startProcess`
-- [ ] Widen the reap predicate so a draining owner's server is also a candidate
-- [ ] Confirm reaped processes are dead by polling, without holding `p.mu`
-- [ ] Implement the memory projection from wired plus weights plus KV cache
-- [ ] Fall back to registry arithmetic when the probe returns unknown
-- [ ] Refuse over-budget spawns via the existing `InstanceFailed` and `LastError` path
-- [ ] Include projected, current, model size, KV, headroom and limit in the error text
-- [ ] Emit a `spawn` runtime event recording projected against actual
-- [ ] Run `go test ./internal/localruntime/...`
+- [x] Add the reap barrier and provider-level spawn mutex to `Start` before `choosePort` and `startProcess`
+- [x] Widen the reap predicate so a draining owner's server is also a candidate
+- [x] Confirm reaped processes are dead by polling, without holding `p.mu`
+- [x] Implement the memory projection from wired plus weights plus KV cache
+- [x] Fall back to registry arithmetic when the probe returns unknown
+- [x] Refuse over-budget spawns by returning `Start` error and emitting durable `refused` event
+  (decision #5: do not create a synthetic failed instance for a process that never existed)
+- [x] Include projected, current, model size, KV, headroom and limit in the error text
+- [x] Emit a `spawn` runtime event recording projected against actual
+- [x] Run `go test ./internal/localruntime/...`
 
 ## Phase 5 — End-to-end verification
 

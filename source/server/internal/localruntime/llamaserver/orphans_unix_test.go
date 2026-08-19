@@ -3,15 +3,21 @@
 package llamaserver
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
 	"cercano/source/server/internal/localruntime"
+	"cercano/source/server/pkg/config"
 )
 
 // deadOwnerPID returns a PID guaranteed not to be a live cercano process:
@@ -58,6 +64,41 @@ func writeRegistryFile(t *testing.T, dir string, state registryFile) {
 	if err := os.WriteFile(path, data, 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func spawnRecordedServer(t *testing.T, modelPath string) *exec.Cmd {
+	t.Helper()
+	cmd := exec.Command("/bin/sh", "-c", "while :; do sleep 1; done", "llama-test", modelPath)
+	setProcessGroup(cmd)
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
+	})
+	return cmd
+}
+
+func healthyServer(t *testing.T) (port int, close func()) {
+	t.Helper()
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/health" {
+			http.NotFound(w, r)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(s.Close)
+	_, portText, err := net.SplitHostPort(s.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err = strconv.Atoi(portText)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return port, s.Close
 }
 
 // TestSweepOrphans_ReapsDeadOwnersServers: a registry file whose owner is
@@ -154,6 +195,100 @@ func TestSweepOrphans_NeverKillsARecycledPID(t *testing.T) {
 
 	if !processAlive(victim.Process.Pid) {
 		t.Fatal("sweep killed a process whose command line no longer matches the registry entry")
+	}
+}
+
+func TestReapBeforeSpawn_ReapsDeadOwnerForRequestedModel(t *testing.T) {
+	dir := t.TempDir()
+	modelPath := filepath.Join(dir, "model.gguf")
+	if err := os.WriteFile(modelPath, []byte("stub"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	victim := spawnRecordedServer(t, modelPath)
+	wait := waitOwnedProcess(victim)
+	owner := deadOwnerPID(t)
+	writeRegistryFile(t, dir, registryFile{
+		OwnerPID: owner,
+		OwnerExe: "cercano-test-dead-owner",
+		Servers:  []serverEntry{{PID: victim.Process.Pid, Binary: "/bin/sh", ModelPath: modelPath, Port: 65001}},
+	})
+
+	p := NewProvider(config.LlamaServerConfig{})
+	p.registry = &pidRegistry{dir: dir}
+	p.reapBeforeSpawn(context.Background(), localruntime.ModelRecord{Path: modelPath}, "/bin/sh", nil)
+
+	select {
+	case <-wait:
+		// reaped and waited
+	case <-time.After(time.Second):
+		t.Fatal("pre-spawn barrier did not reap the dead owner's server")
+	}
+	if _, err := os.Stat(filepath.Join(dir, fmt.Sprintf("%d.json", owner))); !os.IsNotExist(err) {
+		t.Fatal("dead-owner registry file was not removed")
+	}
+}
+
+func TestReapBeforeSpawn_ReapsUnhealthyLiveOwnerForRequestedModel(t *testing.T) {
+	dir := t.TempDir()
+	modelPath := filepath.Join(dir, "model.gguf")
+	if err := os.WriteFile(modelPath, []byte("stub"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	victim := spawnRecordedServer(t, modelPath)
+	wait := waitOwnedProcess(victim)
+	state := registryFile{
+		OwnerPID: os.Getpid(),
+		OwnerExe: currentExecutableBase(),
+		Servers:  []serverEntry{{PID: victim.Process.Pid, Binary: "/bin/sh", ModelPath: modelPath, Port: 1}}, // port 1 is not healthy/adoptable
+	}
+	data, err := json.Marshal(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "99999.json"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	p := NewProvider(config.LlamaServerConfig{Host: "127.0.0.1"})
+	p.registry = &pidRegistry{dir: dir}
+	p.reapBeforeSpawn(context.Background(), localruntime.ModelRecord{Path: modelPath}, "/bin/sh", nil)
+
+	select {
+	case <-wait:
+		// reaped and waited
+	case <-time.After(time.Second):
+		t.Fatal("pre-spawn barrier did not reap unhealthy live-owner server")
+	}
+}
+
+func TestReapBeforeSpawn_LeavesHealthyLiveOwnerAlone(t *testing.T) {
+	dir := t.TempDir()
+	modelPath := filepath.Join(dir, "model.gguf")
+	if err := os.WriteFile(modelPath, []byte("stub"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	victim := spawnRecordedServer(t, modelPath)
+	port, closeHealth := healthyServer(t)
+	defer closeHealth()
+	state := registryFile{
+		OwnerPID: os.Getpid(),
+		OwnerExe: currentExecutableBase(),
+		Servers:  []serverEntry{{PID: victim.Process.Pid, Binary: "/bin/sh", ModelPath: modelPath, Port: port}},
+	}
+	data, err := json.Marshal(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "99999.json"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	p := NewProvider(config.LlamaServerConfig{Host: "127.0.0.1"})
+	p.registry = &pidRegistry{dir: dir}
+	p.reapBeforeSpawn(context.Background(), localruntime.ModelRecord{Path: modelPath}, "/bin/sh", nil)
+
+	if !processAlive(victim.Process.Pid) {
+		t.Fatal("pre-spawn barrier killed a healthy live owner's server")
 	}
 }
 

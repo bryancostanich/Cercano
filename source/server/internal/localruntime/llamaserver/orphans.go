@@ -185,12 +185,12 @@ func (p *Provider) SweepOrphans(sink localruntime.LogSink) {
 			}
 			p.emit(sink, "warn", "", "", msg)
 			extra := map[string]any{
-				"owner_pid":     state.OwnerPID,
-				"model_path":    server.ModelPath,
-				"trigger":       "startup_sweep",
-				"wait_ms":       res.Wait.Milliseconds(),
-				"escalated":     res.Escalated,
-				"already_gone":  res.AlreadyGone,
+				"owner_pid":      state.OwnerPID,
+				"model_path":     server.ModelPath,
+				"trigger":        "startup_sweep",
+				"wait_ms":        res.Wait.Milliseconds(),
+				"escalated":      res.Escalated,
+				"already_gone":   res.AlreadyGone,
 				"confirmed_dead": err == nil,
 			}
 			if err != nil {
@@ -203,6 +203,120 @@ func (p *Provider) SweepOrphans(sink localruntime.LogSink) {
 		}
 		_ = os.Remove(path)
 	}
+}
+
+type reapCandidate struct {
+	owner       registryFile
+	server      serverEntry
+	registry    string
+	removeFile  bool
+	trigger     string
+	description string
+}
+
+// reapBeforeSpawn is the load-bearing startup barrier for the hard-lock
+// class described in efforts/llama-server-memory-guard. It runs after a
+// healthy sibling adoption attempt has failed and before cmd.Start. Dead
+// owners are ordinary orphans. Live owners are considered only for the
+// exact requested model and only when they look like the same executable
+// family but their server is not healthy/adoptable — the observed restart
+// shape where the old owner is draining while the new one is about to
+// wire a second full model into memory.
+func (p *Provider) reapBeforeSpawn(ctx context.Context, model localruntime.ModelRecord, binary string, sink localruntime.LogSink) {
+	r := p.registry
+	if r == nil || model.Path == "" {
+		return
+	}
+	candidates := p.spawnReapCandidates(ctx, model, binary)
+	for _, c := range candidates {
+		res, err := terminateGroup(c.server.PID)
+		msg := fmt.Sprintf("pre-spawn reap of llama-server pid %d for %s (%s)", c.server.PID, filepath.Base(c.server.ModelPath), c.description)
+		if err != nil {
+			msg = fmt.Sprintf("failed to confirm pre-spawn reaped llama-server pid %d died for %s (%s): %v", c.server.PID, filepath.Base(c.server.ModelPath), c.description, err)
+		}
+		p.emit(sink, "warn", "", "", msg)
+		extra := map[string]any{
+			"owner_pid":      c.owner.OwnerPID,
+			"model_path":     c.server.ModelPath,
+			"trigger":        c.trigger,
+			"wait_ms":        res.Wait.Milliseconds(),
+			"escalated":      res.Escalated,
+			"already_gone":   res.AlreadyGone,
+			"confirmed_dead": err == nil,
+		}
+		if err != nil {
+			extra["error"] = err.Error()
+		}
+		p.event(crashlog.EventReap, msg, crashlog.RuntimeInfo{PID: c.server.PID, Port: c.server.Port}, extra)
+		if c.removeFile {
+			_ = os.Remove(c.registry)
+		}
+	}
+}
+
+func (p *Provider) spawnReapCandidates(ctx context.Context, model localruntime.ModelRecord, binary string) []reapCandidate {
+	r := p.registry
+	if r == nil {
+		return nil
+	}
+	entries, err := os.ReadDir(r.dir)
+	if err != nil {
+		return nil
+	}
+	currentExe := currentExecutableBase()
+	var out []reapCandidate
+	for _, dirEntry := range entries {
+		name := dirEntry.Name()
+		if dirEntry.IsDir() || !strings.HasSuffix(name, ".json") {
+			continue
+		}
+		path := filepath.Join(r.dir, name)
+		if path == r.ownFile() {
+			continue
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var state registryFile
+		if err := json.Unmarshal(data, &state); err != nil || state.OwnerPID <= 0 {
+			continue
+		}
+		ownerLive := ownerAlive(state)
+		for _, server := range state.Servers {
+			if !serverStillOurs(server) || server.ModelPath != model.Path || filepath.Base(server.Binary) != filepath.Base(binary) {
+				continue
+			}
+			if !ownerLive {
+				out = append(out, reapCandidate{owner: state, server: server, registry: path, removeFile: true, trigger: "pre_spawn_dead_owner", description: fmt.Sprintf("owner pid %d is gone", state.OwnerPID)})
+				continue
+			}
+			if currentExe == "" || state.OwnerExe == "" || state.OwnerExe != currentExe {
+				continue
+			}
+			if p.serverHealthy(ctx, server) {
+				continue
+			}
+			out = append(out, reapCandidate{owner: state, server: server, registry: path, trigger: "pre_spawn_unhealthy_live_owner", description: fmt.Sprintf("owner pid %d is live but server is not healthy/adoptable", state.OwnerPID)})
+		}
+	}
+	return out
+}
+
+func (p *Provider) serverHealthy(ctx context.Context, server serverEntry) bool {
+	probeCtx, cancel := context.WithTimeout(ctx, 750*time.Millisecond)
+	defer cancel()
+	host := p.snapshot().Host
+	endpoint := fmt.Sprintf("http://%s:%d", healthHost(host), server.Port)
+	return p.probeEndpoint(probeCtx, endpoint) == nil
+}
+
+func currentExecutableBase() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	return filepath.Base(exe)
 }
 
 // ownerAlive reports whether the recorded owner process still exists AND

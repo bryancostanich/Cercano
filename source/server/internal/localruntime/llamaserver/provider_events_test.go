@@ -101,9 +101,10 @@ func TestStart_SpawnWritesDurableEventWithModelSize(t *testing.T) {
 	if err := os.WriteFile(modelPath, []byte("stub-weights"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// Binary is the stub model file: resolveBinary passes, exec fails.
-	// Reaching the spawn path is what matters here, not a live server.
-	p := NewProvider(config.LlamaServerConfig{ModelDirs: []string{dir}, Binary: modelPath})
+	// Binary is a real executable that starts and exits quickly. The
+	// spawn event is written after cmd.Start succeeds, so an exec-format
+	// failure would not exercise it.
+	p := NewProvider(config.LlamaServerConfig{ModelDirs: []string{dir}, Binary: "/usr/bin/false"})
 	log, read := newTestEventLog(t)
 	p.SetEventLog(log)
 
@@ -117,9 +118,12 @@ func TestStart_SpawnWritesDurableEventWithModelSize(t *testing.T) {
 	if e.Runtime == nil || e.Runtime.Port == 0 {
 		t.Errorf("spawn event missing port: %+v", e.Runtime)
 	}
-	size, ok := e.Extra["model_size_bytes"].(float64)
+	size, ok := e.Extra["model_bytes"].(float64)
 	if !ok || size <= 0 {
-		t.Errorf("model_size_bytes = %v, want the on-disk weight size", e.Extra["model_size_bytes"])
+		t.Errorf("model_bytes = %v, want the on-disk weight size", e.Extra["model_bytes"])
+	}
+	if projected, ok := e.Extra["projected_bytes"].(float64); !ok || projected <= 0 {
+		t.Errorf("projected_bytes = %v, want memory projection in spawn event", e.Extra["projected_bytes"])
 	}
 }
 

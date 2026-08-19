@@ -24,10 +24,15 @@ import (
 	"cercano/source/server/internal/crashlog"
 	"cercano/source/server/internal/gguf"
 	"cercano/source/server/internal/localruntime"
+	"cercano/source/server/internal/sysram"
 	"cercano/source/server/pkg/config"
 )
 
 const runtimeName = "llama_server"
+
+const (
+	memoryGuardHeadroomBytes = 10 << 30 // 10 GiB, calibrated by runtime-event logs.
+)
 
 var quantRE = regexp.MustCompile(`(?i)(?:^|[-_. ])(Q[0-9][A-Z0-9]*(?:[_-][A-Z0-9]+){0,3})(?:$|[-_. ])`)
 
@@ -36,8 +41,16 @@ type instanceUpdater interface {
 }
 
 type Provider struct {
-	cfg     config.LlamaServerConfig
-	client  *http.Client
+	cfg    config.LlamaServerConfig
+	client *http.Client
+
+	// spawnMu serializes memory admission inside one agent. p.mu's
+	// double-check prevents duplicate starts of the same model; it does
+	// not prevent two different huge models from both sampling memory,
+	// both passing, and both spawning. The spawn path is rare and slow, so
+	// serialization is the clean safety boundary.
+	spawnMu sync.Mutex
+
 	mu      sync.RWMutex
 	running map[string]*managedInstance
 
@@ -61,6 +74,11 @@ type Provider struct {
 	// Nil disables durable event recording; every write goes through
 	// p.event, which tolerates a nil writer.
 	events *crashlog.Writer
+
+	// Memory probes are fields rather than direct package calls so tests
+	// can make the guard deterministic without spoofing OS memory state.
+	totalRAM     func() int64
+	nonEvictable func() (int64, bool)
 }
 
 // SetEventLog attaches the durable operational log. Separate from
@@ -145,10 +163,12 @@ type managedInstance struct {
 
 func NewProvider(cfg config.LlamaServerConfig) *Provider {
 	return &Provider{
-		cfg:      withDefaults(cfg),
-		client:   &http.Client{Timeout: 2 * time.Second},
-		running:  make(map[string]*managedInstance),
-		registry: newPidRegistry(defaultRegistryDir()),
+		cfg:          withDefaults(cfg),
+		client:       &http.Client{Timeout: 2 * time.Second},
+		running:      make(map[string]*managedInstance),
+		registry:     newPidRegistry(defaultRegistryDir()),
+		totalRAM:     sysram.Total,
+		nonEvictable: sysram.NonEvictable,
 	}
 }
 
@@ -273,8 +293,18 @@ func (p *Provider) Start(ctx context.Context, req localruntime.StartRequest, sin
 		return adopted, nil
 	}
 
+	p.spawnMu.Lock()
+	p.reapBeforeSpawn(ctx, model, binary, sink)
+	projection, err := p.checkMemoryBudget(model)
+	if err != nil {
+		p.spawnMu.Unlock()
+		p.event(crashlog.EventRefused, err.Error(), crashlog.RuntimeInfo{ModelID: model.ID}, projection.extra())
+		return nil, err
+	}
+
 	port, err := p.choosePort()
 	if err != nil {
+		p.spawnMu.Unlock()
 		return nil, err
 	}
 
@@ -314,27 +344,33 @@ func (p *Provider) Start(ctx context.Context, req localruntime.StartRequest, sin
 			PID:        record.PID,
 			Port:       record.Port,
 		}, nil)
+		p.spawnMu.Unlock()
 		return &record, nil
 	}
 	p.running[id] = instance
 	p.mu.Unlock()
 	p.emit(sink, "info", id, model.ID, "starting llama-server for "+model.DisplayName)
-	p.event(crashlog.EventSpawn, "starting llama-server for "+model.DisplayName, crashlog.RuntimeInfo{
-		InstanceID: id,
-		ModelID:    model.ID,
-		Port:       port,
-	}, map[string]any{
-		"model_size_bytes": model.SizeBytes,
-		"model_path":       model.Path,
-	})
 
 	if err := p.startProcess(id, binary, sink); err != nil {
+		p.spawnMu.Unlock()
 		p.updateRecord(id, sink, func(record *localruntime.InstanceRecord) {
 			record.State = localruntime.InstanceFailed
 			record.LastError = err.Error()
 		})
 		return &instance.record, err
 	}
+	p.mu.RLock()
+	pid := instance.record.PID
+	p.mu.RUnlock()
+	spawnExtra := projection.extra()
+	spawnExtra["model_path"] = model.Path
+	p.event(crashlog.EventSpawn, "started llama-server for "+model.DisplayName, crashlog.RuntimeInfo{
+		InstanceID: id,
+		ModelID:    model.ID,
+		PID:        pid,
+		Port:       port,
+	}, spawnExtra)
+	p.spawnMu.Unlock()
 	// The watch goroutine owns the process from birth, so a crash during the
 	// (possibly long) initial model load is observed — and restarted per
 	// config — instead of leaving a stale record behind.
@@ -453,9 +489,9 @@ func (p *Provider) Stop(_ context.Context, instanceID string) error {
 	pid := cmd.Process.Pid
 	res, err := killProcessWithResult(cmd.Process)
 	extra := map[string]any{
-		"wait_ms":       res.Wait.Milliseconds(),
-		"escalated":     res.Escalated,
-		"already_gone":  res.AlreadyGone,
+		"wait_ms":        res.Wait.Milliseconds(),
+		"escalated":      res.Escalated,
+		"already_gone":   res.AlreadyGone,
 		"confirmed_dead": err == nil,
 	}
 	reason := "stopped llama-server"
@@ -470,6 +506,171 @@ func (p *Provider) Stop(_ context.Context, instanceID string) error {
 		Port:       port,
 	}, extra)
 	return err
+}
+
+type memoryProjection struct {
+	TotalBytes           int64
+	CurrentBytes         int64
+	CurrentProbeOK       bool
+	RegistryBytes        int64
+	ModelBytes           int64
+	KVBytes              int64
+	KVBytesPerToken      int64
+	ContextTokens        int
+	HeadroomBytes        int64
+	LimitBytes           int64
+	ProjectedBytes       int64
+	FallbackToRegistry   bool
+	BlockingInstanceID   string
+	BlockingInstancePID  int
+	BlockingInstancePort int
+}
+
+func (m memoryProjection) extra() map[string]any {
+	return map[string]any{
+		"total_bytes":            m.TotalBytes,
+		"current_bytes":          m.CurrentBytes,
+		"current_probe_ok":       m.CurrentProbeOK,
+		"registry_bytes":         m.RegistryBytes,
+		"model_bytes":            m.ModelBytes,
+		"kv_bytes":               m.KVBytes,
+		"kv_bytes_per_token":     m.KVBytesPerToken,
+		"context_tokens":         m.ContextTokens,
+		"headroom_bytes":         m.HeadroomBytes,
+		"limit_bytes":            m.LimitBytes,
+		"projected_bytes":        m.ProjectedBytes,
+		"fallback_to_registry":   m.FallbackToRegistry,
+		"blocking_instance_id":   m.BlockingInstanceID,
+		"blocking_instance_pid":  m.BlockingInstancePID,
+		"blocking_instance_port": m.BlockingInstancePort,
+	}
+}
+
+func (p *Provider) checkMemoryBudget(model localruntime.ModelRecord) (memoryProjection, error) {
+	totalFn := p.totalRAM
+	if totalFn == nil {
+		totalFn = sysram.Total
+	}
+	nonEvictableFn := p.nonEvictable
+	if nonEvictableFn == nil {
+		nonEvictableFn = sysram.NonEvictable
+	}
+
+	projection := memoryProjection{
+		TotalBytes:     totalFn(),
+		ModelBytes:     model.SizeBytes,
+		HeadroomBytes:  memoryGuardHeadroomBytes,
+		RegistryBytes:  p.registryResidentEstimate(),
+		ContextTokens:  EffectiveContextSize(p.snapshot().ContextSize, model.ExtraArgs),
+		CurrentProbeOK: false,
+	}
+	projection.KVBytesPerToken, projection.KVBytes = p.kvEstimate(model, projection.ContextTokens)
+	current, ok := nonEvictableFn()
+	if ok {
+		projection.CurrentBytes = current
+		projection.CurrentProbeOK = true
+		// The OS probe is the truth for resident non-evictable memory,
+		// but immediately after cmd.Start a new llama-server may be on
+		// the books before all of its Metal buffers are wired. Treat the
+		// registry sum as a floor so a second same-process start cannot
+		// slip through that load window.
+		if projection.RegistryBytes > projection.CurrentBytes {
+			projection.CurrentBytes = projection.RegistryBytes
+		}
+	} else {
+		projection.CurrentBytes = projection.RegistryBytes
+		projection.FallbackToRegistry = true
+	}
+	projection.ProjectedBytes = projection.CurrentBytes + projection.ModelBytes + projection.KVBytes
+	if projection.TotalBytes <= 0 {
+		return projection, nil
+	}
+	projection.LimitBytes = projection.TotalBytes - projection.HeadroomBytes
+	if projection.LimitBytes <= 0 {
+		return projection, fmt.Errorf("llama-server memory guard: system RAM %s is below reserved headroom %s", bytesForHumans(projection.TotalBytes), bytesForHumans(projection.HeadroomBytes))
+	}
+	if projection.ProjectedBytes <= projection.LimitBytes {
+		return projection, nil
+	}
+	projection.BlockingInstanceID, projection.BlockingInstancePID, projection.BlockingInstancePort = p.largestLiveInstance()
+	return projection, fmt.Errorf("llama-server memory guard refused to start %s: projected non-evictable memory %s exceeds limit %s (current %s, model %s, KV %s for %d ctx tokens, headroom %s, total %s%s)",
+		model.DisplayName,
+		bytesForHumans(projection.ProjectedBytes),
+		bytesForHumans(projection.LimitBytes),
+		bytesForHumans(projection.CurrentBytes),
+		bytesForHumans(projection.ModelBytes),
+		bytesForHumans(projection.KVBytes),
+		projection.ContextTokens,
+		bytesForHumans(projection.HeadroomBytes),
+		bytesForHumans(projection.TotalBytes),
+		blockingInstanceSuffix(projection))
+}
+
+func (p *Provider) kvEstimate(model localruntime.ModelRecord, ctxTokens int) (perToken int64, total int64) {
+	if ctxTokens <= 0 || model.Path == "" {
+		return 0, 0
+	}
+	f, err := os.Open(model.Path)
+	if err != nil {
+		return 0, 0
+	}
+	defer f.Close()
+	meta, err := gguf.ParseMeta(io.LimitReader(f, identityHeaderWindow))
+	if err != nil || meta == nil {
+		return 0, 0
+	}
+	perToken = meta.KVBytesPerToken()
+	if perToken <= 0 {
+		return 0, 0
+	}
+	return perToken, perToken * int64(ctxTokens)
+}
+
+func (p *Provider) registryResidentEstimate() int64 {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	var total int64
+	for _, inst := range p.running {
+		if inst == nil || inst.record.State != localruntime.InstanceRunning && inst.record.State != localruntime.InstanceStarting {
+			continue
+		}
+		total += inst.model.SizeBytes
+	}
+	return total
+}
+
+func (p *Provider) largestLiveInstance() (id string, pid int, port int) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	var max int64
+	for _, inst := range p.running {
+		if inst == nil || inst.model.SizeBytes <= max {
+			continue
+		}
+		if inst.record.State != localruntime.InstanceRunning && inst.record.State != localruntime.InstanceStarting {
+			continue
+		}
+		max = inst.model.SizeBytes
+		id = inst.record.ID
+		pid = inst.record.PID
+		port = inst.record.Port
+	}
+	return id, pid, port
+}
+
+func blockingInstanceSuffix(m memoryProjection) string {
+	if m.BlockingInstanceID == "" {
+		return ""
+	}
+	return fmt.Sprintf(", largest live instance %s pid %d port %d", m.BlockingInstanceID, m.BlockingInstancePID, m.BlockingInstancePort)
+}
+
+func bytesForHumans(n int64) string {
+	if n <= 0 {
+		return "0 B"
+	}
+	const gib = 1 << 30
+	return fmt.Sprintf("%.2f GiB", float64(n)/gib)
 }
 
 func (p *Provider) Probe(ctx context.Context, instanceID string) (*localruntime.InstanceHealth, error) {

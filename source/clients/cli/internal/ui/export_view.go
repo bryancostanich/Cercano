@@ -65,7 +65,7 @@ type trajectoryExportErrMsg struct{ err error }
 
 func newTrajectoryExportView(ag *agentclient.Client, p theme.Palette, s theme.Styles, w, h int, currentConvID, prefill string) (*trajectoryExportView, tea.Cmd) {
 	v := &trajectoryExportView{styles: s, agent: ag, currentConvID: currentConvID, width: w, height: h, filtering: true, md: render.NewMarkdown(theme.MarkdownStyle(p)), zip: true}
-	v.allRows = loadHistoryRows(ag)
+	v.allRows, _ = loadHistoryRows(ag)
 	v.applyFilter()
 	if currentConvID != "" {
 		for i, r := range v.rows {

@@ -924,10 +924,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.content.SetSize(m.width, m.contentPageHeight())
 		}
 		// -r boot: open the history picker on the first sized frame.
+		var historyCmd tea.Cmd
 		if m.openHistoryOnStart && m.width > 0 {
 			m.openHistoryOnStart = false
-			hv, _ := newHistoryView(m.agent, m.palette, m.styles, m.width, m.height)
+			hv, cmd := newHistoryView(m.agent, m.palette, m.styles, m.width, m.height)
 			m.content = hv
+			historyCmd = cmd
 		}
 		// -s boot / first run / wizard resume: the wizard page wins when
 		// both flags are set — setup is the more urgent state.
@@ -938,7 +940,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Force a full alt-screen redraw on resize. Without ClearScreen,
 		// rows in the terminal that were occupied at the OLD size but not
 		// rewritten at the NEW size show stale content.
-		return m, tea.ClearScreen
+		return m, tea.Batch(tea.ClearScreen, historyCmd)
 
 	case tea.MouseWheelMsg:
 		if m.contentPageActive() {
@@ -1577,6 +1579,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				cv.notice = "exported full context → " + msg.path
 			}
+		}
+		return m, nil
+
+	case historyRowsLoadedMsg:
+		if hv, ok := m.content.(*historyView); ok {
+			hv.applyRowsLoaded(msg.rows, msg.err)
 		}
 		return m, nil
 
@@ -2800,8 +2808,9 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 	case slash.ResultOpenThemeSettings:
 		return m, m.openConfigSurface(configTabUI)
 	case slash.ResultOpenHistoryPicker:
-		hv, _ := newHistoryView(m.agent, m.palette, m.styles, m.width, m.height)
+		hv, cmd := newHistoryView(m.agent, m.palette, m.styles, m.width, m.height)
 		m.content = hv
+		return m, cmd
 	case slash.ResultOpenRuntimeDashboard:
 		return m, m.openConfigSurface(configTabModels)
 	case slash.ResultOpenMcpConfig:

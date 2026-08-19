@@ -64,6 +64,8 @@ type historyView struct {
 	allRows       []histRow
 	filter        string
 	filtering     bool
+	loading       bool
+	loadErr       string
 	cursor        int
 	scrollOffset  int
 	md            *render.Markdown
@@ -73,29 +75,48 @@ func newHistoryMarkdown(p theme.Palette) *render.Markdown {
 	return render.NewMarkdown(theme.MarkdownStyle(p))
 }
 
-// newHistoryView loads the conversation list synchronously (matching the old
-// picker + contextView) and returns the page. The turn drawer loads lazily.
+// newHistoryView returns the page immediately and loads the conversation list
+// asynchronously. The turn drawer still loads lazily.
 func newHistoryView(ag *agentclient.Client, p theme.Palette, s theme.Styles, w, h int) (*historyView, tea.Cmd) {
 	hv := &historyView{
 		styles: s, agent: ag,
 		width: w, height: h, cursor: 0, filtering: true, md: newHistoryMarkdown(p),
 	}
-	hv.allRows = loadHistoryRows(ag)
+	if ag == nil {
+		hv.applyFilter()
+		return hv, nil
+	}
+	hv.loading = true
 	hv.applyFilter()
-	return hv, nil
+	return hv, loadHistoryRowsCmd(ag)
+}
+
+// historyRowsLoadedMsg carries the asynchronous conversation-list result back
+// to the model. Errors stay visible in the history page instead of being
+// collapsed into the "no saved conversations" empty state.
+type historyRowsLoadedMsg struct {
+	rows []histRow
+	err  error
+}
+
+func loadHistoryRowsCmd(ag *agentclient.Client) tea.Cmd {
+	return func() tea.Msg {
+		rows, err := loadHistoryRows(ag)
+		return historyRowsLoadedMsg{rows: rows, err: err}
+	}
 }
 
 // loadHistoryRows snapshots conversations into histRows (newest first as the
 // agent returns them).
-func loadHistoryRows(ag *agentclient.Client) []histRow {
+func loadHistoryRows(ag *agentclient.Client) ([]histRow, error) {
 	if ag == nil {
-		return nil
+		return nil, nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	convs, err := ag.ListConversations(ctx, "", 100)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	rows := make([]histRow, 0, len(convs))
 	for _, c := range convs {
@@ -113,7 +134,35 @@ func loadHistoryRows(ag *agentclient.Client) []histRow {
 		}
 		rows = append(rows, histRow{id: c.ID, name: name, recap: c.Recap, meta: meta})
 	}
-	return rows
+	return rows, nil
+}
+
+func (h *historyView) applyRowsLoaded(rows []histRow, err error) {
+	h.loading = false
+	if err != nil {
+		h.loadErr = err.Error()
+		h.allRows = nil
+		h.rows = nil
+		h.cursor = 0
+		h.scrollOffset = 0
+		return
+	}
+	h.loadErr = ""
+	h.allRows = rows
+	h.applyFilter()
+}
+
+func (h *historyView) retryLoadCmd() tea.Cmd {
+	if h.agent == nil {
+		return nil
+	}
+	h.loading = true
+	h.loadErr = ""
+	h.allRows = nil
+	h.rows = nil
+	h.cursor = 0
+	h.scrollOffset = 0
+	return loadHistoryRowsCmd(h.agent)
 }
 
 func (h *historyView) ID() contentPageID { return contentPageHistory }
@@ -125,6 +174,9 @@ func (h *historyView) SetSize(w, hgt int) {
 }
 
 func (h *historyView) Update(msg tea.KeyPressMsg) (tea.Cmd, bool) {
+	if h.loadErr != "" && (msg.String() == "r" || msg.String() == "ctrl+r") {
+		return h.retryLoadCmd(), false
+	}
 	if h.filtering {
 		if handled := h.updateFilter(msg); handled {
 			return nil, false
@@ -321,8 +373,14 @@ func (h *historyView) renderSearchChrome(width int) []string {
 	if h.filtering {
 		label += "█"
 	}
-	label += fmt.Sprintf("  (%d/%d)", len(h.rows), len(h.allRows))
-	if !h.filtering && h.filter == "" {
+	if h.loading {
+		label += "  (loading…)"
+	} else if h.loadErr != "" {
+		label += "  (load failed)"
+	} else {
+		label += fmt.Sprintf("  (%d/%d)", len(h.rows), len(h.allRows))
+	}
+	if !h.loading && h.loadErr == "" && !h.filtering && h.filter == "" {
 		label = "/ search"
 	}
 	input := h.styles.UserPrompt.Render("▶ ") + h.styles.Primary.Render(ansi.Truncate(label, max(1, width-2), "…"))
@@ -343,6 +401,18 @@ func (h *historyView) rowsLines() ([]string, []histLineMeta) {
 	}
 	add("", histLineMeta{row: -1})
 
+	if h.loading {
+		add(h.styles.Muted.Render("  loading conversations…"), histLineMeta{row: -1})
+		return lines, meta
+	}
+	if h.loadErr != "" {
+		msg := "  could not load conversations: " + h.loadErr
+		for _, line := range strings.Split(ansi.Wrap(msg, maxInt(8, panelW), ""), "\n") {
+			add(h.styles.Error.Render(line), histLineMeta{row: -1})
+		}
+		add(h.styles.Muted.Render("  press r to retry"), histLineMeta{row: -1})
+		return lines, meta
+	}
 	if len(h.rows) == 0 {
 		if strings.TrimSpace(h.filter) != "" {
 			add(h.styles.Muted.Render("  (no conversations match the search)"), histLineMeta{row: -1})

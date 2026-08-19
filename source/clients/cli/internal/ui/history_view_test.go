@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -95,6 +96,41 @@ func TestNewHistoryView_StartsWithSearchFocused(t *testing.T) {
 	}
 	if ruleCount < 2 {
 		t.Fatalf("search prompt should be wrapped in top and bottom rules:\n%s", joined)
+	}
+}
+
+func TestHistoryRowsLines_ShowsLoadingState(t *testing.T) {
+	h := newTestHistoryView(nil, 100, 30)
+	h.loading = true
+	lines, _ := h.rowsLines()
+	joined := stripAnsiCSI(strings.Join(lines, "\n"))
+	if !strings.Contains(joined, "loading conversations") || !strings.Contains(joined, "(loading…)") {
+		t.Fatalf("loading history view should show loading state, got:\n%s", joined)
+	}
+	if strings.Contains(joined, "no saved conversations") {
+		t.Fatalf("loading history view must not look like an empty store, got:\n%s", joined)
+	}
+}
+
+func TestHistoryRowsLines_ShowsLoadErrorAndRetryHint(t *testing.T) {
+	h := newTestHistoryView(nil, 100, 30)
+	h.applyRowsLoaded(nil, errors.New("deadline exceeded"))
+	lines, _ := h.rowsLines()
+	joined := stripAnsiCSI(strings.Join(lines, "\n"))
+	if !strings.Contains(joined, "could not load conversations: deadline exceeded") || !strings.Contains(joined, "press r to retry") {
+		t.Fatalf("failed history load should surface error and retry hint, got:\n%s", joined)
+	}
+	if strings.Contains(joined, "no saved conversations") {
+		t.Fatalf("failed history load must not look like an empty store, got:\n%s", joined)
+	}
+}
+
+func TestHistoryApplyRowsLoadedRestoresRowsAfterError(t *testing.T) {
+	h := newTestHistoryView(nil, 100, 30)
+	h.applyRowsLoaded(nil, errors.New("deadline exceeded"))
+	h.applyRowsLoaded([]histRow{{id: "a", name: "alpha", meta: "1 turn"}}, nil)
+	if h.loading || h.loadErr != "" || len(h.rows) != 1 || h.rows[0].id != "a" {
+		t.Fatalf("successful reload should clear error and apply rows; loading=%v err=%q rows=%+v", h.loading, h.loadErr, h.rows)
 	}
 }
 

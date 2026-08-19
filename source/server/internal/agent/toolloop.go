@@ -712,7 +712,16 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 					blocks = []llm.Block{out}
 					emit(LoopEvent{Kind: LoopToolExecComplete, ToolUseID: pc.block.ToolUseID, ToolName: pc.block.ToolName, Summary: err.Error(), IsError: true})
 				} else {
-					out.Content = res.LLMContent()
+					// Same window ceiling as the sequential path below. R-tier
+					// reads run here, and this is the path the production
+					// incident took: one unscoped Grep returning ~346 KB into a
+					// 32k window. See capToolResultForWindow.
+					content, capped := capToolResultForWindow(res.LLMContent(), in.ContextWindow)
+					if capped {
+						log.Printf("[tool-loop] tool result capped to window: conv=%s tool=%s window=%d final_bytes=%d",
+							in.ConversationID, pc.block.ToolName, in.ContextWindow, len(content))
+					}
+					out.Content = content
 					out.StartLine = res.StartLine
 					blocks = toolResultBlocks(out, res, supportsVision)
 					emit(LoopEvent{Kind: LoopToolExecComplete, ToolUseID: pc.block.ToolUseID, ToolName: pc.block.ToolName, Summary: summarizeResult(res), Detail: res.Detail, StartLine: res.StartLine, IsError: false})
@@ -853,7 +862,20 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 					return ToolLoopResult{FinalText: finalText, Iterations: iter + 1, History: hist, InputTokens: lastIn, OutputTokens: lastOut, CalledTools: calledTools}, nil
 				}
 			} else {
-				out.Content = res.LLMContent()
+				// Last-resort ceiling before the result enters history. The
+				// constructors already apply an absolute cap, but they are
+				// context-free; this is the only layer that knows the window in
+				// play, and it also covers producers the constructors never see
+				// (MCP tools, future non-row results). Without it a single call
+				// can exceed the window outright — and it cannot be recovered
+				// from, because history trimming must preserve the newest
+				// message, which is exactly this one.
+				content, capped := capToolResultForWindow(res.LLMContent(), in.ContextWindow)
+				if capped {
+					log.Printf("[tool-loop] tool result capped to window: conv=%s tool=%s window=%d final_bytes=%d",
+						in.ConversationID, pc.block.ToolName, in.ContextWindow, len(content))
+				}
+				out.Content = content
 				out.StartLine = res.StartLine
 				emit(LoopEvent{Kind: LoopToolExecComplete, ToolUseID: pc.block.ToolUseID, ToolName: pc.block.ToolName, Summary: summarizeResult(res), Detail: res.Detail, StartLine: res.StartLine, IsError: false})
 				results = append(results, toolResultBlocks(out, res, supportsVision)...)

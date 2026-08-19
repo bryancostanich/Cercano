@@ -144,34 +144,27 @@ func (r *Result) LLMContent() string {
 	return body
 }
 
-// NewRowsResult constructs a rows-shaped Result, applying the standard
-// row-count truncation policy (200 rows max).
+// NewRowsResult constructs a rows-shaped Result, applying the shared row
+// truncation policy: row count, per-value size, and total serialized bytes.
+// See agenttools.TruncateRows for why all three ceilings are needed.
 func NewRowsResult(rows []map[string]any) *Result {
-	r := &Result{Type: ResultRows}
-	const maxRows = 200
-	if len(rows) > maxRows {
-		r.Rows = rows[:maxRows]
-		r.Truncated = true
-		r.Note = "showed first 200 rows; refine the query for more"
-		return r
+	t := TruncateRows(rows)
+	return &Result{
+		Type:      ResultRows,
+		Rows:      t.Rows,
+		Truncated: t.Truncated,
+		Note:      t.Note,
 	}
-	r.Rows = rows
-	return r
 }
 
 // NewTextResult constructs a text-shaped Result with byte-cap truncation
 // (32 KiB) so the agent doesn't ingest megabytes of file content.
 func NewTextResult(text string) *Result {
 	r := &Result{Type: ResultText}
-	const maxBytes = 32 * 1024
-	if len(text) > maxBytes {
+	if len(text) > MaxResultBytes {
 		// Truncate at codepoint boundary so the rendered string stays
 		// valid UTF-8.
-		cut := maxBytes
-		for cut > 0 && !isUTF8Boundary(text[cut]) {
-			cut--
-		}
-		r.Text = text[:cut] + "\n… (truncated)"
+		r.Text = TruncateUTF8(text, MaxResultBytes) + "\n… (truncated)"
 		r.Truncated = true
 		r.Note = "showed first 32 KiB; refine to get more"
 		return r

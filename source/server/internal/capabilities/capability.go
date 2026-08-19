@@ -101,30 +101,24 @@ func (r *Result) LLMContent() string {
 	return body
 }
 
-// NewRowsResult applies the 200-row truncation policy.
+// NewRowsResult applies the shared row truncation policy (row count, per-value
+// size, and total serialized bytes). The policy lives in agenttools so this
+// type and agenttools.Result cannot drift apart; see agenttools.TruncateRows.
 func NewRowsResult(rows []map[string]any) *Result {
-	r := &Result{Type: ResultRows}
-	const maxRows = 200
-	if len(rows) > maxRows {
-		r.Rows = rows[:maxRows]
-		r.Truncated = true
-		r.Note = "showed first 200 rows; refine the query for more"
-		return r
+	t := agenttools.TruncateRows(rows)
+	return &Result{
+		Type:      ResultRows,
+		Rows:      t.Rows,
+		Truncated: t.Truncated,
+		Note:      t.Note,
 	}
-	r.Rows = rows
-	return r
 }
 
 // NewTextResult applies the 32 KiB byte-cap truncation policy.
 func NewTextResult(text string) *Result {
 	r := &Result{Type: ResultText}
-	const maxBytes = 32 * 1024
-	if len(text) > maxBytes {
-		cut := maxBytes
-		for cut > 0 && (text[cut]&0xC0) == 0x80 {
-			cut--
-		}
-		r.Text = text[:cut] + "\n… (truncated)"
+	if len(text) > agenttools.MaxResultBytes {
+		r.Text = agenttools.TruncateUTF8(text, agenttools.MaxResultBytes) + "\n… (truncated)"
 		r.Truncated = true
 		r.Note = "showed first 32 KiB; refine to get more"
 		return r

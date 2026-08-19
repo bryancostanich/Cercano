@@ -86,19 +86,48 @@ func TestRenderConfirmPrompt_SuggestPlan_AsksPlainQuestionNotDestructive(t *test
 
 func TestRenderConfirmPrompt_RequestPlanApproval_AsksToExecute(t *testing.T) {
 	m := minimalModel()
-	s := stripAnsiCSI(m.renderConfirmPrompt(&pendingToolCall{
+	raw := m.renderConfirmPrompt(&pendingToolCall{
 		Name:       "request_plan_approval",
 		Args:       `{"summary":"Fix handle-drag: 3 phases","effort":"viz-drag-audit"}`,
 		Permission: "X",
-	}))
+	})
+	s := stripAnsiCSI(raw)
 	if !strings.Contains(s, "start executing") {
 		t.Errorf("request_plan_approval prompt should ask to execute, got: %q", s)
 	}
 	if strings.Contains(s, "DESTRUCTIVE") || strings.Contains(s, "⚠") {
 		t.Errorf("request_plan_approval must not be DESTRUCTIVE/⚠: %q", s)
 	}
-	if !strings.Contains(s, "Plan: Fix handle-drag: 3 phases") {
-		t.Errorf("prompt should surface summary as Plan detail, got: %q", s)
+	for _, want := range []string{"Plan\n    Fix handle-drag: 3 phases", "Effort\n    viz-drag-audit"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("prompt should render plan approval detail block %q, got: %q", want, s)
+		}
+	}
+	if !strings.Contains(raw, "\x1b[1;38;2;") || !strings.Contains(raw, "mPlan\x1b[m") || !strings.Contains(raw, "mEffort\x1b[m") {
+		t.Errorf("plan approval labels should be bold, got: %q", raw)
+	}
+}
+
+func TestRenderConfirmPrompt_RequestPlanApproval_WrapsDetailsWithHangingIndent(t *testing.T) {
+	m := minimalModel()
+	m.width = 28
+	s := stripAnsiCSI(m.renderConfirmPrompt(&pendingToolCall{
+		Name:       "request_plan_approval",
+		Args:       `{"summary":"alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau","effort":"floating-origin","spec_path":"efforts/floating-origin/with/a/deep/path/to/spec.md","plan_path":"efforts/floating-origin/with/a/deep/path/to/plan.md"}`,
+		Permission: "X",
+	}))
+	for _, want := range []string{
+		"Plan\n    alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron",
+		"    pi rho sigma tau",
+		"Spec\n    efforts/floating-origin/with/a/deep/path/to/spec.md",
+		"Plan file\n    efforts/floating-origin/with/a/deep/path/to/plan.md",
+	} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("plan approval details should wrap with block indentation; missing %q in %q", want, s)
+		}
+	}
+	if strings.Contains(s, "\nepsilon zeta") || strings.Contains(s, "\nfloating-origin/spec.md") {
+		t.Fatalf("wrapped plan approval details should not restart at column 0, got: %q", s)
 	}
 }
 

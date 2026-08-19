@@ -3779,7 +3779,9 @@ func (m Model) renderConfirmPrompt(p *pendingToolCall) string {
 	}
 
 	lines := []string{head + m.styles.AgentProse.Render(confirmPromptTitle(p))}
-	if p.Name == "suggest_autonomous" || p.Name == "request_autonomous_execution" {
+	if p.Name == "request_plan_approval" {
+		lines = append(lines, m.renderPlanApprovalConfirmDetails(p)...)
+	} else if p.Name == "suggest_autonomous" || p.Name == "request_autonomous_execution" {
 		lines = append(lines, m.renderAutonomousBriefConfirmDetails(p)...)
 	} else if p.Name == "request_autonomous_exit" {
 		lines = append(lines, m.renderAutonomousExitConfirmDetails(p)...)
@@ -3857,6 +3859,36 @@ func toolSpecificConfirmSummary(p *pendingToolCall) string {
 		return summary
 	}
 	return ""
+}
+
+func (m Model) renderPlanApprovalConfirmDetails(p *pendingToolCall) []string {
+	obj, ok := decodeArgObject(p.Args)
+	if !ok {
+		return nil
+	}
+	bodyWidth := m.confirmBlockBodyWidth()
+	lines := make([]string, 0, 8)
+	addTextSection := func(heading, text string) {
+		text = strings.TrimSpace(text)
+		if text == "" {
+			return
+		}
+		if len(lines) > 0 {
+			lines = append(lines, "")
+		}
+		lines = append(lines, "  "+m.styles.Accent.Bold(true).Render(heading))
+		wrapped := strings.Split(ansi.Wrap(oneLine(text), bodyWidth, ""), "\n")
+		for _, line := range wrapped {
+			if strings.TrimSpace(line) != "" {
+				lines = append(lines, "    "+m.styles.AgentProse.Render(line))
+			}
+		}
+	}
+	addTextSection("Plan", stringArg(obj, "summary"))
+	addTextSection("Effort", stringArg(obj, "effort"))
+	addTextSection("Spec", stringArg(obj, "spec_path"))
+	addTextSection("Plan file", stringArg(obj, "plan_path"))
+	return lines
 }
 
 func (m Model) renderAutonomousBriefConfirmDetails(p *pendingToolCall) []string {

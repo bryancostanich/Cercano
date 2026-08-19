@@ -5,7 +5,7 @@ var builtinProtocols = []Protocol{
 		Name:        "design-decisions",
 		Description: "Stop and weigh real options before coding a structural decision.",
 		Domain:      DomainCore,
-		Trigger:     "Facing a real decision with more than one viable approach → stop, enumerate the real options in a Markdown pipe table (decision axes as rows, the actual option titles across the header row) with their trade-offs in plain English, and get human approval before writing code.",
+		Trigger:     "Facing a real decision with more than one viable approach → stop, state the decision question on its own line, enumerate the real options in a Markdown pipe table (decision axes as rows, the actual option titles across the header row) with their trade-offs in plain English, and get human approval before writing code.",
 		Body: `# Design Decision Protocol
 
 ## When This Applies
@@ -33,7 +33,11 @@ Any time there are multiple viable implementation approaches — data modeling, 
 
    **Required rollup table**: after identifying the options, present the comparison as a normal Markdown pipe table with **decision axes as rows** and the **actual option titles in the top row**. Do not hide the titles in a separate legend with A/B/C-only columns, and do not hand-draw ASCII/grid tables. Markdown tables exist so the renderer can wrap cells and keep the table readable.
 
+   **State the decision above the table**: immediately before the table, write one line naming the question being decided, in the form ` + "`Decision: <question being decided>`" + `. The table shows only candidate answers, so without that line the reader sees options with no stated question. Do not rely on surrounding prose to imply the question, and do not jump straight from the options list into the table.
+
    Use this shape:
+
+   Decision: should the noisy watchdog check stay on by default?
 
    | Axis | Disable by default | Disable one check | Tune checks now |
    |---|---|---|---|
@@ -44,7 +48,7 @@ Any time there are multiple viable implementation approaches — data modeling, 
    | Best reason | Safest user default | Narrowest behavior change | Addresses root cause |
    | Main drawback | Less watchdog coverage | Doesn't fix all noise | More work now |
 
-   Table rules: option titles belong in the header row; cells may be short phrases and may wrap. Keep wording concise, but do not destroy clarity just to avoid wrapping. Put longer nuance below the table in prose bullets.
+   Table rules: the decision question goes on its own line above the table; option titles belong in the header row; cells may be short phrases and may wrap. Keep wording concise, but do not destroy clarity just to avoid wrapping. Put longer nuance below the table in prose bullets.
 
 4. **Explicitly flag hacks.** If an option conflates unrelated concerns, overloads a field for a dual purpose, or works "because there happen to be unused slots," call it a hack. Do not dress it up.
 

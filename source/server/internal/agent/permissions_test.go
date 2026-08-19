@@ -42,14 +42,14 @@ func TestGateDecision_Permissive(t *testing.T) {
 	}
 }
 
-func TestGateDecision_Bypass_StillConfirmsX(t *testing.T) {
+func TestGateDecision_Bypass_SkipsEveryTier(t *testing.T) {
 	cases := []struct {
 		tier llm.Permission
 		want bool
 	}{
 		{llm.PermR, false},
 		{llm.PermW, false},
-		{llm.PermX, true},
+		{llm.PermX, false},
 	}
 	for _, c := range cases {
 		got := GateDecision(ModeBypass, c.tier)
@@ -144,14 +144,19 @@ func TestPermissionStore_RetainsModeOnBadFile(t *testing.T) {
 	}
 }
 
-func TestGateDecisionForTool_BypassSkipsDelegationGrantConfirm(t *testing.T) {
-	for _, name := range []string{"dispatch", "workflow"} {
+func TestGateDecisionForTool_BypassSkipsDestructiveAndDelegationPrompts(t *testing.T) {
+	for _, name := range []string{"dispatch", "workflow", "rm_file", "git_push", "Bash"} {
 		if GateDecisionForTool(ModeBypass, llm.PermX, name, false, false) {
-			t.Fatalf("%s should not prompt in bypass even when its granted toolset escalates it to X", name)
+			t.Fatalf("%s should not prompt in bypass even when it is X-tier", name)
 		}
 	}
-	if !GateDecisionForTool(ModeBypass, llm.PermX, "git_push", false, false) {
-		t.Fatal("ordinary X-tier tools should still prompt in bypass")
+}
+
+func TestGateDecisionForTool_BypassKeepsHumanHandoffPrompts(t *testing.T) {
+	for _, name := range []string{"suggest_plan", "request_plan_approval", "request_autonomous_execution", "request_autonomous_exit", "restart_agent"} {
+		if !GateDecisionForTool(ModeBypass, llm.PermX, name, false, false) {
+			t.Fatalf("%s should still prompt in bypass because it asks the human to change session state", name)
+		}
 	}
 }
 
@@ -180,8 +185,8 @@ func TestGateDecisionForMCP(t *testing.T) {
 				c.mode, c.isMCP, c.allowlisted, got, c.want)
 		}
 	}
-	if !GateDecisionForMCP(ModeBypass, llm.PermX, true, true) {
-		t.Fatal("X-tier MCP tool must still confirm under bypass, even if allowlisted")
+	if GateDecisionForMCP(ModeBypass, llm.PermX, true, true) {
+		t.Fatal("X-tier MCP tool should not confirm under bypass")
 	}
 }
 

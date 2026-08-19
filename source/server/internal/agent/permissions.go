@@ -27,54 +27,62 @@ func ParseMode(s string) (PermissionMode, error) {
 	return "", fmt.Errorf("unknown permission mode: %q (want strict|permissive|bypass)", s)
 }
 
-// GateDecision returns true when a tool call at the given tier requires
-// human confirmation under the given mode. Bypass suppresses W-tier prompts, but
-// X-tier calls still confirm because they are destructive or session-control
-// operations that must never auto-run.
+// GateDecision returns true when a tool call at the given tier requires human
+// confirmation under the given mode. Bypass suppresses permission prompts for
+// ordinary tools at every tier; tool-specific human-handoff prompts are layered
+// in GateDecisionForTool.
 func GateDecision(mode PermissionMode, tier llm.Permission) bool {
 	if tier == llm.PermR {
 		return false
-	}
-	if tier == llm.PermX {
-		return true
 	}
 	switch mode {
 	case ModeStrict:
 		return true
 	case ModePermissive:
-		return false
+		return tier == llm.PermX
 	case ModeBypass:
 		return false
 	}
 	return true
 }
 
-// GateDecisionForTool extends GateDecision with tool-specific policy.
-// Delegation tools can be dynamically escalated to X when their granted toolset
-// includes write-capable tools. That X means "confirm the sub-agent grant once"
-// in strict/permissive modes; in bypass mode, the user has explicitly asked to
-// skip those gates, so delegation must not prompt solely because its grant is
-// write-capable. Ordinary X-tier tools still confirm under bypass.
+// GateDecisionForTool extends GateDecision with tool-specific policy. Bypass
+// skips destructive/executing tool prompts, including built-in X-tier tools and
+// delegated-agent grant prompts. It still preserves explicit human-handoff
+// prompts: those tools are not asking for permission to mutate the workspace,
+// they are asking the user to change the conversation's operating mode.
 func GateDecisionForTool(mode PermissionMode, tier llm.Permission, toolName string, isMCP, allowlisted bool) bool {
-	if mode == ModeBypass && tier == llm.PermX && (toolName == "dispatch" || toolName == "workflow") {
-		return false
+	if mode == ModeBypass && isHumanHandoffTool(toolName) {
+		return true
 	}
 	return GateDecisionForMCP(mode, tier, isMCP, allowlisted)
 }
 
+func isHumanHandoffTool(toolName string) bool {
+	switch toolName {
+	case "suggest_plan",
+		"request_plan_approval",
+		"suggest_autonomous",
+		"request_autonomous_execution",
+		"request_autonomous_exit",
+		"complete_autonomous_review",
+		"auto_exit",
+		"restart_agent":
+		return true
+	default:
+		return false
+	}
+}
+
 // GateDecisionForMCP extends GateDecision with MCP origin. MCP tools are
 // untrusted third-party code: they confirm by default even in permissive mode,
-// unless allowlisted. Bypass suppresses non-X MCP prompts; X-tier calls still
-// confirm even under bypass and even when allowlisted.
+// unless allowlisted. Bypass suppresses MCP prompts at every tier.
 func GateDecisionForMCP(mode PermissionMode, tier llm.Permission, isMCP, allowlisted bool) bool {
-	if tier == llm.PermX {
-		return true
-	}
 	if mode == ModeBypass {
 		return false
 	}
 	if isMCP {
-		return !allowlisted
+		return tier == llm.PermX || !allowlisted
 	}
 	return GateDecision(mode, tier)
 }

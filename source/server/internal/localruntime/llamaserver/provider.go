@@ -294,6 +294,10 @@ func (p *Provider) Start(ctx context.Context, req localruntime.StartRequest, sin
 	}
 
 	p.spawnMu.Lock()
+	if existing := p.liveInstance(model, sink); existing != nil {
+		p.spawnMu.Unlock()
+		return existing, nil
+	}
 	p.reapBeforeSpawn(ctx, model, binary, sink)
 	projection, err := p.checkMemoryBudget(model)
 	if err != nil {
@@ -904,6 +908,26 @@ func (p *Provider) waitReady(ctx context.Context, instanceID, endpoint string) e
 		case <-ticker.C:
 		}
 	}
+}
+
+func (p *Provider) liveInstance(model localruntime.ModelRecord, sink localruntime.LogSink) *localruntime.InstanceRecord {
+	p.mu.RLock()
+	var record localruntime.InstanceRecord
+	if existing := p.liveInstanceForLocked(model); existing != nil {
+		record = existing.record
+	}
+	p.mu.RUnlock()
+	if record.ID == "" {
+		return nil
+	}
+	p.emit(sink, "info", record.ID, model.ID, "reusing running llama-server for "+model.DisplayName)
+	p.event(crashlog.EventReuse, "reusing running llama-server for "+model.DisplayName, crashlog.RuntimeInfo{
+		InstanceID: record.ID,
+		ModelID:    model.ID,
+		PID:        record.PID,
+		Port:       record.Port,
+	}, nil)
+	return &record
 }
 
 // liveInstanceForLocked returns an instance already serving the given model

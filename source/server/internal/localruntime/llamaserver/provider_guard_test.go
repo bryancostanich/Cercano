@@ -31,6 +31,29 @@ func sparseModel(t *testing.T, dir, name string, size int64) string {
 	return path
 }
 
+func TestStart_ReusesLiveInstanceBeforeMemoryGuard(t *testing.T) {
+	dir := t.TempDir()
+	modelPath := sparseModel(t, dir, "same-model.gguf", 20*gib)
+	p := NewProvider(config.LlamaServerConfig{ModelDirs: []string{dir}, Binary: "/usr/bin/false"})
+	p.totalRAM = func() int64 { return 128 * gib }
+	p.nonEvictable = func() (int64, bool) { return 110 * gib, true }
+	p.running["existing"] = &managedInstance{
+		model:  localruntime.ModelRecord{ID: "existing-model", Path: modelPath, SizeBytes: 20 * gib},
+		record: localruntime.InstanceRecord{ID: "existing", PID: 4242, Port: 1234, State: localruntime.InstanceRunning},
+	}
+
+	record, err := p.Start(context.Background(), localruntime.StartRequest{ModelID: "same-model"}, nil)
+	if err != nil {
+		t.Fatalf("reuse should happen before the guard can refuse a duplicate start: %v", err)
+	}
+	if record == nil || record.ID != "existing" {
+		t.Fatalf("got record %+v, want existing instance", record)
+	}
+	if len(p.running) != 1 {
+		t.Fatalf("running has %d entries; reuse must not insert a duplicate", len(p.running))
+	}
+}
+
 func TestStart_MemoryGuardRefusesBeforeSpawning(t *testing.T) {
 	dir := t.TempDir()
 	sparseModel(t, dir, "huge-model.gguf", 20*gib)

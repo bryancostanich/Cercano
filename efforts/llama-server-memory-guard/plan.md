@@ -48,7 +48,7 @@ platforms return the unknown sentinel; callers can distinguish unknown from zero
 - [x] Add `NonEvictable()` to `sysram` following the existing per-OS build-tag structure
 - [x] Implement the darwin probe by parsing `/usr/bin/vm_stat` (see decision #2: no
   sysctl exposes wired/compressor counts, and `host_statistics64` would require
-                                              cgo in a deliberately pure-Go repo)
+                                                                  cgo in a deliberately pure-Go repo)
 - [x] Implement or explicitly decline the linux probe, returning unknown if declined
 - [x] Keep `sysram_other.go` returning the unknown sentinel
 - [x] Run `go test ./internal/sysram/...`
@@ -104,15 +104,15 @@ Objective: prove the guard actually prevents the overlap, rather than trusting u
 tests.
 Files: no production edits; a throwaway probe script at most.
 
-- [ ] Start GLM-4.5-Air through the runtime dashboard and record actual resident size
-- [ ] Compare recorded projection against measured actual and note the delta
-- [ ] Restart the agent while GLM is live and confirm the barrier reaped and waited
-- [ ] Confirm a second concurrent large-model start is refused with the numeric error
-- [ ] Confirm `crash.log` now contains spawn, reuse, reap and stop records
+- [x] Start GLM-4.5-Air through the runtime dashboard and record actual resident size
+- [x] Compare recorded projection against measured actual and note the delta
+- [-] Restart the agent while GLM is live and confirm the barrier reaped and waited
+- [x] Confirm a second concurrent large-model start is refused with the numeric error
+- [-] Confirm `crash.log` now contains spawn, reuse, reap and stop records
 
 ## Phase 6 — Cleanup and checkpoint
 
-- [ ] Remove any throwaway probe scripts
-- [ ] Confirm `go build ./...` and `go test ./...` pass from `source/server`
+- [x] Remove any throwaway probe scripts
+- [x] Confirm `go build ./...` and `go test ./...` pass from `source/server`
 - [ ] Checkpoint the guard, teardown and event log with a conventional-commit message
-- [ ] Record the deferred override and registry-flock follow-ups in the effort dir
+- [x] Record the deferred override and registry-flock follow-ups in the effort dir

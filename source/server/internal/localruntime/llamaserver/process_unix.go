@@ -23,9 +23,9 @@ var (
 )
 
 type terminationResult struct {
-	PID        int
-	Wait       time.Duration
-	Escalated  bool
+	PID         int
+	Wait        time.Duration
+	Escalated   bool
 	AlreadyGone bool
 }
 

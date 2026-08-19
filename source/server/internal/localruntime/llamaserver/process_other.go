@@ -11,9 +11,9 @@ import (
 func setProcessGroup(cmd *exec.Cmd) {}
 
 type terminationResult struct {
-	PID        int
-	Wait       time.Duration
-	Escalated  bool
+	PID         int
+	Wait        time.Duration
+	Escalated   bool
 	AlreadyGone bool
 }
 

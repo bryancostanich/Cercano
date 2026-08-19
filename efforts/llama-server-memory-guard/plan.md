@@ -44,12 +44,14 @@ Files: `source/server/internal/sysram/sysram_darwin.go`, `sysram_linux.go`,
 Tests: darwin probe returns a plausible non-zero value below `Total()`; unsupported
 platforms return the unknown sentinel; callers can distinguish unknown from zero.
 
-- [ ] Verify vm_stat page accounting against live output and record the numbers
-- [ ] Add `NonEvictable()` to `sysram` following the existing per-OS build-tag structure
-- [ ] Implement the darwin probe from host_statistics64 page counts
-- [ ] Implement or explicitly decline the linux probe, returning unknown if declined
-- [ ] Keep `sysram_other.go` returning the unknown sentinel
-- [ ] Run `go test ./internal/sysram/...`
+- [x] Verify vm_stat page accounting against live output and record the numbers
+- [x] Add `NonEvictable()` to `sysram` following the existing per-OS build-tag structure
+- [x] Implement the darwin probe by parsing `/usr/bin/vm_stat` (see decision #2: no
+  sysctl exposes wired/compressor counts, and `host_statistics64` would require
+            cgo in a deliberately pure-Go repo)
+- [x] Implement or explicitly decline the linux probe, returning unknown if declined
+- [x] Keep `sysram_other.go` returning the unknown sentinel
+- [x] Run `go test ./internal/sysram/...`
 
 ## Phase 3 — Synchronous teardown
 

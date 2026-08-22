@@ -494,12 +494,15 @@ func TestResolveConfirmKey_OtherKey_Ignored(t *testing.T) {
 	}
 }
 
-func TestConfirmPromptHintsAdvertiseEnterSteer(t *testing.T) {
+func TestConfirmPromptHintsDoNotAdvertisePromptSteer(t *testing.T) {
 	m := minimalModel()
 	out := m.confirmPromptHints(&pendingToolCall{ToolUseID: "tool-1", Name: "dispatch"})
 	plain := stripAnsiCSI(out)
-	if !strings.Contains(plain, "press [enter] to steer convo") {
-		t.Fatalf("confirm hints should advertise enter steering, got %q", plain)
+	if strings.Contains(plain, "type below") || strings.Contains(plain, "press [enter] to steer convo") {
+		t.Fatalf("confirm hints should not advertise prompt typing while gate is up, got %q", plain)
+	}
+	if !strings.Contains(plain, "[c]hat") {
+		t.Fatalf("confirm hints should keep explicit c hotkey, got %q", plain)
 	}
 }
 
@@ -530,7 +533,7 @@ func TestToolConfirm_SessionControlDoesNotExposeChatExtra(t *testing.T) {
 	}
 }
 
-func TestConfirmPending_SlashCommandRunsInsteadOfSteering(t *testing.T) {
+func TestConfirmPending_DisablesPromptTyping(t *testing.T) {
 	m := New(nil, false)
 	m = send(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.pendingConfirm = toolConfirm(&pendingToolCall{ToolUseID: "tool-1", Name: "git_push", Args: `{}`, Permission: "X"})
@@ -540,104 +543,45 @@ func TestConfirmPending_SlashCommandRunsInsteadOfSteering(t *testing.T) {
 		next, _ := m.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
 		m = next.(Model)
 	}
-	if m.input.Value() != "/help" {
-		t.Fatalf("typing a slash command should edit the prompt, got %q", m.input.Value())
+	if m.input.Value() != "" {
+		t.Fatalf("typing while confirm pending must not edit prompt, got %q", m.input.Value())
 	}
 
 	next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Text: "\n"})
 	m = next.(Model)
-
-	if m.input.Value() != "" {
-		t.Fatalf("running a slash command should clear the prompt, got %q", m.input.Value())
+	if m.pendingConfirm == nil {
+		t.Fatal("enter while confirm pending should not resolve the gate")
 	}
-	for _, e := range m.mainChat().Entries() {
-		if strings.Contains(e.Content, "steer: /help") {
-			t.Fatalf("slash command should not be sent as steer text: %+v", e)
-		}
-	}
-	if len(m.mainChat().Entries()) <= before {
-		t.Fatal("/help should produce output instead of steering the tool call")
+	if len(m.mainChat().Entries()) != before {
+		t.Fatal("typing/enter while confirm pending should not run slash commands or steer")
 	}
 }
 
-func TestConfirmPending_TypingThenEnterSteersToolCall(t *testing.T) {
+func TestConfirmPending_PasteDoesNotEditPrompt(t *testing.T) {
 	m := New(nil, false)
 	m.pendingConfirm = toolConfirm(&pendingToolCall{ToolUseID: "tool-1", Name: "dispatch", Args: `{}`, Permission: "X"})
 
-	next, _ := m.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+	next, _ := m.Update(tea.PasteMsg{Content: "hello"})
 	m = next.(Model)
-	next, _ = m.Update(tea.KeyPressMsg{Code: 'i', Text: "i"})
-	m = next.(Model)
-	if m.input.Value() != "pi" {
-		t.Fatalf("typing while confirm pending should edit prompt, got %q", m.input.Value())
+	if m.input.Value() != "" {
+		t.Fatalf("paste while confirm pending must not edit prompt, got %q", m.input.Value())
 	}
+	if m.pendingConfirm == nil {
+		t.Fatal("paste while confirm pending should keep gate pending")
+	}
+}
 
-	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+func TestConfirmPending_CHotkeyStartsChatSteer(t *testing.T) {
+	m := New(nil, false)
+	m.pendingConfirm = toolConfirm(&pendingToolCall{ToolUseID: "tool-1", Name: "dispatch", Args: `{}`, Permission: "X"})
+
+	next, _ := m.Update(tea.KeyPressMsg{Code: 'c', Text: "c"})
 	m = next.(Model)
 	if m.pendingConfirm != nil {
-		t.Fatal("steering with enter should clear pending confirm")
+		t.Fatal("c hotkey should resolve into steer/chat mode")
 	}
-	if m.input.Value() != "" {
-		t.Fatalf("steering should clear prompt, got %q", m.input.Value())
-	}
-	found := false
-	for _, e := range m.mainChat().Entries() {
-		if strings.Contains(e.Content, "↳ steer: pi") {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatal("steering should append a visible steer entry")
-	}
-}
-
-func TestConfirmPending_TypingThenEnterDoesNotSteerSessionControl(t *testing.T) {
-	m := New(nil, false)
-	m.pendingConfirm = toolConfirm(&pendingToolCall{ToolUseID: "tool-1", Name: "request_autonomous_execution", Args: `{}`, Permission: "X"})
-
-	next, _ := m.Update(tea.KeyPressMsg{Code: 'o', Text: "o"})
-	m = next.(Model)
-	next, _ = m.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
-	m = next.(Model)
-	if m.input.Value() != "ok" {
-		t.Fatalf("typing while confirm pending should edit prompt, got %q", m.input.Value())
-	}
-
-	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	m = next.(Model)
-	if m.pendingConfirm == nil {
-		t.Fatal("session-control typed enter must keep pending confirm")
-	}
-	if m.input.Value() != "" {
-		t.Fatalf("session-control typed enter should clear the ambiguous prompt text, got %q", m.input.Value())
-	}
-	foundGuidance := false
-	for _, e := range m.mainChat().Entries() {
-		if strings.Contains(e.Content, "Session-control prompts require an explicit key") {
-			foundGuidance = true
-		}
-		if strings.Contains(e.Content, "↳ steer: ok") {
-			t.Fatal("session-control typed text must not be sent as steer text")
-		}
-	}
-	if !foundGuidance {
-		t.Fatal("session-control typed enter should append explicit y/n/d guidance")
-	}
-}
-
-func TestConfirmPending_EmptyEnterStartsChatSteer(t *testing.T) {
-	for _, msg := range []tea.KeyPressMsg{{Code: tea.KeyEnter}, {Code: tea.KeyEnter, Text: "\n"}} {
-		m := New(nil, false)
-		m.pendingConfirm = toolConfirm(&pendingToolCall{ToolUseID: "tool-1", Name: "dispatch", Args: `{}`, Permission: "X"})
-
-		next, _ := m.Update(msg)
-		m = next.(Model)
-		if m.pendingConfirm != nil {
-			t.Fatalf("empty enter %#v should resolve into steer/chat mode", msg)
-		}
-		if m.composeToolUseID != "tool-1" {
-			t.Fatalf("composeToolUseID = %q", m.composeToolUseID)
-		}
+	if m.composeToolUseID != "tool-1" {
+		t.Fatalf("composeToolUseID = %q", m.composeToolUseID)
 	}
 }
 
@@ -655,26 +599,26 @@ func TestConfirmPending_EmptyEnterDoesNotStartChatSteerForSessionControl(t *test
 	}
 }
 
-func TestConfirmPending_HotkeysOnlyWhenPromptEmpty(t *testing.T) {
+func TestConfirmPending_HotkeysResolveEvenWhenPromptHasDraft(t *testing.T) {
 	m := New(nil, false)
 	m.pendingConfirm = toolConfirm(&pendingToolCall{ToolUseID: "tool-1", Name: "dispatch", Args: `{}`, Permission: "X"})
 
 	next, _ := m.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
 	m = next.(Model)
 	if m.pendingConfirm != nil {
-		t.Fatal("n with an empty prompt should still deny")
+		t.Fatal("n with an empty prompt should deny")
 	}
 
 	m = New(nil, false)
 	m.pendingConfirm = toolConfirm(&pendingToolCall{ToolUseID: "tool-1", Name: "dispatch", Args: `{}`, Permission: "X"})
-	m.input.SetValue("a")
+	m.input.SetValue("draft")
 	next, _ = m.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
 	m = next.(Model)
-	if m.pendingConfirm == nil {
-		t.Fatal("n with non-empty steering text should not deny")
+	if m.pendingConfirm != nil {
+		t.Fatal("n should deny even if a draft was already in the disabled prompt")
 	}
-	if m.input.Value() != "an" {
-		t.Fatalf("n should append to steering text, got %q", m.input.Value())
+	if m.input.Value() != "draft" {
+		t.Fatalf("disabled prompt draft should be preserved, got %q", m.input.Value())
 	}
 }
 

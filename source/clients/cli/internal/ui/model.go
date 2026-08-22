@@ -1199,11 +1199,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.pendingConfirm != nil {
-			prevVal := m.input.Value()
-			m.input, _ = m.input.Update(msg)
-			if m.input.Value() != prevVal {
-				m.relayout()
-			}
+			// Confirm pending: the prompt input is disabled. Pasted text must not
+			// enter the prompt buffer or shadow y/n/c/d hotkeys.
 			return m, nil
 		}
 		m = m.preparePromptInput()
@@ -3814,9 +3811,7 @@ func (m Model) confirmPromptHints(p *pendingToolCall) string {
 	if p.ToolUseID != "" && !isSessionControlTool(p.Name) {
 		hints += m.styles.Muted.Render(" / [") +
 			m.styles.Accent.Render("c") +
-			m.styles.Muted.Render("]hat / type below + press [") +
-			m.styles.Accent.Render("enter") +
-			m.styles.Muted.Render("] to steer convo")
+			m.styles.Muted.Render("]hat")
 	}
 	if strings.HasPrefix(p.Name, "mcp__") {
 		hints += m.styles.Muted.Render(" / [") +
@@ -4213,44 +4208,14 @@ func (m Model) handlePendingConfirmKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		cmd := m.activeChat().Update(msg)
 		return m, cmd
 	}
+	// Confirm pending: the prompt input is disabled. Only explicit confirm
+	// hotkeys resolve the gate; all text, paste, Enter, Esc-as-clear, and Ctrl+C
+	// prompt-editing behavior is ignored here unless the confirm itself binds it.
 	keyStr := msg.String()
-	if msg.Key().Code == tea.KeyEnter {
-		text := strings.TrimSpace(m.input.Value())
-		if text != "" {
-			// A slash command typed while a permission gate is pending is a
-			// client-side command (e.g. /config, /help), not steering text for
-			// the paused tool. Run it as a slash command and leave the confirm
-			// gate intact so the user can still answer y/n/d/c afterward.
-			if strings.HasPrefix(text, "/") {
-				m.input.SetValue("")
-				m.relayout()
-				next, cmd := m.runSlash(text)
-				if nm, ok := next.(Model); ok {
-					return nm, cmd
-				}
-				return m, cmd
-			}
-			return m.steerPendingConfirm(text)
-		}
-		if m.pendingConfirm != nil && !m.pendingConfirm.stale {
-			if fn, ok := m.pendingConfirm.extras["c"]; ok {
-				return fn(m)
-			}
-		}
-		return m, nil
+	if next, cmd, handled := m.resolveConfirmHotkey(keyStr); handled {
+		return next, cmd
 	}
-	if strings.TrimSpace(m.input.Value()) == "" {
-		if next, cmd, handled := m.resolveConfirmHotkey(keyStr); handled {
-			return next, cmd
-		}
-	}
-	prevVal := m.input.Value()
-	var cmd tea.Cmd
-	m.input, cmd = m.input.Update(msg)
-	if m.input.Value() != prevVal {
-		m.relayout()
-	}
-	return m, cmd
+	return m, nil
 }
 
 func (m Model) steerPendingConfirm(text string) (Model, tea.Cmd) {
@@ -4350,9 +4315,9 @@ func (m Model) resolveConfirmHotkey(key string) (Model, tea.Cmd, bool) {
 			}
 			return m, nil, true
 		default:
-			// The dead turn cannot be redirected with [c]hat, but ordinary text
-			// should still type into the input so Enter can submit a fresh request.
-			return m, nil, false
+			// Confirm pending disables the prompt input even for stale gates; the
+			// user must answer with the advertised hotkeys.
+			return m, nil, true
 		}
 	}
 	switch key {

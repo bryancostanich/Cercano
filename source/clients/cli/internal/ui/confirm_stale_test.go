@@ -134,10 +134,10 @@ func TestConfirmStale_YesUsesCapturedRetryPrompt(t *testing.T) {
 	}
 }
 
-// TestConfirmStale_TextSubmitsFreshPrompt ensures ordinary typing is not
-// swallowed by the stale y/n gate. A dead tool call cannot receive chat
-// steering, so typed text should become a fresh request after reconnect.
-func TestConfirmStale_TextSubmitsFreshPrompt(t *testing.T) {
+// TestConfirmStale_DisablesPromptInput ensures stale y/n gates obey the same
+// modal rule as live gates: prompt text is not submitted while the gate is up;
+// the user must answer with an advertised hotkey.
+func TestConfirmStale_DisablesPromptInput(t *testing.T) {
 	m := New(nil, false)
 	m.pendingConfirm = toolConfirm(&pendingToolCall{ToolUseID: "tool-1", Name: "dispatch", Args: `{}`, Permission: "X"})
 	m.pendingConfirm.retryPrompt = "fixed. push"
@@ -147,16 +147,15 @@ func TestConfirmStale_TextSubmitsFreshPrompt(t *testing.T) {
 	nextModel, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	next := nextModel.(Model)
 
-	if next.pendingConfirm != nil {
-		t.Fatal("typing a fresh prompt after reconnect should clear the stale confirm")
+	if next.pendingConfirm == nil {
+		t.Fatal("enter with a disabled prompt should keep the stale confirm pending")
 	}
-	found := false
 	for _, e := range next.mainChat().Entries() {
 		if e.Role == RoleUser && strings.Contains(e.Content, "show summary of changes") {
-			found = true
+			t.Fatal("disabled prompt text should not submit as a fresh user turn")
 		}
 	}
-	if !found {
-		t.Fatal("typed text should submit as a fresh user turn")
+	if next.input.Value() != "show summary of changes" {
+		t.Fatalf("disabled prompt draft should be preserved, got %q", next.input.Value())
 	}
 }

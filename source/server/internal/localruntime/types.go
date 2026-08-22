@@ -128,6 +128,9 @@ type ModelRecord struct {
 	// models with no special launch requirements. The llama-server provider
 	// appends these after the global config ExtraArgs.
 	ExtraArgs []string
+	// ContextSize is an optional profile-level launch-policy override for runtimes
+	// that support configurable context windows. Zero means no profile override.
+	ContextSize int
 }
 
 type InstanceRecord struct {

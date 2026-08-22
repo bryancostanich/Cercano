@@ -851,7 +851,8 @@ func NewServer(a *agent.Agent, router RouterCloudUpdater, coordinator *loop.ADKC
 		if isCloud {
 			return 0
 		}
-		return localModelContextWindow(s.cfgSvc.Get().LlamaServer.ContextSize, model)
+		llamaCfg := s.cfgSvc.Get().LlamaServer
+		return localModelContextWindow(llamaCfg.ContextSize, llamaCfg.ContextSizeSet, model)
 	})
 	// Wire the in-process turn runner with nil Perms (permBroker not yet set).
 	// Rebuilt in SetPermissions once the broker is wired. workerRunner stays nil
@@ -2531,7 +2532,10 @@ func buildToolLoopSystem(env loopEnv, steering, dirSnapshot, projectContext stri
 // served with, applying the catalog's per-model --ctx-size override on top of
 // the configured value. The model ID arrives in routing form
 // ("llama_server:catalog:<id>"), while the catalog is keyed by the bare ID.
-func localModelContextWindow(configured int, model string) int {
+func localModelContextWindow(configured int, configExplicit bool, model string) int {
+	if configExplicit && configured > 0 {
+		return configured
+	}
 	if model == "" {
 		return configured
 	}
@@ -2539,7 +2543,11 @@ func localModelContextWindow(configured int, model string) int {
 	if i := strings.LastIndex(bare, ":"); i >= 0 {
 		bare = bare[i+1:]
 	}
-	if n := llamaserver.ModelContextOverride(bare); n > 0 {
+	total := sysram.Total()
+	if total < 0 {
+		total = 0
+	}
+	if n := llamaserver.ModelContextOverride(bare, uint64(total)); n > 0 {
 		return n
 	}
 	return configured

@@ -455,6 +455,7 @@ type LlamaServerConfig struct {
 	Host             string        `yaml:"host"`
 	Port             int           `yaml:"port"`
 	ContextSize      int           `yaml:"context_size"`
+	ContextSizeSet   bool          `yaml:"-"`
 	GPULayers        string        `yaml:"gpu_layers"`
 	Threads          int           `yaml:"threads"`
 	ExtraArgs        []string      `yaml:"extra_args"`
@@ -905,6 +906,7 @@ func Load(path string) (Config, error) {
 		if err := yaml.Unmarshal(data, &cfg); err != nil {
 			return cfg, fmt.Errorf("failed to parse config file %q: %w", path, err)
 		}
+		markLlamaServerExplicitFields(data, &cfg)
 
 		// Backward-compat: accept the pre-rename `local_model` /
 		// `local_runtime` YAML keys (and `locus_mode` values
@@ -978,6 +980,20 @@ func applyLegacyLocalKeys(data []byte, cfg *Config) {
 		cfg.LocusMode = "open_primary"
 	case "local_only":
 		cfg.LocusMode = "open_only"
+	}
+}
+
+func markLlamaServerExplicitFields(data []byte, cfg *Config) {
+	var raw map[string]any
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		return
+	}
+	llama, ok := raw["llama_server"].(map[string]any)
+	if !ok {
+		return
+	}
+	if _, ok := llama["context_size"]; ok {
+		cfg.LlamaServer.ContextSizeSet = true
 	}
 }
 

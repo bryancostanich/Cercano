@@ -60,8 +60,6 @@
       "status": "tested",
       "extra_args": [
         "--jinja",
-        "--ctx-size",
-        "32768",
         "--cache-type-k",
         "q8_0",
         "--cache-type-v",
@@ -214,36 +212,108 @@
   },
   "profiles": {
     "24": {
-      "most_capable": "qwen3-14b-q4_k_m",
-      "everyday": "qwen3-14b-q4_k_m",
-      "fast_light": "qwen3-14b-q4_k_m",
-      "fast_light_text": "qwen3-14b-q4_k_m",
-      "vision": "gemma-3-4b-it-q4_k_m",
-      "embedding": "nomic-embed-text-v1.5-f16"
+      "most_capable": {
+        "model": "qwen3-14b-q4_k_m",
+        "ctx_size": 32768
+      },
+      "everyday": {
+        "model": "qwen3-14b-q4_k_m",
+        "ctx_size": 32768
+      },
+      "fast_light": {
+        "model": "qwen3-14b-q4_k_m",
+        "ctx_size": 32768
+      },
+      "fast_light_text": {
+        "model": "qwen3-14b-q4_k_m",
+        "ctx_size": 32768
+      },
+      "vision": {
+        "model": "gemma-3-4b-it-q4_k_m",
+        "ctx_size": 32768
+      },
+      "embedding": {
+        "model": "nomic-embed-text-v1.5-f16",
+        "ctx_size": 8192
+      }
     },
     "48": {
-      "most_capable": "glm-4.7-flash-q5_k_m",
-      "everyday": "glm-4.7-flash-q5_k_m",
-      "fast_light": "glm-4.7-flash-q5_k_m",
-      "fast_light_text": "glm-4.7-flash-q5_k_m",
-      "vision": "gemma-3-4b-it-q4_k_m",
-      "embedding": "nomic-embed-text-v1.5-f16"
+      "most_capable": {
+        "model": "glm-4.7-flash-q5_k_m",
+        "ctx_size": 32768
+      },
+      "everyday": {
+        "model": "glm-4.7-flash-q5_k_m",
+        "ctx_size": 32768
+      },
+      "fast_light": {
+        "model": "glm-4.7-flash-q5_k_m",
+        "ctx_size": 32768
+      },
+      "fast_light_text": {
+        "model": "glm-4.7-flash-q5_k_m",
+        "ctx_size": 32768
+      },
+      "vision": {
+        "model": "gemma-3-4b-it-q4_k_m",
+        "ctx_size": 32768
+      },
+      "embedding": {
+        "model": "nomic-embed-text-v1.5-f16",
+        "ctx_size": 8192
+      }
     },
     "96": {
-      "most_capable": "glm-4.5-air-q4_k_m",
-      "everyday": "glm-4.5-air-q4_k_m",
-      "fast_light": "glm-4.5-air-q4_k_m",
-      "fast_light_text": "glm-4.5-air-q4_k_m",
-      "vision": "gemma-3-4b-it-q4_k_m",
-      "embedding": "nomic-embed-text-v1.5-f16"
+      "most_capable": {
+        "model": "glm-4.5-air-q4_k_m",
+        "ctx_size": 65536
+      },
+      "everyday": {
+        "model": "glm-4.5-air-q4_k_m",
+        "ctx_size": 65536
+      },
+      "fast_light": {
+        "model": "glm-4.5-air-q4_k_m",
+        "ctx_size": 65536
+      },
+      "fast_light_text": {
+        "model": "glm-4.5-air-q4_k_m",
+        "ctx_size": 65536
+      },
+      "vision": {
+        "model": "gemma-3-4b-it-q4_k_m",
+        "ctx_size": 32768
+      },
+      "embedding": {
+        "model": "nomic-embed-text-v1.5-f16",
+        "ctx_size": 8192
+      }
     },
     "128": {
-      "most_capable": "glm-4.5-air-q4_k_m",
-      "everyday": "glm-4.5-air-q4_k_m",
-      "fast_light": "glm-4.5-air-q4_k_m",
-      "fast_light_text": "glm-4.5-air-q4_k_m",
-      "vision": "gemma-3-4b-it-q4_k_m",
-      "embedding": "nomic-embed-text-v1.5-f16"
+      "most_capable": {
+        "model": "glm-4.5-air-q4_k_m",
+        "ctx_size": 131072
+      },
+      "everyday": {
+        "model": "glm-4.5-air-q4_k_m",
+        "ctx_size": 131072
+      },
+      "fast_light": {
+        "model": "glm-4.5-air-q4_k_m",
+        "ctx_size": 131072
+      },
+      "fast_light_text": {
+        "model": "glm-4.5-air-q4_k_m",
+        "ctx_size": 131072
+      },
+      "vision": {
+        "model": "gemma-3-4b-it-q4_k_m",
+        "ctx_size": 32768
+      },
+      "embedding": {
+        "model": "nomic-embed-text-v1.5-f16",
+        "ctx_size": 8192
+      }
     }
   }
 }

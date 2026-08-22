@@ -157,6 +157,27 @@ func TestLoad_FromFile(t *testing.T) {
 	if cfg.LlamaServer.ContextSize != 8192 {
 		t.Errorf("expected default llama-server context size, got %d", cfg.LlamaServer.ContextSize)
 	}
+	if cfg.LlamaServer.ContextSizeSet {
+		t.Error("defaulted llama-server context size must not be marked explicit")
+	}
+}
+
+func TestLoad_LlamaServerContextSizePresence(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte(`
+llama_server:
+  context_size: 65536
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.LlamaServer.ContextSize != 65536 || !cfg.LlamaServer.ContextSizeSet {
+		t.Fatalf("context presence = size %d explicit %v, want 65536/true", cfg.LlamaServer.ContextSize, cfg.LlamaServer.ContextSizeSet)
+	}
 }
 
 func TestLoad_LlamaServerRestartCanBeDisabled(t *testing.T) {

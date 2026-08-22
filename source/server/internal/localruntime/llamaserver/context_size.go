@@ -14,6 +14,21 @@ func hasFlag(args []string, flag string) bool {
 	return false
 }
 
+// stripFlag removes every occurrence of a flag that takes one following value.
+func stripFlag(args []string, flag string) []string {
+	out := args[:0]
+	for i := 0; i < len(args); i++ {
+		if args[i] == flag {
+			if i+1 < len(args) {
+				i++
+			}
+			continue
+		}
+		out = append(out, args[i])
+	}
+	return out
+}
+
 // ctxSizeFromArgs returns the value of the LAST --ctx-size in args, matching
 // llama-server's own last-flag-wins parsing. Returns 0 when absent or unparsable.
 func ctxSizeFromArgs(args []string) int {
@@ -29,39 +44,69 @@ func ctxSizeFromArgs(args []string) int {
 	return out
 }
 
-// EffectiveContextSize reports the context window llama-server will actually
-// serve for a model, applying the same precedence as the launch command:
-// a per-model --ctx-size from the catalog's ExtraArgs wins over the global
-// config value, because per-model flags are appended last and llama-server
-// honors the last occurrence.
-//
-// This exists so the agent's context budget is computed from the window the
-// server is really running, not from config alone. Budgeting against a smaller
-// config number causes false preflight context_overflow rejections for requests
-// the model would have accepted; budgeting against a larger one lets genuinely
-// oversized requests reach the server and fail there.
-//
-// modelExtraArgs is the catalog entry's ExtraArgs for the running model.
-// Returns configContextSize when the model pins nothing.
-func EffectiveContextSize(configContextSize int, modelExtraArgs []string) int {
-	if n := ctxSizeFromArgs(modelExtraArgs); n > 0 {
-		return n
-	}
-	return configContextSize
+// ContextSizeInput is the complete precedence set for resolving the window a
+// llama-server process should serve.
+type ContextSizeInput struct {
+	ConfigContextSize  int
+	ConfigExplicit     bool
+	ProfileContextSize int
+	ModelExtraArgs     []string
+	DefaultContextSize int
 }
 
-// ModelContextOverride returns the per-model --ctx-size pinned in the catalog
-// for modelID, or 0 when the model pins none (or the ID is unknown). Callers
-// outside this package use it to resolve the effective window without needing
-// the catalog's internal shape.
-func ModelContextOverride(modelID string) int {
+// EffectiveContextSize reports the context window llama-server will actually
+// serve for a model, applying the same precedence as launch args:
+//
+//	explicit user config llama_server.context_size
+//	> profile ctx_size
+//	> model extra_args --ctx-size (legacy/backward compatibility)
+//	> default context_size
+//
+// This exists so launch args, the memory guard, tool-loop preflight, and
+// sub-agent preflight all budget against the same window. The earlier
+// model-extra-args-only rule fixed a false 16k ceiling, but it left ctx-size as
+// model-level policy; RAM profiles now own that tuning.
+func EffectiveContextSize(in ContextSizeInput) int {
+	if in.ConfigExplicit && in.ConfigContextSize > 0 {
+		return in.ConfigContextSize
+	}
+	if in.ProfileContextSize > 0 {
+		return in.ProfileContextSize
+	}
+	if n := ctxSizeFromArgs(in.ModelExtraArgs); n > 0 {
+		return n
+	}
+	if in.DefaultContextSize > 0 {
+		return in.DefaultContextSize
+	}
+	return in.ConfigContextSize
+}
+
+// ModelContextOverride returns the profile/model context override for modelID,
+// or 0 when none applies. It exists for call sites that only know a bare catalog
+// model ID and cannot see a ModelRecord. totalBytes selects the RAM profile.
+func ModelContextOverride(modelID string, totalBytes uint64) int {
 	cat, err := loadCatalog()
 	if err != nil {
 		return 0
 	}
-	m, ok := cat.Models[modelID]
-	if !ok {
-		return 0
+	profile, _ := cat.ProfileForRAMEntries(totalBytes)
+	for _, entry := range profile {
+		if entry.Model == modelID && entry.ContextSize > 0 {
+			return entry.ContextSize
+		}
 	}
-	return ctxSizeFromArgs(m.ExtraArgs)
+	if m, ok := cat.Models[modelID]; ok {
+		return ctxSizeFromArgs(m.ExtraArgs)
+	}
+	return 0
+}
+
+func BareCatalogID(model string) string {
+	for i := len(model) - 1; i >= 0; i-- {
+		if model[i] == ':' {
+			return model[i+1:]
+		}
+	}
+	return model
 }

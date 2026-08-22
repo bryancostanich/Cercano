@@ -55,7 +55,7 @@ func TestCatalog_AgentTiersSupportTools(t *testing.T) {
 	}
 	for name, prof := range cat.Profiles {
 		for _, tier := range []string{"everyday", "most_capable"} {
-			m := cat.Models[prof[tier]]
+			m := cat.Models[prof[tier].Model]
 			if !m.SupportsTools {
 				t.Errorf("profile %q tier %q model %q does not support tools", name, tier, m.ID)
 			}
@@ -75,12 +75,12 @@ func TestCatalog_PlainChatTiersAreChatCapable(t *testing.T) {
 		t.Fatalf("loadCatalog: %v", err)
 	}
 	for name, prof := range cat.Profiles {
-		for tier, id := range prof {
+		for tier, entry := range prof {
 			if tier == "embedding" {
 				continue
 			}
-			if !cat.Models[id].PlainChatSupported() {
-				t.Errorf("profile %q chat tier %q uses non-plain-chat model %q", name, tier, id)
+			if !cat.Models[entry.Model].PlainChatSupported() {
+				t.Errorf("profile %q chat tier %q uses non-plain-chat model %q", name, tier, entry.Model)
 			}
 		}
 	}
@@ -130,13 +130,13 @@ func TestLoadCatalog_RejectsNonPlainChatInChatTier(t *testing.T) {
 			"emptybot": {ID: "emptybot", SupportsTools: true, PlainChatOK: &no},
 			"embedder": {ID: "embedder", SupportsEmbed: true},
 		},
-		Profiles: map[string]map[string]string{
+		Profiles: map[string]map[string]ProfileEntry{
 			"48": {
-				"most_capable":    "emptybot",
-				"everyday":        "chatty",
-				"fast_light":      "chatty",
-				"fast_light_text": "chatty",
-				"embedding":       "embedder",
+				"most_capable":    {Model: "emptybot"},
+				"everyday":        {Model: "chatty"},
+				"fast_light":      {Model: "chatty"},
+				"fast_light_text": {Model: "chatty"},
+				"embedding":       {Model: "embedder"},
 			},
 		},
 	}
@@ -155,7 +155,7 @@ func TestCatalog_EmbeddingTierEmbeds(t *testing.T) {
 		t.Fatalf("loadCatalog: %v", err)
 	}
 	for name, prof := range cat.Profiles {
-		m := cat.Models[prof["embedding"]]
+		m := cat.Models[prof["embedding"].Model]
 		if !m.SupportsEmbed {
 			t.Errorf("profile %q embedding model %q is not an embedder", name, m.ID)
 		}
@@ -172,22 +172,22 @@ func TestCatalog_ProfiledVisionTierIsValid(t *testing.T) {
 		t.Fatalf("loadCatalog: %v", err)
 	}
 	for name, prof := range cat.Profiles {
-		id, ok := prof["vision"]
-		if !ok || id == "" {
+		entry, ok := prof["vision"]
+		if !ok || entry.Model == "" {
 			t.Fatalf("profile %q missing optional-but-shipped vision tier", name)
 		}
-		m, ok := cat.Models[id]
+		m, ok := cat.Models[entry.Model]
 		if !ok {
-			t.Fatalf("profile %q vision model %q is not in catalog", name, id)
+			t.Fatalf("profile %q vision model %q is not in catalog", name, entry.Model)
 		}
 		if !m.SupportsVision {
-			t.Errorf("profile %q vision model %q does not advertise supports_vision", name, id)
+			t.Errorf("profile %q vision model %q does not advertise supports_vision", name, entry.Model)
 		}
 		if m.MmprojFile == "" {
-			t.Errorf("profile %q vision model %q has no mmproj_file", name, id)
+			t.Errorf("profile %q vision model %q has no mmproj_file", name, entry.Model)
 		}
 		if m.SupportsEmbed {
-			t.Errorf("profile %q vision model %q should not be an embedding model", name, id)
+			t.Errorf("profile %q vision model %q should not be an embedding model", name, entry.Model)
 		}
 	}
 }
@@ -244,7 +244,7 @@ func TestCatalog_QwenVisionMarkedBroken(t *testing.T) {
 		t.Fatalf("qwen status = %q, want broken", qwen.Status)
 	}
 	for name, prof := range cat.Profiles {
-		if prof["vision"] == "qwen2.5-vl-3b-instruct-q4_k_m" {
+		if prof["vision"].Model == "qwen2.5-vl-3b-instruct-q4_k_m" {
 			t.Fatalf("profile %q must not use the broken qwen vision model", name)
 		}
 	}

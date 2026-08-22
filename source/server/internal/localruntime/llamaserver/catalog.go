@@ -79,14 +79,44 @@ func (m CuratedModel) DownloadURLs() []string {
 	return out
 }
 
+// ProfileEntry maps a capability tier in a RAM profile to a catalog model and
+// optional launch policy. ContextSize is a profile-level context-window
+// override: the same model may run with different windows on 96 GB and 128 GB
+// machines. Zero means no profile override (legacy/default behavior).
+type ProfileEntry struct {
+	Model       string `json:"model"`
+	ContextSize int    `json:"ctx_size,omitempty"`
+}
+
+// UnmarshalJSON keeps the profile schema backward-compatible: an old string
+// value means just the model ID, while the object form can carry ctx_size.
+func (e *ProfileEntry) UnmarshalJSON(data []byte) error {
+	var id string
+	if err := json.Unmarshal(data, &id); err == nil {
+		e.Model = id
+		e.ContextSize = 0
+		return nil
+	}
+	var obj struct {
+		Model       string `json:"model"`
+		ContextSize int    `json:"ctx_size"`
+	}
+	if err := json.Unmarshal(data, &obj); err != nil {
+		return err
+	}
+	e.Model = obj.Model
+	e.ContextSize = obj.ContextSize
+	return nil
+}
+
 // CuratedCatalog is the parsed catalog.json: a model dictionary keyed by ID
-// plus RAM-tier profiles. A profile maps each capability tier to a model ID;
+// plus RAM-tier profiles. A profile maps each capability tier to a model entry;
 // profile keys are RAM thresholds in GB as strings ("24","48","96","128").
-// Reusing IDs across profiles (the same Phi-4-mini serves every profile's fast
-// tiers) keeps the data DRY.
+// Reusing IDs across profiles keeps the data DRY; profile entries carry launch
+// policy such as ctx_size when a RAM tier should run the same model differently.
 type CuratedCatalog struct {
-	Models   map[string]CuratedModel      `json:"models"`
-	Profiles map[string]map[string]string `json:"profiles"`
+	Models   map[string]CuratedModel            `json:"models"`
+	Profiles map[string]map[string]ProfileEntry `json:"profiles"`
 }
 
 // requiredTiers are the capability tiers every profile must fill. Kept in sync
@@ -120,32 +150,48 @@ func validateCatalog(cat CuratedCatalog) error {
 		return fmt.Errorf("catalog has no profiles")
 	}
 	for name, prof := range cat.Profiles {
+		ctxByModel := map[string]int{}
+		for tier, entry := range prof {
+			if entry.Model == "" {
+				return fmt.Errorf("profile %q tier %q has empty model", name, tier)
+			}
+			if entry.ContextSize < 0 {
+				return fmt.Errorf("profile %q tier %q has invalid ctx_size %d", name, tier, entry.ContextSize)
+			}
+			if entry.ContextSize > 0 {
+				if prev := ctxByModel[entry.Model]; prev > 0 && prev != entry.ContextSize {
+					return fmt.Errorf("profile %q model %q has inconsistent ctx_size values %d and %d", name, entry.Model, prev, entry.ContextSize)
+				}
+				ctxByModel[entry.Model] = entry.ContextSize
+			}
+			if _, ok := cat.Models[entry.Model]; !ok {
+				return fmt.Errorf("profile %q tier %q references unknown model %q", name, tier, entry.Model)
+			}
+		}
 		for _, tier := range requiredTiers {
-			id, ok := prof[tier]
-			if !ok || id == "" {
+			entry, ok := prof[tier]
+			if !ok || entry.Model == "" {
 				return fmt.Errorf("profile %q is missing tier %q", name, tier)
 			}
-			model, ok := cat.Models[id]
-			if !ok {
-				return fmt.Errorf("profile %q tier %q references unknown model %q", name, tier, id)
-			}
+			model := cat.Models[entry.Model]
 			// Every required tier except embedding is a plain-chat tier: it must
 			// reference a model that actually produces visible chat content, or
 			// the wizard would recommend a model that answers with empty output.
 			if tier != "embedding" && !model.PlainChatSupported() {
-				return fmt.Errorf("profile %q tier %q references model %q which is not plain-chat capable (plain_chat_ok:false)", name, tier, id)
+				return fmt.Errorf("profile %q tier %q references model %q which is not plain-chat capable (plain_chat_ok:false)", name, tier, entry.Model)
 			}
 		}
 	}
 	return nil
 }
 
-// ProfileForRAM picks the profile for a machine with the given total RAM: the
-// largest profile whose GB threshold is at or below the machine's memory, so a
-// 64 GB box takes the 48 GB profile and a 128 GB box takes 128. A machine
-// below the smallest threshold still gets the smallest profile (better a tight
-// fit than nothing). Returns the tier→modelID map and the chosen threshold.
-func (c CuratedCatalog) ProfileForRAM(totalBytes uint64) (map[string]string, int) {
+// ProfileForRAMEntries picks the profile for a machine with the given total
+// RAM: the largest profile whose GB threshold is at or below the machine's
+// memory, so a 64 GB box takes the 48 GB profile and a 128 GB box takes 128. A
+// machine below the smallest threshold still gets the smallest profile (better
+// a tight fit than nothing). Returns the tier→ProfileEntry map and the chosen
+// threshold.
+func (c CuratedCatalog) ProfileForRAMEntries(totalBytes uint64) (map[string]ProfileEntry, int) {
 	gb := int(totalBytes / (1024 * 1024 * 1024))
 	thresholds := make([]int, 0, len(c.Profiles))
 	for k := range c.Profiles {
@@ -161,6 +207,17 @@ func (c CuratedCatalog) ProfileForRAM(totalBytes uint64) (map[string]string, int
 		}
 	}
 	return c.Profiles[strconv.Itoa(chosen)], chosen
+}
+
+// ProfileForRAM preserves the older helper shape for callers that only need
+// tier→modelID recommendations.
+func (c CuratedCatalog) ProfileForRAM(totalBytes uint64) (map[string]string, int) {
+	entries, chosen := c.ProfileForRAMEntries(totalBytes)
+	out := make(map[string]string, len(entries))
+	for tier, entry := range entries {
+		out[tier] = entry.Model
+	}
+	return out, chosen
 }
 
 // RecommendedOpenModels returns the curated open-model recommendation for a

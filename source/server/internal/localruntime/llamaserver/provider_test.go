@@ -76,11 +76,12 @@ func TestDiscoverIncludesQwenCatalogModels(t *testing.T) {
 
 func TestArgsForBuildsLlamaServerCommand(t *testing.T) {
 	provider := NewProvider(config.LlamaServerConfig{
-		Host:        "127.0.0.1",
-		ContextSize: 4096,
-		GPULayers:   "auto",
-		Threads:     6,
-		ExtraArgs:   []string{"--no-webui"},
+		Host:           "127.0.0.1",
+		ContextSize:    4096,
+		ContextSizeSet: true,
+		GPULayers:      "auto",
+		Threads:        6,
+		ExtraArgs:      []string{"--no-webui"},
 	})
 	model := provider.modelRecord("/models/test.gguf", fakeFileInfo{size: 42})
 
@@ -114,6 +115,7 @@ func TestArgsForAppendsPerModelExtraArgs(t *testing.T) {
 		"--model", "/models/glm.gguf",
 		"--host", "127.0.0.1",
 		"--port", "8123",
+		"--ctx-size", "8192",
 		"--no-webui",
 		"--jinja",
 	}
@@ -167,6 +169,7 @@ func TestArgsForPassesMmproj(t *testing.T) {
 		"--host", "127.0.0.1",
 		"--port", "8123",
 		"--mmproj", projector,
+		"--ctx-size", "8192",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("vision args mismatch:\n got: %#v\nwant: %#v", got, want)
@@ -292,4 +295,25 @@ func mustURLPort(t *testing.T, raw string) int {
 		t.Fatal(err)
 	}
 	return port
+}
+
+func TestCatalogModelRecordsCarryProfileContext(t *testing.T) {
+	provider := NewProvider(config.LlamaServerConfig{ModelDirs: []string{t.TempDir()}})
+	provider.totalRAM = func() int64 { return 128 * 1024 * 1024 * 1024 }
+
+	models := provider.catalogModels()
+	var got = map[string]int{}
+	for _, m := range models {
+		got[m.ID] = m.ContextSize
+	}
+	checks := map[string]int{
+		runtimeName + ":catalog:glm-4.5-air-q4_k_m":        131072,
+		runtimeName + ":catalog:gemma-3-4b-it-q4_k_m":      32768,
+		runtimeName + ":catalog:nomic-embed-text-v1.5-f16": 8192,
+	}
+	for id, want := range checks {
+		if got[id] != want {
+			t.Fatalf("%s ContextSize = %d, want %d", id, got[id], want)
+		}
+	}
 }

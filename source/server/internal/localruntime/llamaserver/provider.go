@@ -563,11 +563,17 @@ func (p *Provider) checkMemoryBudget(model localruntime.ModelRecord) (memoryProj
 
 	p.pruneDeadAdoptedInstances()
 	projection := memoryProjection{
-		TotalBytes:     totalFn(),
-		ModelBytes:     model.SizeBytes,
-		HeadroomBytes:  memoryGuardHeadroomBytes,
-		RegistryBytes:  p.registryResidentEstimate(),
-		ContextTokens:  EffectiveContextSize(p.snapshot().ContextSize, model.ExtraArgs),
+		TotalBytes:    totalFn(),
+		ModelBytes:    model.SizeBytes,
+		HeadroomBytes: memoryGuardHeadroomBytes,
+		RegistryBytes: p.registryResidentEstimate(),
+		ContextTokens: EffectiveContextSize(ContextSizeInput{
+			ConfigContextSize:  p.snapshot().ContextSize,
+			ConfigExplicit:     p.snapshot().ContextSizeSet,
+			ProfileContextSize: model.ContextSize,
+			ModelExtraArgs:     model.ExtraArgs,
+			DefaultContextSize: config.Defaults().LlamaServer.ContextSize,
+		}),
 		CurrentProbeOK: false,
 	}
 	projection.KVBytesPerToken, projection.KVBytes = p.kvEstimate(model, projection.ContextTokens)
@@ -868,13 +874,15 @@ func (p *Provider) argsFor(cfg config.LlamaServerConfig, model localruntime.Mode
 		// completions endpoints.
 		args = append(args, "--embedding")
 	}
-	// A per-model --ctx-size in the catalog's ExtraArgs is authoritative: those
-	// flags are appended last and llama-server takes the LAST occurrence, so
-	// emitting the config value too would put a losing duplicate on the command
-	// line and leave the agent budgeting against a window the server isn't
-	// using. EffectiveContextSize applies the same precedence.
-	if cfg.ContextSize > 0 && !hasFlag(model.ExtraArgs, "--ctx-size") {
-		args = append(args, "--ctx-size", strconv.Itoa(cfg.ContextSize))
+	ctxSize := EffectiveContextSize(ContextSizeInput{
+		ConfigContextSize:  cfg.ContextSize,
+		ConfigExplicit:     cfg.ContextSizeSet,
+		ProfileContextSize: model.ContextSize,
+		ModelExtraArgs:     model.ExtraArgs,
+		DefaultContextSize: config.Defaults().LlamaServer.ContextSize,
+	})
+	if ctxSize > 0 {
+		args = append(args, "--ctx-size", strconv.Itoa(ctxSize))
 	}
 	if cfg.Threads > 0 {
 		args = append(args, "--threads", strconv.Itoa(cfg.Threads))
@@ -882,10 +890,12 @@ func (p *Provider) argsFor(cfg config.LlamaServerConfig, model localruntime.Mode
 	if cfg.GPULayers != "" {
 		args = append(args, "--gpu-layers", cfg.GPULayers)
 	}
-	args = append(args, cfg.ExtraArgs...)
+	args = append(args, stripFlag(append([]string(nil), cfg.ExtraArgs...), "--ctx-size")...)
 	// Per-model launch flags (from the catalog's ExtraArgs) apply last, scoped
-	// to this model only — e.g. GLM-4.5-Air's required "--jinja".
-	args = append(args, model.ExtraArgs...)
+	// to this model only — e.g. GLM-4.5-Air's required "--jinja". Strip legacy
+	// --ctx-size pins here so profile/user context policy cannot be overridden by
+	// a later duplicate flag.
+	args = append(args, stripFlag(append([]string(nil), model.ExtraArgs...), "--ctx-size")...)
 	return args
 }
 
@@ -1254,6 +1264,7 @@ func (p *Provider) catalogModels() []localruntime.ModelRecord {
 		return nil
 	}
 	targetDir := p.catalogTargetDir()
+	profileContext := p.profileContextByModel(cat)
 	ids := make([]string, 0, len(cat.Models))
 	for id := range cat.Models {
 		ids = append(ids, id)
@@ -1300,7 +1311,33 @@ func (p *Provider) catalogModels() []localruntime.ModelRecord {
 			SupportsVision:     vision,
 			MmprojPath:         mmprojPath,
 			ExtraArgs:          m.ExtraArgs,
+			ContextSize:        profileContext[m.ID],
 		})
+	}
+	return out
+}
+
+func (p *Provider) profileContextByModel(cat CuratedCatalog) map[string]int {
+	totalFn := p.totalRAM
+	if totalFn == nil {
+		totalFn = sysram.Total
+	}
+	total := totalFn()
+	if total < 0 {
+		total = 0
+	}
+	profile, _ := cat.ProfileForRAMEntries(uint64(total))
+	out := make(map[string]int, len(profile))
+	for _, entry := range profile {
+		if entry.Model == "" || entry.ContextSize <= 0 {
+			continue
+		}
+		// If the same model appears in several tiers of one profile, all curated
+		// entries should agree. Keep the first value; validateCatalog catches
+		// inconsistent positive values in the same profile.
+		if _, exists := out[entry.Model]; !exists {
+			out[entry.Model] = entry.ContextSize
+		}
 	}
 	return out
 }

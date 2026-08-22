@@ -81,6 +81,55 @@ func TestRunToolLoop_RewritesImagesWhenVisionStoreSet(t *testing.T) {
 	}
 }
 
+func TestRunToolLoop_RewritesHistoricalImagesWhenVisionStoreSet(t *testing.T) {
+	store := visionattach.NewStore()
+	prov := &capturingProvider{}
+	largeEncodedImage := b64(strings.Repeat("OLDPNG", 4096))
+
+	_, err := RunToolLoop(t.Context(), ToolLoopInput{
+		Provider:  prov,
+		Registry:  emptyRegistry(t),
+		UserInput: "continue",
+		ConvHistory: []llm.Message{{Role: llm.RoleUser, Blocks: []llm.Block{
+			{Type: llm.BlockText, Text: "previous screenshot:"},
+			{Type: llm.BlockImage, MediaType: "image/png", ImageData: largeEncodedImage},
+		}}},
+		ConversationID: "conv-history",
+		VisionStore:    store,
+		MaxIterations:  1,
+	})
+	if err != nil {
+		t.Fatalf("RunToolLoop: %v", err)
+	}
+	if len(prov.captured) < 2 {
+		t.Fatalf("captured messages = %d, want history plus current user", len(prov.captured))
+	}
+	history := prov.captured[0]
+	for _, b := range history.Blocks {
+		if b.Type == llm.BlockImage {
+			t.Fatalf("raw historical image block reached provider-facing request: %+v", history.Blocks)
+		}
+	}
+	if !messageContainsText(history, "inspect_image") {
+		t.Fatalf("historical image was not rewritten to inspect_image placeholder: %+v", history.Blocks)
+	}
+	if messageContainsText(history, largeEncodedImage) {
+		t.Fatal("large historical base64 payload leaked into provider-facing text")
+	}
+	if got := store.Count("conv-history"); got != 1 {
+		t.Fatalf("store.Count = %d, want historical image registered", got)
+	}
+}
+
+func messageContainsText(m llm.Message, sub string) bool {
+	for _, b := range m.Blocks {
+		if b.Type == llm.BlockText && strings.Contains(b.Text, sub) {
+			return true
+		}
+	}
+	return false
+}
+
 // TestRunToolLoop_LeavesImagesWhenNoVisionStore proves the nil-store default:
 // with no VisionStore, image blocks pass through untouched (the provider
 // capability gate still strips them for text-only backends).

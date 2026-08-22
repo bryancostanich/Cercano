@@ -56,10 +56,10 @@ type Config struct {
 
 // Client implements inference.Provider using the OpenAI Responses API.
 type Client struct {
-	http    httpx.Doer
-	baseURL string
-	apiKey  string
-	model   string
+	http           httpx.Doer
+	baseURL        string
+	apiKey         string
+	model          string
 	route          string
 	tokens         TokenSource
 	supportsVision bool
@@ -127,11 +127,15 @@ func modelOr(def, override string) string {
 	return def
 }
 
-func (c *Client) buildRequest(req llm.ChatRequest, stream bool) request {
+func (c *Client) buildRequest(req llm.ChatRequest, stream bool) (request, error) {
+	input, err := messagesToInput(req.Messages)
+	if err != nil {
+		return request{}, err
+	}
 	r := request{
 		Model:        modelOr(c.model, req.Model),
 		Instructions: req.System,
-		Input:        messagesToInput(req.Messages),
+		Input:        input,
 		Tools:        toolsToResponses(req.Tools),
 		Store:        false,
 		Include:      []string{"reasoning.encrypted_content"},
@@ -146,7 +150,7 @@ func (c *Client) buildRequest(req llm.ChatRequest, stream bool) request {
 		tmp := *req.Temperature
 		r.Temperature = &tmp
 	}
-	return r
+	return r, nil
 }
 
 // do POSTs the request body to /responses and returns the raw http response.
@@ -298,7 +302,11 @@ func (c *Client) chatOnce(ctx context.Context, req llm.ChatRequest) (llm.ChatRes
 		defer rdr.Close()
 		return llm.CollectStream(ctx, rdr, nil, nil)
 	}
-	httpResp, err := c.do(ctx, c.buildRequest(req, false))
+	built, err := c.buildRequest(req, false)
+	if err != nil {
+		return llm.ChatResponse{}, err
+	}
+	httpResp, err := c.do(ctx, built)
 	if err != nil {
 		return llm.ChatResponse{}, err
 	}
@@ -325,7 +333,11 @@ func (c *Client) chatOnce(ctx context.Context, req llm.ChatRequest) (llm.ChatRes
 // StreamChat opens a streaming Responses request and returns a StreamReader that
 // emits llm.StreamEvents.
 func (c *Client) StreamChat(ctx context.Context, req llm.ChatRequest) (llm.StreamReader, error) {
-	httpResp, err := c.do(ctx, c.buildRequest(req, true))
+	built, err := c.buildRequest(req, true)
+	if err != nil {
+		return nil, err
+	}
+	httpResp, err := c.do(ctx, built)
 	if err != nil {
 		return nil, err
 	}

@@ -67,6 +67,30 @@ func TestChatGPTRoute_Stages(t *testing.T) {
 	weatherTool := tool{Type: "function", Name: "get_weather", Description: "Get the current weather for a city.",
 		Parameters: []byte(`{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}`)}
 
+	maxTokensReq, err := c.buildRequest(llm.ChatRequest{
+		MaxTokens: 4096,
+		Messages:  []llm.Message{{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: "Reply with the single word: pong"}}}},
+	}, true)
+	if err != nil {
+		t.Fatalf("build max-tokens request: %v", err)
+	}
+	anthropicHistoryReq, err := c.buildRequest(llm.ChatRequest{
+		Tools: []llm.Tool{{Name: "get_weather", Description: "Get the current weather for a city.",
+			Schema: []byte(`{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}`)}},
+		Messages: []llm.Message{
+			{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: "What's the weather in Paris? Use the tool."}}},
+			{Role: llm.RoleAssistant, Blocks: []llm.Block{
+				{Type: llm.BlockText, Text: "Checking the weather now."},
+				{Type: llm.BlockToolUse, ToolUseID: "toolu_01XYZabcdef", ToolName: "get_weather", ToolInput: []byte(`{"city":"Paris"}`)},
+			}},
+			{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockToolResult, ToolUseRef: "toolu_01XYZabcdef", Content: "18C and sunny"}}},
+			{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: "still running?"}}},
+		},
+	}, true)
+	if err != nil {
+		t.Fatalf("build anthropic-history request: %v", err)
+	}
+
 	stages := []struct {
 		name string
 		req  request
@@ -91,27 +115,12 @@ func TestChatGPTRoute_Stages(t *testing.T) {
 		// MaxTokens set on the ChatRequest: buildRequest must NOT forward
 		// max_output_tokens on this route (the backend rejects it with
 		// "Unsupported parameter").
-		{"max-tokens", c.buildRequest(llm.ChatRequest{
-			MaxTokens: 4096,
-			Messages:  []llm.Message{{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: "Reply with the single word: pong"}}}},
-		}, true)},
+		{"max-tokens", maxTokensReq},
 		// A resumed conversation whose earlier turns ran on Anthropic: plain
 		// assistant text (must replay as output_text — the backend rejects
 		// input_text on assistant messages) plus a tool_use/tool_result pair
 		// whose call_id is in Anthropic's toolu_ format, not codex's fc_/call_.
-		{"anthropic-history", c.buildRequest(llm.ChatRequest{
-			Tools: []llm.Tool{{Name: "get_weather", Description: "Get the current weather for a city.",
-				Schema: []byte(`{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}`)}},
-			Messages: []llm.Message{
-				{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: "What's the weather in Paris? Use the tool."}}},
-				{Role: llm.RoleAssistant, Blocks: []llm.Block{
-					{Type: llm.BlockText, Text: "Checking the weather now."},
-					{Type: llm.BlockToolUse, ToolUseID: "toolu_01XYZabcdef", ToolName: "get_weather", ToolInput: []byte(`{"city":"Paris"}`)},
-				}},
-				{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockToolResult, ToolUseRef: "toolu_01XYZabcdef", Content: "18C and sunny"}}},
-				{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: "still running?"}}},
-			},
-		}, true)},
+		{"anthropic-history", anthropicHistoryReq},
 	}
 
 	for _, st := range stages {

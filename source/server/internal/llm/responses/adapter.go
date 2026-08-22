@@ -8,10 +8,24 @@ import (
 )
 
 // messagesToInput maps llm messages to Responses input items, preserving order.
-// Text and image blocks accumulate into a single "message" item per message;
-// tool calls, tool results, and reasoning become their own items (flushing any
-// pending message first so order is preserved).
-func messagesToInput(msgs []llm.Message) []inputItem {
+// Text blocks accumulate into a single "message" item per message; tool calls,
+// tool results, and reasoning become their own items (flushing any pending
+// message first so order is preserved). Raw image blocks are rejected by default:
+// normal provider-facing history should have been rewritten to inspect_image
+// placeholders before it reaches this adapter.
+func messagesToInput(msgs []llm.Message) ([]inputItem, error) {
+	return messagesToInputWithOptions(msgs, inputOptions{})
+}
+
+type inputOptions struct {
+	allowRawImages bool
+}
+
+func messagesToInputAllowRawImages(msgs []llm.Message) ([]inputItem, error) {
+	return messagesToInputWithOptions(msgs, inputOptions{allowRawImages: true})
+}
+
+func messagesToInputWithOptions(msgs []llm.Message, opts inputOptions) ([]inputItem, error) {
 	var items []inputItem
 	for _, m := range msgs {
 		role := roleString(m.Role)
@@ -35,6 +49,9 @@ func messagesToInput(msgs []llm.Message) []inputItem {
 			case llm.BlockText:
 				parts = append(parts, contentPart{Type: textType, Text: b.Text})
 			case llm.BlockImage:
+				if !opts.allowRawImages {
+					return nil, fmt.Errorf("responses: raw image block reached adapter; rewrite images to inspect_image placeholders or explicitly allow raw images")
+				}
 				url := b.ImageURL
 				if url == "" {
 					url = fmt.Sprintf("data:%s;base64,%s", b.MediaType, b.ImageData)
@@ -57,7 +74,7 @@ func messagesToInput(msgs []llm.Message) []inputItem {
 		}
 		flush()
 	}
-	return items
+	return items, nil
 }
 
 func roleString(r llm.Role) string {

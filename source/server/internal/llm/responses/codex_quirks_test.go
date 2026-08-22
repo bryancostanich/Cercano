@@ -18,20 +18,31 @@ func TestBuildRequest_ChatGPTRouteOmitsMaxOutputTokens(t *testing.T) {
 		Messages:  []llm.Message{{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: "hi"}}}},
 	}
 	chatgpt := NewClient(Config{Model: "gpt-5.5", Route: RouteChatGPT, TokenSource: staticTokens{}})
-	if got := chatgpt.buildRequest(req, true).MaxOutputTokens; got != 0 {
+	chatgptReq, err := chatgpt.buildRequest(req, true)
+	if err != nil {
+		t.Fatalf("chatgpt buildRequest: %v", err)
+	}
+	if got := chatgptReq.MaxOutputTokens; got != 0 {
 		t.Errorf("chatgpt route forwarded max_output_tokens=%d; backend rejects the parameter", got)
 	}
 	apiKey := NewClient(Config{Model: "gpt-5.5", APIKey: "sk-test"})
-	if got := apiKey.buildRequest(req, true).MaxOutputTokens; got != 4096 {
+	apiKeyReq, err := apiKey.buildRequest(req, true)
+	if err != nil {
+		t.Fatalf("api key buildRequest: %v", err)
+	}
+	if got := apiKeyReq.MaxOutputTokens; got != 4096 {
 		t.Errorf("api-key route MaxOutputTokens = %d, want 4096", got)
 	}
 }
 
 func TestMessagesToInput_AssistantTextIsOutputText(t *testing.T) {
-	items := messagesToInput([]llm.Message{
+	items, err := messagesToInput([]llm.Message{
 		{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: "question"}}},
 		{Role: llm.RoleAssistant, Blocks: []llm.Block{{Type: llm.BlockText, Text: "answer"}}},
 	})
+	if err != nil {
+		t.Fatalf("messagesToInput: %v", err)
+	}
 	if len(items) != 2 {
 		t.Fatalf("items = %d, want 2", len(items))
 	}
@@ -44,12 +55,15 @@ func TestMessagesToInput_AssistantTextIsOutputText(t *testing.T) {
 }
 
 func TestMessagesToInput_ReasoningCarriesEmptySummary(t *testing.T) {
-	items := messagesToInput([]llm.Message{
+	items, err := messagesToInput([]llm.Message{
 		{Role: llm.RoleAssistant, Blocks: []llm.Block{
 			{Type: llm.BlockReasoning, ReasoningID: "rs_123", ReasoningData: "enc"},
 			{Type: llm.BlockText, Text: "answer"},
 		}},
 	})
+	if err != nil {
+		t.Fatalf("messagesToInput: %v", err)
+	}
 	if len(items) != 2 {
 		t.Fatalf("items = %d, want 2", len(items))
 	}

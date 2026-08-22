@@ -21,7 +21,10 @@ func TestMessagesToInput_TextImageToolReasoning(t *testing.T) {
 			{Type: llm.BlockToolResult, ToolUseRef: "call_1", Content: "sunny"},
 		}},
 	}
-	items := messagesToInput(msgs)
+	items, err := messagesToInputAllowRawImages(msgs)
+	if err != nil {
+		t.Fatalf("messagesToInputAllowRawImages: %v", err)
+	}
 
 	// Expect, in order: message(user text+image), reasoning, function_call, function_call_output.
 	if len(items) != 4 {
@@ -54,7 +57,10 @@ func TestMessagesToInput_EmptyToolResultKeepsOutput(t *testing.T) {
 	msgs := []llm.Message{{Role: llm.RoleUser, Blocks: []llm.Block{
 		{Type: llm.BlockToolResult, ToolUseRef: "call_9", Content: ""},
 	}}}
-	items := messagesToInput(msgs)
+	items, err := messagesToInput(msgs)
+	if err != nil {
+		t.Fatalf("messagesToInput: %v", err)
+	}
 	if len(items) != 1 || items[0].Type != "function_call_output" {
 		t.Fatalf("items = %+v", items)
 	}
@@ -78,9 +84,22 @@ func TestMessagesToInput_ImageURLPassthrough(t *testing.T) {
 	msgs := []llm.Message{{Role: llm.RoleUser, Blocks: []llm.Block{
 		{Type: llm.BlockImage, ImageURL: "https://x/y.png"},
 	}}}
-	items := messagesToInput(msgs)
+	items, err := messagesToInputAllowRawImages(msgs)
+	if err != nil {
+		t.Fatalf("messagesToInputAllowRawImages: %v", err)
+	}
 	if items[0].Content[0].ImageURL != "https://x/y.png" {
 		t.Fatalf("url = %q", items[0].Content[0].ImageURL)
+	}
+}
+
+func TestMessagesToInput_DefaultRejectsRawImages(t *testing.T) {
+	msgs := []llm.Message{{Role: llm.RoleUser, Blocks: []llm.Block{
+		{Type: llm.BlockText, Text: "see attached"},
+		{Type: llm.BlockImage, MediaType: "image/png", ImageData: "AAAA"},
+	}}}
+	if _, err := messagesToInput(msgs); err == nil {
+		t.Fatal("messagesToInput accepted a raw image block by default")
 	}
 }
 

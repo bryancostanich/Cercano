@@ -358,6 +358,8 @@ func TestAutonomousRunProtocolLocksDecisionDisciplineAndReview(t *testing.T) {
 	for _, want := range []string{
 		"approved lightweight run brief",
 		"capture_decision",
+		"visible progress",
+		"progress beacons",
 		"design-decision protocol",
 		"explicitly flag hacky options",
 		"High Bar For Stopping Mid-Run",
@@ -381,7 +383,7 @@ func TestAutonomousRunProtocolDoesNotAskForEveryDecision(t *testing.T) {
 		"Log and",
 		"Do not stop just because there are two reasonable implementation paths",
 		"checkpoint boundary is not a pause boundary",
-		"do not end your turn with a progress report",
+		"Progress beacons are required",
 	} {
 		if !strings.Contains(p.Body, want) {
 			t.Fatalf("autonomous-run protocol must keep the stop threshold high; missing %q", want)

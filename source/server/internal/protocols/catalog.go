@@ -471,11 +471,16 @@ points, treat it as a brief revision. Do not silently reinterpret the run.
    gate when interfaces, persistence, or user-visible behavior changed.
 7. **Fix failures with data.** If a test or bug appears, follow systematic
    debugging before patching.
-8. **Checkpoint solved units, then continue.** Commit solved units with clear
+8. **Keep visible progress.** Autonomy is not silence. Emit concise, user-visible
+   progress beacons before meaningful phases, before long or noisy tool batches,
+   before verification, before checkpointing, and when moving to the next major
+   slice. These are beacons, not pause points: write one short sentence and keep
+   working in the same turn.
+9. **Checkpoint solved units, then continue.** Commit solved units with clear
    messages. A checkpoint boundary is not a pause boundary: after checkpointing,
    immediately continue to the next unsatisfied ` + "`done_when`" + ` item or next necessary
    implementation slice. Never push or merge unless explicitly authorized.
-9. **Request final review.** When the brief is satisfied, call
+10. **Request final review.** When the brief is satisfied, call
    ` + "`request_autonomous_exit`" + ` to enter decision review. Walk the user through
    decisions one by one; only after acceptance call ` + "`complete_autonomous_review`" + `.
 
@@ -508,11 +513,12 @@ continue when the choice:
 ## High Bar For Stopping Mid-Run
 
 Do not stop just because there are two reasonable implementation paths. Do not
-stop just because you reached a clean checkpoint. A status summary is not a
-substitute for continuing work: do not end your turn with a progress report
-unless the approved brief is complete, you are blocked, the user explicitly asked
-for a pause/status-only update, or a high-risk stop condition is met. Stop and
-ask only when the decision crosses a high-risk boundary:
+stop just because you reached a clean checkpoint. Progress beacons are required
+for liveness, but they are not a substitute for continuing work: do not end your
+turn with a progress report unless the approved brief is complete, you are
+blocked, the user explicitly asked for a pause/status-only update, or a high-risk
+stop condition is met. Stop and ask only when the decision crosses a high-risk
+boundary:
 
 - it is effectively irreversible;
 - if wrong, it would invalidate most downstream work or require a major rewrite;

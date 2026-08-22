@@ -70,3 +70,32 @@ func TestRequest_IsProviderFree(t *testing.T) {
 	_ = r
 	var _ []llm.Message // history is assembled by the runner, not passed in
 }
+
+func TestMakeLoopSink_AutonomousEmitsProgressBeforeToolExec(t *testing.T) {
+	s := &captureSink{}
+	makeLoopSinkForProfile(s, agent.AutonomousProfile())(agent.LoopEvent{
+		Kind:      agent.LoopToolExecStart,
+		ToolUseID: "tool-1",
+		ToolName:  "Bash",
+	})
+	if len(s.events) != 2 {
+		t.Fatalf("got %d events, want progress + exec start: %+v", len(s.events), s.events)
+	}
+	if s.events[0].Kind != EventProgress || s.events[0].Text != "autonomous: running Bash" {
+		t.Fatalf("first event should be autonomous progress, got %+v", s.events[0])
+	}
+	if s.events[1].Kind != EventToolExecStart || s.events[1].ToolUseID != "tool-1" {
+		t.Fatalf("second event should be tool exec start, got %+v", s.events[1])
+	}
+}
+
+func TestMakeLoopSink_NormalDoesNotEmitAutonomousToolProgress(t *testing.T) {
+	s := &captureSink{}
+	makeLoopSink(s)(agent.LoopEvent{Kind: agent.LoopToolExecStart, ToolUseID: "tool-1", ToolName: "Bash"})
+	if len(s.events) != 1 {
+		t.Fatalf("got %d events, want only exec start: %+v", len(s.events), s.events)
+	}
+	if s.events[0].Kind != EventToolExecStart {
+		t.Fatalf("unexpected event: %+v", s.events[0])
+	}
+}

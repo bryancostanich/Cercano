@@ -20,6 +20,7 @@ import (
 	"cercano/source/server/internal/locus"
 	"cercano/source/server/internal/protocols"
 	"cercano/source/server/internal/routinglog"
+	"cercano/source/server/internal/sysram"
 	"cercano/source/server/internal/watchdog"
 	"cercano/source/server/pkg/config"
 )
@@ -74,10 +75,10 @@ func localContextWindow(cfg config.Config, model string) int {
 	case "mistralrs":
 		return cfg.MistralRS.MaxSeqLen
 	case "llama_server":
-		return llamaServerWindow(cfg.LlamaServer.ContextSize, model)
+		return llamaServerWindow(cfg.LlamaServer.ContextSize, cfg.LlamaServer.ContextSizeSet, model)
 	default:
 		if cfg.LlamaServer.ContextSize > 0 {
-			return llamaServerWindow(cfg.LlamaServer.ContextSize, model)
+			return llamaServerWindow(cfg.LlamaServer.ContextSize, cfg.LlamaServer.ContextSizeSet, model)
 		}
 		return cfg.MistralRS.MaxSeqLen
 	}
@@ -87,7 +88,10 @@ func localContextWindow(cfg config.Config, model string) int {
 // configured context size. The model ID carries provider/catalog prefixes in
 // routing form (e.g. "llama_server:catalog:glm-4.5-air-q4_k_m"); the catalog is
 // keyed by the bare ID, so match on the final segment.
-func llamaServerWindow(configured int, model string) int {
+func llamaServerWindow(configured int, configExplicit bool, model string) int {
+	if configExplicit && configured > 0 {
+		return configured
+	}
 	if model == "" {
 		return configured
 	}
@@ -95,7 +99,11 @@ func llamaServerWindow(configured int, model string) int {
 	if i := strings.LastIndex(bare, ":"); i >= 0 {
 		bare = bare[i+1:]
 	}
-	if n := llamaserver.ModelContextOverride(bare); n > 0 {
+	total := sysram.Total()
+	if total < 0 {
+		total = 0
+	}
+	if n := llamaserver.ModelContextOverride(bare, uint64(total)); n > 0 {
 		return n
 	}
 	return configured
@@ -288,21 +296,21 @@ func (c *Core) RunTurn(
 		}
 	}
 
-	// 5. Internal adapter: agent.LoopEvent → runner.Event, forwarded to sink.
-	loopSink := makeLoopSink(sink)
-
-	// 6. Build the permission store for the loop.
-	var permStore *agent.PermissionStore
-	if c.d.Perms != nil {
-		permStore = c.d.Perms.Store()
-	}
-
-	// 6b. Read the active capability profile (read-only planning fence / future
-	// modes). Live accessor: read at turn time so a mid-session mode switch
+	// 5. Read the active capability profile (read-only planning fence / autonomous
+	// mode signal). Live accessor: read at turn time so a mid-session mode switch
 	// takes effect on the next turn. Nil accessor = unrestricted (zero Profile).
 	var profile agent.Profile
 	if c.d.Profiles != nil {
 		profile = c.d.Profiles(req.ConversationID)
+	}
+
+	// 6. Internal adapter: agent.LoopEvent → runner.Event, forwarded to sink.
+	loopSink := makeLoopSinkForProfile(sink, profile)
+
+	// 7. Build the permission store for the loop.
+	var permStore *agent.PermissionStore
+	if c.d.Perms != nil {
+		permStore = c.d.Perms.Store()
 	}
 
 	// Run the tool loop on the primary provider.
@@ -534,6 +542,11 @@ func retryNotice(provider string, class llm.ErrorClass) string {
 // to the runner's proto-free Event type. The host's protoSink then maps
 // runner.Event → stream.Send(proto...).
 func makeLoopSink(sink EventSink) func(agent.LoopEvent) {
+	return makeLoopSinkForProfile(sink, agent.Profile{})
+}
+
+func makeLoopSinkForProfile(sink EventSink, profile agent.Profile) func(agent.LoopEvent) {
+	autonomous := profile.Name == "autonomous"
 	return func(ev agent.LoopEvent) {
 		switch ev.Kind {
 		case agent.LoopToolUseStart:
@@ -556,6 +569,9 @@ func makeLoopSink(sink EventSink) func(agent.LoopEvent) {
 			})
 
 		case agent.LoopToolExecStart:
+			if autonomous {
+				sink.Emit(Event{Kind: EventProgress, Text: autonomousToolProgress(ev.ToolName)})
+			}
 			sink.Emit(Event{
 				Kind:      EventToolExecStart,
 				ToolUseID: ev.ToolUseID,
@@ -664,6 +680,14 @@ func makeLoopSink(sink EventSink) func(agent.LoopEvent) {
 	}
 }
 
+func autonomousToolProgress(toolName string) string {
+	name := strings.TrimSpace(toolName)
+	if name == "" {
+		return "autonomous: running tool"
+	}
+	return "autonomous: running " + name
+}
+
 func taskProgressSnapshotToRunner(in agenttools.TaskProgressSnapshot) TaskSnapshot {
 	out := TaskSnapshot{
 		ID:       in.ID,
@@ -728,7 +752,7 @@ func profileStateSignal(p agent.Profile) string {
 	case "plan":
 		return "<planning-mode>\nYou are currently IN PLANNING MODE (a read-only exploration fence is active). You may read the codebase and author the effort's spec.md and plan.md, but write/exec tools on other files are unavailable until the plan is approved. Do NOT call suggest_plan again — you are already planning; proceed to investigate and author the spec. When the plan is ready, call request_plan_approval to hand off to execution; to abandon planning, call plan_exit.\n</planning-mode>"
 	case "autonomous":
-		return "<autonomous-mode>\nYou are currently IN AUTONOMOUS MODE. Follow the autonomous-run protocol. Work against the approved run brief: pursue the goal, satisfy the done_when items, honor constraints, and pay attention to review_points. For meaningful in-scope forks, use the design-decision protocol, call capture_decision with the real options/trade-offs/hack flags/counterarguments/reversibility, then continue without asking. Stop mid-run only for high-risk boundary cases: effectively irreversible choices, scope expansion, security/permission/data-loss semantics, destructive operations, push/merge/migration/user-data changes, or when you cannot identify a clean preferred option. A checkpoint boundary is not a pause boundary: after checkpointing a solved unit, continue to the next unsatisfied done_when item or necessary implementation slice instead of ending with a status report. When the brief is satisfied, call request_autonomous_exit to begin final decision review. Walk the user through captured decisions one by one; if they accept, call complete_autonomous_review to mark the run completed and leave autonomous mode.\n</autonomous-mode>"
+		return "<autonomous-mode>\nYou are currently IN AUTONOMOUS MODE. Follow the autonomous-run protocol. Work against the approved run brief: pursue the goal, satisfy the done_when items, honor constraints, and pay attention to review_points. Keep visible progress: emit concise user-visible progress beacons before meaningful phases, long or noisy tool batches, verification, checkpointing, and major slice transitions, then continue working in the same turn. For meaningful in-scope forks, use the design-decision protocol, call capture_decision with the real options/trade-offs/hack flags/counterarguments/reversibility, then continue without asking. Stop mid-run only for high-risk boundary cases: effectively irreversible choices, scope expansion, security/permission/data-loss semantics, destructive operations, push/merge/migration/user-data changes, or when you cannot identify a clean preferred option. A checkpoint boundary is not a pause boundary: after checkpointing a solved unit, continue to the next unsatisfied done_when item or necessary implementation slice instead of ending with a status report. When the brief is satisfied, call request_autonomous_exit to begin final decision review. Walk the user through captured decisions one by one; if they accept, call complete_autonomous_review to mark the run completed and leave autonomous mode.\n</autonomous-mode>"
 	default:
 		return fmt.Sprintf("<active-profile>\nYou are currently in the %q capability profile, which fences off some tools. Tools outside the profile are unavailable this turn.\n</active-profile>", p.Name)
 	}

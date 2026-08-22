@@ -7,16 +7,12 @@ import (
 	"cercano/source/server/internal/llm"
 )
 
-const maxInlineImageDataChars = 1_000_000
-
 // messagesToInput maps llm messages to Responses input items, preserving order.
 // Text and image blocks accumulate into a single "message" item per message;
 // tool calls, tool results, and reasoning become their own items (flushing any
-// pending message first so order is preserved). Normal-sized inline images are
-// preserved for vision-capable Responses calls, while pathological multi-MB
-// inline payloads are rejected locally as a last-resort guard. Provider-facing
-// history should still be rewritten to inspect_image placeholders before it
-// reaches this adapter.
+// pending message first so order is preserved). Provider-facing history should
+// be rewritten to inspect_image placeholders before it reaches this adapter;
+// intentional current-turn vision payloads are serialized normally.
 func messagesToInput(msgs []llm.Message) ([]inputItem, error) {
 	var items []inputItem
 	for _, m := range msgs {
@@ -41,9 +37,6 @@ func messagesToInput(msgs []llm.Message) ([]inputItem, error) {
 			case llm.BlockText:
 				parts = append(parts, contentPart{Type: textType, Text: b.Text})
 			case llm.BlockImage:
-				if b.ImageURL == "" && len(b.ImageData) > maxInlineImageDataChars {
-					return nil, fmt.Errorf("responses: inline image payload is %d chars, exceeds %d char safety limit; rewrite historical images to inspect_image placeholders", len(b.ImageData), maxInlineImageDataChars)
-				}
 				url := b.ImageURL
 				if url == "" {
 					url = fmt.Sprintf("data:%s;base64,%s", b.MediaType, b.ImageData)

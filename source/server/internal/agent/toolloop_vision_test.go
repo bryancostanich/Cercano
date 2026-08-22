@@ -2,9 +2,11 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
+	"cercano/source/server/internal/agenttools"
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/visionattach"
@@ -31,6 +33,45 @@ func (p *capturingProvider) StreamChat(_ context.Context, req llm.ChatRequest) (
 	}
 	p.calls++
 	return &scriptedStream{events: blocksToEvents([]llm.Block{{Type: llm.BlockText, Text: "ok"}})}, nil
+}
+
+type captureEveryProvider struct {
+	scripts [][]llm.Block
+	capture [][]llm.Message
+}
+
+func (p *captureEveryProvider) Name() string { return "capture-every" }
+func (p *captureEveryProvider) Capabilities() inference.Capabilities {
+	return inference.Capabilities{SupportsTools: true, SupportsVision: true}
+}
+func (p *captureEveryProvider) Chat(_ context.Context, _ llm.ChatRequest) (llm.ChatResponse, error) {
+	return llm.ChatResponse{}, nil
+}
+func (p *captureEveryProvider) StreamChat(_ context.Context, req llm.ChatRequest) (llm.StreamReader, error) {
+	p.capture = append(p.capture, req.Messages)
+	idx := len(p.capture) - 1
+	if idx >= len(p.scripts) {
+		idx = len(p.scripts) - 1
+	}
+	return &scriptedStream{events: blocksToEvents(p.scripts[idx])}, nil
+}
+
+type imageTool struct{ data string }
+
+func (imageTool) Name() string                      { return "screenshot" }
+func (imageTool) Description() string               { return "returns an image" }
+func (imageTool) Permission() agenttools.Permission { return agenttools.PermR }
+func (imageTool) Schema() json.RawMessage           { return json.RawMessage(`{"type":"object"}`) }
+func (t imageTool) Execute(context.Context, json.RawMessage) (*agenttools.Result, error) {
+	return &agenttools.Result{
+		Type: agenttools.ResultText,
+		Text: "screenshot captured",
+		Images: []llm.Block{{
+			Type:      llm.BlockImage,
+			MediaType: "image/png",
+			ImageData: t.data,
+		}},
+	}, nil
 }
 
 // TestRunToolLoop_RewritesImagesWhenVisionStoreSet proves the Phase 8 wiring:
@@ -118,6 +159,52 @@ func TestRunToolLoop_RewritesHistoricalImagesWhenVisionStoreSet(t *testing.T) {
 	}
 	if got := store.Count("conv-history"); got != 1 {
 		t.Fatalf("store.Count = %d, want historical image registered", got)
+	}
+}
+
+func TestRunToolLoop_RewritesToolResultImagesBeforeNextProviderCall(t *testing.T) {
+	store := visionattach.NewStore()
+	largeEncodedImage := b64(strings.Repeat("TOOLPNG", 4096))
+	prov := &captureEveryProvider{scripts: [][]llm.Block{
+		{{Type: llm.BlockToolUse, ToolUseID: "call_1", ToolName: "screenshot", ToolInput: []byte(`{}`)}},
+		{{Type: llm.BlockText, Text: "done"}},
+	}}
+	reg := emptyRegistry(t)
+	reg.MustRegister(imageTool{data: largeEncodedImage})
+
+	_, err := RunToolLoop(t.Context(), ToolLoopInput{
+		Provider:       prov,
+		Registry:       reg,
+		UserInput:      "take a screenshot",
+		ConversationID: "conv-tool-image",
+		VisionStore:    store,
+		MaxIterations:  2,
+	})
+	if err != nil {
+		t.Fatalf("RunToolLoop: %v", err)
+	}
+	if len(prov.capture) < 2 {
+		t.Fatalf("provider calls = %d, want at least 2", len(prov.capture))
+	}
+	second := prov.capture[1]
+	for _, m := range second {
+		for _, b := range m.Blocks {
+			if b.Type == llm.BlockImage {
+				t.Fatalf("raw tool-result image reached follow-up provider request: %+v", second)
+			}
+		}
+		if messageContainsText(m, largeEncodedImage) {
+			t.Fatal("large tool-result base64 payload leaked into follow-up provider text")
+		}
+	}
+	foundPlaceholder := false
+	for _, m := range second {
+		if messageContainsText(m, "inspect_image") {
+			foundPlaceholder = true
+		}
+	}
+	if !foundPlaceholder {
+		t.Fatalf("follow-up provider request did not include inspect_image placeholder: %+v", second)
 	}
 }
 

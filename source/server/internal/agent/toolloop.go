@@ -488,6 +488,11 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 	}
 
 	for iter := 0; unlimitedIters || iter < maxIters; iter++ {
+		// Tool results can add image blocks after the initial user/history rewrite.
+		// Re-apply the vision-as-tool transform before every provider request so a
+		// screenshot returned by a tool cannot be replayed as raw base64 on the next
+		// iteration.
+		hist = RewriteImagesToPlaceholders(in.VisionStore, in.ConversationID, hist)
 		catalog = buildCompactToolCatalog(in.Registry, in.Profile, in.TightContextFallback, hydratedTools)
 		effectiveSystem := in.System
 		if in.TightContextFallback {

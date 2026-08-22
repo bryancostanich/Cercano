@@ -2,6 +2,7 @@ package responses
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"cercano/source/server/internal/llm"
@@ -93,13 +94,18 @@ func TestMessagesToInput_ImageURLPassthrough(t *testing.T) {
 	}
 }
 
-func TestMessagesToInput_RejectsOversizedInlineImages(t *testing.T) {
+func TestMessagesToInput_AllowsLargeInlineImages(t *testing.T) {
+	largeImage := string(make([]byte, 5*1024*1024))
 	msgs := []llm.Message{{Role: llm.RoleUser, Blocks: []llm.Block{
 		{Type: llm.BlockText, Text: "see attached"},
-		{Type: llm.BlockImage, MediaType: "image/png", ImageData: string(make([]byte, maxInlineImageDataChars+1))},
+		{Type: llm.BlockImage, MediaType: "image/png", ImageData: largeImage},
 	}}}
-	if _, err := messagesToInput(msgs); err == nil {
-		t.Fatal("messagesToInput accepted an oversized inline image payload")
+	items, err := messagesToInput(msgs)
+	if err != nil {
+		t.Fatalf("messagesToInput rejected an intentional inline vision payload: %v", err)
+	}
+	if got := items[0].Content[1].ImageURL; !strings.Contains(got, largeImage) {
+		t.Fatal("large inline image payload was not serialized for the vision-capable request")
 	}
 }
 

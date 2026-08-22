@@ -70,3 +70,20 @@ func TestSegmentByTokens_SplitsImageHeavyHistory(t *testing.T) {
 		t.Fatalf("expected image-heavy history to split under tight budget, got %d segments: %+v", len(segs), segs)
 	}
 }
+
+func TestProviderMessageTokens_CountsImageAsReferenceNotPayload(t *testing.T) {
+	tok := contextmeter.Default()
+	msg := llm.Message{Role: llm.RoleUser, Blocks: []llm.Block{{
+		Type:      llm.BlockImage,
+		MediaType: "image/png",
+		ImageData: string(make([]byte, 4096)),
+	}}}
+	rawCost := MessageTokens(tok, msg)
+	providerCost := ProviderMessageTokens(tok, msg)
+	if providerCost <= 0 {
+		t.Fatalf("provider image cost = %d, want nonzero reference cost", providerCost)
+	}
+	if providerCost >= rawCost/10 {
+		t.Fatalf("provider image cost = %d, raw cost = %d; provider cost should be placeholder-sized", providerCost, rawCost)
+	}
+}

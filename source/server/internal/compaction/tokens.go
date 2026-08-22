@@ -55,11 +55,67 @@ func ImageTokens(tok contextmeter.Tokenizer, b llm.Block) int {
 	return n
 }
 
-// TotalTokens sums MessageTokens over msgs.
+// TotalTokens sums MessageTokens over msgs. It is intentionally conservative
+// for compaction pressure and raw send-view safety checks: inline image payloads
+// are charged by encoded byte length so image-heavy tails cannot look cheap.
 func TotalTokens(tok contextmeter.Tokenizer, msgs []llm.Message) int {
 	n := 0
 	for _, m := range msgs {
 		n += MessageTokens(tok, m)
+	}
+	return n
+}
+
+// ProviderMessageTokens estimates the provider-facing token cost of a message
+// after history images have been converted to references/placeholders. Unlike
+// MessageTokens, inline image bytes are not charged by payload size. Use this
+// for UI sent-context meters and hard-override decisions that are meant to
+// mirror the compacted prompt, not raw storage pressure.
+func ProviderMessageTokens(tok contextmeter.Tokenizer, m llm.Message) int {
+	n := 0
+	for _, b := range m.Blocks {
+		if b.Text != "" {
+			n += tok.Count(b.Text)
+		}
+		if b.Content != "" {
+			n += tok.Count(b.Content)
+		}
+		if len(b.ToolInput) > 0 {
+			n += tok.Count(string(b.ToolInput))
+		}
+		if b.ToolName != "" {
+			n += tok.Count(b.ToolName)
+		}
+		if b.Type == llm.BlockImage {
+			n += ProviderImageTokens(tok, b)
+		}
+	}
+	return n
+}
+
+// ProviderImageTokens charges an image as the small textual reference the model
+// should see after placeholder rewriting, rather than charging inline base64.
+// It is deliberately nonzero so image-heavy histories remain visible in the
+// sent-context meter without exploding to raw-storage size.
+func ProviderImageTokens(tok contextmeter.Tokenizer, b llm.Block) int {
+	if b.Type != llm.BlockImage {
+		return 0
+	}
+	n := tok.Count("[image attached; use inspect_image]")
+	if b.MediaType != "" {
+		n += tok.Count(b.MediaType)
+	}
+	if b.ImageURL != "" {
+		n += tok.Count(b.ImageURL)
+	}
+	return n
+}
+
+// ProviderTotalTokens sums ProviderMessageTokens over msgs.
+func ProviderTotalTokens(tok contextmeter.Tokenizer, msgs []llm.Message) int {
+	n := 0
+	for _, m := range msgs {
+		n += ProviderMessageTokens(tok, m)
 	}
 	return n
 }

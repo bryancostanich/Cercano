@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
+	"cercano/source/server/internal/compaction"
 	"cercano/source/server/internal/contextmeter"
 	"cercano/source/server/internal/conversation"
 	"cercano/source/server/internal/llm"
@@ -53,6 +55,60 @@ func TestGetConversationTurns_SummariesAndSideEffectFree(t *testing.T) {
 	used, _ := srv.agent.GetContextUsage(ctx, convID)
 	if used != 0 {
 		t.Errorf("GetConversationTurns mutated the meter: used = %d, want 0", used)
+	}
+}
+
+func TestGetContextUsage_CompactedMeterCountsLiveImagesAsReferences(t *testing.T) {
+	srv, store := newServerWithStore(t)
+	ctx := context.Background()
+	convID := "conv-compacted-image-meter"
+	if err := store.EnsureConversation(ctx, convID, "", "test-model"); err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+	frozenAt := time.Unix(100, 0)
+	if err := store.Append(ctx, conversation.Turn{
+		ConversationID: convID,
+		Role:           "user",
+		Content:        "old frozen turn",
+		CreatedAt:      frozenAt,
+	}); err != nil {
+		t.Fatalf("append frozen: %v", err)
+	}
+	largeImage := strings.Repeat("A", 512*1024)
+	blocksJSON, _ := json.Marshal([]llm.Block{{
+		Type:      llm.BlockImage,
+		MediaType: "image/png",
+		ImageData: largeImage,
+	}})
+	if err := store.Append(ctx, conversation.Turn{
+		ConversationID: convID,
+		Role:           "user",
+		BlocksJSON:     string(blocksJSON),
+		CreatedAt:      time.Unix(101, 0),
+	}); err != nil {
+		t.Fatalf("append live image: %v", err)
+	}
+	consolidated, _ := json.Marshal(compaction.StructuredSummary{Goal: "summarized", State: "ready"})
+	if err := store.SaveCompaction(ctx, conversation.Compaction{
+		ConversationID:       convID,
+		FrozenThrough:        frozenAt.Unix(),
+		ConsolidatedJSON:     string(consolidated),
+		CompactedTokens:      10,
+		SegmentSummariesJSON: "[]",
+		UpdatedAt:            time.Unix(102, 0),
+	}); err != nil {
+		t.Fatalf("save compaction: %v", err)
+	}
+
+	resp, err := srv.GetContextUsage(ctx, &proto.GetContextUsageRequest{ConversationId: convID})
+	if err != nil {
+		t.Fatalf("GetContextUsage: %v", err)
+	}
+	if resp.GetTokensUsed() > 10_000 {
+		t.Fatalf("compacted meter counted raw live image payload: tokens=%d raw=%d", resp.GetTokensUsed(), resp.GetRawTokens())
+	}
+	if resp.GetRawTokens() <= resp.GetTokensUsed() {
+		t.Fatalf("raw storage pressure should remain larger than provider-facing sent tokens: raw=%d sent=%d", resp.GetRawTokens(), resp.GetTokensUsed())
 	}
 }
 

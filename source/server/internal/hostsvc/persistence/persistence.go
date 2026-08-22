@@ -373,17 +373,17 @@ func (x *svc) AssembleHistory(ctx context.Context, convID string) []llm.Message 
 	pct := compactionCfg.HardOverridePct
 	if compactionCfg.Enabled && pct > 0 {
 		hardLimit := int(float64(contextmeter.ModelMax(cloudModel)) * pct)
-		if compaction.TotalTokens(contextmeter.Default(), view) > hardLimit {
+		if compaction.ProviderTotalTokens(contextmeter.Default(), view) > hardLimit {
 			// Never compact inline — kick the background generator (debounced,
 			// deduped, timeout-bounded) and bring THIS turn under the limit with
 			// LLM-free steps only.
 			x.convAgent.ScheduleCompaction(convID)
-			pre := compaction.TotalTokens(contextmeter.Default(), view)
+			pre := compaction.ProviderTotalTokens(contextmeter.Default(), view)
 			view, _ = compaction.ElideSupersededToolResults(view)
-			if compaction.TotalTokens(contextmeter.Default(), view) > hardLimit {
+			if compaction.ProviderTotalTokens(contextmeter.Default(), view) > hardLimit {
 				view, _ = compaction.KeepLastNToolResults(view, compaction.DefaultLossyElisionKeepLast)
 			}
-			if compaction.TotalTokens(contextmeter.Default(), view) > hardLimit {
+			if compaction.ProviderTotalTokens(contextmeter.Default(), view) > hardLimit {
 				preserve := 0
 				if state.ConsolidatedJSON != "" {
 					preserve = 1 // keep the consolidated-summary preamble
@@ -723,7 +723,7 @@ func (x *svc) sentViewTokens(convID string, turns []conversation.Turn, state con
 	if lossy {
 		view, _ = compaction.KeepLastNToolResults(view, compaction.DefaultLossyElisionKeepLast)
 	}
-	return compaction.TotalTokens(contextmeter.Default(), view)
+	return compaction.ProviderTotalTokens(contextmeter.Default(), view)
 }
 
 // ElideContext implements the /elide-context RPC: record "now" as the
@@ -783,7 +783,7 @@ func (x *svc) GetCompactionState(ctx context.Context, req *proto.GetCompactionSt
 	}
 	state, _ := store.GetCompaction(ctx, convID)
 	view, _ := compactor.BuildSendView(turns, state)
-	out.SentTokens = int32(compaction.TotalTokens(contextmeter.Default(), view))
+	out.SentTokens = int32(compaction.ProviderTotalTokens(contextmeter.Default(), view))
 	out.RawTokens = int32(estimateRawTokens(turns))
 	out.FrozenThrough = state.FrozenThrough
 	for _, t := range turns {

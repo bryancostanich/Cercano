@@ -58,9 +58,9 @@ Spec: `efforts/tune-llama-context-ram-tiers/spec.md`
   - [x] relevant server tests for dispatch/preflight integration.
 - [x] Run broader server verification:
   - [x] `go test ./...`
-- [ ] Checkpoint the work with a commit body including before/after context sizes and the GLM KV math.
-- [ ] Rebuild `~/bin/.cercano-libexec/cercano`.
-- [ ] Do not restart automatically; tell the user restart is required and let them choose timing.
+- [x] Checkpoint the work with a commit body including before/after context sizes and the GLM KV math.
+- [x] Rebuild `~/bin/.cercano-libexec/cercano`.
+- [x] Do not restart automatically; tell the user restart is required and let them choose timing.
 
 ## Safety constraints
 

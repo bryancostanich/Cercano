@@ -11,7 +11,7 @@ This violates Cercano's intended model: historical images should be referenced a
 - Prevent historical image payloads from being serialized into normal provider requests.
 - Preserve the existing vision-as-tool workflow: images remain addressable through stable `inspect_image` placeholders when the in-memory vision store can hold them.
 - Make compaction and context budgeting conservatively aware of inline image payload size.
-- Add adapter-level protection so raw images only reach a provider when that path explicitly allows them.
+- Add adapter-level protection so pathological oversized inline image payloads fail locally instead of becoming giant provider requests, while normal current-turn image serialization remains available for vision-capable paths.
 - Cover the observed failure mode with focused regression tests.
 
 ## Non-goals
@@ -42,7 +42,7 @@ The approved product invariant is: history images are references, not prompt pay
 | Risk | Could hide a fresh attachment if applied at the wrong boundary. | Provider calls can still fail before compaction catches up. | Highest semantic risk. | Slightly more code, but each guard is simple and testable. |
 | Implementation cleanliness | Good partial fix. | Good backstop, not the core invariant. | Feels like cleanup policy rather than architecture. | Cleanest complete fix for the observed failure mode. |
 
-The implementation should therefore do both: explicitly sanitize historical image blocks before provider calls, and teach compaction/budget code to charge image payloads conservatively. Provider adapters, especially OpenAI Responses, should additionally fail locally if an unapproved raw image block reaches serialization.
+The implementation should therefore do both: explicitly sanitize historical image blocks before provider calls, and teach compaction/budget code to charge image payloads conservatively. Provider adapters, especially OpenAI Responses, should additionally fail locally if an oversized inline image payload reaches serialization.
 
 ## Current code facts anchoring the work
 
@@ -51,4 +51,4 @@ The implementation should therefore do both: explicitly sanitize historical imag
 - `source/server/internal/agent/history.go` unmarshals persisted `BlocksJSON` directly into `llm.Message` blocks.
 - `source/server/internal/agent/vision_placeholder.go` already provides `RewriteImagesToPlaceholders`, with tests in `vision_placeholder_test.go`.
 - `source/server/internal/compaction/tokens.go` currently counts text/tool fields but not `BlockImage.ImageData` size.
-- `source/server/internal/llm/responses/adapter.go` serializes `BlockImage` as `input_image` data URLs, so it needs an explicit guard or allowlist path.
+- `source/server/internal/llm/responses/adapter.go` serializes `BlockImage` as `input_image` data URLs, so it needs an explicit oversized-inline-payload guard without disabling normal image-capable Responses calls.

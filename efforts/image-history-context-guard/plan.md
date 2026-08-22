@@ -32,12 +32,12 @@ Prevent image-heavy conversation history from overflowing provider context windo
 
 ## Phase 4 — Add OpenAI Responses serialization guard
 
-- [x] Introduce an explicit guard in the Responses adapter so raw inline images are rejected unless a deliberate allow-raw-images path is used.
-- [x] Keep existing image serialization support available for intentionally raw image tests or future vision-provider use, but make default provider calls fail locally rather than silently emitting giant `data:image/...;base64,...` payloads.
+- [x] Introduce an explicit guard in the Responses adapter so oversized inline images are rejected with an actionable local error.
+- [x] Keep existing normal image serialization support available for current-turn or intentionally raw vision-provider use, while refusing pathological multi-megabyte `data:image/...;base64,...` payloads.
 - [x] Update `source/server/internal/llm/responses/adapter_test.go`:
-  - existing raw image serialization test should either opt into raw image allowance or be split into an explicit allow-raw test;
-                - add a default-path test asserting inline image blocks are rejected or omitted according to the chosen adapter API;
-                - keep URL passthrough behavior only if it is explicitly allowed by the same policy.
+  - existing normal raw image serialization remains covered;
+  - add a default-path test asserting oversized inline image blocks are rejected;
+  - keep URL passthrough behavior covered.
 
 ## Phase 5 — Regression for the observed failure mode
 

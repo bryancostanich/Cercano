@@ -21,9 +21,9 @@ func TestMessagesToInput_TextImageToolReasoning(t *testing.T) {
 			{Type: llm.BlockToolResult, ToolUseRef: "call_1", Content: "sunny"},
 		}},
 	}
-	items, err := messagesToInputAllowRawImages(msgs)
+	items, err := messagesToInput(msgs)
 	if err != nil {
-		t.Fatalf("messagesToInputAllowRawImages: %v", err)
+		t.Fatalf("messagesToInput: %v", err)
 	}
 
 	// Expect, in order: message(user text+image), reasoning, function_call, function_call_output.
@@ -84,22 +84,22 @@ func TestMessagesToInput_ImageURLPassthrough(t *testing.T) {
 	msgs := []llm.Message{{Role: llm.RoleUser, Blocks: []llm.Block{
 		{Type: llm.BlockImage, ImageURL: "https://x/y.png"},
 	}}}
-	items, err := messagesToInputAllowRawImages(msgs)
+	items, err := messagesToInput(msgs)
 	if err != nil {
-		t.Fatalf("messagesToInputAllowRawImages: %v", err)
+		t.Fatalf("messagesToInput: %v", err)
 	}
 	if items[0].Content[0].ImageURL != "https://x/y.png" {
 		t.Fatalf("url = %q", items[0].Content[0].ImageURL)
 	}
 }
 
-func TestMessagesToInput_DefaultRejectsRawImages(t *testing.T) {
+func TestMessagesToInput_RejectsOversizedInlineImages(t *testing.T) {
 	msgs := []llm.Message{{Role: llm.RoleUser, Blocks: []llm.Block{
 		{Type: llm.BlockText, Text: "see attached"},
-		{Type: llm.BlockImage, MediaType: "image/png", ImageData: "AAAA"},
+		{Type: llm.BlockImage, MediaType: "image/png", ImageData: string(make([]byte, maxInlineImageDataChars+1))},
 	}}}
 	if _, err := messagesToInput(msgs); err == nil {
-		t.Fatal("messagesToInput accepted a raw image block by default")
+		t.Fatal("messagesToInput accepted an oversized inline image payload")
 	}
 }
 

@@ -575,6 +575,11 @@ func TestBuildSystemPrompt_SignalsActiveProfile(t *testing.T) {
 	}
 
 	normal := BuildSystemPrompt(d, "", agent.Profile{})
+	for _, want := range []string{"Keep the user oriented", "Before the first tool call", "progress beacons"} {
+		if !strings.Contains(normal, want) {
+			t.Fatalf("normal prompt should contain general progress guidance %q; got:\n%s", want, normal)
+		}
+	}
 	if strings.Contains(normal, "PLANNING MODE") || strings.Contains(normal, "AUTONOMOUS MODE") {
 		t.Fatalf("unrestricted prompt must not claim a special profile; got:\n%s", normal)
 	}

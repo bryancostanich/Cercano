@@ -305,7 +305,7 @@ func (c *Core) RunTurn(
 	}
 
 	// 6. Internal adapter: agent.LoopEvent → runner.Event, forwarded to sink.
-	loopSink := makeLoopSinkForProfile(sink, profile)
+	loopSink := makeLoopSink(sink)
 
 	// 7. Build the permission store for the loop.
 	var permStore *agent.PermissionStore
@@ -542,11 +542,6 @@ func retryNotice(provider string, class llm.ErrorClass) string {
 // to the runner's proto-free Event type. The host's protoSink then maps
 // runner.Event → stream.Send(proto...).
 func makeLoopSink(sink EventSink) func(agent.LoopEvent) {
-	return makeLoopSinkForProfile(sink, agent.Profile{})
-}
-
-func makeLoopSinkForProfile(sink EventSink, profile agent.Profile) func(agent.LoopEvent) {
-	autonomous := profile.Name == "autonomous"
 	return func(ev agent.LoopEvent) {
 		switch ev.Kind {
 		case agent.LoopToolUseStart:
@@ -569,9 +564,7 @@ func makeLoopSinkForProfile(sink EventSink, profile agent.Profile) func(agent.Lo
 			})
 
 		case agent.LoopToolExecStart:
-			if autonomous {
-				sink.Emit(Event{Kind: EventProgress, Text: autonomousToolProgress(ev.ToolName)})
-			}
+			sink.Emit(Event{Kind: EventProgress, Text: toolProgress(ev.ToolName)})
 			sink.Emit(Event{
 				Kind:      EventToolExecStart,
 				ToolUseID: ev.ToolUseID,
@@ -680,12 +673,12 @@ func makeLoopSinkForProfile(sink EventSink, profile agent.Profile) func(agent.Lo
 	}
 }
 
-func autonomousToolProgress(toolName string) string {
+func toolProgress(toolName string) string {
 	name := strings.TrimSpace(toolName)
 	if name == "" {
-		return "autonomous: running tool"
+		return "running tool"
 	}
-	return "autonomous: running " + name
+	return "running " + name
 }
 
 func taskProgressSnapshotToRunner(in agenttools.TaskProgressSnapshot) TaskSnapshot {
@@ -776,6 +769,7 @@ func buildToolLoopSystem(env loopEnv, steering, dirSnapshot, projectContext stri
 	b.WriteString("You are Cercano, an agentic coding assistant operating in a terminal.\n\n")
 	b.WriteString("A note on tool naming: depending on your cloud route, some tools in your schema may appear under a host prefix like `mcp__oc__Read` instead of plain `Read`. That prefix is a wire-level routing artifact from the provider (e.g. an OpenCode/Meridian adapter) — it does not mean you are running inside a different host. You are Cercano either way. Call tools using whatever name is in your schema. But when you pass tool names as data — for example, in the `tools` argument of `dispatch` or `workflow` — always use the plain registered names (Read, Write, Edit, Bash, Glob, Grep, LS, git_info, git_status, etc.) without any host prefix.\n\n")
 	b.WriteString("Never end your turn on a promise. Your turn ends the moment you send a reply with no tool calls — anything you say you are \"about to\" do (\"let me check…\", \"running it now…\") will never happen unless you do it in this same turn, with tool calls, before replying. Either do the work now, or state plainly that you are not doing it and why. Never claim you checked, ran, or verified something unless a tool call in this turn actually did it.\n\n")
+	b.WriteString("Keep the user oriented during tool-using work. Before the first tool call in a non-trivial turn, say what you are going to do in one short sentence. For long runs or phase changes, emit concise progress beacons before the next meaningful tool batch, verification step, or checkpoint. These beacons are not promises and not pause points: write the update, then do the work in the same turn.\n\n")
 	if strings.TrimSpace(steering) != "" {
 		b.WriteString(steering)
 		b.WriteString("\n\n")

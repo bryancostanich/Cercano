@@ -25,23 +25,31 @@ func TestProgressAnimTick_CompactingOnlyDoesNotRefreshViewport(t *testing.T) {
 	}
 }
 
-func TestProgressAnimTick_AnimationOnlyViewportRefreshesEveryFrame(t *testing.T) {
+func TestProgressAnimTick_AnimationOnlyDoesNotRebuildViewport(t *testing.T) {
 	m := New(nil, false)
 	m = send(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: "", Tool: &ToolEntry{ToolName: "research", Status: ToolStatusInProgress}})
+	m.refreshViewport()
+	content := m.mainChat().content
 
 	first := time.Unix(100, 0)
 	next, _ := m.Update(progressAnimTickMsg(first))
 	m = next.(Model)
 	if !m.lastAnimViewportRefresh.Equal(first) {
-		t.Fatalf("first animation-only tick should refresh viewport, got %v", m.lastAnimViewportRefresh)
+		t.Fatalf("first animation-only tick should mark paint time, got %v", m.lastAnimViewportRefresh)
+	}
+	if got := m.mainChat().content; got != content {
+		t.Fatal("animation-only tick rebuilt viewport content")
 	}
 
 	second := first.Add(50 * time.Millisecond)
 	next, _ = m.Update(progressAnimTickMsg(second))
 	m = next.(Model)
 	if !m.lastAnimViewportRefresh.Equal(second) {
-		t.Fatalf("next animation-only tick should refresh viewport; got %v want %v", m.lastAnimViewportRefresh, second)
+		t.Fatalf("next animation-only tick should mark paint time; got %v want %v", m.lastAnimViewportRefresh, second)
+	}
+	if got := m.mainChat().content; got != content {
+		t.Fatal("second animation-only tick rebuilt viewport content")
 	}
 }
 

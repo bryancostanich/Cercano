@@ -865,18 +865,6 @@ func progressAnimTick() tea.Cmd {
 	return tea.Tick(50*time.Millisecond, func(t time.Time) tea.Msg { return progressAnimTickMsg(t) })
 }
 
-const animationViewportRefreshInterval = 50 * time.Millisecond
-
-func (m *Model) shouldRefreshAnimationViewport(now time.Time) bool {
-	if now.IsZero() {
-		return true
-	}
-	if m.lastAnimViewportRefresh.IsZero() {
-		return true
-	}
-	return now.Sub(m.lastAnimViewportRefresh) >= animationViewportRefreshInterval
-}
-
 // ensureAnimTick arms the shared animation/repaint tick loop unless one is
 // already in flight. Returns nil when already armed — safe to pass straight
 // into tea.Batch, which drops nil cmds.
@@ -2533,8 +2521,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if contentRepaint {
 			m.refreshViewport()
 			m.lastAnimViewportRefresh = time.Time{}
-		} else if animRepaint && m.shouldRefreshAnimationViewport(frameTime) {
-			m.refreshViewport()
+		} else if animRepaint {
+			// Animation-only frames are overlaid by chatView.View() on the visible
+			// rows. Rebuilding the viewport here would re-scan the entire transcript
+			// for links and line widths on every spinner tick, which makes large
+			// conversations laggy even when chatDirty=false.
 			m.lastAnimViewportRefresh = frameTime
 		}
 		if keep {

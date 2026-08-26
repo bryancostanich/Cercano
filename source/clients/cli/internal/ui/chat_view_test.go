@@ -87,6 +87,31 @@ func TestChatView_ViewIdentityOverlayMatchesNoSelection(t *testing.T) {
 	}
 }
 
+func TestChatView_ViewAnimatesPlaceholderWithoutRebuildingContent(t *testing.T) {
+	c := newTestChatView(60, 10)
+	c.SetTurnStatus(turnStatus{
+		activity: "thinking",
+		start:    time.Unix(10, 0),
+		model:    "local",
+	})
+	c.SetAnimationTime(time.Unix(12, 0))
+	c.SetEntries([]*Entry{{Role: RoleAssistant, Streaming: true, Content: ""}})
+	content := c.content
+	first := plain(c.View())
+
+	c.SetAnimationTime(time.Unix(12, 0).Add(100 * time.Millisecond))
+	second := plain(c.View())
+	if c.content != content {
+		t.Fatal("View animation should not rebuild viewport content")
+	}
+	if first == second {
+		t.Fatalf("expected placeholder animation to change through View overlay; first=%q second=%q", first, second)
+	}
+	if !strings.Contains(second, "thinking") {
+		t.Fatalf("animated placeholder lost activity text: %q", second)
+	}
+}
+
 func TestChatView_UserPromptAppliesTextForegroundOnLightThemes(t *testing.T) {
 	var daylight theme.Palette
 	for _, t := range theme.BuiltinThemes() {

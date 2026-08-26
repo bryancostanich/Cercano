@@ -83,6 +83,10 @@ type chatView struct {
 	// every render, so it can never drift from the drawn layout.
 	arrowRows []arrowRow
 	linkRows  []linkRow
+	// animatedRanges are rows whose text is wall-clock animated but whose row
+	// geometry is stable. View overlays these visible rows directly so animation
+	// ticks do not have to rebuild the whole transcript/viewport content.
+	animatedRanges []animatedRange
 
 	// pendingCensor is the assistant entry the most recent watchdog
 	// challenge/block fired against. If the model rewrites (a fresh assistant
@@ -945,6 +949,24 @@ func (c *chatView) renderTrailingActivity(textW int) string {
 
 // ── scroll surface ─────────────────────────────────────────────────────────
 
+type animatedRangeKind int
+
+const (
+	animatedRangePreText animatedRangeKind = iota
+	animatedRangeTrailingActivity
+	animatedRangeToolGroup
+)
+
+type animatedRange struct {
+	startLine  int
+	lineCount  int
+	kind       animatedRangeKind
+	entryStart int
+	entryEnd   int
+	entry      *Entry
+	run        []*Entry
+}
+
 // Width returns the viewport width.
 func (c *chatView) Width() int { return c.vp.Width() }
 
@@ -1042,6 +1064,7 @@ func (c *chatView) SetEntries(entries []*Entry) {
 	b.Grow(len(prefix.content) + 4096)
 	b.WriteString(prefix.content)
 	c.arrowRows = append(c.arrowRows[:0], prefix.arrowRows...)
+	c.animatedRanges = c.animatedRanges[:0]
 	// nl counts newlines written so far — which is also the content-line index
 	// where the next write begins. Arrow rows are recorded against it as blocks
 	// are emitted, so the map matches the layout by construction.
@@ -1062,11 +1085,19 @@ func (c *chatView) SetEntries(entries []*Entry) {
 			for _, r := range rows {
 				c.arrowRows = append(c.arrowRows, arrowRow{line: nl + r.Line, entry: i + r.Entry, group: r.Group, railMin: r.RailMin, railMax: r.RailMax})
 			}
+			blockLines := strings.Count(block, "\n") + 1
+			if groupIsDynamic(entries[i:j]) {
+				c.animatedRanges = append(c.animatedRanges, animatedRange{startLine: nl, lineCount: blockLines, kind: animatedRangeToolGroup, entryStart: i, entryEnd: j, run: entries[i:j]})
+			}
 			b.WriteString(block)
-			nl += strings.Count(block, "\n")
+			nl += blockLines - 1
 			i = j
 		} else {
 			seg := c.renderEntryCached(entries[i], i)
+			segLines := strings.Count(seg, "\n") + 1
+			if entries[i].Role == RoleAssistant && entries[i].Streaming && entries[i].Content == "" {
+				c.animatedRanges = append(c.animatedRanges, animatedRange{startLine: nl, lineCount: segLines, kind: animatedRangePreText, entryStart: i, entryEnd: i + 1, entry: entries[i]})
+			}
 			if entries[i].Superseded {
 				c.arrowRows = append(c.arrowRows, arrowRow{line: nl, entry: i})
 				if entries[i].SupersededOpen {
@@ -1076,7 +1107,7 @@ func (c *chatView) SetEntries(entries []*Entry) {
 				}
 			}
 			b.WriteString(seg)
-			nl += strings.Count(seg, "\n")
+			nl += segLines - 1
 			i++
 		}
 		first = false
@@ -1108,13 +1139,17 @@ func (c *chatView) SetEntries(entries []*Entry) {
 		}
 		pad := strings.Repeat(" ", entryIndent)
 		block := indentBlock(pad, c.renderTrailingActivity(textW))
-		rows := strings.Count(block, "\n") + 1
+		blockLines := strings.Count(block, "\n") + 1
+		rows := blockLines
+		startLine := nl
 		if b.Len() > 0 {
 			rows += 2
 			b.WriteString("\n\n")
+			startLine += 2
 		}
 		c.tailReserve = rows
 		c.tailReserveBaseRows = naturalRows
+		c.animatedRanges = append(c.animatedRanges, animatedRange{startLine: startLine, lineCount: blockLines, kind: animatedRangeTrailingActivity})
 		b.WriteString(block)
 	} else if c.tailReserve > 0 {
 		remaining := c.tailReserve - (naturalRows - c.tailReserveBaseRows)
@@ -1198,10 +1233,15 @@ func (c *chatView) View() string {
 	body := c.vp.View()
 	lines := strings.Split(body, "\n")
 	height := c.vp.Height()
-	col := scrollbarColumn(c.vp.TotalLineCount(), height, c.vp.YOffset())
+	viewportTop := c.vp.YOffset()
+	overlay := c.animationOverlayLines(viewportTop, viewportTop+len(lines))
+	col := scrollbarColumn(c.vp.TotalLineCount(), height, viewportTop)
 	var b strings.Builder
 	for i, line := range lines {
-		contentLine := c.vp.YOffset() + i
+		contentLine := viewportTop + i
+		if replacement, ok := overlay[contentLine]; ok {
+			line = replacement
+		}
 		line = c.renderSelectionOnLine(line, contentLine)
 		// Clamp to the viewport width so an over-wide content line (Glamour
 		// pads prose a few columns past the wrap width) can't push the
@@ -1229,6 +1269,53 @@ func (c *chatView) View() string {
 		}
 	}
 	return b.String()
+}
+
+func (c *chatView) animationOverlayLines(startLine, endLine int) map[int]string {
+	if len(c.animatedRanges) == 0 || endLine <= startLine {
+		return nil
+	}
+	var out map[int]string
+	put := func(r animatedRange, block string) {
+		lines := strings.Split(block, "\n")
+		for i, line := range lines {
+			contentLine := r.startLine + i
+			if contentLine < startLine || contentLine >= endLine {
+				continue
+			}
+			if out == nil {
+				out = map[int]string{}
+			}
+			out[contentLine] = line
+		}
+	}
+	for _, r := range c.animatedRanges {
+		if r.lineCount <= 0 || r.startLine+r.lineCount <= startLine || r.startLine >= endLine {
+			continue
+		}
+		switch r.kind {
+		case animatedRangePreText:
+			if r.entry != nil {
+				put(r, c.renderEntry(r.entry, r.entryStart))
+			}
+		case animatedRangeTrailingActivity:
+			wrapW := c.vp.Width()
+			if wrapW < 10 {
+				wrapW = 10
+			}
+			textW := wrapW - entryIndent
+			if textW < 8 {
+				textW = 8
+			}
+			put(r, indentBlock(strings.Repeat(" ", entryIndent), c.renderTrailingActivity(textW)))
+		case animatedRangeToolGroup:
+			if len(r.run) > 0 {
+				block, _ := c.renderToolGroupBlock(r.run, r.entryStart)
+				put(r, block)
+			}
+		}
+	}
+	return out
 }
 
 // ── entry rendering ────────────────────────────────────────────────────────

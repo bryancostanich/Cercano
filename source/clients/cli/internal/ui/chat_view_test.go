@@ -96,13 +96,16 @@ func TestChatView_ViewAnimatesPlaceholderWithoutRebuildingContent(t *testing.T) 
 	})
 	c.SetAnimationTime(time.Unix(12, 0))
 	c.SetEntries([]*Entry{{Role: RoleAssistant, Streaming: true, Content: ""}})
-	content := c.content
+	if len(c.layout.units) == 0 {
+		t.Fatal("precondition: expected rendered layout units")
+	}
+	firstUnit := &c.layout.units[0]
 	first := plain(c.View())
 
 	c.SetAnimationTime(time.Unix(12, 0).Add(100 * time.Millisecond))
 	second := plain(c.View())
-	if c.content != content {
-		t.Fatal("View animation should not rebuild viewport content")
+	if len(c.layout.units) == 0 || &c.layout.units[0] != firstUnit {
+		t.Fatal("View animation should not rebuild transcript layout")
 	}
 	if first == second {
 		t.Fatalf("expected placeholder animation to change through View overlay; first=%q second=%q", first, second)

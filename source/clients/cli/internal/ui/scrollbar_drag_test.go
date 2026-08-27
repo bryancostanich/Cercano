@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -17,9 +16,7 @@ func buildDragModel() Model {
 	const w, vh = 80, 10
 	p := theme.Cracker()
 	cv := newChatView(theme.NewStyles(p), p, "", "", w-2, vh)
-	content := strings.Repeat("xxxxxxxx\n", 50) // total 50 > height 10 → overflow
-	cv.vp.SetContent(content)
-	cv.plainLines = plainLines(content)
+	seedScrollableChat(&cv, 50) // total 50 > height 10 → overflow
 	m := Model{
 		width:        w,
 		height:       vh + 6,

@@ -30,7 +30,10 @@ func TestProgressAnimTick_AnimationOnlyDoesNotRebuildViewport(t *testing.T) {
 	m = send(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: "", Tool: &ToolEntry{ToolName: "research", Status: ToolStatusInProgress}})
 	m.refreshViewport()
-	content := m.mainChat().content
+	if len(m.mainChat().layout.units) == 0 {
+		t.Fatal("precondition: expected rendered layout units")
+	}
+	firstUnit := &m.mainChat().layout.units[0]
 
 	first := time.Unix(100, 0)
 	next, _ := m.Update(progressAnimTickMsg(first))
@@ -38,8 +41,8 @@ func TestProgressAnimTick_AnimationOnlyDoesNotRebuildViewport(t *testing.T) {
 	if !m.lastAnimViewportRefresh.Equal(first) {
 		t.Fatalf("first animation-only tick should mark paint time, got %v", m.lastAnimViewportRefresh)
 	}
-	if got := m.mainChat().content; got != content {
-		t.Fatal("animation-only tick rebuilt viewport content")
+	if len(m.mainChat().layout.units) == 0 || &m.mainChat().layout.units[0] != firstUnit {
+		t.Fatal("animation-only tick replaced transcript layout")
 	}
 
 	second := first.Add(50 * time.Millisecond)
@@ -48,8 +51,8 @@ func TestProgressAnimTick_AnimationOnlyDoesNotRebuildViewport(t *testing.T) {
 	if !m.lastAnimViewportRefresh.Equal(second) {
 		t.Fatalf("next animation-only tick should mark paint time; got %v want %v", m.lastAnimViewportRefresh, second)
 	}
-	if got := m.mainChat().content; got != content {
-		t.Fatal("second animation-only tick rebuilt viewport content")
+	if len(m.mainChat().layout.units) == 0 || &m.mainChat().layout.units[0] != firstUnit {
+		t.Fatal("second animation-only tick replaced transcript layout")
 	}
 }
 

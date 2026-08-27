@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -15,7 +14,7 @@ func buildConfirmScrollModel() Model {
 	m.width = 80
 	m.height = 24
 	m.relayout()
-	m.mainChat().vp.SetContent(strings.Repeat("chat\n", 80))
+	seedScrollableChat(m.mainChat(), 80)
 	m.mainChat().SetYOffset(0)
 	m.pendingConfirm = &confirmRequest{
 		onYes: func(m Model) (Model, tea.Cmd) { m.pendingConfirm = nil; return m, nil },

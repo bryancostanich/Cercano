@@ -54,10 +54,11 @@ func TestAssistantMarkdown_LinksHaveClickableHitRegions(t *testing.T) {
 	cv.AppendEntry(&Entry{Role: RoleAssistant, Content: "Here is a [link](https://example.com/docs) and https://bare.example/path."})
 	cv.rebuild()
 
+	content := chatLayoutContent(&cv)
 	if len(cv.linkRows) < 2 {
-		t.Fatalf("expected markdown and bare URL link regions, got %+v in %q", cv.linkRows, cv.content)
+		t.Fatalf("expected markdown and bare URL link regions, got %+v in %q", cv.linkRows, content)
 	}
-	plainLines := strings.Split(ansi.Strip(cv.content), "\n")
+	plainLines := strings.Split(ansi.Strip(content), "\n")
 	line := 0
 	col := -1
 	for i, l := range plainLines {
@@ -71,7 +72,7 @@ func TestAssistantMarkdown_LinksHaveClickableHitRegions(t *testing.T) {
 		t.Fatalf("rendered link label not found in %q", strings.Join(plainLines, "\n"))
 	}
 	if got, ok := cv.LinkAt(col, line); !ok || got != "https://example.com/docs" {
-		t.Fatalf("LinkAt markdown label = %q,%v; want https://example.com/docs,true; rows=%+v content=%q", got, ok, cv.linkRows, cv.content)
+		t.Fatalf("LinkAt markdown label = %q,%v; want https://example.com/docs,true; rows=%+v content=%q", got, ok, cv.linkRows, content)
 	}
 
 	bareCol := -1

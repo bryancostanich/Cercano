@@ -16,7 +16,7 @@ func newSelectionModel(vpWidth, vpHeight int, content string, plainLns []string)
 	p := theme.Cracker()
 	cv := newChatView(theme.NewStyles(p), p, "", "", vpWidth, vpHeight)
 	if content != "" {
-		cv.vp.SetContent(content)
+		seedChatViewLines(&cv, strings.Split(content, "\n"))
 	}
 	if plainLns != nil {
 		cv.plainLines = plainLns
@@ -71,8 +71,8 @@ func TestSelectionPointFromMouseUsesViewportOffset(t *testing.T) {
 	}
 	p := theme.Cracker()
 	cv := newChatView(theme.NewStyles(p), p, "", "", 20, 4)
-	cv.vp.SetContent(strings.Join(lines, "\n"))
-	cv.vp.SetYOffset(10)
+	seedChatViewLines(&cv, lines)
+	cv.SetYOffset(10)
 	cv.plainLines = lines
 
 	// scrollbarTop=2, screen mouse.Y=4 → local Y = 4-2 = 2
@@ -123,7 +123,7 @@ func TestHeaderTitleDragSelectionCopiesText(t *testing.T) {
 func TestMouseReleaseCopiesDragSelection(t *testing.T) {
 	p := theme.Cracker()
 	cv := newChatView(theme.NewStyles(p), p, "", "", 20, 4)
-	cv.vp.SetContent("hello world")
+	seedChatViewLines(&cv, []string{"hello world"})
 	cv.plainLines = []string{"hello world"}
 	cv.selection = textSelection{Active: true, Dragging: true, Anchor: selectionPoint{Line: 0, Col: 0}, Cursor: selectionPoint{Line: 0, Col: 1}}
 

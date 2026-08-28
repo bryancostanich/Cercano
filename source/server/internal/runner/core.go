@@ -268,8 +268,29 @@ func (c *Core) RunTurn(
 		IsCloud: isCloud,
 	})
 
-	// 2. Conversation history is assembled per concrete attempt below so each
-	// provider/model sees a send view sized for its own context window.
+	// 2. Assemble conversation history before crash-resilient user persistence.
+	// The tool loop receives the current user input separately; if assembly runs
+	// after PersistTurn below, the current user turn is duplicated in the model
+	// request. Prepare the primary history now and prepare a potential cross-tier
+	// fallback history for the concrete fallback target as well.
+	convHistory := c.assembleAttemptHistory(ctx, req, "primary", provider, selectedModel, isCloud, false)
+	fallbackHistory := []llm.Message(nil)
+	fallbackPrepared := false
+	mode := locus.Mode("cloud_primary")
+	if c.d.Config != nil {
+		mode, _ = locus.ParseMode(c.d.Config.Get().LocusMode)
+	}
+	res := mode.Main()
+	fbProv := c.d.Providers.Cloud()
+	fbCloud := true
+	if res.Fallback == locus.TierLocal {
+		fbProv, fbCloud = c.d.Providers.Open(), false
+	}
+	fallbackModel := c.d.Providers.MainModel(fbCloud)
+	if fbProv != nil {
+		fallbackPrepared = true
+		fallbackHistory = c.assembleAttemptHistory(ctx, req, "cross_tier_fallback", fbProv, fallbackModel, fbCloud, !fbCloud)
+	}
 
 	// 3. Crash-resilient persistence: persist the USER turn up front (before
 	// any LLM call) so a crash/kill/restart cannot lose the prompt. The
@@ -382,7 +403,6 @@ func (c *Core) RunTurn(
 		"model":           selectedModel,
 		"is_cloud":        isCloud,
 	})
-	convHistory := c.assembleAttemptHistory(ctx, req, "primary", provider, selectedModel, isCloud, false)
 	result, loopErr := c.runLoop(ctx, req, provider, selectedModel, isCloud,
 		loopSink, requester, convHistory, onTextDelta, onTurn, wdGate, wdTurnEnd, gateRegistry, permStore, profile, false)
 	c.logRoute("loop.result", routinglog.Event{
@@ -424,7 +444,6 @@ func (c *Core) RunTurn(
 			"error_class":     errClassString(loopErr),
 		})
 		sink.Emit(Event{Kind: EventProgress, Text: notice})
-		convHistory = c.assembleAttemptHistory(ctx, req, "same_provider_retry", provider, selectedModel, isCloud, false)
 		result, loopErr = c.runLoop(ctx, req, provider, selectedModel, isCloud,
 			loopSink, requester, convHistory, onTextDelta, onTurn, wdGate, wdTurnEnd, gateRegistry, permStore, profile, false)
 		c.logRoute("loop.result", routinglog.Event{
@@ -445,17 +464,6 @@ func (c *Core) RunTurn(
 	// 7. Cross-tier fallback: on error, attempt the other tier if locus allows.
 	var fallbackNotice string
 	if loopErr != nil && ctx.Err() == nil && !errors.Is(loopErr, context.Canceled) {
-		mode := locus.Mode("cloud_primary")
-		if c.d.Config != nil {
-			mode, _ = locus.ParseMode(c.d.Config.Get().LocusMode)
-		}
-		res := mode.Main()
-		fbProv := c.d.Providers.Cloud()
-		fbCloud := true
-		if res.Fallback == locus.TierLocal {
-			fbProv, fbCloud = c.d.Providers.Open(), false
-		}
-		fallbackModel := c.d.Providers.MainModel(fbCloud)
 		failedProvider := failedProviderName(provider, loopErr)
 		fromWindow, _ := c.knownContextWindowFor(isCloud, selectedModel)
 		fallbackWindow, fallbackWindowKnown := c.knownContextWindowFor(fbCloud, fallbackModel)
@@ -480,7 +488,7 @@ func (c *Core) RunTurn(
 			"trigger_error_class":     errClassString(loopErr),
 			"trigger_error":           errorString(loopErr),
 		})
-		if !fellBack && res.CrossAllowed && fbProv != nil && llm.FailoverableToWindow(llm.ClassOf(loopErr), loopErr, fromWindow, fallbackWindow, fallbackWindowKnown) {
+		if !fellBack && res.CrossAllowed && fbProv != nil && fallbackPrepared && llm.FailoverableToWindow(llm.ClassOf(loopErr), loopErr, fromWindow, fallbackWindow, fallbackWindowKnown) {
 			// The local fallback generally has a much smaller context window than
 			// the cloud provider. Keep its tool catalog compact for every
 			// cross-tier fallback, including transient cloud failures whose error
@@ -505,7 +513,7 @@ func (c *Core) RunTurn(
 				"is_cloud":               fbCloud,
 				"tight_context_fallback": tightContextFallback,
 			})
-			convHistory = c.assembleAttemptHistory(ctx, req, "cross_tier_fallback", fbProv, fallbackModel, fbCloud, tightContextFallback)
+			convHistory = fallbackHistory
 			result, loopErr = c.runLoop(ctx, req, fbProv, fallbackModel, fbCloud,
 				loopSink, requester, convHistory, onTextDelta, onTurn, wdGate, wdTurnEnd, gateRegistry, permStore, profile, tightContextFallback)
 			c.logRoute("loop.result", routinglog.Event{

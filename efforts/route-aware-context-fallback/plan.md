@@ -70,11 +70,11 @@ Objective: validate the behavior with focused tests, remove obsolete duplicate p
 Files: touched files from earlier phases, effort notes if needed.
 Tests: focused Go package tests for `internal/llm`, `internal/inference/resilience`, runner fallback logic, stream normalization, request assembly, and context usage; no live provider tests required.
 
-- [ ] Run focused unit tests for LLM error policy and stream normalization
-- [ ] Run focused resilience tests including streaming pre-content failures
-- [ ] Run focused runner tests for cross-tier fallback policy and attribution
-- [ ] Run request assembly and context meter consistency tests
-- [ ] Run the narrow server package test set covering changed packages
-- [ ] Remove any stale duplicated fallback policy helpers
-- [ ] Add a short follow-up note or issue stub for live `llama_server` 500 diagnostics if no existing note covers it
-- [ ] Summarize implemented behavior, tests run, and any remaining risks before checkpointing
+- [x] Run focused unit tests for LLM error policy and stream normalization
+- [x] Run focused resilience tests including streaming pre-content failures
+- [x] Run focused runner tests for cross-tier fallback policy and attribution
+- [x] Run request assembly and context meter consistency tests
+- [x] Run the narrow server package test set covering changed packages
+- [x] Remove any stale duplicated fallback policy helpers
+- [x] Add a short follow-up note or issue stub for live `llama_server` 500 diagnostics if no existing note covers it
+- [x] Summarize implemented behavior, tests run, and any remaining risks before checkpointing

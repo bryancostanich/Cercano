@@ -56,8 +56,10 @@ func TestGetContextUsage_RawIsCheapEstimateNotZero(t *testing.T) {
 	if resp.GetRawTokens() <= 0 {
 		t.Errorf("raw_tokens should be a positive estimate, got %d", resp.GetRawTokens())
 	}
-	// No compaction state → sent == raw still holds (both derived from the same turns).
-	if resp.GetTokensUsed() != resp.GetRawTokens() {
-		t.Errorf("no compaction → sent==raw: sent=%d raw=%d", resp.GetTokensUsed(), resp.GetRawTokens())
+	// Sent tokens now come from the shared provider-facing request assembler,
+	// while raw_tokens remains the cheap storage-size estimate for the UI's raw
+	// savings figure. They need not be equal even with no compaction state.
+	if resp.GetTokensUsed() <= 0 {
+		t.Errorf("tokens_used should be a positive assembled send-view count, got %d", resp.GetTokensUsed())
 	}
 }

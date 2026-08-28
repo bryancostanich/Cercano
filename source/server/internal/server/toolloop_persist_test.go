@@ -443,14 +443,14 @@ func TestStreamToolLoop_UpdatesContextMeter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetContextUsage: %v", err)
 	}
-	// TokensUsed is now the tokenizer-estimated sent size (compaction-aware),
-	// not the provider-reported count. This conversation has no compaction state,
-	// so the sent view IS the full history → sent must equal raw, and be > 0.
+	// TokensUsed is the shared assembler's provider-facing send-view estimate;
+	// RawTokens is the cheap storage-size estimate. They use different accounting
+	// paths by design, so both should be positive but they need not be equal.
 	if resp.TokensUsed <= 0 {
-		t.Errorf("TokensUsed = %d, want > 0 (tokenizer estimate of stored turns)", resp.TokensUsed)
+		t.Errorf("TokensUsed = %d, want > 0 (provider-facing assembled estimate)", resp.TokensUsed)
 	}
-	if resp.TokensUsed != resp.RawTokens {
-		t.Errorf("with no compaction state sent must equal raw: sent=%d raw=%d", resp.TokensUsed, resp.RawTokens)
+	if resp.RawTokens <= 0 {
+		t.Errorf("RawTokens = %d, want > 0 (cheap storage estimate)", resp.RawTokens)
 	}
 	if want := int32(contextmeter.ModelMax("test-model")); resp.ModelMax != want {
 		t.Errorf("ModelMax = %d, want %d (cloud window)", resp.ModelMax, want)

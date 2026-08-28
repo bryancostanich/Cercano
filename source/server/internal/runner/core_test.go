@@ -461,17 +461,14 @@ func TestCore_CrossTierFallbackReassemblesHistoryForFallbackTarget(t *testing.T)
 	}
 	history.mu.Lock()
 	defer history.mu.Unlock()
-	if len(history.targets) != 3 {
-		t.Fatalf("assembly targets = %+v, want primary, same_provider_retry, cross_tier_fallback", history.targets)
+	if len(history.targets) != 2 {
+		t.Fatalf("assembly targets = %+v, want primary and cross_tier_fallback", history.targets)
 	}
 	if history.targets[0].RouteLabel != "primary" || history.targets[0].Model != "fake-cloud-model" {
 		t.Fatalf("primary target = %+v", history.targets[0])
 	}
-	if history.targets[1].RouteLabel != "same_provider_retry" || history.targets[1].Model != "fake-cloud-model" {
-		t.Fatalf("retry target = %+v", history.targets[1])
-	}
-	if history.targets[2].RouteLabel != "cross_tier_fallback" || history.targets[2].Provider != "spy" || history.targets[2].Model != "fake-open-model" || !history.targets[2].TightContext {
-		t.Fatalf("fallback target = %+v", history.targets[2])
+	if history.targets[1].RouteLabel != "cross_tier_fallback" || history.targets[1].Provider != "spy" || history.targets[1].Model != "fake-open-model" || !history.targets[1].TightContext {
+		t.Fatalf("fallback target = %+v", history.targets[1])
 	}
 }
 

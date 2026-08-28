@@ -128,8 +128,15 @@ func Retryable(class ErrorClass) bool {
 // failoverable here: a caller may allow it only after proving the fallback
 // target has a larger known context window.
 func Failoverable(class ErrorClass, err error) bool {
+	return FailoverableToWindow(class, err, 0, 0, false)
+}
+
+// FailoverableToWindow reports whether a fallback target with targetWindow may
+// plausibly serve the failed request. Context overflow is allowed only when the
+// target window is known and strictly larger than the failed attempt's window.
+func FailoverableToWindow(class ErrorClass, err error, failedWindow, targetWindow int, targetWindowKnown bool) bool {
 	if class == ErrContextOverflow {
-		return false
+		return failedWindow > 0 && targetWindowKnown && targetWindow > failedWindow
 	}
 	if class == ErrInvalidRequest {
 		return IsProviderModelUnavailable(err)

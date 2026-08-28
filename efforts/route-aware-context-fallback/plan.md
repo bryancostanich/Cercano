@@ -57,12 +57,12 @@ Objective: allow context-overflow recovery only when a configured fallback targe
 Files: shared fallback policy helper, runner fallback selection, model/context-window lookup helpers, assembler tests, runner/resilience tests.
 Tests: no fallback to smaller/equal-window local model; fallback allowed to a larger known-window fake model; unknown-window cases surface safely rather than silently shrinking.
 
-- [ ] Add or reuse model context-window lookup for concrete fallback targets
-- [ ] Compare failed attempt window against fallback attempt window before allowing context-overflow fallback
-- [ ] Block context-overflow fallback when the fallback window is unknown, smaller, or equal
-- [ ] Require route-aware assembly for the fallback target before sending any allowed larger-window fallback request
-- [ ] Make blocked context-overflow fallback surface a clear error/notice rather than trying local with trimmed history
-- [ ] Add regression tests for smaller/equal/unknown/larger fallback-window cases
+- [x] Add or reuse model context-window lookup for concrete fallback targets
+- [x] Compare failed attempt window against fallback attempt window before allowing context-overflow fallback
+- [x] Block context-overflow fallback when the fallback window is unknown, smaller, or equal
+- [x] Require route-aware assembly for the fallback target before sending any allowed larger-window fallback request
+- [x] Make blocked context-overflow fallback surface a clear error/notice rather than trying local with trimmed history
+- [x] Add regression tests for smaller/equal/unknown/larger fallback-window cases
 
 ## Phase 6 — Verification and cleanup
 

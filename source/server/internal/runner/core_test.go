@@ -196,23 +196,43 @@ func (r *endTurnReader) Close() error { return nil }
 // ---------------------------------------------------------------------------
 
 type fakeResolver struct {
-	prov inference.Provider
-	open inference.Provider
+	prov       inference.Provider
+	open       inference.Provider
+	cloud      inference.Provider
+	isCloud    bool
+	isCloudSet bool
+	cloudModel string
+	openModel  string
 }
 
 func (f *fakeResolver) Main() (inference.Provider, bool, bool, error) {
-	return f.prov, true, false, nil
+	isCloud := true
+	if f.isCloudSet {
+		isCloud = f.isCloud
+	}
+	return f.prov, isCloud, false, nil
 }
 func (f *fakeResolver) MainModel(isCloud bool) string {
 	if isCloud {
+		if f.cloudModel != "" {
+			return f.cloudModel
+		}
 		return "fake-cloud-model"
+	}
+	if f.openModel != "" {
+		return f.openModel
 	}
 	return "fake-open-model"
 }
-func (f *fakeResolver) PrimaryModel() string                                            { return "fake-model" }
-func (f *fakeResolver) Rebuild() error                                                  { return nil }
-func (f *fakeResolver) InstallAbsentCloud(_ string)                                     {}
-func (f *fakeResolver) Cloud() inference.Provider                                       { return f.prov }
+func (f *fakeResolver) PrimaryModel() string        { return "fake-model" }
+func (f *fakeResolver) Rebuild() error              { return nil }
+func (f *fakeResolver) InstallAbsentCloud(_ string) {}
+func (f *fakeResolver) Cloud() inference.Provider {
+	if f.cloud != nil {
+		return f.cloud
+	}
+	return f.prov
+}
 func (f *fakeResolver) Open() inference.Provider                                        { return f.open }
 func (f *fakeResolver) ActiveCloudModel() string                                        { return "" }
 func (f *fakeResolver) LocusMode() string                                               { return "" }
@@ -267,9 +287,9 @@ func (s *fakeToolSvc) GrantedRegistry(_ []string) (*agenttools.Registry, []strin
 // which are not exercised here (Watchdog=nil, loop succeeds).
 // ---------------------------------------------------------------------------
 
-type fakeConfig struct{}
+type fakeConfig struct{ cfg config.Config }
 
-func (c *fakeConfig) Get() config.Config                               { return config.Config{} }
+func (c *fakeConfig) Get() config.Config                               { return c.cfg }
 func (c *fakeConfig) Path() string                                     { return "" }
 func (c *fakeConfig) Secrets() secrets.Store                           { return nil }
 func (c *fakeConfig) ActiveProfile() (config.CloudProfile, bool)       { return config.CloudProfile{}, false }
@@ -384,6 +404,39 @@ func TestCore_ContextOverflowDoesNotCrossTierFallback(t *testing.T) {
 
 func TestCore_InvalidContextTextDoesNotCrossTierFallback(t *testing.T) {
 	assertNoCrossTierFallbackForPrimary(t, &invalidContextTextProvider{}, llm.ErrInvalidRequest)
+}
+
+func TestCore_ContextOverflowCanFallbackToLargerKnownWindow(t *testing.T) {
+	cloudSpy := &spyProvider{}
+	deps := buildDeps(&contextOverflowProvider{})
+	deps.Config = &fakeConfig{cfg: config.Config{
+		LocusMode:   "open_primary",
+		OpenRuntime: "llama_server",
+		LlamaServer: config.LlamaServerConfig{ContextSize: 8_192, ContextSizeSet: true},
+	}}
+	deps.Providers = &fakeResolver{
+		prov:       &contextOverflowProvider{},
+		cloud:      cloudSpy,
+		isCloud:    false,
+		isCloudSet: true,
+		openModel:  "llama3",
+		cloudModel: "claude-opus-5",
+	}
+	core := New(deps)
+
+	_, err := core.RunTurn(context.Background(), Request{
+		Input:          "recover on larger cloud",
+		ConversationID: "larger-window-fallback-conv",
+		WorkDir:        t.TempDir(),
+	}, noopSink{}, nil, nil)
+	if err != nil {
+		t.Fatalf("RunTurn should fallback to larger known cloud window: %v", err)
+	}
+	cloudSpy.mu.Lock()
+	defer cloudSpy.mu.Unlock()
+	if len(cloudSpy.requests) == 0 {
+		t.Fatal("expected larger-window cloud fallback provider to be called")
+	}
 }
 
 func TestCore_BusyFallbackUsesCompactLocalCatalog(t *testing.T) {

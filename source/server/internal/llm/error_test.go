@@ -113,6 +113,27 @@ func TestFailoverable(t *testing.T) {
 	}
 }
 
+func TestFailoverableToWindow_ContextOverflowRequiresLargerKnownTarget(t *testing.T) {
+	err := &Error{Class: ErrContextOverflow, Provider: "anthropic"}
+	cases := []struct {
+		name        string
+		from, to    int
+		known       bool
+		wantAllowed bool
+	}{
+		{"unknown failed window", 0, 200_000, true, false},
+		{"unknown target", 200_000, 0, false, false},
+		{"smaller target", 200_000, 128_000, true, false},
+		{"equal target", 200_000, 200_000, true, false},
+		{"larger target", 128_000, 200_000, true, true},
+	}
+	for _, tc := range cases {
+		if got := FailoverableToWindow(ErrContextOverflow, err, tc.from, tc.to, tc.known); got != tc.wantAllowed {
+			t.Errorf("%s: FailoverableToWindow = %v, want %v", tc.name, got, tc.wantAllowed)
+		}
+	}
+}
+
 func TestIsProviderModelUnavailable(t *testing.T) {
 	cases := []struct {
 		msg  string

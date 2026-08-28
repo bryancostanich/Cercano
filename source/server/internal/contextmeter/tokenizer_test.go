@@ -40,6 +40,18 @@ func TestModelMax(t *testing.T) {
 	}
 }
 
+func TestKnownModelMaxDistinguishesDefaultFallback(t *testing.T) {
+	if got, ok := KnownModelMax("claude-opus-5"); !ok || got != 200_000 {
+		t.Fatalf("KnownModelMax claude = %d/%v, want 200000/true", got, ok)
+	}
+	if got, ok := KnownModelMax("unknown-model"); ok || got != 0 {
+		t.Fatalf("KnownModelMax unknown = %d/%v, want 0/false", got, ok)
+	}
+	if got := ModelMax("unknown-model"); got != 128_000 {
+		t.Fatalf("ModelMax unknown default = %d, want 128000", got)
+	}
+}
+
 func TestCounter_AddAndUsed(t *testing.T) {
 	c := NewCounter(Default(), 1000)
 	c.Add("hello world")

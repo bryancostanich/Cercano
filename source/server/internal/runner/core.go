@@ -14,6 +14,7 @@ import (
 
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/agenttools"
+	"cercano/source/server/internal/contextmeter"
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/localruntime/llamaserver"
@@ -74,14 +75,16 @@ func failedProviderName(routeProvider inference.Provider, err error) string {
 }
 
 func (c *Core) contextWindowFor(isCloud bool, model string) int {
-	if c.d.Config == nil {
-		return 0
+	window, _ := c.knownContextWindowFor(isCloud, model)
+	return window
+}
+
+func (c *Core) knownContextWindowFor(isCloud bool, model string) (int, bool) {
+	if c.d.Config != nil && !isCloud {
+		window := localContextWindow(c.d.Config.Get(), model)
+		return window, window > 0
 	}
-	cfgSnap := c.d.Config.Get()
-	if !isCloud {
-		return localContextWindow(cfgSnap, model)
-	}
-	return 0
+	return contextmeter.KnownModelMax(model)
 }
 
 func (c *Core) assembleAttemptHistory(ctx context.Context, req Request, attempt string, provider inference.Provider, model string, isCloud bool, tightContext bool) []llm.Message {
@@ -454,6 +457,8 @@ func (c *Core) RunTurn(
 		}
 		fallbackModel := c.d.Providers.MainModel(fbCloud)
 		failedProvider := failedProviderName(provider, loopErr)
+		fromWindow, _ := c.knownContextWindowFor(isCloud, selectedModel)
+		fallbackWindow, fallbackWindowKnown := c.knownContextWindowFor(fbCloud, fallbackModel)
 		c.logRoute("fallback.consider", routinglog.Event{
 			"conversation_id":         req.ConversationID,
 			"mode":                    string(mode),
@@ -469,10 +474,13 @@ func (c *Core) RunTurn(
 			"fallback_provider":       providerName(fbProv),
 			"fallback_model":          fallbackModel,
 			"fallback_is_cloud":       fbCloud,
+			"from_context_window":     fromWindow,
+			"fallback_context_window": fallbackWindow,
+			"fallback_window_known":   fallbackWindowKnown,
 			"trigger_error_class":     errClassString(loopErr),
 			"trigger_error":           errorString(loopErr),
 		})
-		if !fellBack && res.CrossAllowed && fbProv != nil && llm.Failoverable(llm.ClassOf(loopErr), loopErr) {
+		if !fellBack && res.CrossAllowed && fbProv != nil && llm.FailoverableToWindow(llm.ClassOf(loopErr), loopErr, fromWindow, fallbackWindow, fallbackWindowKnown) {
 			// The local fallback generally has a much smaller context window than
 			// the cloud provider. Keep its tool catalog compact for every
 			// cross-tier fallback, including transient cloud failures whose error

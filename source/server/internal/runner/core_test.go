@@ -67,6 +67,8 @@ type invalidContextTextProvider struct{}
 
 type busyProvider struct{}
 
+type wrappedBusyProvider struct{}
+
 func (p *cancelProvider) Name() string { return "cancel" }
 func (p *cancelProvider) Capabilities() inference.Capabilities {
 	return inference.Capabilities{SupportsTools: true}
@@ -108,6 +110,17 @@ func (p *busyProvider) Chat(context.Context, llm.ChatRequest) (llm.ChatResponse,
 	return llm.ChatResponse{}, &llm.Error{Class: llm.ErrBusy, Provider: "openai-responses", Err: errors.New("server busy")}
 }
 func (p *busyProvider) StreamChat(context.Context, llm.ChatRequest) (llm.StreamReader, error) {
+	return nil, &llm.Error{Class: llm.ErrBusy, Provider: "openai-responses", Err: errors.New("server busy")}
+}
+
+func (p *wrappedBusyProvider) Name() string { return "anthropic" }
+func (p *wrappedBusyProvider) Capabilities() inference.Capabilities {
+	return inference.Capabilities{SupportsTools: true}
+}
+func (p *wrappedBusyProvider) Chat(context.Context, llm.ChatRequest) (llm.ChatResponse, error) {
+	return llm.ChatResponse{}, &llm.Error{Class: llm.ErrBusy, Provider: "openai-responses", Err: errors.New("server busy")}
+}
+func (p *wrappedBusyProvider) StreamChat(context.Context, llm.ChatRequest) (llm.StreamReader, error) {
 	return nil, &llm.Error{Class: llm.ErrBusy, Provider: "openai-responses", Err: errors.New("server busy")}
 }
 
@@ -298,6 +311,16 @@ type noopSink struct{}
 
 func (noopSink) Emit(_ Event) {}
 
+func progressText(events []Event) string {
+	var parts []string
+	for _, ev := range events {
+		if ev.Kind == EventProgress {
+			parts = append(parts, ev.Text)
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
 // ---------------------------------------------------------------------------
 // buildDeps constructs a Deps wired with a given spy provider.
 // ---------------------------------------------------------------------------
@@ -355,6 +378,30 @@ func TestCore_InvalidContextTextDoesNotCrossTierFallback(t *testing.T) {
 
 func TestCore_BusyFallbackUsesCompactLocalCatalog(t *testing.T) {
 	assertCompactFallbackForPrimary(t, &busyProvider{})
+}
+
+func TestCore_FallbackNoticeUsesConcreteErrorProvider(t *testing.T) {
+	openSpy := &spyProvider{}
+	deps := buildDeps(&wrappedBusyProvider{})
+	deps.Providers = &fakeResolver{prov: &wrappedBusyProvider{}, open: openSpy}
+	core := New(deps)
+	sink := &captureSink{}
+
+	_, err := core.RunTurn(context.Background(), Request{
+		Input:          "attribute concrete provider",
+		ConversationID: "attribution-conv",
+		WorkDir:        t.TempDir(),
+	}, sink, nil, nil)
+	if err != nil {
+		t.Fatalf("RunTurn fallback should succeed on open provider: %v", err)
+	}
+	progress := progressText(sink.events)
+	if !strings.Contains(progress, "openai-responses failed") {
+		t.Fatalf("fallback progress should name concrete failing provider, got %q", progress)
+	}
+	if strings.Contains(progress, "anthropic failed") {
+		t.Fatalf("fallback progress should not label wrapper route as concrete failure, got %q", progress)
+	}
 }
 
 func assertCompactFallbackForPrimary(t *testing.T, primary inference.Provider) {

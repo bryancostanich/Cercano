@@ -169,6 +169,25 @@ func TestChat_NetworkRetriesOnceThenSucceeds(t *testing.T) {
 	}
 }
 
+func TestChat_EventFromUsesConcreteErrorProvider(t *testing.T) {
+	primary := &fakeProvider{name: "anthropic", outcome: []error{busyErr("openai-responses", 0), nil}}
+	backup := &fakeProvider{name: "openai"}
+	p, events, _ := build(primary, backup)
+
+	if _, err := p.Chat(context.Background(), inference.Call{Model: "claude"}); err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if len(*events) != 1 || (*events)[0].Action != ActionRetry {
+		t.Fatalf("events = %+v, want one retry", *events)
+	}
+	if (*events)[0].From != "openai-responses" {
+		t.Fatalf("event From = %q, want concrete provider openai-responses", (*events)[0].From)
+	}
+	if got := (*events)[0].Notice(); got != "openai-responses server busy — trying once more" {
+		t.Fatalf("notice = %q", got)
+	}
+}
+
 func TestChat_BusyTwiceFailsOverWithStillBusyNotice(t *testing.T) {
 	primary := &fakeProvider{name: "openai", outcome: []error{busyErr("openai", 0), busyErr("openai", 0)}}
 	backup := &fakeProvider{name: "anthropic"}

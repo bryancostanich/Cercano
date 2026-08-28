@@ -20,11 +20,11 @@ Objective: make logs, notices, and errors distinguish selected logical route fro
 Files: `source/server/internal/runner/core.go`, `source/server/internal/inference/resilience/resilience.go`, provider interfaces/types under `source/server/internal/llm/`, routing-log call sites, related tests.
 Tests: unit tests or focused fake-provider tests asserting fallback notices and routing-log events name the concrete attempted provider/model and do not mislabel OpenAI Responses failures as Anthropic failures.
 
-- [ ] Identify the smallest attempt metadata struct needed for route label, provider name, model name, tier, and context window
-- [ ] Thread attempt metadata through primary, backup, retry, and cross-tier fallback attempts
-- [ ] Update routing-log `loop.start`, `loop.result`, `fallback.consider`, and fallback-attempt fields to include selected route and concrete attempted provider/model
-- [ ] Update user-visible fallback notices to use concrete attempt metadata or neutral route wording when metadata is unavailable
-- [ ] Add tests for provider attribution through wrapped `llm.Error` values and fallback notices
+- [x] Identify the smallest attempt metadata struct needed for route label, provider name, model name, tier, and context window
+- [x] Thread attempt metadata through primary, backup, retry, and cross-tier fallback attempts
+- [x] Update routing-log `loop.start`, `loop.result`, `fallback.consider`, and fallback-attempt fields to include selected route and concrete attempted provider/model
+- [x] Update user-visible fallback notices to use concrete attempt metadata or neutral route wording when metadata is unavailable
+- [x] Add tests for provider attribution through wrapped `llm.Error` values and fallback notices
 
 ## Phase 3 — Typed streaming errors
 

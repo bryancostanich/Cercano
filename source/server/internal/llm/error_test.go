@@ -58,6 +58,18 @@ func TestClassOf(t *testing.T) {
 	}
 }
 
+func TestProviderOf(t *testing.T) {
+	if got := ProviderOf(&Error{Class: ErrBusy, Provider: "openai-responses"}); got != "openai-responses" {
+		t.Fatalf("ProviderOf normalized error = %q", got)
+	}
+	if got := ProviderOf(fmt.Errorf("wrapped: %w", &Error{Class: ErrQuota, Provider: "anthropic"})); got != "anthropic" {
+		t.Fatalf("ProviderOf wrapped error = %q", got)
+	}
+	if got := ProviderOf(errors.New("foreign")); got != "" {
+		t.Fatalf("ProviderOf foreign error = %q, want empty", got)
+	}
+}
+
 func TestRetryable(t *testing.T) {
 	cases := []struct {
 		class ErrorClass

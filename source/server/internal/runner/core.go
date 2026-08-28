@@ -61,6 +61,13 @@ func errorString(err error) string {
 	return err.Error()
 }
 
+func failedProviderName(routeProvider inference.Provider, err error) string {
+	if name := llm.ProviderOf(err); name != "" {
+		return name
+	}
+	return providerName(routeProvider)
+}
+
 // localContextWindow reports the context window the local runtime will
 // actually serve for model, which is NOT always the configured value: a
 // catalog model may pin its own --ctx-size in ExtraArgs, and because per-model
@@ -318,6 +325,7 @@ func (c *Core) RunTurn(
 		"conversation_id": req.ConversationID,
 		"attempt":         "primary",
 		"provider":        providerName(provider),
+		"route_provider":  providerName(provider),
 		"model":           selectedModel,
 		"is_cloud":        isCloud,
 	})
@@ -327,6 +335,8 @@ func (c *Core) RunTurn(
 		"conversation_id": req.ConversationID,
 		"attempt":         "primary",
 		"provider":        providerName(provider),
+		"route_provider":  providerName(provider),
+		"error_provider":  llm.ProviderOf(loopErr),
 		"model":           selectedModel,
 		"is_cloud":        isCloud,
 		"error_class":     errClassString(loopErr),
@@ -345,12 +355,15 @@ func (c *Core) RunTurn(
 	// attempt on the same provider before any tier change; llm.Retryable owns
 	// the class policy so this site and the resilience engine stay in sync.
 	if loopErr != nil && ctx.Err() == nil && !errors.Is(loopErr, context.Canceled) && llm.Retryable(llm.ClassOf(loopErr)) {
-		notice := retryNotice(provider.Name(), llm.ClassOf(loopErr))
-		fmt.Fprintf(os.Stderr, "[resilience] turn retry: %s (%v)\n", provider.Name(), loopErr)
+		failedProvider := failedProviderName(provider, loopErr)
+		notice := retryNotice(failedProvider, llm.ClassOf(loopErr))
+		fmt.Fprintf(os.Stderr, "[resilience] turn retry: %s route failed at %s (%v)\n", provider.Name(), failedProvider, loopErr)
 		c.logRoute("loop.retry", routinglog.Event{
 			"conversation_id": req.ConversationID,
 			"attempt":         "same_provider",
 			"provider":        providerName(provider),
+			"route_provider":  providerName(provider),
+			"error_provider":  failedProvider,
 			"model":           selectedModel,
 			"is_cloud":        isCloud,
 			"previous_error":  errorString(loopErr),
@@ -363,6 +376,8 @@ func (c *Core) RunTurn(
 			"conversation_id": req.ConversationID,
 			"attempt":         "same_provider_retry",
 			"provider":        providerName(provider),
+			"route_provider":  providerName(provider),
+			"error_provider":  llm.ProviderOf(loopErr),
 			"model":           selectedModel,
 			"is_cloud":        isCloud,
 			"error_class":     errClassString(loopErr),
@@ -386,20 +401,24 @@ func (c *Core) RunTurn(
 			fbProv, fbCloud = c.d.Providers.Open(), false
 		}
 		fallbackModel := c.d.Providers.MainModel(fbCloud)
+		failedProvider := failedProviderName(provider, loopErr)
 		c.logRoute("fallback.consider", routinglog.Event{
-			"conversation_id":     req.ConversationID,
-			"mode":                string(mode),
-			"cross_allowed":       res.CrossAllowed,
-			"already_fell_back":   fellBack,
-			"from_provider":       providerName(provider),
-			"from_model":          selectedModel,
-			"from_is_cloud":       isCloud,
-			"fallback_tier":       res.Fallback.String(),
-			"fallback_provider":   providerName(fbProv),
-			"fallback_model":      fallbackModel,
-			"fallback_is_cloud":   fbCloud,
-			"trigger_error_class": errClassString(loopErr),
-			"trigger_error":       errorString(loopErr),
+			"conversation_id":         req.ConversationID,
+			"mode":                    string(mode),
+			"cross_allowed":           res.CrossAllowed,
+			"already_fell_back":       fellBack,
+			"from_provider":           providerName(provider),
+			"from_route_provider":     providerName(provider),
+			"from_error_provider":     llm.ProviderOf(loopErr),
+			"from_effective_provider": failedProvider,
+			"from_model":              selectedModel,
+			"from_is_cloud":           isCloud,
+			"fallback_tier":           res.Fallback.String(),
+			"fallback_provider":       providerName(fbProv),
+			"fallback_model":          fallbackModel,
+			"fallback_is_cloud":       fbCloud,
+			"trigger_error_class":     errClassString(loopErr),
+			"trigger_error":           errorString(loopErr),
 		})
 		if !fellBack && res.CrossAllowed && fbProv != nil && llm.Failoverable(llm.ClassOf(loopErr), loopErr) {
 			// The local fallback generally has a much smaller context window than
@@ -407,7 +426,7 @@ func (c *Core) RunTurn(
 			// cross-tier fallback, including transient cloud failures whose error
 			// text does not identify context overflow.
 			tightContextFallback := !fbCloud
-			fallbackNotice = fmt.Sprintf("⚠ %s failed (%v) — retrying on %s", provider.Name(), loopErr, fbProv.Name())
+			fallbackNotice = fmt.Sprintf("⚠ %s failed (%v) — retrying on %s", failedProvider, loopErr, fbProv.Name())
 			sink.Emit(Event{Kind: EventProgress, Text: fallbackNotice})
 			sink.Emit(Event{
 				Kind:    EventRouteSelected,
@@ -421,6 +440,7 @@ func (c *Core) RunTurn(
 				"conversation_id":        req.ConversationID,
 				"attempt":                "cross_tier_fallback",
 				"provider":               providerName(fbProv),
+				"route_provider":         providerName(fbProv),
 				"model":                  fallbackModel,
 				"is_cloud":               fbCloud,
 				"tight_context_fallback": tightContextFallback,
@@ -431,6 +451,8 @@ func (c *Core) RunTurn(
 				"conversation_id": req.ConversationID,
 				"attempt":         "cross_tier_fallback",
 				"provider":        providerName(fbProv),
+				"route_provider":  providerName(fbProv),
+				"error_provider":  llm.ProviderOf(loopErr),
 				"model":           fallbackModel,
 				"is_cloud":        fbCloud,
 				"error_class":     errClassString(loopErr),

@@ -187,6 +187,13 @@ func (p *Provider) emit(ev Event) {
 	}
 }
 
+func eventFrom(fallback string, err error) string {
+	if name := llm.ProviderOf(err); name != "" {
+		return name
+	}
+	return fallback
+}
+
 // waitFor computes the busy-retry wait: the server's suggestion capped, or
 // the default when it gave none.
 func (p *Provider) waitFor(err error) time.Duration {
@@ -245,7 +252,7 @@ func (p *Provider) Chat(ctx context.Context, req inference.Call) (inference.Resu
 	}
 	if llm.Retryable(llm.ClassOf(err)) {
 		ev := Event{Action: ActionRetry, Stage: "chat", Class: llm.ClassOf(err),
-			From: p.primary.Name(), To: p.primary.Name(), Wait: p.waitFor(err), Err: err}
+			From: eventFrom(p.primary.Name(), err), To: p.primary.Name(), Wait: p.waitFor(err), Err: err}
 		p.emit(ev)
 		if !p.sleep(ctx, ev.Wait) {
 			return resp, err
@@ -258,14 +265,14 @@ func (p *Provider) Chat(ctx context.Context, req inference.Call) (inference.Resu
 	class := llm.ClassOf(err)
 	if p.backup == nil || !llm.Failoverable(class, err) {
 		p.emit(Event{Action: ActionSurface, Stage: "chat", Class: class,
-			From: p.primary.Name(), Err: err})
+			From: eventFrom(p.primary.Name(), err), Err: err})
 		return inference.Result{}, err
 	}
 	if class == llm.ErrQuota {
 		p.markQuotaCooldown(err)
 	}
 	p.emit(Event{Action: ActionFailover, Stage: "chat", Class: class,
-		From: p.primary.Name(), To: p.backup.Name(), Err: err})
+		From: eventFrom(p.primary.Name(), err), To: p.backup.Name(), Err: err})
 	return p.backup.Chat(ctx, p.backupRequest(req))
 }
 
@@ -373,7 +380,7 @@ func (r *reader) decide(stage string, err error) bool {
 	if llm.Retryable(class) && !r.retried {
 		r.retried = true
 		ev := Event{Action: ActionRetry, Stage: stage, Class: class,
-			From: p.primary.Name(), To: p.primary.Name(), Wait: p.waitFor(err), Err: err}
+			From: eventFrom(p.primary.Name(), err), To: p.primary.Name(), Wait: p.waitFor(err), Err: err}
 		p.emit(ev)
 		r.queue = append(r.queue, llm.StreamEvent{Type: llm.EventNotice, Notice: ev.Notice()})
 		r.attempt = func() (llm.StreamReader, error) {
@@ -390,7 +397,7 @@ func (r *reader) decide(stage string, err error) bool {
 			p.markQuotaCooldown(err)
 		}
 		ev := Event{Action: ActionFailover, Stage: stage, Class: class,
-			From: p.primary.Name(), To: p.backup.Name(), Err: err}
+			From: eventFrom(p.primary.Name(), err), To: p.backup.Name(), Err: err}
 		p.emit(ev)
 		r.queue = append(r.queue, llm.StreamEvent{Type: llm.EventNotice, Notice: ev.Notice()})
 		r.attempt = func() (llm.StreamReader, error) {
@@ -399,7 +406,7 @@ func (r *reader) decide(stage string, err error) bool {
 		return true
 	}
 	p.emit(Event{Action: ActionSurface, Stage: stage, Class: class,
-		From: p.primary.Name(), Err: err})
+		From: eventFrom(p.primary.Name(), err), Err: err})
 	return false
 }
 

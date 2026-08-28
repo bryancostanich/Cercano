@@ -93,6 +93,20 @@ func ClassOf(err error) ErrorClass {
 	return ErrUnknown
 }
 
+// ProviderOf extracts the concrete provider recorded on a normalized provider
+// error. It returns an empty string when err is nil, unnormalized, or carries no
+// provider name.
+func ProviderOf(err error) string {
+	if err == nil {
+		return ""
+	}
+	var e *Error
+	if errors.As(err, &e) && e.Provider != "" {
+		return e.Provider
+	}
+	return ""
+}
+
 // Retryable reports whether re-running the SAME provider once may succeed.
 // The transient classes — ErrBusy (overload) and ErrNetwork (transport reset/
 // refused/TLS) — are re-runnable by definition. ErrUnknown gets a single cheap

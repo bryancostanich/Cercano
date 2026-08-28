@@ -63,17 +63,60 @@ func TestRetryable(t *testing.T) {
 		class ErrorClass
 		want  bool
 	}{
-		{ErrBusy, true},     // transient overload — re-run may succeed
-		{ErrNetwork, true},  // transport reset — re-run may succeed
-		{ErrUnknown, true},  // one cheap attempt, then failover
-		{ErrQuota, false},   // pointless until quota resets
-		{ErrAuth, false},    // bad credential won't fix on retry
+		{ErrBusy, true},    // transient overload — re-run may succeed
+		{ErrNetwork, true}, // transport reset — re-run may succeed
+		{ErrUnknown, true}, // one cheap attempt, then failover
+		{ErrQuota, false},  // pointless until quota resets
+		{ErrAuth, false},   // bad credential won't fix on retry
 		{ErrInvalidRequest, false},
 		{ErrContextOverflow, false},
 	}
 	for _, tc := range cases {
 		if got := Retryable(tc.class); got != tc.want {
 			t.Errorf("Retryable(%q) = %v, want %v", tc.class, got, tc.want)
+		}
+	}
+}
+
+func TestFailoverable(t *testing.T) {
+	cases := []struct {
+		name  string
+		class ErrorClass
+		err   error
+		want  bool
+	}{
+		{"context overflow surfaces", ErrContextOverflow, &Error{Class: ErrContextOverflow, Provider: "anthropic"}, false},
+		{"invalid request surfaces", ErrInvalidRequest, &Error{Class: ErrInvalidRequest, Provider: "openai", Err: errors.New("bad parameter")}, false},
+		{"invalid request model unavailable fails over", ErrInvalidRequest, &Error{Class: ErrInvalidRequest, Provider: "openai", Err: errors.New("model_not_found")}, true},
+		{"quota fails over", ErrQuota, &Error{Class: ErrQuota, Provider: "anthropic"}, true},
+		{"auth fails over", ErrAuth, &Error{Class: ErrAuth, Provider: "anthropic"}, true},
+		{"busy fails over", ErrBusy, &Error{Class: ErrBusy, Provider: "anthropic"}, true},
+		{"network fails over", ErrNetwork, &Error{Class: ErrNetwork, Provider: "anthropic"}, true},
+		{"unknown fails over", ErrUnknown, errors.New("boom"), true},
+	}
+	for _, tc := range cases {
+		if got := Failoverable(tc.class, tc.err); got != tc.want {
+			t.Errorf("%s: Failoverable(%q, %v) = %v, want %v", tc.name, tc.class, tc.err, got, tc.want)
+		}
+	}
+}
+
+func TestIsProviderModelUnavailable(t *testing.T) {
+	cases := []struct {
+		msg  string
+		want bool
+	}{
+		{"model: claude-opus not_found", true},
+		{"model not found", true},
+		{"model_not_found", true},
+		{"unsupported model", true},
+		{"model unavailable", true},
+		{"model is not supported", true},
+		{"request body was invalid", false},
+	}
+	for _, tc := range cases {
+		if got := IsProviderModelUnavailable(errors.New(tc.msg)); got != tc.want {
+			t.Errorf("IsProviderModelUnavailable(%q) = %v, want %v", tc.msg, got, tc.want)
 		}
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -104,6 +105,40 @@ func ClassOf(err error) ErrorClass {
 // definition of "transient" instead of hardcoding class comparisons.
 func Retryable(class ErrorClass) bool {
 	return class == ErrBusy || class == ErrNetwork || class == ErrUnknown
+}
+
+// Failoverable reports whether re-serving a failed request on a different
+// provider/model could plausibly help. Invalid requests generally fail
+// everywhere, except for provider/model availability mismatches where another
+// provider may serve the requested capability. Context overflow is not broadly
+// failoverable here: a caller may allow it only after proving the fallback
+// target has a larger known context window.
+func Failoverable(class ErrorClass, err error) bool {
+	if class == ErrContextOverflow {
+		return false
+	}
+	if class == ErrInvalidRequest {
+		return IsProviderModelUnavailable(err)
+	}
+	return true
+}
+
+// IsProviderModelUnavailable reports whether an invalid-request-shaped error
+// actually means the selected provider/model cannot serve the requested model,
+// making another provider a reasonable fallback target.
+func IsProviderModelUnavailable(err error) bool {
+	if err == nil {
+		return false
+	}
+	m := strings.ToLower(err.Error())
+	if strings.Contains(m, "model:") && (strings.Contains(m, "not_found") || strings.Contains(m, "not found")) {
+		return true
+	}
+	return strings.Contains(m, "model not found") ||
+		strings.Contains(m, "model_not_found") ||
+		strings.Contains(m, "unsupported model") ||
+		strings.Contains(m, "model unavailable") ||
+		strings.Contains(m, "model is not supported")
 }
 
 // IsNetworkError reports whether err is a transport-level failure that should

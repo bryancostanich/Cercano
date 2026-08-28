@@ -345,12 +345,12 @@ func TestCore_ContextCanceledDoesNotCrossTierFallback(t *testing.T) {
 // permanently nil (silently disabled) for every user who enabled it — the
 // exact regression the whole-branch review caught. This test fails if the
 // runner ever reverts to reading a captured value instead of the accessor.
-func TestCore_ContextOverflowFallbackUsesCompactLocalCatalog(t *testing.T) {
-	assertCompactFallbackForPrimary(t, &contextOverflowProvider{})
+func TestCore_ContextOverflowDoesNotCrossTierFallback(t *testing.T) {
+	assertNoCrossTierFallbackForPrimary(t, &contextOverflowProvider{}, llm.ErrContextOverflow)
 }
 
-func TestCore_ContextOverflowTextFallbackUsesCompactLocalCatalog(t *testing.T) {
-	assertCompactFallbackForPrimary(t, &invalidContextTextProvider{})
+func TestCore_InvalidContextTextDoesNotCrossTierFallback(t *testing.T) {
+	assertNoCrossTierFallbackForPrimary(t, &invalidContextTextProvider{}, llm.ErrInvalidRequest)
 }
 
 func TestCore_BusyFallbackUsesCompactLocalCatalog(t *testing.T) {
@@ -390,6 +390,31 @@ func assertCompactFallbackForPrimary(t *testing.T, primary inference.Provider) {
 	}
 	if tools["git_push"] {
 		t.Fatalf("local fallback should use compact catalog and hide git_push, got %v", tools)
+	}
+}
+
+func assertNoCrossTierFallbackForPrimary(t *testing.T, primary inference.Provider, wantClass llm.ErrorClass) {
+	t.Helper()
+	openSpy := &spyProvider{}
+	deps := buildDeps(primary)
+	deps.Providers = &fakeResolver{prov: primary, open: openSpy}
+	core := New(deps)
+
+	_, err := core.RunTurn(context.Background(), Request{
+		Input:          "do not recover locally",
+		ConversationID: "no-fallback-conv",
+		WorkDir:        t.TempDir(),
+	}, noopSink{}, nil, nil)
+	if err == nil {
+		t.Fatal("RunTurn unexpectedly succeeded; wanted original loop error to surface")
+	}
+	if got := llm.ClassOf(err); got != wantClass {
+		t.Fatalf("RunTurn error class = %q, want %q; err=%v", got, wantClass, err)
+	}
+	openSpy.mu.Lock()
+	defer openSpy.mu.Unlock()
+	if len(openSpy.observations) != 0 || len(openSpy.requests) != 0 {
+		t.Fatalf("non-failoverable error should not call fallback/open provider, got observations=%d requests=%d", len(openSpy.observations), len(openSpy.requests))
 	}
 }
 

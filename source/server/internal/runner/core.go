@@ -401,7 +401,7 @@ func (c *Core) RunTurn(
 			"trigger_error_class": errClassString(loopErr),
 			"trigger_error":       errorString(loopErr),
 		})
-		if !fellBack && res.CrossAllowed && fbProv != nil {
+		if !fellBack && res.CrossAllowed && fbProv != nil && llm.Failoverable(llm.ClassOf(loopErr), loopErr) {
 			// The local fallback generally has a much smaller context window than
 			// the cloud provider. Keep its tool catalog compact for every
 			// cross-tier fallback, including transient cloud failures whose error

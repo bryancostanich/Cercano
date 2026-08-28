@@ -19,6 +19,7 @@ import (
 	"cercano/source/server/internal/localruntime/llamaserver"
 	"cercano/source/server/internal/locus"
 	"cercano/source/server/internal/protocols"
+	"cercano/source/server/internal/requestassembly"
 	"cercano/source/server/internal/routinglog"
 	"cercano/source/server/internal/sysram"
 	"cercano/source/server/internal/watchdog"
@@ -29,6 +30,10 @@ import (
 // many Cores may run concurrently (embedded mode) or one per worker process
 // (Phase 5) — identical code path either way.
 type Core struct{ d Deps }
+
+type targetHistory interface {
+	AssembleHistoryForTarget(ctx context.Context, convID string, target requestassembly.Target) requestassembly.Result
+}
 
 // New constructs a Core from the injected service dependencies.
 func New(d Deps) *Core { return &Core{d: d} }
@@ -66,6 +71,54 @@ func failedProviderName(routeProvider inference.Provider, err error) string {
 		return name
 	}
 	return providerName(routeProvider)
+}
+
+func (c *Core) contextWindowFor(isCloud bool, model string) int {
+	if c.d.Config == nil {
+		return 0
+	}
+	cfgSnap := c.d.Config.Get()
+	if !isCloud {
+		return localContextWindow(cfgSnap, model)
+	}
+	return 0
+}
+
+func (c *Core) assembleAttemptHistory(ctx context.Context, req Request, attempt string, provider inference.Provider, model string, isCloud bool, tightContext bool) []llm.Message {
+	if c.d.Persist == nil || req.ConversationID == "" {
+		return nil
+	}
+	target := requestassembly.Target{
+		RouteLabel:    attempt,
+		Provider:      providerName(provider),
+		Model:         model,
+		ContextWindow: c.contextWindowFor(isCloud, model),
+		TightContext:  tightContext,
+	}
+	if h, ok := c.d.Persist.(targetHistory); ok {
+		assembled := h.AssembleHistoryForTarget(ctx, req.ConversationID, target)
+		acct := assembled.Accounting
+		c.logRoute("context.assembled", routinglog.Event{
+			"conversation_id":   req.ConversationID,
+			"attempt":           attempt,
+			"provider":          target.Provider,
+			"model":             target.Model,
+			"is_cloud":          isCloud,
+			"context_window":    acct.Window,
+			"hard_limit":        acct.HardLimit,
+			"raw_tokens":        acct.RawTokens,
+			"initial_tokens":    acct.InitialTokens,
+			"after_hard_elide":  acct.AfterHardElide,
+			"after_keep_last":   acct.AfterKeepLast,
+			"final_tokens":      acct.FinalTokens,
+			"dropped_messages":  acct.DroppedMessages,
+			"scheduled_compact": acct.Scheduled,
+			"truncated":         acct.Truncated,
+			"tight_context":     tightContext,
+		})
+		return assembled.Messages
+	}
+	return c.d.Persist.AssembleHistory(ctx, req.ConversationID)
 }
 
 // localContextWindow reports the context window the local runtime will
@@ -212,11 +265,8 @@ func (c *Core) RunTurn(
 		IsCloud: isCloud,
 	})
 
-	// 2. Assemble conversation history.
-	var convHistory []llm.Message
-	if c.d.Persist != nil && req.ConversationID != "" {
-		convHistory = c.d.Persist.AssembleHistory(ctx, req.ConversationID)
-	}
+	// 2. Conversation history is assembled per concrete attempt below so each
+	// provider/model sees a send view sized for its own context window.
 
 	// 3. Crash-resilient persistence: persist the USER turn up front (before
 	// any LLM call) so a crash/kill/restart cannot lose the prompt. The
@@ -329,6 +379,7 @@ func (c *Core) RunTurn(
 		"model":           selectedModel,
 		"is_cloud":        isCloud,
 	})
+	convHistory := c.assembleAttemptHistory(ctx, req, "primary", provider, selectedModel, isCloud, false)
 	result, loopErr := c.runLoop(ctx, req, provider, selectedModel, isCloud,
 		loopSink, requester, convHistory, onTextDelta, onTurn, wdGate, wdTurnEnd, gateRegistry, permStore, profile, false)
 	c.logRoute("loop.result", routinglog.Event{
@@ -370,6 +421,7 @@ func (c *Core) RunTurn(
 			"error_class":     errClassString(loopErr),
 		})
 		sink.Emit(Event{Kind: EventProgress, Text: notice})
+		convHistory = c.assembleAttemptHistory(ctx, req, "same_provider_retry", provider, selectedModel, isCloud, false)
 		result, loopErr = c.runLoop(ctx, req, provider, selectedModel, isCloud,
 			loopSink, requester, convHistory, onTextDelta, onTurn, wdGate, wdTurnEnd, gateRegistry, permStore, profile, false)
 		c.logRoute("loop.result", routinglog.Event{
@@ -445,6 +497,7 @@ func (c *Core) RunTurn(
 				"is_cloud":               fbCloud,
 				"tight_context_fallback": tightContextFallback,
 			})
+			convHistory = c.assembleAttemptHistory(ctx, req, "cross_tier_fallback", fbProv, fallbackModel, fbCloud, tightContextFallback)
 			result, loopErr = c.runLoop(ctx, req, fbProv, fallbackModel, fbCloud,
 				loopSink, requester, convHistory, onTextDelta, onTurn, wdGate, wdTurnEnd, gateRegistry, permStore, profile, tightContextFallback)
 			c.logRoute("loop.result", routinglog.Event{
@@ -514,9 +567,7 @@ func (c *Core) runLoop(
 	if c.d.Config != nil {
 		cfgSnap := c.d.Config.Get()
 		maxIterations = cfgSnap.ToolLoop.MaxIterations
-		if !isCloud {
-			contextWindow = localContextWindow(cfgSnap, model)
-		}
+		contextWindow = c.contextWindowFor(isCloud, model)
 	}
 
 	return agent.RunToolLoop(ctx, agent.ToolLoopInput{

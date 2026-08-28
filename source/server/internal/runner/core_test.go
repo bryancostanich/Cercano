@@ -31,6 +31,7 @@ import (
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/ollamacatalog"
+	"cercano/source/server/internal/requestassembly"
 	"cercano/source/server/internal/routinglog"
 	"cercano/source/server/internal/secrets"
 	"cercano/source/server/internal/usage"
@@ -232,10 +233,19 @@ func (f *fakeResolver) SetRoutingLog(_ *routinglog.Writer)                      
 // fakeTurnHistory — minimal TurnHistory; returns empty history.
 // ---------------------------------------------------------------------------
 
-type fakeTurnHistory struct{}
+type fakeTurnHistory struct {
+	mu      sync.Mutex
+	targets []requestassembly.Target
+}
 
 func (h *fakeTurnHistory) AssembleHistory(_ context.Context, _ string) []llm.Message {
 	return nil
+}
+func (h *fakeTurnHistory) AssembleHistoryForTarget(_ context.Context, _ string, target requestassembly.Target) requestassembly.Result {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.targets = append(h.targets, target)
+	return requestassembly.Result{}
 }
 func (h *fakeTurnHistory) PersistTurn(_ context.Context, _ string, _ llm.Message) {}
 func (h *fakeTurnHistory) LoadProjectContext(_ string) string                     { return "" }
@@ -378,6 +388,38 @@ func TestCore_InvalidContextTextDoesNotCrossTierFallback(t *testing.T) {
 
 func TestCore_BusyFallbackUsesCompactLocalCatalog(t *testing.T) {
 	assertCompactFallbackForPrimary(t, &busyProvider{})
+}
+
+func TestCore_CrossTierFallbackReassemblesHistoryForFallbackTarget(t *testing.T) {
+	openSpy := &spyProvider{}
+	history := &fakeTurnHistory{}
+	deps := buildDeps(&busyProvider{})
+	deps.Persist = history
+	deps.Providers = &fakeResolver{prov: &busyProvider{}, open: openSpy}
+	core := New(deps)
+
+	_, err := core.RunTurn(context.Background(), Request{
+		Input:          "reassemble per target",
+		ConversationID: "assembly-conv",
+		WorkDir:        t.TempDir(),
+	}, noopSink{}, nil, nil)
+	if err != nil {
+		t.Fatalf("RunTurn fallback should succeed on open provider: %v", err)
+	}
+	history.mu.Lock()
+	defer history.mu.Unlock()
+	if len(history.targets) != 3 {
+		t.Fatalf("assembly targets = %+v, want primary, same_provider_retry, cross_tier_fallback", history.targets)
+	}
+	if history.targets[0].RouteLabel != "primary" || history.targets[0].Model != "fake-cloud-model" {
+		t.Fatalf("primary target = %+v", history.targets[0])
+	}
+	if history.targets[1].RouteLabel != "same_provider_retry" || history.targets[1].Model != "fake-cloud-model" {
+		t.Fatalf("retry target = %+v", history.targets[1])
+	}
+	if history.targets[2].RouteLabel != "cross_tier_fallback" || history.targets[2].Provider != "spy" || history.targets[2].Model != "fake-open-model" || !history.targets[2].TightContext {
+		t.Fatalf("fallback target = %+v", history.targets[2])
+	}
 }
 
 func TestCore_FallbackNoticeUsesConcreteErrorProvider(t *testing.T) {

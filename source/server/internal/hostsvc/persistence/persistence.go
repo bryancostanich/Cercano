@@ -28,6 +28,7 @@ import (
 	cfgsvc "cercano/source/server/internal/hostsvc/config"
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
+	"cercano/source/server/internal/requestassembly"
 	"cercano/source/server/internal/retention"
 	"cercano/source/server/pkg/config"
 	"cercano/source/server/pkg/proto"
@@ -58,6 +59,10 @@ type Service interface {
 	// Unlike the legacy helper it replaced, AssembleHistory gets the store
 	// from the service itself (no store parameter).
 	AssembleHistory(ctx context.Context, convID string) []llm.Message
+
+	// AssembleHistoryForTarget builds the same provider-facing send view for a
+	// concrete provider/model attempt and returns structured token accounting.
+	AssembleHistoryForTarget(ctx context.Context, convID string, target requestassembly.Target) requestassembly.Result
 
 	// Store returns the live conversation store, or nil if none is wired.
 	Store() conversation.Store
@@ -224,7 +229,7 @@ func (x *svc) advanceElisionFloor(ctx context.Context, convID string) (pre, post
 		return 0, 0, 0, false, nil
 	}
 	compSnap := x.cfgSvc.Get().Compaction
-	raw := estimateRawTokens(turns)
+	raw := requestassembly.EstimateRawTokens(turns)
 	if raw < compSnap.ActivationFloorTokens {
 		return 0, 0, 0, false, nil // activation gate — same as the LLM pass
 	}
@@ -351,70 +356,40 @@ func (x *svc) PersistTurn(ctx context.Context, convID string, m llm.Message) {
 // Unlike the legacy assembleHistory helper, this method gets the store from the
 // service itself (no store parameter).
 func (x *svc) AssembleHistory(ctx context.Context, convID string) []llm.Message {
+	return x.AssembleHistoryForTarget(ctx, convID, requestassembly.Target{Model: x.activeCloudModel()}).Messages
+}
+
+func (x *svc) AssembleHistoryForTarget(ctx context.Context, convID string, target requestassembly.Target) requestassembly.Result {
+	return x.assembleHistoryForTarget(ctx, convID, target, true)
+}
+
+func (x *svc) assembleHistoryForTarget(ctx context.Context, convID string, target requestassembly.Target, schedule bool) requestassembly.Result {
 	store := x.Store()
 	if store == nil {
-		return nil
+		return requestassembly.Result{}
 	}
 	turns, err := store.GetTurns(ctx, convID)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[tool-loop] GetTurns(%s) failed: %v\n", convID, err)
-		return nil
+		return requestassembly.Result{}
 	}
 	state, _ := store.GetCompaction(ctx, convID)
-	// /elide-context floor: stub tool-result bodies up to the floor before the
-	// view is assembled, so every downstream consumer (model, meter) agrees.
-	if floor := x.elisionFloor(convID); floor > 0 {
-		turns, _ = compactor.StubToolResultsThrough(turns, floor)
-	}
-	view, _ := compactor.BuildSendView(turns, state)
-
-	compactionCfg := x.cfgSvc.Get().Compaction
-	cloudModel := x.activeCloudModel()
-	pct := compactionCfg.HardOverridePct
-	if compactionCfg.Enabled && pct > 0 {
-		hardLimit := int(float64(contextmeter.ModelMax(cloudModel)) * pct)
-		if compaction.ProviderTotalTokens(contextmeter.Default(), view) > hardLimit {
-			// Never compact inline — kick the background generator (debounced,
-			// deduped, timeout-bounded) and bring THIS turn under the limit with
-			// LLM-free steps only.
-			x.convAgent.ScheduleCompaction(convID)
-			pre := compaction.ProviderTotalTokens(contextmeter.Default(), view)
-			view, _ = compaction.ElideSupersededToolResults(view)
-			if compaction.ProviderTotalTokens(contextmeter.Default(), view) > hardLimit {
-				view, _ = compaction.KeepLastNToolResults(view, compaction.DefaultLossyElisionKeepLast)
-			}
-			if compaction.ProviderTotalTokens(contextmeter.Default(), view) > hardLimit {
-				preserve := 0
-				if state.ConsolidatedJSON != "" {
-					preserve = 1 // keep the consolidated-summary preamble
-				}
-				var dropped int
-				view, dropped = compaction.TruncateOldestToFit(view, contextmeter.Default(), hardLimit, preserve)
-				fmt.Fprintf(os.Stderr, "[compaction] hard-override %s: %d tokens > limit %d — truncated %d oldest messages (background pass scheduled)\n",
-					convID, pre, hardLimit, dropped)
-			} else {
-				fmt.Fprintf(os.Stderr, "[compaction] hard-override %s: %d tokens > limit %d — elision brought it under (background pass scheduled)\n",
-					convID, pre, hardLimit)
-			}
+	assembled := requestassembly.Assemble(turns, state, x.cfgSvc.Get().Compaction, x.elisionFloor(convID), target, contextmeter.Default())
+	acct := assembled.Accounting
+	if schedule && acct.Scheduled {
+		// Never compact inline — kick the background generator (debounced,
+		// deduped, timeout-bounded) and bring THIS turn under the limit with
+		// LLM-free steps only.
+		x.convAgent.ScheduleCompaction(convID)
+		if acct.Truncated {
+			fmt.Fprintf(os.Stderr, "[compaction] hard-override %s: %d tokens > limit %d — truncated %d oldest messages (background pass scheduled)\n",
+				convID, acct.InitialTokens, acct.HardLimit, acct.DroppedMessages)
+		} else {
+			fmt.Fprintf(os.Stderr, "[compaction] hard-override %s: %d tokens > limit %d — elision brought it under (background pass scheduled)\n",
+				convID, acct.InitialTokens, acct.HardLimit)
 		}
 	}
-	// Mechanical superseded-tool-result dedup. LLM-free, lossless, and safe to
-	// apply on top of either a summarized view or the raw history — running it
-	// twice is idempotent.
-	if compactionCfg.ElideToolResults {
-		view, _ = compaction.ElideSupersededToolResults(view)
-	}
-	// Recency-window elision. Stubs older tool_result content down to a marker;
-	// keeps the last N intact. Applied after byte-identical dedup because the
-	// two are complementary — the identical-dedup catches literal duplicates
-	// among the kept N; the recency policy handles the long tail.
-	if compactionCfg.LossyToolElision {
-		view, _ = compaction.KeepLastNToolResults(view, compaction.DefaultLossyElisionKeepLast)
-	}
-	// Final pairing repair: idempotent on a valid view, and insurance for the
-	// one degrade edge (a lone surviving tool_result after truncation) that
-	// would otherwise reach the provider as an invalid message array.
-	return llm.RepairPairing(view)
+	return assembled
 }
 
 // --- RPC-body implementations ---
@@ -673,12 +648,10 @@ func (x *svc) GetContextUsage(ctx context.Context, req *proto.GetContextUsageReq
 	// restart until the first cloud-served turn re-baselined it.
 	max := contextmeter.ModelMax(x.primaryModel())
 	sent, raw := 0, 0
-	if store := x.Store(); store != nil && convID != "" {
-		if turns, err := store.GetTurns(ctx, convID); err == nil {
-			raw = estimateRawTokens(turns)
-			state, _ := store.GetCompaction(ctx, convID)
-			sent = x.sentViewTokens(convID, turns, state, raw)
-		}
+	if x.Store() != nil && convID != "" {
+		assembled := x.assembleHistoryForTarget(ctx, convID, requestassembly.Target{Model: x.primaryModel()}, false)
+		raw = assembled.Accounting.RawTokens
+		sent = assembled.Accounting.FinalTokens
 	}
 	var pct float64
 	if max > 0 {
@@ -705,25 +678,14 @@ func (x *svc) GetContextUsage(ctx context.Context, req *proto.GetContextUsageReq
 // frequently.
 func (x *svc) sentViewTokens(convID string, turns []conversation.Turn, state conversation.Compaction, raw int) int {
 	compSnap := x.cfgSvc.Get().Compaction
-	elide := compSnap.ElideToolResults
-	lossy := compSnap.LossyToolElision
 	floor := x.elisionFloor(convID)
-	if state.ConsolidatedJSON == "" && !elide && !lossy && floor <= 0 {
+	if state.ConsolidatedJSON == "" && !compSnap.Enabled && !compSnap.ElideToolResults && !compSnap.LossyToolElision && floor <= 0 {
 		return raw
 	}
-	if floor > 0 {
-		turns, _ = compactor.StubToolResultsThrough(turns, floor)
-	}
-	// BuildSendView degrades to the full raw history when no compaction state
-	// exists, so one call covers both the summarized and plain cases.
-	view, _ := compactor.BuildSendView(turns, state)
-	if elide {
-		view, _ = compaction.ElideSupersededToolResults(view)
-	}
-	if lossy {
-		view, _ = compaction.KeepLastNToolResults(view, compaction.DefaultLossyElisionKeepLast)
-	}
-	return compaction.ProviderTotalTokens(contextmeter.Default(), view)
+	assembled := requestassembly.Assemble(turns, state, compSnap, floor, requestassembly.Target{
+		Model: x.primaryModel(),
+	}, contextmeter.Default())
+	return assembled.Accounting.FinalTokens
 }
 
 // ElideContext implements the /elide-context RPC: record "now" as the
@@ -748,7 +710,7 @@ func (x *svc) ElideContext(ctx context.Context, req *proto.ElideContextRequest) 
 		return &proto.ElideContextResponse{}, nil
 	}
 	state, _ := store.GetCompaction(ctx, convID)
-	raw := estimateRawTokens(turns)
+	raw := requestassembly.EstimateRawTokens(turns)
 
 	pre := x.sentViewTokens(convID, turns, state, raw)
 	// GetTurns returns turns in created_at order; the newest turn's timestamp
@@ -784,7 +746,7 @@ func (x *svc) GetCompactionState(ctx context.Context, req *proto.GetCompactionSt
 	state, _ := store.GetCompaction(ctx, convID)
 	view, _ := compactor.BuildSendView(turns, state)
 	out.SentTokens = int32(compaction.ProviderTotalTokens(contextmeter.Default(), view))
-	out.RawTokens = int32(estimateRawTokens(turns))
+	out.RawTokens = int32(requestassembly.EstimateRawTokens(turns))
 	out.FrozenThrough = state.FrozenThrough
 	for _, t := range turns {
 		if t.CreatedAt.Unix() <= state.FrozenThrough {
@@ -1075,27 +1037,4 @@ func SanitizeSuggestion(s string) string {
 		s = s[:80]
 	}
 	return s
-}
-
-// estimateRawTokens is a fast len/4 token estimate over the turns' text — used
-// for the displayed raw/savings figure so the footer's frequent GetContextUsage
-// poll never tokenizes the full uncompacted history with tiktoken.
-//
-// Uses the LARGER of Content and BlocksJSON per turn, not the sum: BlocksJSON
-// is the canonical block-array serialization (what feeds BuildLLMHistory) and
-// already contains every text body as a JSON string, so summing it with
-// Content double-counts the text portion — inflating the number by ~8% on a
-// text-heavy conversation. Content is retained only as the fallback for
-// pre-BlocksJSON turns (older rows may have Content but an empty
-// content_json column, since it defaulted to the empty string when added).
-func estimateRawTokens(turns []conversation.Turn) int {
-	n := 0
-	for _, t := range turns {
-		if len(t.BlocksJSON) > len(t.Content) {
-			n += len(t.BlocksJSON)
-		} else {
-			n += len(t.Content)
-		}
-	}
-	return (n + 3) / 4
 }

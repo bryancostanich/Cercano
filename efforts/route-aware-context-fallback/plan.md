@@ -44,12 +44,12 @@ Objective: introduce one request assembly path that sizes conversation history f
 Files: likely `source/server/internal/hostsvc/persistence/persistence.go`, new or existing assembly package under `source/server/internal/`, `source/server/internal/runner/core.go`, `source/server/internal/contextmeter/`, tests.
 Tests: assembler tests for raw/compacted/elided/truncated/final token accounting; tests proving meter output and actual request assembly agree for the same concrete target.
 
-- [ ] Extract the current history assembly and hard-elision logic into a dedicated request assembly service/path
-- [ ] Define the concrete target input: selected route, provider, model, tier, context-window limit, and tight-context mode
-- [ ] Return structured accounting for raw, compacted, elided, truncated, and final request token counts
-- [ ] Wire runner primary, backup, retry, and fallback attempts to assemble history for their concrete target before sending
-- [ ] Wire `GetContextUsage` to the same assembler so the UI meter reflects the next send-view estimate
-- [ ] Add routing-log events or fields for per-attempt assembly accounting without logging prompt text, tool arguments, API keys, or response bodies
+- [x] Extract the current history assembly and hard-elision logic into a dedicated request assembly service/path
+- [x] Define the concrete target input: selected route, provider, model, tier, context-window limit, and tight-context mode
+- [x] Return structured accounting for raw, compacted, elided, truncated, and final request token counts
+- [x] Wire runner primary, backup, retry, and fallback attempts to assemble history for their concrete target before sending
+- [x] Wire `GetContextUsage` to the same assembler so the UI meter reflects the next send-view estimate
+- [x] Add routing-log events or fields for per-attempt assembly accounting without logging prompt text, tool arguments, API keys, or response bodies
 
 ## Phase 5 — Context-overflow fallback semantics
 

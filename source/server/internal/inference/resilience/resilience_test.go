@@ -16,10 +16,11 @@ import (
 // succeeds (Chat returns a result naming the provider; StreamChat returns a
 // two-event stream: text delta "from <name>" + message stop).
 type fakeProvider struct {
-	name    string
-	outcome []error
-	calls   int
-	models  []string // Model field of each observed request
+	name           string
+	outcome        []error
+	calls          int
+	models         []string // Model field of each observed request
+	streamOverride func(context.Context, inference.Call) (inference.Stream, error)
 }
 
 func (f *fakeProvider) next() error {
@@ -42,7 +43,10 @@ func (f *fakeProvider) Chat(_ context.Context, req inference.Call) (inference.Re
 	return inference.Result{Model: f.name, Blocks: []llm.Block{{Type: llm.BlockText, Text: "from " + f.name}}}, nil
 }
 
-func (f *fakeProvider) StreamChat(_ context.Context, req inference.Call) (inference.Stream, error) {
+func (f *fakeProvider) StreamChat(ctx context.Context, req inference.Call) (inference.Stream, error) {
+	if f.streamOverride != nil {
+		return f.streamOverride(ctx, req)
+	}
 	f.models = append(f.models, req.Model)
 	if err := f.next(); err != nil {
 		return nil, err
@@ -375,6 +379,41 @@ func TestChat_TierRewriteOnFailover(t *testing.T) {
 	}
 	if len(backup.models) != 1 || backup.models[0] != "backup-economy" {
 		t.Errorf("backup saw model %v, want tier-resolved backup-economy", backup.models)
+	}
+}
+
+func TestStream_TypedEventErrorContextOverflowSurfaces(t *testing.T) {
+	primary := &fakeProvider{name: "anthropic"}
+	backup := &fakeProvider{name: "openai"}
+	p, events, _ := build(primary, backup)
+	primaryStreamErr := &llm.Error{Class: llm.ErrContextOverflow, Provider: "openai-responses", Err: errors.New("context window exceeded")}
+	primary.outcome = []error{nil}
+
+	// Replace the successful stream with one that emits a typed EventError before
+	// content. This exercises the legacy EventError path while preserving class.
+	primaryStream := &fakeStream{events: []llm.StreamEvent{{Type: llm.EventError, ErrText: primaryStreamErr.Error(), Err: primaryStreamErr}}}
+	primary.streamOverride = func(_ context.Context, req inference.Call) (inference.Stream, error) {
+		primary.models = append(primary.models, req.Model)
+		primary.calls++
+		return primaryStream, nil
+	}
+
+	r, err := p.StreamChat(context.Background(), inference.Call{Model: "claude"})
+	if err != nil {
+		t.Fatalf("StreamChat dial err = %v", err)
+	}
+	_, _, err = r.Next()
+	if err == nil {
+		t.Fatal("Next unexpectedly succeeded; wanted context overflow")
+	}
+	if got := llm.ClassOf(err); got != llm.ErrContextOverflow {
+		t.Fatalf("Next error class = %q, want context_overflow; err=%v", got, err)
+	}
+	if backup.calls != 0 {
+		t.Fatalf("context overflow EventError should not fail over, backup calls=%d", backup.calls)
+	}
+	if len(*events) != 1 || (*events)[0].Action != ActionSurface || (*events)[0].From != "openai-responses" {
+		t.Fatalf("events = %+v, want concrete-provider surface", *events)
 	}
 }
 

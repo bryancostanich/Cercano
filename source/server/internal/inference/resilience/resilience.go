@@ -349,13 +349,18 @@ func (r *reader) Next() (llm.StreamEvent, bool, error) {
 			}
 			return llm.StreamEvent{}, false, err
 		case ok && ev.Type == llm.EventError:
-			// In-band error before any content. ErrText carries no class, so
-			// this follows the unknown rule: fail over if possible.
-			if r.decide("stream_first", &llm.Error{Class: llm.ErrUnknown,
-				Provider: r.p.primary.Name(), Err: errors.New(ev.ErrText)}) {
+			streamErr := ev.Err
+			if streamErr == nil {
+				// Legacy adapters may still send only ErrText. Preserve previous
+				// behavior for those frames: classify as unknown and let the shared
+				// policy decide whether a recovery attempt is worthwhile.
+				streamErr = &llm.Error{Class: llm.ErrUnknown,
+					Provider: r.p.primary.Name(), Err: errors.New(ev.ErrText)}
+			}
+			if r.decide("stream_first", streamErr) {
 				continue
 			}
-			return ev, ok, nil
+			return llm.StreamEvent{}, false, streamErr
 		default:
 			// First real event (or a clean immediate end): the stream is live.
 			r.emitted = true

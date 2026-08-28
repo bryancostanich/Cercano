@@ -170,6 +170,9 @@ func CollectStream(ctx context.Context, rdr StreamReader, onText func(string), o
 				onNotice(ev.Notice)
 			}
 		case EventError:
+			if ev.Err != nil {
+				return out, ev.Err
+			}
 			return out, fmt.Errorf("stream error: %s", ev.ErrText)
 		}
 		if err := ctx.Err(); err != nil {

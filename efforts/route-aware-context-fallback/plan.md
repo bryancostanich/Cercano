@@ -32,11 +32,11 @@ Objective: preserve provider-normalized error class and attribution for in-band 
 Files: `source/server/internal/llm/`, provider stream adapters under Anthropic/OpenAI-compatible/OpenAI Responses/Ollama as needed, `source/server/internal/inference/resilience/resilience.go`, stream tests.
 Tests: stream unit tests showing pre-content `context_overflow` remains `llm.ErrContextOverflow`, surfaces or larger-window-fallbacks according to policy, and is not converted into `ErrUnknown` merely because it arrived in-band.
 
-- [ ] Extend or adapt `llm.StreamEvent` so error events can carry a typed `error` while retaining display text if needed
-- [ ] Update provider stream adapters to emit typed normalized errors for in-band stream failures
-- [ ] Update resilience stream reader logic to prefer typed event errors over reconstructing errors from text
-- [ ] Preserve existing UI/status behavior for non-classified stream notices
-- [ ] Add coverage for OpenAI Responses stream context-window errors and generic stream errors
+- [x] Extend or adapt `llm.StreamEvent` so error events can carry a typed `error` while retaining display text if needed
+- [x] Update provider stream adapters to emit typed normalized errors for in-band stream failures
+- [x] Update resilience stream reader logic to prefer typed event errors over reconstructing errors from text
+- [x] Preserve existing UI/status behavior for non-classified stream notices
+- [x] Add coverage for OpenAI Responses stream context-window errors and generic stream errors
 
 ## Phase 4 — Route-aware request assembly
 

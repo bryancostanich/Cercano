@@ -41,6 +41,7 @@ type StreamEvent struct {
 	OutputTokens int
 
 	ErrText string
+	Err     error
 
 	// Set on EventNotice: the user-facing status line. A dedicated field —
 	// not TextDelta — so no consumer can mistake it for assistant content.

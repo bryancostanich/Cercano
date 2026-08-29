@@ -1205,8 +1205,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		var cmd tea.Cmd
 		prevVal := m.input.Value()
+		prevLayout := m.promptLayoutSignature()
 		m.input, cmd = m.input.Update(msg)
-		if m.input.Value() != prevVal {
+		if m.input.Value() != prevVal && m.promptLayoutSignature() != prevLayout {
 			m.relayout()
 		}
 		return m, cmd
@@ -1527,10 +1528,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		var cmd tea.Cmd
 		prevVal := m.input.Value()
+		prevLayout := m.promptLayoutSignature()
 		m.input, cmd = m.input.Update(msg)
-		// Recompute layout if the input changed shape (suggestion line
-		// height depends on the input value). Cheap when nothing changed.
-		if m.input.Value() != prevVal {
+		// Recompute layout only if the input changed screen shape. Ordinary
+		// same-row typing repaints the prompt from m.input.View() and must not
+		// rebuild a large transcript on every keypress.
+		if m.input.Value() != prevVal && m.promptLayoutSignature() != prevLayout {
 			m.relayout()
 		}
 		return m, cmd
@@ -3005,6 +3008,21 @@ func (m *Model) applyTurnTelemetry(d chatDoneMsg) {
 //	input   (1)
 //	─────   (1)
 //	status  (1)
+type promptLayoutSignature struct {
+	inputHeight      int
+	suggestionHeight int
+}
+
+func (m Model) promptLayoutSignature() promptLayoutSignature {
+	sig := promptLayoutSignature{inputHeight: m.input.Height()}
+	if m.mainChat().Width() > 0 && !m.contentPageActive() {
+		if hint := m.renderSlashSuggestions(); hint != "" {
+			sig.suggestionHeight = strings.Count(hint, "\n") + 1
+		}
+	}
+	return sig
+}
+
 func (m *Model) relayout() {
 	contentW := m.width
 	if paneW := m.taskPaneWidth(); paneW > 0 {

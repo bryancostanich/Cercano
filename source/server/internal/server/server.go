@@ -34,6 +34,7 @@ import (
 	"cercano/source/server/internal/conversation"
 	"cercano/source/server/internal/dispatch"
 	"cercano/source/server/internal/engine"
+	"cercano/source/server/internal/failurelog"
 	cfgsvc "cercano/source/server/internal/hostsvc/config"
 	"cercano/source/server/internal/hostsvc/permissions"
 	persistsvc "cercano/source/server/internal/hostsvc/persistence"
@@ -137,6 +138,7 @@ type Server struct {
 	// resolveMainProvider, so no usage would otherwise be recorded.
 	usageSink  func(usage.Usage)
 	routingLog *routinglog.Writer
+	failureLog *failurelog.Writer
 
 	buildVersion string // surfaced in exported trajectory metadata
 
@@ -782,6 +784,10 @@ func NewServer(a *agent.Agent, router RouterCloudUpdater, coordinator *loop.ADKC
 	if err != nil {
 		log.Printf("[routing] open log: %v", err)
 	}
+	failureLog, err := failurelog.NewWriter("")
+	if err != nil {
+		log.Printf("[failures] open log: %v", err)
+	}
 	s := &Server{
 		agent:         a,
 		events:        newEventHub(),
@@ -789,6 +795,7 @@ func NewServer(a *agent.Agent, router RouterCloudUpdater, coordinator *loop.ADKC
 		openModels:    openModelsResolver,
 		runtimesSvc:   rtSvc,
 		routingLog:    routeLog,
+		failureLog:    failureLog,
 		turnBroker:    broker.New(),
 		profileBroker: agent.NewProfileBroker(),
 	}
@@ -838,6 +845,7 @@ func NewServer(a *agent.Agent, router RouterCloudUpdater, coordinator *loop.ADKC
 		func() conversation.Store { return s.persistSvc.Store() },
 		s.persistSvc.PersistTurn,
 	)
+	s.toolSvc.SetFailureLog(failureLog)
 	// Wire the dispatch pre-flight context-window resolver. Local sub-agents run
 	// on the managed llama-server; a cloud sub-agent's window we don't track, so
 	// return 0 to disable the guard (the provider's own overflow error remains
@@ -889,6 +897,7 @@ func (s *Server) runnerDeps() runnersvc.Deps {
 			return s.profileBroker.Active(convID)
 		},
 		RoutingLog: s.routingLog,
+		FailureLog: s.failureLog,
 	}
 }
 

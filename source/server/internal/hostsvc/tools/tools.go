@@ -21,6 +21,7 @@ import (
 	"cercano/source/server/internal/capabilities"
 	"cercano/source/server/internal/conversation"
 	"cercano/source/server/internal/dispatch"
+	"cercano/source/server/internal/failurelog"
 	"cercano/source/server/internal/hostsvc/permissions"
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
@@ -49,6 +50,8 @@ type Catalog interface {
 	// sub-agent's resolved model to its input context window (tokens), feeding
 	// the pre-flight size guard. Unset = guard disabled.
 	SetContextWindowResolver(fn func(model string, isCloud bool) int)
+	// SetFailureLog installs the sanitized failure/degradation diagnostic sink.
+	SetFailureLog(w *failurelog.Writer)
 	// GrantedRegistry builds the least-privilege sub-registry for a dispatch.
 	// Returns the registry, the granted tool names, the ignored-unknown names,
 	// and any error (e.g. empty resulting catalog).
@@ -102,6 +105,9 @@ type Service struct {
 	// track), which disables the guard for that call. nil = guard always off.
 	// A func-value seam so this package need not import config.
 	contextWindowFor func(model string, isCloud bool) int
+
+	// failureLog records sanitized dispatch failure/degradation events. Nil disables logging.
+	failureLog *failurelog.Writer
 }
 
 // SetContextWindowResolver installs the resolver that maps a dispatch
@@ -111,6 +117,9 @@ type Service struct {
 func (x *Service) SetContextWindowResolver(fn func(model string, isCloud bool) int) {
 	x.contextWindowFor = fn
 }
+
+// SetFailureLog installs the sanitized failure/degradation diagnostic sink.
+func (x *Service) SetFailureLog(w *failurelog.Writer) { x.failureLog = w }
 
 // New constructs a Catalog with the collaborators required by RunAgenticDispatch.
 //
@@ -375,6 +384,31 @@ func (x *Service) dispatchStore() conversation.Store {
 	return x.store()
 }
 
+func (x *Service) logDispatchFailure(event string, spec dispatch.Spec, subConvID, provider, model string, isCloud bool, granted, ignored []string, err error, extra failurelog.Event) {
+	if x == nil || x.failureLog == nil {
+		return
+	}
+	fields := failurelog.Event{
+		"scope":           "dispatch",
+		"conversation_id": spec.ConversationID,
+		"dispatch_id":     subConvID,
+		"provider":        provider,
+		"model":           model,
+		"tier":            string(spec.Tier),
+		"is_cloud":        isCloud,
+		"tool_names":      append([]string(nil), granted...),
+		"ignored_tools":   append([]string(nil), ignored...),
+	}
+	if err != nil {
+		fields["error_class"] = string(llm.ClassOf(err))
+		fields["message"] = failurelog.SanitizeMessage(err.Error())
+	}
+	for k, v := range extra {
+		fields[k] = v
+	}
+	x.failureLog.Log(event, fields)
+}
+
 // SetEnsureSubagent installs the func that creates a sub-agent conversation row.
 // The worker wires this to a host-stream proxy (it has no local store); in-
 // process it stays nil and ensureSubagentConv falls back to the store.
@@ -415,6 +449,9 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 	// was write-capable, so execution implies human approval (or bypass).
 	reg, granted, ignored, err := x.GrantedRegistry(spec.Tools)
 	if err != nil {
+		x.logDispatchFailure("dispatch.failed", spec, "", "", model, sel.IsCloud, nil, ignored, err, failurelog.Event{
+			"error_class": "grant_failed",
+		})
 		emitDispatchProgress(spec.Emit, agenttools.ProgressEvent{Kind: "error", Text: fmt.Sprintf("sub-agent grant failed: %v", err), IsError: true})
 		return dispatch.Result{}, err
 	}
@@ -515,6 +552,13 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 			emitDispatchProgress(spec.Emit, agenttools.ProgressEvent{SubAgentID: subConvID, SubAgentParentID: spec.ConversationID, SubAgentTitle: subTitle, Kind: "token", Text: t, GrantedTools: granted, IgnoredTools: ignored})
 		},
 		EventSink: func(ev agent.LoopEvent) {
+			if ev.Kind == agent.LoopToolExecComplete && ev.IsError {
+				x.logDispatchFailure("dispatch.tool_error", spec, subConvID, provider, model, sel.IsCloud, granted, ignored, nil, failurelog.Event{
+					"tool_name":   ev.ToolName,
+					"error_class": "tool_error",
+					"message":     "sub-agent tool returned an error",
+				})
+			}
 			if progress, ok := formatSubagentLoopEvent(subConvID, spec.ConversationID, subTitle, ev); ok {
 				emitDispatchProgress(spec.Emit, progress)
 			}
@@ -524,6 +568,7 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 	})
 	if err != nil {
 		log.Printf("[dispatch] subagent done: conv=%s err=%v", subConvID, err)
+		x.logDispatchFailure("dispatch.tool_loop_failed", spec, subConvID, provider, model, sel.IsCloud, granted, ignored, err, nil)
 		emitDispatchProgress(spec.Emit, agenttools.ProgressEvent{SubAgentID: subConvID, SubAgentParentID: spec.ConversationID, SubAgentTitle: subTitle, Kind: "error", Text: fmt.Sprintf("sub-agent failed: conv=%s err=%v", subConvID, err), GrantedTools: granted, IgnoredTools: ignored, IsError: true})
 		return dispatch.Result{}, err
 	}
@@ -565,6 +610,12 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 	if suspicious {
 		log.Printf("[dispatch] subagent SUSPICIOUS no-op: conv=%s granted_write=%v called=%v reason=%q",
 			subConvID, sortedKeys(mutating), sortedKeys(called), reason)
+		x.logDispatchFailure("dispatch.degraded", spec, subConvID, provider, model, sel.IsCloud, granted, ignored, nil, failurelog.Event{
+			"error_class":        "suspicious_noop",
+			"message":            suspiciousNoOpMessage(reason),
+			"called_tools_count": len(called),
+			"called_tools":       sortedKeys(called),
+		})
 		emitDispatchProgress(spec.Emit, agenttools.ProgressEvent{SubAgentID: subConvID, SubAgentParentID: spec.ConversationID, SubAgentTitle: subTitle, Kind: "error", Text: suspiciousNoOpMessage(reason), GrantedTools: granted, IgnoredTools: ignored, IsError: true})
 		return dispatch.Result{
 			Text:              text,
@@ -586,6 +637,12 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 		// crying wolf on the returned Result.
 		log.Printf("[dispatch] subagent low-signal run: conv=%s called=%v (read-only grant, <=1 tool call)",
 			subConvID, sortedKeys(called))
+		x.logDispatchFailure("dispatch.degraded", spec, subConvID, provider, model, sel.IsCloud, granted, ignored, nil, failurelog.Event{
+			"error_class":        "low_signal",
+			"message":            "read-only sub-agent completed with one or fewer tool calls",
+			"called_tools_count": len(called),
+			"called_tools":       sortedKeys(called),
+		})
 	}
 
 	return dispatch.Result{

@@ -1,10 +1,14 @@
 package runner
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/agenttools"
+	"cercano/source/server/internal/failurelog"
 	"cercano/source/server/internal/llm"
 )
 
@@ -31,7 +35,7 @@ func TestEvent_CarriesTokenAndToolPayloads(t *testing.T) {
 
 func TestMakeLoopSink_MapsTaskChangeProgress(t *testing.T) {
 	s := &captureSink{}
-	makeLoopSink(s)(agent.LoopEvent{
+	makeLoopSink(s, nil, "")(agent.LoopEvent{
 		Kind:           agent.LoopProgress,
 		TaskChangeKind: "updated",
 		TaskSnapshot: agenttools.TaskProgressSnapshot{
@@ -73,7 +77,7 @@ func TestRequest_IsProviderFree(t *testing.T) {
 
 func TestMakeLoopSink_EmitsProgressBeforeToolExec(t *testing.T) {
 	s := &captureSink{}
-	makeLoopSink(s)(agent.LoopEvent{
+	makeLoopSink(s, nil, "")(agent.LoopEvent{
 		Kind:      agent.LoopToolExecStart,
 		ToolUseID: "tool-1",
 		ToolName:  "Bash",
@@ -86,5 +90,36 @@ func TestMakeLoopSink_EmitsProgressBeforeToolExec(t *testing.T) {
 	}
 	if s.events[1].Kind != EventToolExecStart || s.events[1].ToolUseID != "tool-1" {
 		t.Fatalf("second event should be tool exec start, got %+v", s.events[1])
+	}
+}
+
+func TestMakeLoopSink_LogsSanitizedToolError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "failures.jsonl")
+	w, err := failurelog.NewWriter(path)
+	if err != nil {
+		t.Fatalf("NewWriter() error = %v", err)
+	}
+	defer w.Close()
+
+	s := &captureSink{}
+	makeLoopSink(s, w, "conv-main")(agent.LoopEvent{
+		Kind:     agent.LoopToolExecComplete,
+		ToolName: "Bash",
+		IsError:  true,
+		Detail:   "secret tool output that should not be logged",
+	})
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read failure log: %v", err)
+	}
+	got := string(data)
+	for _, want := range []string{"\"event\":\"main.tool_error\"", "\"conversation_id\":\"conv-main\"", "\"tool_name\":\"Bash\""} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("failure log missing %s: %s", want, got)
+		}
+	}
+	if strings.Contains(got, "secret tool output") {
+		t.Fatalf("failure log included tool output detail: %s", got)
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"cercano/source/server/internal/capabilities"
 	projectctx "cercano/source/server/internal/context"
 	"cercano/source/server/internal/dispatch"
+	"cercano/source/server/internal/failurelog"
 	"cercano/source/server/internal/hostsvc/permissions"
 	toolssvc "cercano/source/server/internal/hostsvc/tools"
 	"cercano/source/server/internal/inference"
@@ -49,6 +50,7 @@ func buildWorkerToolSvc(
 	subPersist *streamSubagentPersist,
 	enterProfile func(context.Context, string) error,
 	vision capabilities.VisionService,
+	failures *failurelog.Writer,
 ) runner.ToolSvc {
 	systemPrompt := func(workDir string) string {
 		// Sub-agents (Agentic dispatch) never run under a session capability
@@ -57,6 +59,7 @@ func buildWorkerToolSvc(
 		return runner.BuildSystemPrompt(runner.Deps{Persist: workerCtxHistory{loader: ctxLoader}}, workDir, agent.Profile{})
 	}
 	svc := toolssvc.New(permBroker, systemPrompt, nil, subagentPersistTurn(subPersist))
+	svc.SetFailureLog(failures)
 	svc.SetEngine(engine) // installs the agentic runner for sub-agent dispatch
 	if subPersist != nil {
 		svc.SetEnsureSubagent(subPersist.ensure) // worker creates sub-agent conversation rows on the host

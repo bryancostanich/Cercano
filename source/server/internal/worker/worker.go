@@ -11,6 +11,7 @@ import (
 	projectctx "cercano/source/server/internal/context"
 	"cercano/source/server/internal/dispatch"
 	"cercano/source/server/internal/engine"
+	"cercano/source/server/internal/failurelog"
 	cfgsvc "cercano/source/server/internal/hostsvc/config"
 	"cercano/source/server/internal/hostsvc/permissions"
 	providerssvc "cercano/source/server/internal/hostsvc/providers"
@@ -303,6 +304,11 @@ func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, cr
 		Mode: func() locus.Mode { m, _ := locus.ParseMode(cfg.LocusMode); return m },
 	})
 
+	failureLog, err := failurelog.NewWriter("")
+	if err != nil {
+		log.Printf("[failures] worker open log: %v", err)
+	}
+
 	// Build Tools. The test hook (w.toolsFactory) still wins when set; otherwise
 	// assemble the full capability/tool stack wired to the worker's engine.
 	var toolSvc runner.ToolSvc
@@ -313,7 +319,7 @@ func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, cr
 			return runner.Deps{}, fmt.Errorf("build tools: %w", err)
 		}
 	} else {
-		toolSvc = buildWorkerToolSvc(permBroker, engine, ctxLoader, provSvc.Cloud(), provSvc.Open(), cfg, subPersist, profileCtl.SetProfile, visionSvc)
+		toolSvc = buildWorkerToolSvc(permBroker, engine, ctxLoader, provSvc.Cloud(), provSvc.Open(), cfg, subPersist, profileCtl.SetProfile, visionSvc, failureLog)
 	}
 
 	// Build the protocol-supervision watchdog from the snapshotted config
@@ -343,6 +349,7 @@ func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, cr
 		// runner registers image placeholders here; the tool looks them up.
 		VisionStore: visionStore,
 		RoutingLog:  routeLog,
+		FailureLog:  failureLog,
 	}, nil
 }
 

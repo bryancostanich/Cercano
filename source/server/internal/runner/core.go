@@ -15,6 +15,7 @@ import (
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/agenttools"
 	"cercano/source/server/internal/contextmeter"
+	"cercano/source/server/internal/failurelog"
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/localruntime/llamaserver"
@@ -44,6 +45,29 @@ func (c *Core) logRoute(event string, fields routinglog.Event) {
 		return
 	}
 	c.d.RoutingLog.Log(event, fields)
+}
+
+func (c *Core) logFailure(event string, fields failurelog.Event) {
+	if c == nil || c.d.FailureLog == nil {
+		return
+	}
+	c.d.FailureLog.Log(event, fields)
+}
+
+func mainFailureFields(req Request, scope, provider, model string, isCloud bool, err error) failurelog.Event {
+	fields := failurelog.Event{
+		"scope":           scope,
+		"conversation_id": req.ConversationID,
+		"provider":        provider,
+		"model":           model,
+		"is_cloud":        isCloud,
+		"error_class":     errClassString(err),
+		"message":         failurelog.SanitizeMessage(errorString(err)),
+	}
+	if ep := llm.ProviderOf(err); ep != "" {
+		fields["error_provider"] = ep
+	}
+	return fields
 }
 
 func providerName(p inference.Provider) string {
@@ -241,6 +265,12 @@ func (c *Core) RunTurn(
 			"conversation_id": req.ConversationID,
 			"error":           err.Error(),
 		})
+		c.logFailure("main.provider_error", failurelog.Event{
+			"scope":           "main",
+			"conversation_id": req.ConversationID,
+			"error_class":     errClassString(err),
+			"message":         failurelog.SanitizeMessage(errorString(err)),
+		})
 		// *_only mode with its required tier unavailable — return a synthetic
 		// result so the host can send a terminal FinalResponse.
 		return Result{FinalText: "Locus: " + err.Error()}, nil
@@ -386,7 +416,7 @@ func (c *Core) RunTurn(
 	}
 
 	// 6. Internal adapter: agent.LoopEvent → runner.Event, forwarded to sink.
-	loopSink := makeLoopSink(sink)
+	loopSink := makeLoopSink(sink, c.d.FailureLog, req.ConversationID)
 
 	// 7. Build the permission store for the loop.
 	var permStore *agent.PermissionStore
@@ -532,6 +562,7 @@ func (c *Core) RunTurn(
 		}
 	}
 	if loopErr != nil {
+		c.logFailure("main.tool_loop_failed", mainFailureFields(req, "main", providerName(provider), selectedModel, isCloud, loopErr))
 		return Result{}, fmt.Errorf("tool loop error: %w", loopErr)
 	}
 
@@ -630,7 +661,7 @@ func retryNotice(provider string, class llm.ErrorClass) string {
 // It is the single point that maps the tool-loop's internal event vocabulary
 // to the runner's proto-free Event type. The host's protoSink then maps
 // runner.Event → stream.Send(proto...).
-func makeLoopSink(sink EventSink) func(agent.LoopEvent) {
+func makeLoopSink(sink EventSink, failures *failurelog.Writer, conversationID string) func(agent.LoopEvent) {
 	return func(ev agent.LoopEvent) {
 		switch ev.Kind {
 		case agent.LoopToolUseStart:
@@ -662,6 +693,15 @@ func makeLoopSink(sink EventSink) func(agent.LoopEvent) {
 
 		case agent.LoopToolExecComplete:
 			fmt.Fprintf(os.Stderr, "[tool-loop]   -> %s (err=%v) %s\n", ev.Summary, ev.IsError, ev.Detail)
+			if ev.IsError && failures != nil {
+				failures.Log("main.tool_error", failurelog.Event{
+					"scope":           "main",
+					"conversation_id": conversationID,
+					"tool_name":       ev.ToolName,
+					"error_class":     "tool_error",
+					"message":         "tool returned an error",
+				})
+			}
 			sink.Emit(Event{
 				Kind:      EventToolExecComplete,
 				ToolUseID: ev.ToolUseID,

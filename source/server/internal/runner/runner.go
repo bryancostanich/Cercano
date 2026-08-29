@@ -9,6 +9,7 @@ import (
 
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/agenttools"
+	"cercano/source/server/internal/failurelog"
 	cfgsvc "cercano/source/server/internal/hostsvc/config"
 	permissions "cercano/source/server/internal/hostsvc/permissions"
 	providers "cercano/source/server/internal/hostsvc/providers"
@@ -111,4 +112,9 @@ type Deps struct {
 	// for postmortems. Nil disables logging. The writer must not receive prompt
 	// bodies, tool args, API keys, or response text.
 	RoutingLog *routinglog.Writer
+
+	// FailureLog records sanitized failure/degradation events from the main turn
+	// path for later diagnostics. Nil disables logging. The writer must not
+	// receive prompt bodies, tool args, API keys, response text, or tool outputs.
+	FailureLog *failurelog.Writer
 }

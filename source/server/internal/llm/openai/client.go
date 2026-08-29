@@ -20,6 +20,10 @@ type Config struct {
 	APIKey  string
 	Model   string
 	Backend string // selects per-backend quirks; empty → defensive default
+	// OnHTTPError receives sanitized HTTP failure facts for OpenAI-compatible
+	// backends. It is called only for non-2xx HTTP responses and transport
+	// failures; request bodies and successful response bodies are never passed.
+	OnHTTPError func(context.Context, HTTPErrorDiagnostic)
 	// SupportsVision reports whether the model behind this endpoint can accept
 	// image content. Cloud OpenAI passes true; the LOCAL llama-server backend
 	// passes the active model's real capability (a text-only GGUF, or a vision
@@ -47,7 +51,7 @@ func NewClient(cfg Config) *Client {
 		c.BaseURL = cfg.BaseURL
 	}
 	q := quirksFor(cfg.Backend)
-	c.HTTPClient = &normalizingDoer{next: &http.Client{}, quirks: q}
+	c.HTTPClient = &normalizingDoer{next: &http.Client{}, quirks: q, onHTTPError: cfg.OnHTTPError}
 	return &Client{api: goopenai.NewClientWithConfig(c), model: cfg.Model, backend: cfg.Backend, quirks: q, supportsVision: cfg.SupportsVision}
 }
 

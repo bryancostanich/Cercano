@@ -172,6 +172,7 @@ func TestChatWithTools_DecodesToolCalls(t *testing.T) {
 type fakeRuntimeManager struct {
 	models        []localruntime.ModelRecord
 	instances     []localruntime.InstanceRecord
+	logs          []localruntime.LogEntry
 	startEndpoint string
 	startCount    int
 	startModelID  string
@@ -236,7 +237,7 @@ func (m *fakeRuntimeManager) Status(context.Context) (*localruntime.StatusSnapsh
 	return nil, nil
 }
 func (m *fakeRuntimeManager) Logs(context.Context, localruntime.LogRequest) ([]localruntime.LogEntry, error) {
-	return nil, nil
+	return m.logs, nil
 }
 func (m *fakeRuntimeManager) WriteLog(localruntime.LogEntry)         {}
 func (m *fakeRuntimeManager) RegisterObserver(localruntime.Observer) {}

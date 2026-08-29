@@ -591,6 +591,12 @@ func startGRPCServer(cfg config.Config, bindAddr string, events *crashlog.Writer
 		}
 	}()
 
+	llamaEng.SetFailureLog(srv.FailureLog())
+	llamaEng.SetContextWindowResolver(func(model string) int {
+		llamaCfg := srv.ConfigSnapshot().LlamaServer
+		return localModelContextWindow(llamaCfg.ContextSize, llamaCfg.ContextSizeSet, model)
+	})
+
 	// Native tool-loop local provider — follows the configured runtime.
 	// Under llama_server/mistralrs the provider resolves/warms instances through
 	// the runtime manager per call; otherwise it is the Ollama client. Stored RAW
@@ -2024,4 +2030,17 @@ func resumeInterruptedDownloads(cfg config.Config, manager localruntime.Manager,
 			Message: fmt.Sprintf("resuming %d interrupted download(s) on startup", len(triggered)),
 		})
 	}
+}
+
+func localModelContextWindow(configured int, configExplicit bool, model string) int {
+	if !configExplicit {
+		bare := strings.TrimSpace(model)
+		if i := strings.LastIndex(bare, ":"); i >= 0 && i+1 < len(bare) {
+			bare = bare[i+1:]
+		}
+		if n := runtimellama.ModelContextOverride(bare, uint64(sysram.Total())); n > 0 {
+			return n
+		}
+	}
+	return configured
 }

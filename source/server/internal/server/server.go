@@ -425,6 +425,14 @@ func (s *Server) OpenLLMProvider() inference.Provider  { return s.providerSvc.Op
 // main tool-loop's provider for token-usage recording. The server's stored
 // providers stay raw; wrapping happens at hand-off so the dispatch engine can
 // read raw providers without double-counting.
+// FailureLog returns the general failure diagnostics writer owned by the server.
+// It may be nil when the log could not be opened; callers must treat nil as
+// logging disabled.
+func (s *Server) FailureLog() *failurelog.Writer { return s.failureLog }
+
+// ConfigSnapshot returns the current persisted configuration snapshot.
+func (s *Server) ConfigSnapshot() config.Config { return s.cfgSvc.Get() }
+
 func (s *Server) SetUsageSink(fn func(usage.Usage)) {
 	s.providerSvc.SetUsageSink(fn)
 	// Keep a reference so worker turns (whose child provider is unwrapped) can

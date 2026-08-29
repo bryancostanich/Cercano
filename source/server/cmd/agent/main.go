@@ -188,6 +188,11 @@ func main() {
 		grpc.ChainStreamInterceptor(server.RecoveryStreamInterceptor()),
 	)
 	srv := server.NewServer(orchestrator, smartRouter, coordinator, cloudFactory, registry)
+	llamaEng.SetFailureLog(srv.FailureLog())
+	llamaEng.SetContextWindowResolver(func(model string) int {
+		llamaCfg := srv.ConfigSnapshot().LlamaServer
+		return llamaCfg.ContextSize
+	})
 	srv.SetRuntimeManager(runtimeManager)
 	srv.SetConfigPersistence(config.DefaultPath(), cfg)
 	proto.RegisterAgentServer(s, srv)

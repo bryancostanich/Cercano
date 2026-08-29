@@ -10,9 +10,11 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"cercano/source/server/internal/engine"
+	"cercano/source/server/internal/failurelog"
 	"cercano/source/server/internal/localruntime"
 )
 
@@ -24,6 +26,10 @@ const runtimeName = "llama_server"
 type Engine struct {
 	Client  *http.Client
 	Manager localruntime.Manager
+
+	mu                    sync.RWMutex
+	failureLog            *failurelog.Writer
+	contextWindowForModel func(string) int
 }
 
 func NewEngine(manager localruntime.Manager) *Engine {
@@ -34,6 +40,40 @@ func NewEngine(manager localruntime.Manager) *Engine {
 }
 
 func (e *Engine) Name() string { return runtimeName }
+
+// SetFailureLog attaches the general failure diagnostics writer used by the
+// native LLM adapter for rich local-runtime provider failures. Nil disables
+// logging and preserves prior behavior.
+func (e *Engine) SetFailureLog(w *failurelog.Writer) {
+	e.mu.Lock()
+	e.failureLog = w
+	e.mu.Unlock()
+}
+
+// SetContextWindowResolver installs an optional resolver for the effective
+// llama-server context window for a model. The command layer wires this from the
+// same config/catalog logic used by the runner's local context accounting.
+func (e *Engine) SetContextWindowResolver(fn func(string) int) {
+	e.mu.Lock()
+	e.contextWindowForModel = fn
+	e.mu.Unlock()
+}
+
+func (e *Engine) failureWriter() *failurelog.Writer {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.failureLog
+}
+
+func (e *Engine) contextWindow(model string) int {
+	e.mu.RLock()
+	fn := e.contextWindowForModel
+	e.mu.RUnlock()
+	if fn == nil {
+		return 0
+	}
+	return fn(model)
+}
 
 func (e *Engine) Complete(ctx context.Context, model, prompt, systemPrompt string, opts engine.GenOptions) (engine.CompletionResult, error) {
 	var messages []openAIMessage

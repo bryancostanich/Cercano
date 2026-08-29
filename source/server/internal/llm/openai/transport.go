@@ -2,6 +2,7 @@ package openai
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"log"
@@ -17,9 +18,23 @@ import (
 type diagnosticConversationIDKey struct{}
 type diagnosticRequestIDKey struct{}
 
+// HTTPErrorDiagnostic is the bounded, payload-safe subset of HTTP failure facts
+// exposed to backend-specific diagnostics. Body is the raw error response body
+// only for non-2xx responses; request bodies and successful response bodies are
+// never captured.
+type HTTPErrorDiagnostic struct {
+	Method        string
+	Path          string
+	StatusCode    int
+	ContentLength int64
+	Body          string
+	TransportErr  string
+}
+
 type normalizingDoer struct {
-	next   goopenai.HTTPDoer
-	quirks Quirks
+	next        goopenai.HTTPDoer
+	quirks      Quirks
+	onHTTPError func(context.Context, HTTPErrorDiagnostic)
 }
 
 func (d *normalizingDoer) Do(req *http.Request) (*http.Response, error) {
@@ -30,6 +45,7 @@ func (d *normalizingDoer) Do(req *http.Request) (*http.Response, error) {
 	resp, err := d.next.Do(patched)
 	if err != nil {
 		log.Printf("[openai] http request failed: conv=%s request_id=%s method=%s path=%s error=%v", diagnosticConversationID(patched), diagnosticRequestID(patched), patched.Method, patched.URL.Path, err)
+		d.emitHTTPError(patched, HTTPErrorDiagnostic{Method: patched.Method, Path: patched.URL.Path, TransportErr: err.Error()})
 		return nil, err
 	}
 	log.Printf("[openai] http response: conv=%s request_id=%s method=%s path=%s status=%d content_length=%d", diagnosticConversationID(patched), diagnosticRequestID(patched), patched.Method, patched.URL.Path, resp.StatusCode, resp.ContentLength)
@@ -72,27 +88,47 @@ func patchExplicitZeroTemperature(req *http.Request) (*http.Request, error) {
 // backend needs it. Only non-2xx bodies are read; 2xx responses pass through so
 // streaming bodies are never consumed.
 func (d *normalizingDoer) normalize(resp *http.Response) *http.Response {
-	if !d.quirks.NormalizeErrors || resp.StatusCode < 400 {
+	if resp.StatusCode < 400 {
 		return resp
 	}
 	body, err := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	if err != nil {
 		log.Printf("[openai] http error body read failed: conv=%s request_id=%s status=%d error=%v", diagnosticConversationID(resp.Request), diagnosticRequestID(resp.Request), resp.StatusCode, err)
-		resp.Body = io.NopCloser(bytes.NewReader(nil))
-		resp.ContentLength = 0
-		return resp
+		body = nil
+	} else {
+		log.Printf("[openai] http error body: conv=%s request_id=%s status=%d raw_body=%q", diagnosticConversationID(resp.Request), diagnosticRequestID(resp.Request), resp.StatusCode, truncateLogString(string(body), 2000))
 	}
-	log.Printf("[openai] http error body: conv=%s request_id=%s status=%d raw_body=%q", diagnosticConversationID(resp.Request), diagnosticRequestID(resp.Request), resp.StatusCode, truncateLogString(string(body), 2000))
-	if fixed, ok := arrayErrorToObject(body); ok {
-		body = fixed
+	method, path := "", ""
+	if resp.Request != nil {
+		method = resp.Request.Method
+		if resp.Request.URL != nil {
+			path = resp.Request.URL.Path
+		}
 	}
-	if fixed, ok := stringErrorToObject(body); ok {
-		body = fixed
+	d.emitHTTPError(resp.Request, HTTPErrorDiagnostic{Method: method, Path: path, StatusCode: resp.StatusCode, ContentLength: resp.ContentLength, Body: truncateLogString(string(body), 2000)})
+	if d.quirks.NormalizeErrors {
+		if fixed, ok := arrayErrorToObject(body); ok {
+			body = fixed
+		}
+		if fixed, ok := stringErrorToObject(body); ok {
+			body = fixed
+		}
 	}
 	resp.Body = io.NopCloser(bytes.NewReader(body))
 	resp.ContentLength = int64(len(body))
 	return resp
+}
+
+func (d *normalizingDoer) emitHTTPError(req *http.Request, diag HTTPErrorDiagnostic) {
+	if d.onHTTPError == nil {
+		return
+	}
+	ctx := context.Background()
+	if req != nil {
+		ctx = req.Context()
+	}
+	d.onHTTPError(ctx, diag)
 }
 
 // arrayErrorToObject unwraps a `[{...}]` error body to its first object element.

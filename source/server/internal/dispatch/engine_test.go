@@ -323,3 +323,34 @@ func TestDispatchTierResolution(t *testing.T) {
 		}
 	}
 }
+
+func TestTargetMirrorsDispatchModelResolution(t *testing.T) {
+	prov := echoProvider{}
+	eng := NewEngine(
+		provs(Providers{Open: prov}),
+		func() locus.Mode { return locus.OpenOnly },
+		nil,
+	)
+	eng.SetModelFor(func(isCloud bool, tier config.Tier) string {
+		if isCloud {
+			return "cloud-model"
+		}
+		return "local-" + string(tier)
+	})
+
+	target, err := eng.Target(Spec{Mode: OneShot, Role: RoleCoproc, Tier: config.TierFastLightText})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target.Provider != "echo" || target.Model != "local-fast_light_text" || target.Tier != "fast_light_text" || target.IsCloud {
+		t.Fatalf("unexpected target: %+v", target)
+	}
+
+	target, err = eng.Target(Spec{Mode: OneShot, Role: RoleCoproc, Tier: config.TierFastLightText, ModelOverride: "pinned-model"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target.Model != "pinned-model" || target.Tier != "" {
+		t.Fatalf("override target = %+v, want pinned model with no tier", target)
+	}
+}

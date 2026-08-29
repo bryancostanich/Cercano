@@ -12,6 +12,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"cercano/source/server/internal/modelbudget"
+	"cercano/source/server/internal/tokens"
 )
 
 // --- Mocks ---
@@ -181,9 +184,9 @@ func TestSearchPubMed_ParsesResults(t *testing.T) {
 			json.NewEncoder(w).Encode(map[string]interface{}{
 				"result": map[string]interface{}{
 					"12345": map[string]interface{}{
-						"uid":    "12345",
-						"title":  "Test Paper",
-						"source": "Nature",
+						"uid":     "12345",
+						"title":   "Test Paper",
+						"source":  "Nature",
 						"pubdate": "2025 Jan",
 						"authors": []map[string]string{{"name": "Smith J"}},
 					},
@@ -1499,5 +1502,49 @@ func TestFormatNextSteps_Deep(t *testing.T) {
 	result := FormatNextSteps("deep", "topic", "intent", "/tmp")
 	if result != "" {
 		t.Error("deep should not suggest further deepening")
+	}
+}
+
+type budgetedResearchModel struct {
+	budget     modelbudget.Budget
+	lastPrompt string
+	calls      int
+}
+
+func (m *budgetedResearchModel) Budget(ctx context.Context, outputReserve int) (modelbudget.Budget, error) {
+	return m.budget, nil
+}
+
+func (m *budgetedResearchModel) Call(ctx context.Context, prompt string) (string, error) {
+	m.lastPrompt = prompt
+	m.calls++
+	return "summary", nil
+}
+
+func TestGenerateExecutiveSummary_BudgetsFindingSummariesBeforeModelCall(t *testing.T) {
+	model := &budgetedResearchModel{budget: modelbudget.Budget{
+		Target:      modelbudget.Target{Provider: "llama_server", Model: "tiny", ContextWindow: 2000, ContextWindowKnown: true},
+		InputTokens: 360,
+	}}
+	findings := []AnnotatedFinding{
+		{Publication: Publication{Source: "SourceA", Title: "Finding A"}, RelevanceScore: 5, ImpactRating: "high", Summary: strings.Repeat("alpha beta gamma delta ", 400)},
+		{Publication: Publication{Source: "SourceB", Title: "Finding B"}, RelevanceScore: 4, ImpactRating: "medium", Summary: strings.Repeat("epsilon zeta eta theta ", 400)},
+	}
+
+	_, err := GenerateExecutiveSummary(context.Background(), model, findings, "understand budgeted synthesis")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if model.calls != 1 {
+		t.Fatalf("model calls = %d, want 1", model.calls)
+	}
+	if got := tokens.Estimate(model.lastPrompt); got > model.budget.InputTokens {
+		t.Fatalf("prompt estimate = %d, want <= %d\nprompt:\n%s", got, model.budget.InputTokens, model.lastPrompt)
+	}
+	if !strings.Contains(model.lastPrompt, "[SourceA] Finding A") {
+		t.Fatalf("budgeted prompt lost finding identity: %s", model.lastPrompt)
+	}
+	if !strings.Contains(model.lastPrompt, "truncated to fit local model context") {
+		t.Fatalf("budgeted prompt did not mark truncation: %s", model.lastPrompt)
 	}
 }

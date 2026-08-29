@@ -5,6 +5,9 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"cercano/source/server/internal/modelbudget"
+	"cercano/source/server/internal/tokens"
 )
 
 // mockModelCaller is a test double for the local model.
@@ -417,5 +420,72 @@ func TestRunWithoutOutputDirWritesNoSidecar(t *testing.T) {
 	// An empty-dir sidecar is disabled and reports no file.
 	if newResearchSidecar("").exists() {
 		t.Fatal("disabled sidecar should never report existing")
+	}
+}
+
+type budgetedMockModelCaller struct {
+	mockModelCaller
+	budget     modelbudget.Budget
+	lastPrompt string
+}
+
+func (m *budgetedMockModelCaller) Budget(ctx context.Context, outputReserve int) (modelbudget.Budget, error) {
+	return m.budget, nil
+}
+
+func (m *budgetedMockModelCaller) Call(ctx context.Context, prompt string) (string, error) {
+	m.lastPrompt = prompt
+	return m.mockModelCaller.Call(ctx, prompt)
+}
+
+func TestSynthesize_BudgetsFetchedSourcesBeforeModelCall(t *testing.T) {
+	budget := modelbudget.Budget{
+		Target:      modelbudget.Target{Provider: "llama_server", Model: "tiny", ContextWindow: 1800, ContextWindowKnown: true},
+		InputTokens: 320,
+	}
+	model := &budgetedMockModelCaller{
+		mockModelCaller: mockModelCaller{responses: []string{"budgeted answer"}},
+		budget:          budget,
+	}
+	p := NewResearchPipeline(model, nil, nil)
+	pages := []FetchedPage{
+		{URL: "https://a.com", Title: "A", Content: strings.Repeat("alpha beta gamma delta ", 400)},
+		{URL: "https://b.com", Title: "B", Content: strings.Repeat("epsilon zeta eta theta ", 400)},
+	}
+
+	answer, err := p.Synthesize(context.Background(), "what happened?", pages)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if answer != "budgeted answer" {
+		t.Fatalf("answer = %q", answer)
+	}
+	if got := tokens.Estimate(model.lastPrompt); got > budget.InputTokens {
+		t.Fatalf("prompt estimate = %d, want <= %d\nprompt:\n%s", got, budget.InputTokens, model.lastPrompt)
+	}
+	if !strings.Contains(model.lastPrompt, "https://a.com") {
+		t.Fatalf("budgeted prompt lost source URL: %s", model.lastPrompt)
+	}
+	if !strings.Contains(model.lastPrompt, "truncated to fit local model context") {
+		t.Fatalf("budgeted prompt did not mark truncation: %s", model.lastPrompt)
+	}
+}
+
+func TestSynthesize_BudgetErrorBeforeModelCall(t *testing.T) {
+	model := &budgetedMockModelCaller{
+		mockModelCaller: mockModelCaller{responses: []string{"should not be called"}},
+		budget:          modelbudget.Budget{Target: modelbudget.Target{Provider: "llama_server", Model: "tiny", ContextWindow: 900, ContextWindowKnown: true}, InputTokens: 80},
+	}
+	p := NewResearchPipeline(model, nil, nil)
+
+	_, err := p.Synthesize(context.Background(), "what happened?", []FetchedPage{{URL: "https://a.com", Title: "A", Content: "alpha"}})
+	if err == nil {
+		t.Fatal("expected budget error")
+	}
+	if model.callCount != 0 {
+		t.Fatalf("model was called %d times despite budget error", model.callCount)
+	}
+	if !strings.Contains(err.Error(), "research synthesis budget too small") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }

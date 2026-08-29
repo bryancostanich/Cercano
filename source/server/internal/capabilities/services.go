@@ -8,6 +8,7 @@ import (
 	"cercano/source/server/internal/dispatch"
 	"cercano/source/server/internal/engine"
 	"cercano/source/server/internal/inference"
+	"cercano/source/server/internal/modelbudget"
 	"cercano/source/server/pkg/config"
 )
 
@@ -25,6 +26,12 @@ type Services struct {
 	// Dispatch runs an agentic (or one-shot) unit of delegated model work through
 	// the unified dispatch engine. Nil until wired by the server.
 	Dispatch func(ctx context.Context, spec dispatch.Spec) (dispatch.Result, error)
+
+	// DispatchTarget resolves the concrete target a one-shot dispatch would use
+	// without sending a model request. Capabilities that construct large prompts
+	// use it to budget before calling Dispatch. Nil means target budgeting is
+	// unavailable and callers should fail clearly rather than guess.
+	DispatchTarget func(ctx context.Context, spec dispatch.Spec) (modelbudget.Target, error)
 
 	// EnterProfile switches one conversation's active capability profile by name
 	// ("plan", "default", …). It is how the suggest_plan capability flips the

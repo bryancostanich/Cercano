@@ -23,11 +23,13 @@ import (
 	"cercano/source/server/internal/capabilities/agentadapter"
 	"cercano/source/server/internal/capabilities/builtins"
 	projectctx "cercano/source/server/internal/context"
+	"cercano/source/server/internal/contextmeter"
 	"cercano/source/server/internal/conversation"
 	"cercano/source/server/internal/dispatch"
 	tools "cercano/source/server/internal/hostsvc/tools"
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/locus"
+	"cercano/source/server/internal/modelbudget"
 	"cercano/source/server/internal/usage"
 	"cercano/source/server/pkg/config"
 )
@@ -111,6 +113,25 @@ func InstallCapabilities(svc tools.Catalog, d CapDeps) {
 				return dispatch.Result{}, fmt.Errorf("dispatch engine not configured")
 			}
 			return e.Dispatch(ctx, spec)
+		},
+		DispatchTarget: func(ctx context.Context, spec dispatch.Spec) (modelbudget.Target, error) {
+			e := svc.Engine()
+			if e == nil {
+				return modelbudget.Target{}, fmt.Errorf("dispatch engine not configured")
+			}
+			target, err := e.Target(spec)
+			if err != nil {
+				return modelbudget.Target{}, err
+			}
+			if !target.IsCloud && d.Config != nil {
+				window := contextmeter.LocalRuntimeWindow(*d.Config, target.Model)
+				target.ContextWindow = window
+				target.ContextWindowKnown = window > 0
+			} else if window, ok := contextmeter.KnownModelMax(target.Model); ok {
+				target.ContextWindow = window
+				target.ContextWindowKnown = true
+			}
+			return target, nil
 		},
 		EnterProfile: d.EnterProfile,
 		RestartAgent: d.RestartAgent,

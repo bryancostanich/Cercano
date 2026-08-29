@@ -11,6 +11,7 @@ import (
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/locus"
+	"cercano/source/server/internal/modelbudget"
 	"cercano/source/server/internal/usage"
 	"cercano/source/server/pkg/config"
 )
@@ -149,6 +150,38 @@ func (e *Engine) SetUsageSink(fn func(usage.Usage)) {
 // the already-selected provider side plus the taxonomy tier the work runs on.
 func (e *Engine) SetModelFor(fn func(isCloud bool, tier config.Tier) string) {
 	e.modelFor = fn
+}
+
+// Target resolves the concrete provider/model metadata a dispatch would use
+// without sending a prompt. It mirrors Dispatch's selection and model-resolution
+// rules so callers that must budget before constructing a prompt can stay in
+// sync with execution.
+func (e *Engine) Target(spec Spec) (modelbudget.Target, error) {
+	sel, err := inference.Select(e.modeFn(), spec.Role, e.providersFn())
+	if err != nil {
+		return modelbudget.Target{}, err
+	}
+	tier := spec.Tier
+	if tier == "" {
+		tier = config.TierEveryday
+		if spec.Role == RoleCoproc {
+			tier = config.TierFastLightText
+		}
+	}
+	model := ""
+	if e.modelFor != nil {
+		model = e.modelFor(sel.IsCloud, tier)
+	}
+	if spec.ModelOverride != "" {
+		model = spec.ModelOverride
+		tier = ""
+	}
+	return modelbudget.Target{
+		Provider: providerName(sel),
+		Model:    model,
+		Tier:     string(tier),
+		IsCloud:  sel.IsCloud,
+	}, nil
 }
 
 // Dispatch executes spec and returns a Result.

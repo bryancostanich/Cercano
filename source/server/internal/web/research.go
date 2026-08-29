@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+
+	"cercano/source/server/internal/modelbudget"
+	"cercano/source/server/internal/tokens"
 	"time"
 )
 
@@ -168,29 +171,122 @@ func (p *ResearchPipeline) FetchAll(ctx context.Context, results []SearchResult,
 // Synthesize asks the local model to analyze fetched content and produce a
 // sourced answer to the original question.
 func (p *ResearchPipeline) Synthesize(ctx context.Context, question string, pages []FetchedPage) (string, error) {
-	var sb strings.Builder
-	for i, page := range pages {
-		// Truncate very long pages to keep prompt reasonable
-		content := page.Content
-		if len(content) > 8000 {
-			content = content[:8000] + "\n[...truncated]"
-		}
-		fmt.Fprintf(&sb, "--- Source %d: %s (%s) ---\n%s\n\n", i+1, page.Title, page.URL, content)
+	prompt, err := p.synthesisPrompt(ctx, question, pages)
+	if err != nil {
+		return "", err
 	}
-
-	prompt := fmt.Sprintf(`You are a research assistant. Based on the web sources below, provide a clear, accurate answer to the question. Cite sources by URL where relevant. If the sources don't contain enough information, say so.
-
-Question: %s
-
-%s
-
-Provide your answer now. Include source URLs as citations.`, question, sb.String())
 
 	resp, err := p.model.Call(ctx, prompt)
 	if err != nil {
 		return "", fmt.Errorf("synthesis failed: %w", err)
 	}
 	return resp, nil
+}
+
+func (p *ResearchPipeline) synthesisPrompt(ctx context.Context, question string, pages []FetchedPage) (string, error) {
+	corpus, err := p.sourceCorpus(ctx, question, pages)
+	if err != nil {
+		return "", err
+	}
+	return formatSynthesisPrompt(question, corpus), nil
+}
+
+func (p *ResearchPipeline) sourceCorpus(ctx context.Context, question string, pages []FetchedPage) (string, error) {
+	budgeter, ok := p.model.(modelbudget.Budgeter)
+	if !ok {
+		return legacySourceCorpus(pages), nil
+	}
+	budget, err := budgeter.Budget(ctx, modelbudget.DefaultOutputReserve)
+	if err != nil {
+		return "", fmt.Errorf("research synthesis budget: %w", err)
+	}
+	emptyPromptTokens := tokens.Estimate(formatSynthesisPrompt(question, ""))
+	corpusBudget := budget.InputTokens - emptyPromptTokens - 16 // tokenizer/formatting safety margin
+	if corpusBudget < 128 {
+		return "", fmt.Errorf("research synthesis budget too small after prompt overhead: input_budget=%d prompt_overhead=%d corpus_budget=%d provider=%s model=%s context_window=%d", budget.InputTokens, emptyPromptTokens, corpusBudget, budget.Target.Provider, budget.Target.Model, budget.Target.ContextWindow)
+	}
+	corpus, included, _ := budgetedSourceCorpus(pages, corpusBudget)
+	if included == 0 {
+		return "", fmt.Errorf("research synthesis budget could not fit any source content: corpus_budget=%d provider=%s model=%s context_window=%d", corpusBudget, budget.Target.Provider, budget.Target.Model, budget.Target.ContextWindow)
+	}
+	return corpus, nil
+}
+
+func formatSynthesisPrompt(question, corpus string) string {
+	return fmt.Sprintf(`You are a research assistant. Based on the web sources below, provide a clear, accurate answer to the question. Cite sources by URL where relevant. If the sources don't contain enough information, say so.
+
+Question: %s
+
+%s
+
+Provide your answer now. Include source URLs as citations.`, question, corpus)
+}
+
+func legacySourceCorpus(pages []FetchedPage) string {
+	var sb strings.Builder
+	for i, page := range pages {
+		content := page.Content
+		if len(content) > 8000 {
+			content = content[:8000] + "\n[...truncated]"
+		}
+		fmt.Fprintf(&sb, "--- Source %d: %s (%s) ---\n%s\n\n", i+1, page.Title, page.URL, content)
+	}
+	return sb.String()
+}
+
+func budgetedSourceCorpus(pages []FetchedPage, corpusBudget int) (corpus string, included int, trimmed int) {
+	var sb strings.Builder
+	for i, page := range pages {
+		header := fmt.Sprintf("--- Source %d: %s (%s) ---\n", i+1, page.Title, page.URL)
+		footer := "\n\n"
+		remaining := corpusBudget - tokens.Estimate(sb.String()) - tokens.Estimate(header) - tokens.Estimate(footer)
+		if remaining <= 0 {
+			trimmed++
+			continue
+		}
+		content := strings.TrimSpace(page.Content)
+		if content == "" {
+			content = "(No readable text content found.)"
+		}
+		candidate := content
+		if tokens.Estimate(candidate) > remaining {
+			trimmed++
+			candidate = truncateToTokenBudget(candidate, remaining, "\n[...truncated to fit local model context]")
+		}
+		if strings.TrimSpace(candidate) == "" {
+			continue
+		}
+		fmt.Fprintf(&sb, "%s%s%s", header, candidate, footer)
+		included++
+	}
+	return sb.String(), included, trimmed
+}
+
+func truncateToTokenBudget(text string, budget int, marker string) string {
+	if budget <= 0 {
+		return ""
+	}
+	if tokens.Estimate(text) <= budget {
+		return text
+	}
+	markerTokens := tokens.Estimate(marker)
+	usable := budget - markerTokens
+	if usable <= 0 {
+		return ""
+	}
+	chars := usable * 4
+	if chars > len(text) {
+		chars = len(text)
+	}
+	candidate := strings.TrimSpace(text[:chars]) + marker
+	for tokens.Estimate(candidate) > budget && chars > 0 {
+		chars = chars * 9 / 10
+		candidate = strings.TrimSpace(text[:chars]) + marker
+	}
+	if tokens.Estimate(candidate) > budget {
+		return ""
+	}
+	return candidate
 }
 
 // Run executes the full research pipeline: craft queries → search → deduplicate

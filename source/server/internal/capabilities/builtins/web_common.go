@@ -7,6 +7,7 @@ import (
 
 	"cercano/source/server/internal/capabilities"
 	"cercano/source/server/internal/dispatch"
+	"cercano/source/server/internal/modelbudget"
 	"cercano/source/server/internal/research"
 	"cercano/source/server/internal/tokens"
 	"cercano/source/server/internal/web"
@@ -40,6 +41,24 @@ type dispatchModelCaller struct {
 	source string
 	model  string      // advisory model override; empty for the configured default
 	tier   config.Tier // taxonomy tier the pipeline's model calls run on
+}
+
+func (m *dispatchModelCaller) Budget(ctx context.Context, outputReserve int) (modelbudget.Budget, error) {
+	if m.call.Svc.DispatchTarget == nil {
+		return modelbudget.Budget{}, errors.New(m.source + ": dispatch target budgeting not available")
+	}
+	target, err := m.call.Svc.DispatchTarget(ctx, dispatch.Spec{
+		Mode:          dispatch.OneShot,
+		Role:          dispatch.RoleCoproc,
+		Tier:          m.tier,
+		WorkDir:       m.call.WorkDir,
+		ModelOverride: m.model,
+		Source:        m.source,
+	})
+	if err != nil {
+		return modelbudget.Budget{}, err
+	}
+	return modelbudget.ForTarget(target, outputReserve, 0)
 }
 
 func (m *dispatchModelCaller) Call(ctx context.Context, prompt string) (string, error) {

@@ -18,12 +18,10 @@ import (
 	"cercano/source/server/internal/failurelog"
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
-	"cercano/source/server/internal/localruntime/llamaserver"
 	"cercano/source/server/internal/locus"
 	"cercano/source/server/internal/protocols"
 	"cercano/source/server/internal/requestassembly"
 	"cercano/source/server/internal/routinglog"
-	"cercano/source/server/internal/sysram"
 	"cercano/source/server/internal/watchdog"
 	"cercano/source/server/pkg/config"
 )
@@ -134,7 +132,7 @@ func (c *Core) contextWindowFor(isCloud bool, model string) int {
 
 func (c *Core) knownContextWindowFor(isCloud bool, model string) (int, bool) {
 	if c.d.Config != nil && !isCloud {
-		window := localContextWindow(c.d.Config.Get(), model)
+		window := contextmeter.LocalRuntimeWindow(c.d.Config.Get(), model)
 		return window, window > 0
 	}
 	return contextmeter.KnownModelMax(model)
@@ -175,54 +173,6 @@ func (c *Core) assembleAttemptHistory(ctx context.Context, req Request, attempt 
 		return assembled.Messages, acct
 	}
 	return c.d.Persist.AssembleHistory(ctx, req.ConversationID), requestassembly.Accounting{}
-}
-
-// localContextWindow reports the context window the local runtime will
-// actually serve for model, which is NOT always the configured value: a
-// catalog model may pin its own --ctx-size in ExtraArgs, and because per-model
-// flags are appended last, llama-server honors that one instead of the config's.
-// Budgeting against the config number alone produced false preflight
-// context_overflow rejections for requests the running server would have
-// accepted (config said 16384 while the process served 32768).
-//
-// model is the resolved local model ID; empty falls back to the config value.
-func localContextWindow(cfg config.Config, model string) int {
-	switch cfg.OpenRuntime {
-	case "mistralrs":
-		return cfg.MistralRS.MaxSeqLen
-	case "llama_server":
-		return llamaServerWindow(cfg.LlamaServer.ContextSize, cfg.LlamaServer.ContextSizeSet, model)
-	default:
-		if cfg.LlamaServer.ContextSize > 0 {
-			return llamaServerWindow(cfg.LlamaServer.ContextSize, cfg.LlamaServer.ContextSizeSet, model)
-		}
-		return cfg.MistralRS.MaxSeqLen
-	}
-}
-
-// llamaServerWindow applies the catalog's per-model --ctx-size override to the
-// configured context size. The model ID carries provider/catalog prefixes in
-// routing form (e.g. "llama_server:catalog:glm-4.5-air-q4_k_m"); the catalog is
-// keyed by the bare ID, so match on the final segment.
-func llamaServerWindow(configured int, configExplicit bool, model string) int {
-	if configExplicit && configured > 0 {
-		return configured
-	}
-	if model == "" {
-		return configured
-	}
-	bare := model
-	if i := strings.LastIndex(bare, ":"); i >= 0 {
-		bare = bare[i+1:]
-	}
-	total := sysram.Total()
-	if total < 0 {
-		total = 0
-	}
-	if n := llamaserver.ModelContextOverride(bare, uint64(total)); n > 0 {
-		return n
-	}
-	return configured
 }
 
 func addCloudProfileFields(fields routinglog.Event, prefix string, cfg config.Config, name string) {

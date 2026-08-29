@@ -5,8 +5,8 @@
 - [x] Inspect all current `research.ModelCaller` implementations and tests.
 - [x] Add a small budget-aware interface for research callers, for example:
   - `Target() ModelTarget` or `Budget(ctx) ModelBudget`
-    - fields: provider, model, tier, is_cloud, context_window, context_window_known
-    - safe input budget after output reserve/margin
+      - fields: provider, model, tier, is_cloud, context_window, context_window_known
+      - safe input budget after output reserve/margin
 - [x] Implement the interface in the dispatch-backed caller used by built-in `research` and `deep_research`.
 - [x] Resolve the concrete model/window using the same local dispatch selection already used for the actual model call.
 - [x] Add unit tests for target/budget reporting with a fake dispatch result or fake caller.
@@ -41,7 +41,7 @@
 - [x] Run broader changed-package tests if imports require it.
 - [-] Manually exercise a small local `research(max_results=5)` scenario if feasible without relying on external flakiness.
 - [x] Update this plan with final status and any deferred follow-ups.
-- [ ] Commit a checkpoint with a conventional commit subject and body.
+- [x] Commit a checkpoint with a conventional commit subject and body.
 
 ## Final status
 

@@ -409,6 +409,20 @@ func (x *Service) logDispatchFailure(event string, spec dispatch.Spec, subConvID
 	x.failureLog.Log(event, fields)
 }
 
+func addDispatchRequestBudgetFields(fields failurelog.Event, result agent.ToolLoopResult) {
+	budget := result.LastRequestBudget
+	fields["system_tokens"] = budget.SystemTokens
+	fields["message_tokens"] = budget.MessageTokens
+	fields["tool_schema_tokens"] = budget.ToolTokens
+	fields["output_reserve"] = budget.OutputReserve
+	fields["estimated_total_request_tokens"] = budget.EstimatedUsed
+	fields["context_window"] = budget.Limit
+	fields["hard_limit"] = budget.PromptBudget
+	if result.InputTokens > 0 {
+		fields["provider_reported_input_tokens"] = result.InputTokens
+	}
+}
+
 // SetEnsureSubagent installs the func that creates a sub-agent conversation row.
 // The worker wires this to a host-stream proxy (it has no local store); in-
 // process it stays nil and ensureSubagentConv falls back to the store.
@@ -568,7 +582,9 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 	})
 	if err != nil {
 		log.Printf("[dispatch] subagent done: conv=%s err=%v", subConvID, err)
-		x.logDispatchFailure("dispatch.tool_loop_failed", spec, subConvID, provider, model, sel.IsCloud, granted, ignored, err, nil)
+		extra := failurelog.Event{}
+		addDispatchRequestBudgetFields(extra, res)
+		x.logDispatchFailure("dispatch.tool_loop_failed", spec, subConvID, provider, model, sel.IsCloud, granted, ignored, err, extra)
 		emitDispatchProgress(spec.Emit, agenttools.ProgressEvent{SubAgentID: subConvID, SubAgentParentID: spec.ConversationID, SubAgentTitle: subTitle, Kind: "error", Text: fmt.Sprintf("sub-agent failed: conv=%s err=%v", subConvID, err), GrantedTools: granted, IgnoredTools: ignored, IsError: true})
 		return dispatch.Result{}, err
 	}

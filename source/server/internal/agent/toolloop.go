@@ -207,6 +207,10 @@ type ToolLoopResult struct {
 	History      []llm.Message
 	InputTokens  int // last LLM call's provider-reported input tokens (context occupancy)
 	OutputTokens int // last LLM call's provider-reported output tokens
+	// LastRequestBudget is the privacy-safe token budget estimate for the
+	// provider-facing request that failed or most recently ran. It deliberately
+	// contains counts only: no prompt text, tool arguments, or request bodies.
+	LastRequestBudget RequestBudgetResult
 	// CalledTools is the set of tool names the loop actually invoked, in first-
 	// seen order. It is recorded directly from each turn's BlockToolUse blocks,
 	// BEFORE any lean/flatten rewrite of the model-facing history — so callers
@@ -524,7 +528,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 		}
 		if !budget.Fits {
 			log.Printf("[tool-loop] context budget overflow before provider call: conv=%s provider=%s model=%s iter=%d estimated_tokens=%d tool_tokens=%d output_reserve=%d limit=%d budget=%d messages=%d tools=%d", in.ConversationID, in.Provider.Name(), in.Model, iter+1, budget.EstimatedUsed, budget.ToolTokens, budget.OutputReserve, budget.Limit, budget.PromptBudget, len(hist), len(catalog))
-			return ToolLoopResult{}, budget.OverflowError()
+			return ToolLoopResult{Iterations: iter + 1, History: hist, InputTokens: lastIn, OutputTokens: lastOut, LastRequestBudget: budget}, budget.OverflowError()
 		}
 
 		req := llm.ChatRequest{
@@ -542,12 +546,20 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 			in.ConversationID, in.Provider.Name(), in.Model, iter+1, temperatureForLog(req.Temperature), req.MaxTokens, toolNamesForLog(req.Tools), systemHasLeanSubagentMarker(req.System), in.FlattenToolResults, truncateRunes(strings.TrimSpace(req.System), 120), truncateRunes(strings.TrimSpace(in.UserInput), 120), len(req.Messages))
 		rdr, err := in.Provider.StreamChat(ctx, req)
 		if err != nil {
-			return ToolLoopResult{}, err
+			return ToolLoopResult{Iterations: iter + 1, History: hist, InputTokens: lastIn, OutputTokens: lastOut, LastRequestBudget: budget}, err
 		}
 		resp, err := collectStream(ctx, rdr, in.OnTextDelta, noticeSink(in))
 		rdr.Close()
 		if err != nil {
-			return ToolLoopResult{}, err
+			providerInput := lastIn
+			if resp.InputTokens > 0 {
+				providerInput = resp.InputTokens
+			}
+			providerOutput := lastOut
+			if resp.OutputTokens > 0 {
+				providerOutput = resp.OutputTokens
+			}
+			return ToolLoopResult{Iterations: iter + 1, History: hist, InputTokens: providerInput, OutputTokens: providerOutput, LastRequestBudget: budget}, err
 		}
 		lastIn, lastOut = resp.InputTokens, resp.OutputTokens
 		noteAssembledTurn(in.ConversationID, resp.Blocks, seenToolUse)
@@ -941,12 +953,22 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 	finalReq := llm.ChatRequest{Model: in.Model, Tier: in.Tier, System: in.System, Messages: hist, MaxTokens: maxTokens, Temperature: in.Temperature}
 	rdr, err := in.Provider.StreamChat(ctx, finalReq)
 	if err != nil {
-		return ToolLoopResult{Iterations: maxIters, History: hist, InputTokens: lastIn, OutputTokens: lastOut}, err
+		finalBudget := EstimateRequestBudget(RequestBudgetInput{System: in.System, Messages: hist, MaxTokens: maxTokens, ContextWindow: in.ContextWindow})
+		return ToolLoopResult{Iterations: maxIters, History: hist, InputTokens: lastIn, OutputTokens: lastOut, LastRequestBudget: finalBudget}, err
 	}
 	resp, err := collectStream(ctx, rdr, in.OnTextDelta, noticeSink(in))
 	rdr.Close()
 	if err != nil {
-		return ToolLoopResult{Iterations: maxIters, History: hist, InputTokens: lastIn, OutputTokens: lastOut}, err
+		providerInput := lastIn
+		if resp.InputTokens > 0 {
+			providerInput = resp.InputTokens
+		}
+		providerOutput := lastOut
+		if resp.OutputTokens > 0 {
+			providerOutput = resp.OutputTokens
+		}
+		finalBudget := EstimateRequestBudget(RequestBudgetInput{System: in.System, Messages: hist, MaxTokens: maxTokens, ContextWindow: in.ContextWindow})
+		return ToolLoopResult{Iterations: maxIters, History: hist, InputTokens: providerInput, OutputTokens: providerOutput, LastRequestBudget: finalBudget}, err
 	}
 	var finalText string
 	for _, b := range resp.Blocks {
@@ -960,7 +982,8 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 		FinalText: finalText, FinalBlocks: resp.Blocks,
 		Iterations: maxIters, History: hist,
 		InputTokens: resp.InputTokens, OutputTokens: resp.OutputTokens,
-		CalledTools: calledTools,
+		LastRequestBudget: EstimateRequestBudget(RequestBudgetInput{System: in.System, Messages: hist, MaxTokens: maxTokens, ContextWindow: in.ContextWindow}),
+		CalledTools:       calledTools,
 	}, nil
 }
 

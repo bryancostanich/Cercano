@@ -119,14 +119,20 @@ func (p *LLMProvider) logProviderFailure(ctx context.Context, req llm.ChatReques
 	if p == nil || p.eng == nil || p.eng.failureWriter() == nil {
 		return
 	}
+	budget := estimateRequestBudget(req)
 	fields := failurelog.Event{
-		"scope":                  "provider",
-		"provider":               "llama_server",
-		"model":                  req.Model,
-		"conversation_id":        req.ConversationID,
-		"request_id":             req.RequestID,
-		"request_token_estimate": estimateRequestTokens(req),
-		"max_tokens":             req.MaxTokens,
+		"scope":                          "provider",
+		"provider":                       "llama_server",
+		"model":                          req.Model,
+		"conversation_id":                req.ConversationID,
+		"request_id":                     req.RequestID,
+		"request_token_estimate":         budget.EstimatedTotal,
+		"system_tokens":                  budget.SystemTokens,
+		"message_tokens":                 budget.MessageTokens,
+		"tool_schema_tokens":             budget.ToolSchemaTokens,
+		"output_reserve":                 budget.OutputReserve,
+		"estimated_total_request_tokens": budget.EstimatedTotal,
+		"max_tokens":                     req.MaxTokens,
 	}
 	if cw := p.eng.contextWindow(req.Model); cw > 0 {
 		fields["context_window"] = cw
@@ -199,17 +205,33 @@ func (p *LLMProvider) enrichRuntimeDiagnostics(ctx context.Context, model string
 	}
 }
 
-func estimateRequestTokens(req llm.ChatRequest) int {
-	bytes := len(req.System)
+type requestBudgetEstimate struct {
+	SystemTokens     int
+	MessageTokens    int
+	ToolSchemaTokens int
+	OutputReserve    int
+	EstimatedTotal   int
+}
+
+func estimateRequestBudget(req llm.ChatRequest) requestBudgetEstimate {
+	budget := requestBudgetEstimate{
+		SystemTokens:  estimateTokens(req.System),
+		OutputReserve: req.MaxTokens,
+	}
 	for _, msg := range req.Messages {
 		for _, block := range msg.Blocks {
-			bytes += len(block.Text) + len(block.ImageURL) + len(block.ImageData)
+			budget.MessageTokens += estimateTokens(block.Text) + estimateTokens(block.Content) + estimateTokens(block.ImageURL) + estimateTokens(block.ImageData)
 		}
 	}
 	if tools, err := json.Marshal(req.Tools); err == nil {
-		bytes += len(tools)
+		budget.ToolSchemaTokens = estimateTokens(string(tools))
 	}
-	return (bytes + 3) / 4
+	budget.EstimatedTotal = budget.SystemTokens + budget.MessageTokens + budget.ToolSchemaTokens + budget.OutputReserve
+	return budget
+}
+
+func estimateTokens(s string) int {
+	return (len(s) + 3) / 4
 }
 
 func compactRuntimeLogs(logs []localruntime.LogEntry, instanceID string) []map[string]any {

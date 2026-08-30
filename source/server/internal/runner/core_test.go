@@ -25,6 +25,7 @@ import (
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/agenttools"
 	engine "cercano/source/server/internal/engine"
+	"cercano/source/server/internal/failurelog"
 	cfgsvc "cercano/source/server/internal/hostsvc/config"
 	permissions "cercano/source/server/internal/hostsvc/permissions"
 	providers "cercano/source/server/internal/hostsvc/providers"
@@ -254,8 +255,9 @@ func (f *fakeResolver) SetRoutingLog(_ *routinglog.Writer)                      
 // ---------------------------------------------------------------------------
 
 type fakeTurnHistory struct {
-	mu      sync.Mutex
-	targets []requestassembly.Target
+	mu         sync.Mutex
+	targets    []requestassembly.Target
+	accounting requestassembly.Accounting
 }
 
 func (h *fakeTurnHistory) AssembleHistory(_ context.Context, _ string) []llm.Message {
@@ -265,7 +267,7 @@ func (h *fakeTurnHistory) AssembleHistoryForTarget(_ context.Context, _ string, 
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.targets = append(h.targets, target)
-	return requestassembly.Result{}
+	return requestassembly.Result{Accounting: h.accounting}
 }
 func (h *fakeTurnHistory) PersistTurn(_ context.Context, _ string, _ llm.Message) {}
 func (h *fakeTurnHistory) LoadProjectContext(_ string) string                     { return "" }
@@ -746,5 +748,69 @@ func TestBuildSystemPrompt_SignalsActiveProfile(t *testing.T) {
 	}
 	if strings.Contains(normal, "PLANNING MODE") || strings.Contains(normal, "AUTONOMOUS MODE") {
 		t.Fatalf("unrestricted prompt must not claim a special profile; got:\n%s", normal)
+	}
+}
+
+func TestCore_ToolLoopFailureLogsContextAndRequestBudgets(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "failures.jsonl")
+	w, err := failurelog.NewWriter(logPath)
+	if err != nil {
+		t.Fatalf("NewWriter() error = %v", err)
+	}
+	defer w.Close()
+
+	history := &fakeTurnHistory{accounting: requestassembly.Accounting{
+		Window:          200000,
+		HardLimit:       180000,
+		RawTokens:       267000,
+		InitialTokens:   190000,
+		AfterHardElide:  120000,
+		AfterKeepLast:   95100,
+		FinalTokens:     90000,
+		DroppedMessages: 17,
+	}}
+	deps := buildDeps(&contextOverflowProvider{})
+	deps.Persist = history
+	deps.FailureLog = w
+	core := New(deps)
+
+	_, err = core.RunTurn(context.Background(), Request{
+		Input:          "small secret prompt",
+		ConversationID: "budget-failure-conv",
+		WorkDir:        t.TempDir(),
+	}, noopSink{}, nil, nil)
+	if err == nil {
+		t.Fatal("RunTurn unexpectedly succeeded")
+	}
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read failure log: %v", err)
+	}
+	logData := string(data)
+	for _, want := range []string{
+		`"event":"main.tool_loop_failed"`,
+		`"conversation_id":"budget-failure-conv"`,
+		`"error_class":"context_overflow"`,
+		`"raw_tokens":267000`,
+		`"initial_tokens":190000`,
+		`"after_hard_elide":120000`,
+		`"after_keep_last":95100`,
+		`"final_tokens":90000`,
+		`"dropped_messages":17`,
+		`"context_window":200000`,
+		`"hard_limit":180000`,
+		`"system_tokens":`,
+		`"message_tokens":`,
+		`"tool_schema_tokens":`,
+		`"output_reserve":`,
+		`"estimated_total_request_tokens":`,
+	} {
+		if !strings.Contains(logData, want) {
+			t.Fatalf("failure log missing %s: %s", want, logData)
+		}
+	}
+	if strings.Contains(logData, "small secret prompt") {
+		t.Fatalf("failure log included prompt text: %s", logData)
 	}
 }

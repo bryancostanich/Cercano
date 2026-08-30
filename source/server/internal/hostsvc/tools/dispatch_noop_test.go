@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -132,4 +133,56 @@ func readFailureLog(t *testing.T, path string) string {
 		t.Fatalf("read failure log: %v", err)
 	}
 	return string(data)
+}
+
+type failingBudgetProvider struct{}
+
+func (p failingBudgetProvider) Name() string { return "openai-responses" }
+func (p failingBudgetProvider) Capabilities() inference.Capabilities {
+	return inference.Capabilities{SupportsTools: true}
+}
+func (p failingBudgetProvider) Chat(context.Context, llm.ChatRequest) (llm.ChatResponse, error) {
+	return llm.ChatResponse{}, &llm.Error{Class: llm.ErrContextOverflow, Provider: "openai-responses", Err: errors.New("context overflow")}
+}
+func (p failingBudgetProvider) StreamChat(context.Context, llm.ChatRequest) (llm.StreamReader, error) {
+	return nil, &llm.Error{Class: llm.ErrContextOverflow, Provider: "openai-responses", Err: errors.New("context overflow")}
+}
+
+func TestRunAgenticDispatch_ToolLoopFailureLogsRequestBudget(t *testing.T) {
+	svc := New(nil, nil, nil, nil)
+	logPath := installTestFailureLog(t, svc)
+	svc.SetRegistry(regWith(permStub{"Glob", agenttools.PermR}))
+	svc.SetContextWindowResolver(func(string, bool) int { return 32768 })
+
+	_, err := svc.RunAgenticDispatch(t.Context(), dispatch.Spec{
+		Mode:           dispatch.Agentic,
+		Task:           "Inspect a secret task.",
+		Tools:          []string{"Glob"},
+		MaxIterations:  1,
+		ConversationID: "parent-budget",
+	}, inference.Selection{Provider: failingBudgetProvider{}, IsCloud: true}, "gpt-5")
+	if err == nil {
+		t.Fatal("expected dispatch tool loop failure")
+	}
+
+	logData := readFailureLog(t, logPath)
+	for _, want := range []string{
+		`"event":"dispatch.tool_loop_failed"`,
+		`"conversation_id":"parent-budget"`,
+		`"provider":"openai-responses"`,
+		`"error_class":"context_overflow"`,
+		`"system_tokens":`,
+		`"message_tokens":`,
+		`"tool_schema_tokens":`,
+		`"output_reserve":`,
+		`"estimated_total_request_tokens":`,
+		`"context_window":32768`,
+	} {
+		if !strings.Contains(logData, want) {
+			t.Fatalf("failure log missing %s: %s", want, logData)
+		}
+	}
+	if strings.Contains(logData, "Inspect a secret task") {
+		t.Fatalf("failure log included dispatch task text: %s", logData)
+	}
 }

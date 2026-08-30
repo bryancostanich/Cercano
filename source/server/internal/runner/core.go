@@ -70,6 +70,35 @@ func mainFailureFields(req Request, scope, provider, model string, isCloud bool,
 	return fields
 }
 
+func addAssemblyFailureFields(fields failurelog.Event, acct requestassembly.Accounting) {
+	fields["initial_tokens"] = acct.InitialTokens
+	fields["after_hard_elide"] = acct.AfterHardElide
+	fields["after_keep_last"] = acct.AfterKeepLast
+	fields["final_tokens"] = acct.FinalTokens
+	fields["raw_tokens"] = acct.RawTokens
+	fields["dropped_messages"] = acct.DroppedMessages
+	fields["context_window"] = acct.Window
+	fields["hard_limit"] = acct.HardLimit
+}
+
+func addRequestBudgetFailureFields(fields failurelog.Event, result agent.ToolLoopResult) {
+	budget := result.LastRequestBudget
+	fields["system_tokens"] = budget.SystemTokens
+	fields["message_tokens"] = budget.MessageTokens
+	fields["tool_schema_tokens"] = budget.ToolTokens
+	fields["output_reserve"] = budget.OutputReserve
+	fields["estimated_total_request_tokens"] = budget.EstimatedUsed
+	if result.InputTokens > 0 {
+		fields["provider_reported_input_tokens"] = result.InputTokens
+	}
+}
+
+func addTokenDiagnosticsFailureFields(fields failurelog.Event, acct requestassembly.Accounting, result agent.ToolLoopResult) failurelog.Event {
+	addAssemblyFailureFields(fields, acct)
+	addRequestBudgetFailureFields(fields, result)
+	return fields
+}
+
 func providerName(p inference.Provider) string {
 	if p == nil {
 		return ""
@@ -111,9 +140,9 @@ func (c *Core) knownContextWindowFor(isCloud bool, model string) (int, bool) {
 	return contextmeter.KnownModelMax(model)
 }
 
-func (c *Core) assembleAttemptHistory(ctx context.Context, req Request, attempt string, provider inference.Provider, model string, isCloud bool, tightContext bool) []llm.Message {
+func (c *Core) assembleAttemptHistory(ctx context.Context, req Request, attempt string, provider inference.Provider, model string, isCloud bool, tightContext bool) ([]llm.Message, requestassembly.Accounting) {
 	if c.d.Persist == nil || req.ConversationID == "" {
-		return nil
+		return nil, requestassembly.Accounting{}
 	}
 	target := requestassembly.Target{
 		RouteLabel:    attempt,
@@ -143,9 +172,9 @@ func (c *Core) assembleAttemptHistory(ctx context.Context, req Request, attempt 
 			"truncated":         acct.Truncated,
 			"tight_context":     tightContext,
 		})
-		return assembled.Messages
+		return assembled.Messages, acct
 	}
-	return c.d.Persist.AssembleHistory(ctx, req.ConversationID)
+	return c.d.Persist.AssembleHistory(ctx, req.ConversationID), requestassembly.Accounting{}
 }
 
 // localContextWindow reports the context window the local runtime will
@@ -303,8 +332,9 @@ func (c *Core) RunTurn(
 	// after PersistTurn below, the current user turn is duplicated in the model
 	// request. Prepare the primary history now and prepare a potential cross-tier
 	// fallback history for the concrete fallback target as well.
-	convHistory := c.assembleAttemptHistory(ctx, req, "primary", provider, selectedModel, isCloud, false)
+	convHistory, attemptAccounting := c.assembleAttemptHistory(ctx, req, "primary", provider, selectedModel, isCloud, false)
 	fallbackHistory := []llm.Message(nil)
+	fallbackAccounting := requestassembly.Accounting{}
 	fallbackPrepared := false
 	mode := locus.Mode("cloud_primary")
 	if c.d.Config != nil {
@@ -319,7 +349,7 @@ func (c *Core) RunTurn(
 	fallbackModel := c.d.Providers.MainModel(fbCloud)
 	if fbProv != nil {
 		fallbackPrepared = true
-		fallbackHistory = c.assembleAttemptHistory(ctx, req, "cross_tier_fallback", fbProv, fallbackModel, fbCloud, !fbCloud)
+		fallbackHistory, fallbackAccounting = c.assembleAttemptHistory(ctx, req, "cross_tier_fallback", fbProv, fallbackModel, fbCloud, !fbCloud)
 	}
 
 	// 3. Crash-resilient persistence: persist the USER turn up front (before
@@ -544,6 +574,7 @@ func (c *Core) RunTurn(
 				"tight_context_fallback": tightContextFallback,
 			})
 			convHistory = fallbackHistory
+			attemptAccounting = fallbackAccounting
 			result, loopErr = c.runLoop(ctx, req, fbProv, fallbackModel, fbCloud,
 				loopSink, requester, convHistory, onTextDelta, onTurn, wdGate, wdTurnEnd, gateRegistry, permStore, profile, tightContextFallback)
 			c.logRoute("loop.result", routinglog.Event{
@@ -562,7 +593,8 @@ func (c *Core) RunTurn(
 		}
 	}
 	if loopErr != nil {
-		c.logFailure("main.tool_loop_failed", mainFailureFields(req, "main", providerName(provider), selectedModel, isCloud, loopErr))
+		fields := mainFailureFields(req, "main", providerName(provider), selectedModel, isCloud, loopErr)
+		c.logFailure("main.tool_loop_failed", addTokenDiagnosticsFailureFields(fields, attemptAccounting, result))
 		return Result{}, fmt.Errorf("tool loop error: %w", loopErr)
 	}
 

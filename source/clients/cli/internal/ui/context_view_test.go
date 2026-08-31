@@ -87,15 +87,17 @@ func TestContextView_HeaderShowsEstimatedRequestAccounting(t *testing.T) {
 }
 
 func TestContextView_HeaderKeepsLegacyUsageFallback(t *testing.T) {
-	cv := newTestContextView(contextSnapshot{
-		Usage: &agentclient.ContextUsage{TokensUsed: 4321, ModelMax: 200000, Percent: 0.0216, ContextWindowKnown: true},
-	})
-	out := stripAnsiCSI(cv.renderHeader())
-	if !strings.Contains(out, "context") || !strings.Contains(out, "4,321") || !strings.Contains(out, "200,000") {
-		t.Fatalf("legacy header missing usage fields\n%s", out)
-	}
-	if strings.Contains(out, "context est") || strings.Contains(out, "messages") || strings.Contains(out, "window estimated") {
-		t.Fatalf("legacy header should not show estimated accounting labels\n%s", out)
+	for _, known := range []bool{true, false} {
+		cv := newTestContextView(contextSnapshot{
+			Usage: &agentclient.ContextUsage{TokensUsed: 4321, ModelMax: 200000, Percent: 0.0216, ContextWindowKnown: known},
+		})
+		out := stripAnsiCSI(cv.renderHeader())
+		if !strings.Contains(out, "context") || !strings.Contains(out, "4,321") || !strings.Contains(out, "200,000") {
+			t.Fatalf("legacy header missing usage fields\n%s", out)
+		}
+		if strings.Contains(out, "context est") || strings.Contains(out, "messages") || strings.Contains(out, "window estimated") {
+			t.Fatalf("legacy header should not show estimated accounting labels\n%s", out)
+		}
 	}
 }
 

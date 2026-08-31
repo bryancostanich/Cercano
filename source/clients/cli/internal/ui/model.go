@@ -5724,7 +5724,7 @@ func (m Model) renderContextMeter() string {
 	if m.ctxEstimatedRequest > 0 {
 		badge += m.statusDivider() + m.styles.Muted.Render(fmt.Sprintf("msg %s", formatTokens(messageUsed)))
 	}
-	if m.modelMaxTokens > 0 && !m.ctxWindowKnown {
+	if m.ctxEstimatedRequest > 0 && m.modelMaxTokens > 0 && !m.ctxWindowKnown {
 		badge += m.statusDivider() + m.styles.Muted.Render("window est")
 	}
 	return strings.Join([]string{

@@ -505,7 +505,7 @@ func (c *contextView) renderHeader() string {
 			head += c.styles.Muted.Render(fmt.Sprintf(" · %s system · %s tools · %s output", formatThousands(u.SystemTokens), formatThousands(u.ToolSchemaTokens), formatThousands(u.OutputReserveTokens)))
 		}
 	}
-	if u.ModelMax > 0 && !u.ContextWindowKnown {
+	if u.EstimatedRequestTokens > 0 && u.ModelMax > 0 && !u.ContextWindowKnown {
 		head += c.styles.Muted.Render("  ·  window estimated")
 	}
 

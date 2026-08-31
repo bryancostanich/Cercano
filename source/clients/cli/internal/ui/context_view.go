@@ -489,6 +489,9 @@ func (c *contextView) renderHeader() string {
 	}
 	pct := int(percent*100 + 0.5)
 	bar := renderMeterBar(percent, 10, c.styles)
+	if u.EstimatedRequestTokens > 0 {
+		bar = renderRequestMeterBar(u, 10, c.styles)
+	}
 	label := "context"
 	if u.EstimatedRequestTokens > 0 {
 		label = "context est"
@@ -662,4 +665,95 @@ func renderMeterBar(pct float64, width int, s theme.Styles) string {
 		style = s.Warn
 	}
 	return style.Render(strings.Repeat("█", filled)) + s.Dim.Render(strings.Repeat("░", width-filled))
+}
+
+type contextBarSegments struct {
+	Message int
+	System  int
+	Tools   int
+	Output  int
+	Empty   int
+}
+
+func requestBarSegments(u *agentclient.ContextUsage, width int) contextBarSegments {
+	if u == nil || width <= 0 {
+		return contextBarSegments{}
+	}
+	used := u.EstimatedRequestTokens
+	if used <= 0 {
+		used = u.TokensUsed
+	}
+	max := u.ModelMax
+	if max <= 0 || used <= 0 {
+		return contextBarSegments{Empty: width}
+	}
+	filled := int((float64(used)/float64(max))*float64(width) + 0.5)
+	if filled < 0 {
+		filled = 0
+	}
+	if filled > width {
+		filled = width
+	}
+	seg := requestPortionSegments(u, filled)
+	seg.Empty = width - filled
+	return seg
+}
+
+func requestPortionSegments(u *agentclient.ContextUsage, filled int) contextBarSegments {
+	if u == nil || filled <= 0 {
+		return contextBarSegments{}
+	}
+	parts := []int{u.MessageTokens, u.SystemTokens, u.ToolSchemaTokens, u.OutputReserveTokens}
+	total := 0
+	for _, p := range parts {
+		if p > 0 {
+			total += p
+		}
+	}
+	if total <= 0 {
+		return contextBarSegments{Message: filled}
+	}
+	type rem struct {
+		idx int
+		rem float64
+	}
+	counts := make([]int, len(parts))
+	remainders := make([]rem, 0, len(parts))
+	assigned := 0
+	for i, p := range parts {
+		if p <= 0 {
+			continue
+		}
+		exact := float64(p) * float64(filled) / float64(total)
+		whole := int(exact)
+		counts[i] = whole
+		assigned += whole
+		remainders = append(remainders, rem{idx: i, rem: exact - float64(whole)})
+	}
+	for assigned < filled {
+		best := 0
+		for i := 1; i < len(remainders); i++ {
+			if remainders[i].rem > remainders[best].rem {
+				best = i
+			}
+		}
+		counts[remainders[best].idx]++
+		remainders[best].rem = -1
+		assigned++
+	}
+	return contextBarSegments{Message: counts[0], System: counts[1], Tools: counts[2], Output: counts[3]}
+}
+
+func renderRequestMeterBar(u *agentclient.ContextUsage, width int, s theme.Styles) string {
+	seg := requestBarSegments(u, width)
+	if seg.Message+seg.System+seg.Tools+seg.Output == 0 {
+		return s.Dim.Render(strings.Repeat("░", seg.Empty))
+	}
+	var b strings.Builder
+	b.WriteString(s.Accent.Render(strings.Repeat("█", seg.Message)))
+	b.WriteString(s.Info.Render(strings.Repeat("█", seg.System)))
+	b.WriteString(s.Warn.Render(strings.Repeat("█", seg.Tools)))
+	b.WriteString(s.Primary.Render(strings.Repeat("█", seg.Output)))
+	b.WriteString(s.Dim.Render(strings.Repeat("░", seg.Empty)))
+	return b.String()
 }

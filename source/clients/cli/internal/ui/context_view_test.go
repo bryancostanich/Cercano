@@ -34,6 +34,36 @@ func TestContextView_RendersTurnsAndTotal(t *testing.T) {
 	}
 }
 
+func TestRequestBarSegmentsUsesRequestPortions(t *testing.T) {
+	seg := requestBarSegments(&agentclient.ContextUsage{
+		ModelMax:               100,
+		MessageTokens:          50,
+		SystemTokens:           10,
+		ToolSchemaTokens:       30,
+		OutputReserveTokens:    10,
+		EstimatedRequestTokens: 100,
+	}, 20)
+	want := contextBarSegments{Message: 10, System: 2, Tools: 6, Output: 2, Empty: 0}
+	if seg != want {
+		t.Fatalf("segments = %+v, want %+v", seg, want)
+	}
+}
+
+func TestRequestBarSegmentsIncludesEmptyCapacity(t *testing.T) {
+	seg := requestBarSegments(&agentclient.ContextUsage{
+		ModelMax:               200,
+		MessageTokens:          50,
+		SystemTokens:           25,
+		ToolSchemaTokens:       25,
+		OutputReserveTokens:    0,
+		EstimatedRequestTokens: 100,
+	}, 20)
+	want := contextBarSegments{Message: 5, System: 3, Tools: 2, Output: 0, Empty: 10}
+	if seg != want {
+		t.Fatalf("segments = %+v, want %+v", seg, want)
+	}
+}
+
 func TestContextView_HeaderShowsEstimatedRequestAccounting(t *testing.T) {
 	cv := newTestContextView(contextSnapshot{
 		Usage: &agentclient.ContextUsage{

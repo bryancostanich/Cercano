@@ -5689,6 +5689,15 @@ func (m Model) renderContextMeter() string {
 	var bar string
 	if m.compacting {
 		bar = m.renderCompactingMeterBar(cells, fillN)
+	} else if m.ctxEstimatedRequest > 0 {
+		bar = renderRequestMeterBar(&agentclient.ContextUsage{
+			ModelMax:               max,
+			MessageTokens:          m.ctxMessageTokens,
+			SystemTokens:           m.ctxSystemTokens,
+			ToolSchemaTokens:       m.ctxToolSchemaTokens,
+			OutputReserveTokens:    m.ctxOutputReserveTokens,
+			EstimatedRequestTokens: m.ctxEstimatedRequest,
+		}, cells, m.styles)
 	} else {
 		bar = m.styles.MeterFill.Render(strings.Repeat("█", fillN)) +
 			m.styles.MeterEmpty.Render(strings.Repeat("░", cells-fillN))

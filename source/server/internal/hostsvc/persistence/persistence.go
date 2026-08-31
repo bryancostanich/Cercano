@@ -646,12 +646,15 @@ func (x *svc) GetContextUsage(ctx context.Context, req *proto.GetContextUsageReq
 	// whatever model served the last turn and defaults to the open model on a
 	// fresh registry, which made the bar jump (e.g. 200k → 128k) after every
 	// restart until the first cloud-served turn re-baselined it.
-	max := contextmeter.ModelMax(x.primaryModel())
+	modelWindow := contextmeter.ModelWindowFor(x.primaryModel())
+	max := modelWindow.Tokens
 	sent, raw := 0, 0
+	acct := requestassembly.Accounting{Window: max, WindowKnown: modelWindow.Known}
 	if x.Store() != nil && convID != "" {
 		assembled := x.assembleHistoryForTarget(ctx, convID, requestassembly.Target{Model: x.primaryModel()}, false)
-		raw = assembled.Accounting.RawTokens
-		sent = assembled.Accounting.FinalTokens
+		acct = assembled.Accounting
+		raw = acct.RawTokens
+		sent = acct.FinalTokens
 	}
 	var pct float64
 	if max > 0 {
@@ -665,8 +668,17 @@ func (x *svc) GetContextUsage(ctx context.Context, req *proto.GetContextUsageReq
 		isCompacting = x.convAgent.IsCompacting(convID)
 	}
 	return &proto.GetContextUsageResponse{
-		TokensUsed: int32(sent), ModelMax: int32(max), Percent: pct,
-		RawTokens: int32(raw), Compacting: isCompacting,
+		TokensUsed:             int32(sent),
+		ModelMax:               int32(max),
+		Percent:                pct,
+		RawTokens:              int32(raw),
+		Compacting:             isCompacting,
+		MessageTokens:          int32(acct.MessageTokens),
+		SystemTokens:           int32(acct.SystemTokens),
+		ToolSchemaTokens:       int32(acct.ToolSchemaTokens),
+		OutputReserveTokens:    int32(acct.OutputReserveTokens),
+		EstimatedRequestTokens: int32(acct.EstimatedRequestTokens),
+		ContextWindowKnown:     acct.WindowKnown,
 	}, nil
 }
 

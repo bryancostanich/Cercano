@@ -455,6 +455,24 @@ func TestStreamToolLoop_UpdatesContextMeter(t *testing.T) {
 	if want := int32(contextmeter.ModelMax("test-model")); resp.ModelMax != want {
 		t.Errorf("ModelMax = %d, want %d (cloud window)", resp.ModelMax, want)
 	}
+	if resp.MessageTokens <= 0 {
+		t.Errorf("MessageTokens = %d, want > 0 from live tool-loop request accounting", resp.MessageTokens)
+	}
+	if resp.SystemTokens <= 0 {
+		t.Errorf("SystemTokens = %d, want > 0 from live tool-loop request accounting", resp.SystemTokens)
+	}
+	if resp.ToolSchemaTokens <= 0 {
+		t.Errorf("ToolSchemaTokens = %d, want > 0 from live tool-loop request accounting", resp.ToolSchemaTokens)
+	}
+	if resp.OutputReserveTokens <= 0 {
+		t.Errorf("OutputReserveTokens = %d, want > 0 from live tool-loop request accounting", resp.OutputReserveTokens)
+	}
+	if resp.EstimatedRequestTokens <= resp.MessageTokens {
+		t.Errorf("EstimatedRequestTokens = %d, want > MessageTokens %d after request overhead", resp.EstimatedRequestTokens, resp.MessageTokens)
+	}
+	if resp.ContextWindowKnown {
+		t.Errorf("ContextWindowKnown = true for unknown test-model fallback")
+	}
 }
 
 // TestStreamToolLoop_FinalResponseCarriesTokens guards the bug where the

@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -75,6 +76,16 @@ type RouterCloudUpdater interface {
 	SetOpenProvider(p agent.TurnRunner)
 	SetCloudProvider(p agent.TurnRunner)
 	Tiers() agent.Tiers
+}
+
+type requestAccountingSnapshot struct {
+	MessageTokens          int
+	SystemTokens           int
+	ToolSchemaTokens       int
+	OutputReserveTokens    int
+	EstimatedRequestTokens int
+	ContextWindow          int
+	ContextWindowKnown     bool
 }
 
 // McpManager is the subset of *mcphost.Manager the RPC handlers use. An
@@ -140,6 +151,9 @@ type Server struct {
 	routingLog *routinglog.Writer
 	failureLog *failurelog.Writer
 
+	requestAccountingMu sync.Mutex
+	requestAccounting   map[string]requestAccountingSnapshot
+
 	buildVersion string // surfaced in exported trajectory metadata
 
 	events *eventHub // server->client push fan-out (SubscribeEvents)
@@ -171,6 +185,28 @@ func (s *Server) turnIsCurrent(conv string, gen uint64) bool {
 // Delegator shim — logic lives in broker.Broker.HasActiveTurn.
 func (s *Server) hasActiveTurn(conv string) bool {
 	return s.turnBroker.HasActiveTurn(conv)
+}
+
+func (s *Server) recordRequestAccounting(conv string, snap requestAccountingSnapshot) {
+	if s == nil || conv == "" || snap.EstimatedRequestTokens <= 0 {
+		return
+	}
+	s.requestAccountingMu.Lock()
+	defer s.requestAccountingMu.Unlock()
+	if s.requestAccounting == nil {
+		s.requestAccounting = map[string]requestAccountingSnapshot{}
+	}
+	s.requestAccounting[conv] = snap
+}
+
+func (s *Server) latestRequestAccounting(conv string) (requestAccountingSnapshot, bool) {
+	if s == nil || conv == "" {
+		return requestAccountingSnapshot{}, false
+	}
+	s.requestAccountingMu.Lock()
+	defer s.requestAccountingMu.Unlock()
+	snap, ok := s.requestAccounting[conv]
+	return snap, ok
 }
 
 // SetContextLoader wires the project-context loader so the native tool-loop can
@@ -797,15 +833,16 @@ func NewServer(a *agent.Agent, router RouterCloudUpdater, coordinator *loop.ADKC
 		log.Printf("[failures] open log: %v", err)
 	}
 	s := &Server{
-		agent:         a,
-		events:        newEventHub(),
-		cfgSvc:        cfgService,
-		openModels:    openModelsResolver,
-		runtimesSvc:   rtSvc,
-		routingLog:    routeLog,
-		failureLog:    failureLog,
-		turnBroker:    broker.New(),
-		profileBroker: agent.NewProfileBroker(),
+		agent:             a,
+		events:            newEventHub(),
+		cfgSvc:            cfgService,
+		openModels:        openModelsResolver,
+		runtimesSvc:       rtSvc,
+		routingLog:        routeLog,
+		failureLog:        failureLog,
+		requestAccounting: map[string]requestAccountingSnapshot{},
+		turnBroker:        broker.New(),
+		profileBroker:     agent.NewProfileBroker(),
 	}
 	s.providerSvc = providers.New(cfgService, openModelsResolver, router, coordinator, cloudFactory, registry, nil)
 	s.providerSvc.SetRoutingLog(routeLog)
@@ -1727,9 +1764,34 @@ func (s *Server) InvokeTool(ctx context.Context, req *proto.InvokeToolRequest) (
 	return resp, nil
 }
 
-// GetContextUsage implements proto.AgentServer — delegates to persistSvc.
+// GetContextUsage implements proto.AgentServer. The persistence service owns
+// send-view/raw accounting; the front door overlays the latest live tool-loop
+// request estimate because only the loop sees the exact system prompt, advertised
+// tool schemas, and output reserve for the provider request.
 func (s *Server) GetContextUsage(ctx context.Context, req *proto.GetContextUsageRequest) (*proto.GetContextUsageResponse, error) {
-	return s.persistSvc.GetContextUsage(ctx, req)
+	resp, err := s.persistSvc.GetContextUsage(ctx, req)
+	if err != nil || resp == nil {
+		return resp, err
+	}
+	if snap, ok := s.latestRequestAccounting(req.GetConversationId()); ok {
+		resp.MessageTokens = int32(snap.MessageTokens)
+		resp.SystemTokens = int32(snap.SystemTokens)
+		resp.ToolSchemaTokens = int32(snap.ToolSchemaTokens)
+		resp.OutputReserveTokens = int32(snap.OutputReserveTokens)
+		resp.EstimatedRequestTokens = int32(snap.EstimatedRequestTokens)
+		if snap.ContextWindow > 0 {
+			resp.ModelMax = int32(snap.ContextWindow)
+		}
+		resp.ContextWindowKnown = snap.ContextWindowKnown
+		if resp.ModelMax > 0 {
+			pct := float64(snap.EstimatedRequestTokens) / float64(resp.ModelMax)
+			if pct > 1 {
+				pct = 1
+			}
+			resp.Percent = pct
+		}
+	}
+	return resp, nil
 }
 
 // SuggestNextPrompt implements proto.AgentServer — delegates to persistSvc.
@@ -2769,7 +2831,7 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 
 	// brokerSink publishes runner events to the turn broker so all subscribers
 	// (including this initiator) receive them via Attach channels.
-	sink := &brokerSink{broker: s.turnBroker, conv: convID, gen: turnGen}
+	sink := &brokerSink{server: s, broker: s.turnBroker, conv: convID, gen: turnGen}
 
 	runReq := runnersvc.Request{
 		ConversationID: req.GetConversationId(),
@@ -2969,6 +3031,7 @@ func (s *Server) workerPostTurn(convID string, res runnersvc.Result) {
 // (including the turn initiator, attached via Attach) receive the event on
 // their channels.
 type brokerSink struct {
+	server *Server
 	broker *broker.Broker
 	conv   string
 	gen    uint64
@@ -2976,6 +3039,21 @@ type brokerSink struct {
 
 func (s *brokerSink) Emit(ev runnersvc.Event) {
 	s.broker.Publish(s.conv, s.gen, ev)
+}
+
+func (s *brokerSink) RecordRequestAccounting(acct runnersvc.RequestAccounting) {
+	if s.server == nil {
+		return
+	}
+	s.server.recordRequestAccounting(s.conv, requestAccountingSnapshot{
+		MessageTokens:          acct.MessageTokens,
+		SystemTokens:           acct.SystemTokens,
+		ToolSchemaTokens:       acct.ToolSchemaTokens,
+		OutputReserveTokens:    acct.OutputReserveTokens,
+		EstimatedRequestTokens: acct.EstimatedRequestTokens,
+		ContextWindow:          acct.ContextWindow,
+		ContextWindowKnown:     acct.ContextWindowKnown,
+	})
 }
 
 // streamResponseSender is the minimal interface required by sendRunnerEvent so

@@ -22,17 +22,32 @@ type Tokenizer interface {
 	Count(s string) int
 }
 
+// ModelWindow reports the context-window size selected for a model plus whether
+// the value came from known model metadata. Unknown models still get an
+// operational default so callers can keep working, but UIs should label that
+// denominator as estimated/defaulted rather than known provider capacity.
+type ModelWindow struct {
+	Tokens int
+	Known  bool
+}
+
+// ModelWindowFor returns the conventional max context-window size for the given
+// model name and whether the value is known. Names are matched
+// case-insensitively against substrings, so "qwen3-coder:latest" matches
+// "qwen3-coder". Unknown models default to 128 000 with Known=false.
+func ModelWindowFor(model string) ModelWindow {
+	if max, ok := KnownModelMax(model); ok {
+		return ModelWindow{Tokens: max, Known: true}
+	}
+	return ModelWindow{Tokens: 128_000, Known: false}
+}
+
 // modelMax returns the conventional max context-window size for the given
 // model name. Used as the denominator of the % display in the CLI.
 //
 // Names are matched case-insensitively against substrings, so
 // "qwen3-coder:latest" matches "qwen3-coder". Default is 128 000.
-func ModelMax(model string) int {
-	if max, ok := KnownModelMax(model); ok {
-		return max
-	}
-	return 128_000
-}
+func ModelMax(model string) int { return ModelWindowFor(model).Tokens }
 
 // KnownModelMax returns a context-window size only when the model name matches
 // a known family. The boolean lets routing policy distinguish a deliberate

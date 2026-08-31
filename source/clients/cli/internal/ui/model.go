@@ -143,6 +143,12 @@ type Model struct {
 	tokIn, tokOut           int
 	cumIn, cumOut           int
 	ctxRaw                  int
+	ctxMessageTokens        int
+	ctxSystemTokens         int
+	ctxToolSchemaTokens     int
+	ctxOutputReserveTokens  int
+	ctxEstimatedRequest     int
+	ctxWindowKnown          bool
 	compacting              bool
 	ctxPollTicks            int
 	ctxPolling              bool      // a ctxUsageTick loop is currently running (avoid double-scheduling)
@@ -733,10 +739,16 @@ type streamEndMsg struct{ gen int }
 
 // ctxUsageMsg carries the result of an asynchronous GetContextUsage call.
 type ctxUsageMsg struct {
-	Used, Max  int
-	Percent    float64
-	Raw        int
-	Compacting bool
+	Used, Max              int
+	Percent                float64
+	Raw                    int
+	MessageTokens          int
+	SystemTokens           int
+	ToolSchemaTokens       int
+	OutputReserveTokens    int
+	EstimatedRequestTokens int
+	ContextWindowKnown     bool
+	Compacting             bool
 }
 
 // fetchContextUsage produces a tea.Cmd that asks the agent for the live
@@ -750,8 +762,17 @@ func fetchContextUsage(ag *agentclient.Client, convID string) tea.Cmd {
 			return ctxUsageMsg{}
 		}
 		return ctxUsageMsg{
-			Used: u.TokensUsed, Max: u.ModelMax, Percent: u.Percent,
-			Raw: u.RawTokens, Compacting: u.Compacting,
+			Used:                   u.TokensUsed,
+			Max:                    u.ModelMax,
+			Percent:                u.Percent,
+			Raw:                    u.RawTokens,
+			MessageTokens:          u.MessageTokens,
+			SystemTokens:           u.SystemTokens,
+			ToolSchemaTokens:       u.ToolSchemaTokens,
+			OutputReserveTokens:    u.OutputReserveTokens,
+			EstimatedRequestTokens: u.EstimatedRequestTokens,
+			ContextWindowKnown:     u.ContextWindowKnown,
+			Compacting:             u.Compacting,
 		}
 	}
 }
@@ -1843,6 +1864,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.modelMaxTokens = msg.Max
 		}
 		m.ctxRaw = msg.Raw
+		m.ctxMessageTokens = msg.MessageTokens
+		m.ctxSystemTokens = msg.SystemTokens
+		m.ctxToolSchemaTokens = msg.ToolSchemaTokens
+		m.ctxOutputReserveTokens = msg.OutputReserveTokens
+		m.ctxEstimatedRequest = msg.EstimatedRequestTokens
+		m.ctxWindowKnown = msg.ContextWindowKnown
 		m.compacting = msg.Compacting
 		// Kick the per-frame animation loop whenever compacting is reported
 		// and no tick is in flight — not just on the false→true edge. The
@@ -5635,7 +5662,10 @@ func (m Model) renderContextMeter() string {
 	// cumIn now carries the agent-reported cumulative used (set by
 	// ctxUsageMsg) rather than per-turn input. Fall back to cumIn+cumOut
 	// before the first usage RPC has returned.
-	used := m.cumIn
+	used := m.ctxEstimatedRequest
+	if used == 0 {
+		used = m.cumIn
+	}
 	if used == 0 {
 		used = m.cumIn + m.cumOut
 	}
@@ -5674,9 +5704,19 @@ func (m Model) renderContextMeter() string {
 	// pass `used` drops live, so the percentage grows in real time alongside
 	// the overlaid "compacting…" label on the bar above.
 	badge := ""
-	if m.ctxRaw > used && used > 0 {
-		saved := int(100 * (1 - float64(used)/float64(m.ctxRaw)))
+	messageUsed := m.ctxMessageTokens
+	if messageUsed == 0 {
+		messageUsed = m.cumIn
+	}
+	if m.ctxRaw > messageUsed && messageUsed > 0 {
+		saved := int(100 * (1 - float64(messageUsed)/float64(m.ctxRaw)))
 		badge = m.statusDivider() + m.styles.Muted.Render(fmt.Sprintf("▣ %d%%↓", saved))
+	}
+	if m.ctxEstimatedRequest > 0 {
+		badge += m.statusDivider() + m.styles.Muted.Render(fmt.Sprintf("msg %s", formatTokens(messageUsed)))
+	}
+	if m.modelMaxTokens > 0 && !m.ctxWindowKnown {
+		badge += m.statusDivider() + m.styles.Muted.Render("window est")
 	}
 	return strings.Join([]string{
 		m.styles.Muted.Render("ctx "),

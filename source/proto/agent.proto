@@ -852,6 +852,17 @@ message GetContextUsageResponse {
   double percent     = 3;
   int32  raw_tokens  = 4; // the uncompacted size
   bool   compacting  = 5; // a compaction pass is currently running
+
+  // Full estimated provider request accounting. These fields are additive and
+  // estimated: provider tokenizers/wire formats may differ, but this is the
+  // budget the UI should use when available because it includes request
+  // overhead beyond compacted conversation messages.
+  int32 message_tokens            = 6;
+  int32 system_tokens             = 7;
+  int32 tool_schema_tokens        = 8;
+  int32 output_reserve_tokens     = 9;
+  int32 estimated_request_tokens  = 10;
+  bool  context_window_known      = 11;
 }
 
 message SuggestNextPromptRequest  { string conversation_id = 1; }

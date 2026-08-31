@@ -4,6 +4,8 @@
 package requestassembly
 
 import (
+	"encoding/json"
+
 	"cercano/source/server/internal/compaction"
 	"cercano/source/server/internal/compactor"
 	"cercano/source/server/internal/contextmeter"
@@ -16,28 +18,35 @@ import (
 // assembled for. ContextWindow overrides the model-name lookup when the caller
 // knows the runtime window that will actually be served.
 type Target struct {
-	RouteLabel    string
-	Provider      string
-	Model         string
-	Tier          string
-	ContextWindow int
-	TightContext  bool
+	RouteLabel         string
+	Provider           string
+	Model              string
+	Tier               string
+	ContextWindow      int
+	ContextWindowKnown bool
+	TightContext       bool
 }
 
 // Accounting describes how the raw persisted turns became the final send view.
 // Counts use ProviderTotalTokens because this is provider-facing accounting, not
 // raw storage pressure.
 type Accounting struct {
-	RawTokens       int
-	Window          int
-	HardLimit       int
-	InitialTokens   int
-	AfterHardElide  int
-	AfterKeepLast   int
-	FinalTokens     int
-	DroppedMessages int
-	Scheduled       bool
-	Truncated       bool
+	RawTokens              int
+	Window                 int
+	WindowKnown            bool
+	HardLimit              int
+	InitialTokens          int
+	AfterHardElide         int
+	AfterKeepLast          int
+	FinalTokens            int
+	MessageTokens          int
+	SystemTokens           int
+	ToolSchemaTokens       int
+	OutputReserveTokens    int
+	EstimatedRequestTokens int
+	DroppedMessages        int
+	Scheduled              bool
+	Truncated              bool
 }
 
 // Result is the assembled send view plus its accounting.
@@ -63,10 +72,65 @@ func EstimateRawTokens(turns []conversation.Turn) int {
 // WindowFor returns target.ContextWindow when set, otherwise the conventional
 // context window for target.Model.
 func WindowFor(target Target) int {
+	window, _ := WindowForTarget(target)
+	return window
+}
+
+// WindowForTarget returns the context window for target plus whether that value
+// came from known metadata or an explicit concrete target window.
+func WindowForTarget(target Target) (int, bool) {
 	if target.ContextWindow > 0 {
-		return target.ContextWindow
+		return target.ContextWindow, target.ContextWindowKnown
 	}
-	return contextmeter.ModelMax(target.Model)
+	mw := contextmeter.ModelWindowFor(target.Model)
+	return mw.Tokens, mw.Known
+}
+
+// RequestEstimateInput carries provider-agnostic request components available
+// before a provider call.
+type RequestEstimateInput struct {
+	Messages      []llm.Message
+	System        string
+	Tools         []llm.Tool
+	OutputReserve int
+}
+
+// EstimateFullRequest fills full-request accounting fields on acct using the
+// same tokenizer family as send-view assembly. Counts are estimates: provider
+// tokenizers and wire formats can differ.
+func EstimateFullRequest(acct Accounting, in RequestEstimateInput, tok contextmeter.Tokenizer) Accounting {
+	if tok == nil {
+		tok = contextmeter.Default()
+	}
+	acct.MessageTokens = acct.FinalTokens
+	if acct.MessageTokens == 0 && len(in.Messages) > 0 {
+		acct.MessageTokens = compaction.ProviderTotalTokens(tok, in.Messages)
+	}
+	acct.SystemTokens = tok.Count(in.System)
+	acct.ToolSchemaTokens = EstimateToolSchemaTokens(tok, in.Tools)
+	acct.OutputReserveTokens = in.OutputReserve
+	acct.EstimatedRequestTokens = acct.MessageTokens + acct.SystemTokens + acct.ToolSchemaTokens + acct.OutputReserveTokens
+	return acct
+}
+
+// EstimateToolSchemaTokens estimates the token cost of the advertised native
+// tool schemas without logging or exposing the schema bodies themselves.
+func EstimateToolSchemaTokens(tok contextmeter.Tokenizer, tools []llm.Tool) int {
+	if len(tools) == 0 {
+		return 0
+	}
+	if tok == nil {
+		tok = contextmeter.Default()
+	}
+	b, err := json.Marshal(tools)
+	if err != nil {
+		total := 0
+		for _, tool := range tools {
+			total += tok.Count(tool.Name) + tok.Count(tool.Description) + tok.Count(string(tool.Schema))
+		}
+		return total
+	}
+	return tok.Count(string(b))
 }
 
 // Assemble builds the provider-facing send view for target.
@@ -74,7 +138,8 @@ func Assemble(turns []conversation.Turn, state conversation.Compaction, cfg conf
 	if tok == nil {
 		tok = contextmeter.Default()
 	}
-	acct := Accounting{RawTokens: EstimateRawTokens(turns), Window: WindowFor(target)}
+	window, windowKnown := WindowForTarget(target)
+	acct := Accounting{RawTokens: EstimateRawTokens(turns), Window: window, WindowKnown: windowKnown}
 	if floor > 0 {
 		turns, _ = compactor.StubToolResultsThrough(turns, floor)
 	}
@@ -113,5 +178,7 @@ func Assemble(turns []conversation.Turn, state conversation.Compaction, cfg conf
 	}
 	view = llm.RepairPairing(view)
 	acct.FinalTokens = compaction.ProviderTotalTokens(tok, view)
+	acct.MessageTokens = acct.FinalTokens
+	acct.EstimatedRequestTokens = acct.MessageTokens
 	return Result{Messages: view, Accounting: acct}
 }

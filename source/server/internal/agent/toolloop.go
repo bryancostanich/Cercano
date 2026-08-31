@@ -25,7 +25,11 @@ const (
 	// LoopNotice carries a resilience-engine narration line ("anthropic quota
 	// reached — switching to openai") in Summary. Display-only: it reaches the
 	// user via the progress channel and is never part of the transcript.
-	LoopNotice             LoopEventKind = "notice"
+	LoopNotice LoopEventKind = "notice"
+	// LoopRequestAccounting carries safe numeric request-budget estimates for the
+	// provider call about to be made. It intentionally excludes prompt text, tool
+	// args, API keys, and response bodies.
+	LoopRequestAccounting  LoopEventKind = "request_accounting"
 	LoopPermissionRequired LoopEventKind = "permission_required"
 	LoopWatchdogChallenge  LoopEventKind = "watchdog_challenge"
 	LoopWatchdogEscalate   LoopEventKind = "watchdog_escalate"
@@ -56,6 +60,14 @@ type LoopEvent struct {
 	SubAgentKind     string
 	GrantedTools     []string
 	IgnoredTools     []string
+
+	MessageTokens          int
+	SystemTokens           int
+	ToolSchemaTokens       int
+	OutputReserveTokens    int
+	EstimatedRequestTokens int
+	ContextWindow          int
+	ContextWindowKnown     bool
 }
 
 func loopProgressEvent(defaultToolUseID, defaultToolName string, progress agenttools.ProgressEvent) LoopEvent {
@@ -163,6 +175,10 @@ type ToolLoopInput struct {
 	// could not resolve a window, so the provider's own overflow error stays the
 	// only backstop.
 	ContextWindow int
+
+	// ContextWindowKnown is true when ContextWindow came from known model metadata
+	// or an explicit runtime target rather than a conservative default.
+	ContextWindowKnown bool
 
 	// TightContextFallback marks a retry into a smaller context after the primary
 	// route overflowed. The loop may use more conservative catalog/history policy
@@ -530,6 +546,16 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 			log.Printf("[tool-loop] context budget overflow before provider call: conv=%s provider=%s model=%s iter=%d estimated_tokens=%d tool_tokens=%d output_reserve=%d limit=%d budget=%d messages=%d tools=%d", in.ConversationID, in.Provider.Name(), in.Model, iter+1, budget.EstimatedUsed, budget.ToolTokens, budget.OutputReserve, budget.Limit, budget.PromptBudget, len(hist), len(catalog))
 			return ToolLoopResult{Iterations: iter + 1, History: hist, InputTokens: lastIn, OutputTokens: lastOut, LastRequestBudget: budget}, budget.OverflowError()
 		}
+		emit(LoopEvent{
+			Kind:                   LoopRequestAccounting,
+			MessageTokens:          budget.MessageTokens,
+			SystemTokens:           budget.SystemTokens,
+			ToolSchemaTokens:       budget.ToolTokens,
+			OutputReserveTokens:    budget.OutputReserve,
+			EstimatedRequestTokens: budget.EstimatedUsed,
+			ContextWindow:          budget.Limit,
+			ContextWindowKnown:     in.ContextWindowKnown,
+		})
 
 		req := llm.ChatRequest{
 			Model:          in.Model,
@@ -542,8 +568,8 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 			ConversationID: in.ConversationID,
 			RequestID:      fmt.Sprintf("%s:%d", in.ConversationID, iter+1),
 		}
-		log.Printf("[tool-loop] model request: conv=%s provider=%s model=%s iter=%d stream=true temp=%s max_tokens=%d tools=%v lean_subagent_prompt=%t flatten_tool_results=%t system_prefix=%q user_prefix=%q history=%d",
-			in.ConversationID, in.Provider.Name(), in.Model, iter+1, temperatureForLog(req.Temperature), req.MaxTokens, toolNamesForLog(req.Tools), systemHasLeanSubagentMarker(req.System), in.FlattenToolResults, truncateRunes(strings.TrimSpace(req.System), 120), truncateRunes(strings.TrimSpace(in.UserInput), 120), len(req.Messages))
+		log.Printf("[tool-loop] model request: conv=%s provider=%s model=%s iter=%d stream=true temp=%s max_tokens=%d tools=%v lean_subagent_prompt=%t flatten_tool_results=%t system_prefix=%q user_prefix=%q history=%d message_tokens=%d system_tokens=%d tool_schema_tokens=%d output_reserve_tokens=%d estimated_request_tokens=%d context_window=%d context_window_known=%t prompt_budget=%d",
+			in.ConversationID, in.Provider.Name(), in.Model, iter+1, temperatureForLog(req.Temperature), req.MaxTokens, toolNamesForLog(req.Tools), systemHasLeanSubagentMarker(req.System), in.FlattenToolResults, truncateRunes(strings.TrimSpace(req.System), 120), truncateRunes(strings.TrimSpace(in.UserInput), 120), len(req.Messages), budget.MessageTokens, budget.SystemTokens, budget.ToolTokens, budget.OutputReserve, budget.EstimatedUsed, budget.Limit, in.ContextWindowKnown, budget.PromptBudget)
 		rdr, err := in.Provider.StreamChat(ctx, req)
 		if err != nil {
 			return ToolLoopResult{Iterations: iter + 1, History: hist, InputTokens: lastIn, OutputTokens: lastOut, LastRequestBudget: budget}, err

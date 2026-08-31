@@ -4988,14 +4988,24 @@ func (x *GetContextUsageRequest) GetConversationId() string {
 }
 
 type GetContextUsageResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	TokensUsed    int32                  `protobuf:"varint,1,opt,name=tokens_used,json=tokensUsed,proto3" json:"tokens_used,omitempty"` // the SENT (compacted) size
-	ModelMax      int32                  `protobuf:"varint,2,opt,name=model_max,json=modelMax,proto3" json:"model_max,omitempty"`
-	Percent       float64                `protobuf:"fixed64,3,opt,name=percent,proto3" json:"percent,omitempty"`
-	RawTokens     int32                  `protobuf:"varint,4,opt,name=raw_tokens,json=rawTokens,proto3" json:"raw_tokens,omitempty"` // the uncompacted size
-	Compacting    bool                   `protobuf:"varint,5,opt,name=compacting,proto3" json:"compacting,omitempty"`                // a compaction pass is currently running
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	TokensUsed int32                  `protobuf:"varint,1,opt,name=tokens_used,json=tokensUsed,proto3" json:"tokens_used,omitempty"` // the SENT (compacted) size
+	ModelMax   int32                  `protobuf:"varint,2,opt,name=model_max,json=modelMax,proto3" json:"model_max,omitempty"`
+	Percent    float64                `protobuf:"fixed64,3,opt,name=percent,proto3" json:"percent,omitempty"`
+	RawTokens  int32                  `protobuf:"varint,4,opt,name=raw_tokens,json=rawTokens,proto3" json:"raw_tokens,omitempty"` // the uncompacted size
+	Compacting bool                   `protobuf:"varint,5,opt,name=compacting,proto3" json:"compacting,omitempty"`                // a compaction pass is currently running
+	// Full estimated provider request accounting. These fields are additive and
+	// estimated: provider tokenizers/wire formats may differ, but this is the
+	// budget the UI should use when available because it includes request
+	// overhead beyond compacted conversation messages.
+	MessageTokens          int32 `protobuf:"varint,6,opt,name=message_tokens,json=messageTokens,proto3" json:"message_tokens,omitempty"`
+	SystemTokens           int32 `protobuf:"varint,7,opt,name=system_tokens,json=systemTokens,proto3" json:"system_tokens,omitempty"`
+	ToolSchemaTokens       int32 `protobuf:"varint,8,opt,name=tool_schema_tokens,json=toolSchemaTokens,proto3" json:"tool_schema_tokens,omitempty"`
+	OutputReserveTokens    int32 `protobuf:"varint,9,opt,name=output_reserve_tokens,json=outputReserveTokens,proto3" json:"output_reserve_tokens,omitempty"`
+	EstimatedRequestTokens int32 `protobuf:"varint,10,opt,name=estimated_request_tokens,json=estimatedRequestTokens,proto3" json:"estimated_request_tokens,omitempty"`
+	ContextWindowKnown     bool  `protobuf:"varint,11,opt,name=context_window_known,json=contextWindowKnown,proto3" json:"context_window_known,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *GetContextUsageResponse) Reset() {
@@ -5059,6 +5069,48 @@ func (x *GetContextUsageResponse) GetRawTokens() int32 {
 func (x *GetContextUsageResponse) GetCompacting() bool {
 	if x != nil {
 		return x.Compacting
+	}
+	return false
+}
+
+func (x *GetContextUsageResponse) GetMessageTokens() int32 {
+	if x != nil {
+		return x.MessageTokens
+	}
+	return 0
+}
+
+func (x *GetContextUsageResponse) GetSystemTokens() int32 {
+	if x != nil {
+		return x.SystemTokens
+	}
+	return 0
+}
+
+func (x *GetContextUsageResponse) GetToolSchemaTokens() int32 {
+	if x != nil {
+		return x.ToolSchemaTokens
+	}
+	return 0
+}
+
+func (x *GetContextUsageResponse) GetOutputReserveTokens() int32 {
+	if x != nil {
+		return x.OutputReserveTokens
+	}
+	return 0
+}
+
+func (x *GetContextUsageResponse) GetEstimatedRequestTokens() int32 {
+	if x != nil {
+		return x.EstimatedRequestTokens
+	}
+	return 0
+}
+
+func (x *GetContextUsageResponse) GetContextWindowKnown() bool {
+	if x != nil {
+		return x.ContextWindowKnown
 	}
 	return false
 }
@@ -14142,7 +14194,7 @@ const file_agent_proto_rawDesc = "" +
 	"\x05title\x18\x03 \x01(\tR\x05title\x12#\n" +
 	"\rgranted_tools\x18\x04 \x03(\tR\fgrantedTools\"A\n" +
 	"\x16GetContextUsageRequest\x12'\n" +
-	"\x0fconversation_id\x18\x01 \x01(\tR\x0econversationId\"\xb0\x01\n" +
+	"\x0fconversation_id\x18\x01 \x01(\tR\x0econversationId\"\xca\x03\n" +
 	"\x17GetContextUsageResponse\x12\x1f\n" +
 	"\vtokens_used\x18\x01 \x01(\x05R\n" +
 	"tokensUsed\x12\x1b\n" +
@@ -14152,7 +14204,14 @@ const file_agent_proto_rawDesc = "" +
 	"raw_tokens\x18\x04 \x01(\x05R\trawTokens\x12\x1e\n" +
 	"\n" +
 	"compacting\x18\x05 \x01(\bR\n" +
-	"compacting\"C\n" +
+	"compacting\x12%\n" +
+	"\x0emessage_tokens\x18\x06 \x01(\x05R\rmessageTokens\x12#\n" +
+	"\rsystem_tokens\x18\a \x01(\x05R\fsystemTokens\x12,\n" +
+	"\x12tool_schema_tokens\x18\b \x01(\x05R\x10toolSchemaTokens\x122\n" +
+	"\x15output_reserve_tokens\x18\t \x01(\x05R\x13outputReserveTokens\x128\n" +
+	"\x18estimated_request_tokens\x18\n" +
+	" \x01(\x05R\x16estimatedRequestTokens\x120\n" +
+	"\x14context_window_known\x18\v \x01(\bR\x12contextWindowKnown\"C\n" +
 	"\x18SuggestNextPromptRequest\x12'\n" +
 	"\x0fconversation_id\x18\x01 \x01(\tR\x0econversationId\";\n" +
 	"\x19SuggestNextPromptResponse\x12\x1e\n" +

@@ -34,6 +34,41 @@ func TestContextView_RendersTurnsAndTotal(t *testing.T) {
 	}
 }
 
+func TestContextView_HeaderShowsEstimatedRequestAccounting(t *testing.T) {
+	cv := newTestContextView(contextSnapshot{
+		Usage: &agentclient.ContextUsage{
+			TokensUsed:             95000,
+			ModelMax:               128000,
+			RawTokens:              400000,
+			MessageTokens:          95000,
+			SystemTokens:           3000,
+			ToolSchemaTokens:       12000,
+			OutputReserveTokens:    4096,
+			EstimatedRequestTokens: 114096,
+			ContextWindowKnown:     false,
+		},
+	})
+	out := stripAnsiCSI(cv.renderHeader())
+	for _, want := range []string{"context est", "114,096", "128,000", "95,000 messages", "3,000 system", "12,000 tools", "4,096 output", "window estimated"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("header missing %q\n%s", want, out)
+		}
+	}
+}
+
+func TestContextView_HeaderKeepsLegacyUsageFallback(t *testing.T) {
+	cv := newTestContextView(contextSnapshot{
+		Usage: &agentclient.ContextUsage{TokensUsed: 4321, ModelMax: 200000, Percent: 0.0216, ContextWindowKnown: true},
+	})
+	out := stripAnsiCSI(cv.renderHeader())
+	if !strings.Contains(out, "context") || !strings.Contains(out, "4,321") || !strings.Contains(out, "200,000") {
+		t.Fatalf("legacy header missing usage fields\n%s", out)
+	}
+	if strings.Contains(out, "context est") || strings.Contains(out, "messages") || strings.Contains(out, "window estimated") {
+		t.Fatalf("legacy header should not show estimated accounting labels\n%s", out)
+	}
+}
+
 func TestContextView_EmptyAndNoConversation(t *testing.T) {
 	if got := newTestContextView(contextSnapshot{}).View(); !strings.Contains(got, "context is empty") {
 		t.Errorf("empty state: %q", got)

@@ -475,11 +475,36 @@ func (c *contextView) renderHeader() string {
 		return c.styles.Muted.Render("context  usage unavailable")
 	}
 	u := c.snapshot.Usage
-	pct := int(u.Percent*100 + 0.5)
-	bar := renderMeterBar(u.Percent, 10, c.styles)
+	used := u.EstimatedRequestTokens
+	if used == 0 {
+		used = u.TokensUsed
+	}
+	denom := u.ModelMax
+	percent := u.Percent
+	if denom > 0 {
+		percent = float64(used) / float64(denom)
+		if percent > 1 {
+			percent = 1
+		}
+	}
+	pct := int(percent*100 + 0.5)
+	bar := renderMeterBar(percent, 10, c.styles)
+	label := "context"
+	if u.EstimatedRequestTokens > 0 {
+		label = "context est"
+	}
 	head := fmt.Sprintf("%s  %s / %s  · %d%%  %s",
-		c.styles.Bright.Render("context"),
-		formatThousands(u.TokensUsed), formatThousands(u.ModelMax), pct, bar)
+		c.styles.Bright.Render(label),
+		formatThousands(used), formatThousands(u.ModelMax), pct, bar)
+	if u.EstimatedRequestTokens > 0 {
+		head += c.styles.Muted.Render(fmt.Sprintf("  ·  %s messages", formatThousands(u.MessageTokens)))
+		if u.SystemTokens > 0 || u.ToolSchemaTokens > 0 || u.OutputReserveTokens > 0 {
+			head += c.styles.Muted.Render(fmt.Sprintf(" · %s system · %s tools · %s output", formatThousands(u.SystemTokens), formatThousands(u.ToolSchemaTokens), formatThousands(u.OutputReserveTokens)))
+		}
+	}
+	if u.ModelMax > 0 && !u.ContextWindowKnown {
+		head += c.styles.Muted.Render("  ·  window estimated")
+	}
 
 	cs := c.snapshot.Compaction
 	if cs != nil && cs.FrozenTurns > 0 {

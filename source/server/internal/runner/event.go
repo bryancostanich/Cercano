@@ -83,6 +83,25 @@ type Event struct {
 	Notice string
 }
 
+// RequestAccounting carries safe numeric provider-request budget estimates.
+// It is not a runner.Event because it is internal meter state, not transcript or
+// stream output. Sinks that care can opt in via RequestAccountingSink.
+type RequestAccounting struct {
+	MessageTokens          int
+	SystemTokens           int
+	ToolSchemaTokens       int
+	OutputReserveTokens    int
+	EstimatedRequestTokens int
+	ContextWindow          int
+	ContextWindowKnown     bool
+}
+
+// RequestAccountingSink is an optional side-channel implemented by hosts that
+// want to cache request accounting for diagnostics/UI meters.
+type RequestAccountingSink interface {
+	RecordRequestAccounting(RequestAccounting)
+}
+
 // EventSink receives runner events as the turn runs. The in-process host
 // implements it by mapping each Event to stream.Send(proto...); a worker
 // serializes them over its bidi stream.

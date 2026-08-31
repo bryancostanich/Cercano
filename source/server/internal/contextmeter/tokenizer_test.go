@@ -52,6 +52,18 @@ func TestKnownModelMaxDistinguishesDefaultFallback(t *testing.T) {
 	}
 }
 
+func TestModelWindowForReportsCertainty(t *testing.T) {
+	claude := ModelWindowFor("claude-sonnet-4-6")
+	if !claude.Known || claude.Tokens != 200_000 {
+		t.Fatalf("ModelWindowFor claude = %+v, want 200000 known", claude)
+	}
+
+	unknownOpenAI := ModelWindowFor("gpt-5.5")
+	if unknownOpenAI.Known || unknownOpenAI.Tokens != 128_000 {
+		t.Fatalf("ModelWindowFor gpt-5.5 = %+v, want 128000 defaulted/unknown", unknownOpenAI)
+	}
+}
+
 func TestCounter_AddAndUsed(t *testing.T) {
 	c := NewCounter(Default(), 1000)
 	c.Add("hello world")

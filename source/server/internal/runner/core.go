@@ -135,40 +135,49 @@ func (c *Core) knownContextWindowFor(isCloud bool, model string) (int, bool) {
 		window := contextmeter.LocalRuntimeWindow(c.d.Config.Get(), model)
 		return window, window > 0
 	}
-	return contextmeter.KnownModelMax(model)
+	mw := contextmeter.ModelWindowFor(model)
+	return mw.Tokens, mw.Known
 }
 
 func (c *Core) assembleAttemptHistory(ctx context.Context, req Request, attempt string, provider inference.Provider, model string, isCloud bool, tightContext bool) ([]llm.Message, requestassembly.Accounting) {
 	if c.d.Persist == nil || req.ConversationID == "" {
 		return nil, requestassembly.Accounting{}
 	}
+	contextWindow, contextWindowKnown := c.knownContextWindowFor(isCloud, model)
 	target := requestassembly.Target{
-		RouteLabel:    attempt,
-		Provider:      providerName(provider),
-		Model:         model,
-		ContextWindow: c.contextWindowFor(isCloud, model),
-		TightContext:  tightContext,
+		RouteLabel:         attempt,
+		Provider:           providerName(provider),
+		Model:              model,
+		ContextWindow:      contextWindow,
+		ContextWindowKnown: contextWindowKnown,
+		TightContext:       tightContext,
 	}
 	if h, ok := c.d.Persist.(targetHistory); ok {
 		assembled := h.AssembleHistoryForTarget(ctx, req.ConversationID, target)
 		acct := assembled.Accounting
 		c.logRoute("context.assembled", routinglog.Event{
-			"conversation_id":   req.ConversationID,
-			"attempt":           attempt,
-			"provider":          target.Provider,
-			"model":             target.Model,
-			"is_cloud":          isCloud,
-			"context_window":    acct.Window,
-			"hard_limit":        acct.HardLimit,
-			"raw_tokens":        acct.RawTokens,
-			"initial_tokens":    acct.InitialTokens,
-			"after_hard_elide":  acct.AfterHardElide,
-			"after_keep_last":   acct.AfterKeepLast,
-			"final_tokens":      acct.FinalTokens,
-			"dropped_messages":  acct.DroppedMessages,
-			"scheduled_compact": acct.Scheduled,
-			"truncated":         acct.Truncated,
-			"tight_context":     tightContext,
+			"conversation_id":          req.ConversationID,
+			"attempt":                  attempt,
+			"provider":                 target.Provider,
+			"model":                    target.Model,
+			"is_cloud":                 isCloud,
+			"context_window":           acct.Window,
+			"context_window_known":     acct.WindowKnown,
+			"hard_limit":               acct.HardLimit,
+			"raw_tokens":               acct.RawTokens,
+			"initial_tokens":           acct.InitialTokens,
+			"after_hard_elide":         acct.AfterHardElide,
+			"after_keep_last":          acct.AfterKeepLast,
+			"final_tokens":             acct.FinalTokens,
+			"message_tokens":           acct.MessageTokens,
+			"system_tokens":            acct.SystemTokens,
+			"tool_schema_tokens":       acct.ToolSchemaTokens,
+			"output_reserve_tokens":    acct.OutputReserveTokens,
+			"estimated_request_tokens": acct.EstimatedRequestTokens,
+			"dropped_messages":         acct.DroppedMessages,
+			"scheduled_compact":        acct.Scheduled,
+			"truncated":                acct.Truncated,
+			"tight_context":            tightContext,
 		})
 		return assembled.Messages, acct
 	}
@@ -593,10 +602,14 @@ func (c *Core) runLoop(
 ) (agent.ToolLoopResult, error) {
 	maxIterations := 0
 	contextWindow := 0
+	contextWindowKnown := false
 	if c.d.Config != nil {
 		cfgSnap := c.d.Config.Get()
 		maxIterations = cfgSnap.ToolLoop.MaxIterations
-		contextWindow = c.contextWindowFor(isCloud, model)
+		contextWindow, contextWindowKnown = c.knownContextWindowFor(isCloud, model)
+		if contextWindow == 0 {
+			contextWindow = c.contextWindowFor(isCloud, model)
+		}
 	}
 
 	return agent.RunToolLoop(ctx, agent.ToolLoopInput{
@@ -618,6 +631,7 @@ func (c *Core) runLoop(
 		OnTurnComplete:       onTurn,
 		MaxIterations:        maxIterations,
 		ContextWindow:        contextWindow,
+		ContextWindowKnown:   contextWindowKnown,
 		TightContextFallback: tightContextFallback,
 		WatchdogGate:         wdGate,
 		WatchdogTurnEnd:      wdTurnEnd,
@@ -727,6 +741,19 @@ func makeLoopSink(sink EventSink, failures *failurelog.Writer, conversationID st
 				break
 			}
 			sink.Emit(Event{Kind: EventProgress, Text: ev.Summary, ToolUseID: ev.ToolUseID, ToolName: ev.ToolName})
+
+		case agent.LoopRequestAccounting:
+			if rs, ok := sink.(RequestAccountingSink); ok {
+				rs.RecordRequestAccounting(RequestAccounting{
+					MessageTokens:          ev.MessageTokens,
+					SystemTokens:           ev.SystemTokens,
+					ToolSchemaTokens:       ev.ToolSchemaTokens,
+					OutputReserveTokens:    ev.OutputReserveTokens,
+					EstimatedRequestTokens: ev.EstimatedRequestTokens,
+					ContextWindow:          ev.ContextWindow,
+					ContextWindowKnown:     ev.ContextWindowKnown,
+				})
+			}
 
 		case agent.LoopNotice:
 			// Resilience-engine narration ("anthropic quota reached — switching

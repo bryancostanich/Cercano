@@ -677,11 +677,17 @@ func (c *Client) InvokeTool(ctx context.Context, name, argsJSON string) (*ToolRe
 // ContextUsage is the cumulative token usage for a conversation against the
 // active model's context-window size.
 type ContextUsage struct {
-	TokensUsed int
-	ModelMax   int
-	Percent    float64
-	RawTokens  int
-	Compacting bool
+	TokensUsed             int
+	ModelMax               int
+	Percent                float64
+	RawTokens              int
+	Compacting             bool
+	MessageTokens          int
+	SystemTokens           int
+	ToolSchemaTokens       int
+	OutputReserveTokens    int
+	EstimatedRequestTokens int
+	ContextWindowKnown     bool
 }
 
 // GetContextUsage fetches the live context-window meter for a conversation.
@@ -691,11 +697,17 @@ func (c *Client) GetContextUsage(ctx context.Context, conversationID string) (*C
 		return nil, err
 	}
 	return &ContextUsage{
-		TokensUsed: int(resp.GetTokensUsed()),
-		ModelMax:   int(resp.GetModelMax()),
-		Percent:    resp.GetPercent(),
-		RawTokens:  int(resp.GetRawTokens()),
-		Compacting: resp.GetCompacting(),
+		TokensUsed:             int(resp.GetTokensUsed()),
+		ModelMax:               int(resp.GetModelMax()),
+		Percent:                resp.GetPercent(),
+		RawTokens:              int(resp.GetRawTokens()),
+		Compacting:             resp.GetCompacting(),
+		MessageTokens:          int(resp.GetMessageTokens()),
+		SystemTokens:           int(resp.GetSystemTokens()),
+		ToolSchemaTokens:       int(resp.GetToolSchemaTokens()),
+		OutputReserveTokens:    int(resp.GetOutputReserveTokens()),
+		EstimatedRequestTokens: int(resp.GetEstimatedRequestTokens()),
+		ContextWindowKnown:     resp.GetContextWindowKnown(),
 	}, nil
 }
 

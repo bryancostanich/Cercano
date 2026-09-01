@@ -2549,7 +2549,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			keep = true
 		}
 		if contentRepaint {
-			m.refreshViewport()
+			m.refreshVisibleDynamicViewport()
 			m.lastAnimViewportRefresh = time.Time{}
 		} else if animRepaint {
 			// Animation-only frames are overlaid by chatView.View() on the visible
@@ -3261,6 +3261,30 @@ func (m *Model) refreshViewport() {
 		return
 	}
 	m.chatDirty = false // any full rebuild flushes pending coalesced repaints
+	m.syncMainTurnStatus()
+	m.activeChat().rebuild()
+}
+
+func (m *Model) refreshVisibleDynamicViewport() {
+	// Same strip-drift guard as refreshViewport: a visible-tab topology change is
+	// structural, so fall back to the full layout pass that recalculates bodyH and
+	// scrollbarTop. Ordinary token deltas keep the existing layout and repaint only
+	// visible dynamic units; this is the hot path while the model streams.
+	if want := m.hasSubAgentTabs() && !m.contentPageActive(); want != m.stripShown {
+		m.relayout()
+		return
+	}
+	m.chatDirty = false
+	m.syncMainTurnStatus()
+	chat := m.activeChat()
+	if chat.layout.totalLines == 0 && len(chat.entries) > 0 {
+		chat.rebuild()
+		return
+	}
+	chat.RefreshVisibleDynamicUnits()
+}
+
+func (m *Model) syncMainTurnStatus() {
 	m.mainChat().SetTurnStatus(turnStatus{
 		activity: m.turnActivity,
 		start:    m.turnStart,
@@ -3268,7 +3292,6 @@ func (m *Model) refreshViewport() {
 		model:    m.turnModel,
 		cloud:    m.turnCloud,
 	})
-	m.activeChat().rebuild()
 }
 
 func (m Model) preparePromptInput() Model {

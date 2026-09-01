@@ -1769,29 +1769,32 @@ func (s *Server) InvokeTool(ctx context.Context, req *proto.InvokeToolRequest) (
 // request estimate because only the loop sees the exact system prompt, advertised
 // tool schemas, and output reserve for the provider request.
 func (s *Server) GetContextUsage(ctx context.Context, req *proto.GetContextUsageRequest) (*proto.GetContextUsageResponse, error) {
-	resp, err := s.persistSvc.GetContextUsage(ctx, req)
-	if err != nil || resp == nil {
-		return resp, err
-	}
-	if snap, ok := s.latestRequestAccounting(req.GetConversationId()); ok {
-		resp.MessageTokens = int32(snap.MessageTokens)
-		resp.SystemTokens = int32(snap.SystemTokens)
-		resp.ToolSchemaTokens = int32(snap.ToolSchemaTokens)
-		resp.OutputReserveTokens = int32(snap.OutputReserveTokens)
-		resp.EstimatedRequestTokens = int32(snap.EstimatedRequestTokens)
+	// Prefer the latest live request accounting when available. It is already the
+	// provider-bound, post-compaction/post-elision view and avoids re-walking giant
+	// persisted tool-result transcripts on every footer poll.
+	if snap, ok := s.latestRequestAccounting(req.GetConversationId()); ok && snap.EstimatedRequestTokens > 0 {
+		resp := &proto.GetContextUsageResponse{
+			TokensUsed:             int32(snap.EstimatedRequestTokens),
+			RawTokens:              int32(snap.MessageTokens),
+			MessageTokens:          int32(snap.MessageTokens),
+			SystemTokens:           int32(snap.SystemTokens),
+			ToolSchemaTokens:       int32(snap.ToolSchemaTokens),
+			OutputReserveTokens:    int32(snap.OutputReserveTokens),
+			EstimatedRequestTokens: int32(snap.EstimatedRequestTokens),
+			ContextWindowKnown:     snap.ContextWindowKnown,
+		}
 		if snap.ContextWindow > 0 {
 			resp.ModelMax = int32(snap.ContextWindow)
-		}
-		resp.ContextWindowKnown = snap.ContextWindowKnown
-		if resp.ModelMax > 0 {
-			pct := float64(snap.EstimatedRequestTokens) / float64(resp.ModelMax)
+			pct := float64(snap.EstimatedRequestTokens) / float64(snap.ContextWindow)
 			if pct > 1 {
 				pct = 1
 			}
 			resp.Percent = pct
 		}
+		return resp, nil
 	}
-	return resp, nil
+
+	return s.persistSvc.GetContextUsage(ctx, req)
 }
 
 // SuggestNextPrompt implements proto.AgentServer — delegates to persistSvc.

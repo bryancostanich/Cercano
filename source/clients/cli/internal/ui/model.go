@@ -739,6 +739,7 @@ type streamEndMsg struct{ gen int }
 
 // ctxUsageMsg carries the result of an asynchronous GetContextUsage call.
 type ctxUsageMsg struct {
+	Err                    error
 	Used, Max              int
 	Percent                float64
 	Raw                    int
@@ -758,8 +759,11 @@ func fetchContextUsage(ag *agentclient.Client, convID string) tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		u, err := ag.GetContextUsage(ctx, convID)
-		if err != nil || u == nil {
-			return ctxUsageMsg{}
+		if err != nil {
+			return ctxUsageMsg{Err: err}
+		}
+		if u == nil {
+			return ctxUsageMsg{Err: context.Canceled}
 		}
 		return ctxUsageMsg{
 			Used:                   u.TokensUsed,
@@ -1856,7 +1860,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case ctxUsageMsg:
 		// Authoritative context-window meter from the agent; overrides
-		// our locally-summed cumIn approximation.
+		// our locally-summed cumIn approximation. If the poll fails, clear
+		// request-specific fields so the footer cannot keep showing a stale
+		// pre-elision estimate from an earlier accounting path.
+		if msg.Err != nil {
+			m.ctxRaw = 0
+			m.ctxMessageTokens = 0
+			m.ctxSystemTokens = 0
+			m.ctxToolSchemaTokens = 0
+			m.ctxOutputReserveTokens = 0
+			m.ctxEstimatedRequest = 0
+			m.compacting = false
+			return m, nil
+		}
 		if msg.Used > 0 {
 			m.cumIn = msg.Used
 		}

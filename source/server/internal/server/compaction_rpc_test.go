@@ -42,6 +42,42 @@ func TestGetCompactionState_NoStateIsEmpty(t *testing.T) {
 	}
 }
 
+func TestGetContextUsage_PrefersLiveRequestAccounting(t *testing.T) {
+	s, _ := newServerWithStore(t)
+	s.recordRequestAccounting("live-fast", requestAccountingSnapshot{
+		MessageTokens:          38137,
+		SystemTokens:           1178,
+		ToolSchemaTokens:       12613,
+		OutputReserveTokens:    8192,
+		EstimatedRequestTokens: 60120,
+		ContextWindow:          128000,
+		ContextWindowKnown:     true,
+	})
+
+	resp, err := s.GetContextUsage(context.Background(), &proto.GetContextUsageRequest{ConversationId: "live-fast"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := resp.GetEstimatedRequestTokens(), int32(60120); got != want {
+		t.Fatalf("EstimatedRequestTokens = %d, want %d", got, want)
+	}
+	if got, want := resp.GetTokensUsed(), int32(60120); got != want {
+		t.Fatalf("TokensUsed = %d, want live request estimate %d", got, want)
+	}
+	if got, want := resp.GetMessageTokens(), int32(38137); got != want {
+		t.Fatalf("MessageTokens = %d, want %d", got, want)
+	}
+	if got, want := resp.GetRawTokens(), int32(38137); got != want {
+		t.Fatalf("RawTokens = %d, want conservative live message-token lower-bound %d", got, want)
+	}
+	if got, want := resp.GetModelMax(), int32(128000); got != want {
+		t.Fatalf("ModelMax = %d, want %d", got, want)
+	}
+	if !resp.GetContextWindowKnown() {
+		t.Fatal("ContextWindowKnown = false, want true")
+	}
+}
+
 func TestGetContextUsage_RawIsCheapEstimateNotZero(t *testing.T) {
 	s, store := newServerWithStore(t)
 	ctx := context.Background()

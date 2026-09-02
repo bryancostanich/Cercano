@@ -446,6 +446,8 @@ func (x *svc) GetConversation(ctx context.Context, req *proto.GetConversationReq
 const (
 	resumeConversationChunkTargetBytes  = 8 << 20
 	resumeConversationChunkHardMaxBytes = 48 << 20
+	resumeViewportDefaultTailTurns      = 80
+	resumeViewportDefaultOlderChunk     = 200
 )
 
 // ResumeConversation loads persisted turns for a conversation, rehydrates the
@@ -479,6 +481,106 @@ func (x *svc) StreamResumeConversation(req *proto.ResumeConversationRequest, str
 		return err
 	}
 	return sendResumeTurnChunks(req.GetConversationId(), turns, resumeConversationChunkTargetBytes, stream.Send)
+}
+
+func (x *svc) StreamResumeConversationViewportFirst(req *proto.ResumeConversationViewportFirstRequest, stream proto.Agent_StreamResumeConversationViewportFirstServer) error {
+	if x.convAgent == nil {
+		return nil
+	}
+	store := x.convAgent.PersistentStore()
+	if store == nil {
+		return nil
+	}
+	ctx := stream.Context()
+	convID := req.GetConversationId()
+	tailTurns := int(req.GetTailTurns())
+	if tailTurns <= 0 {
+		tailTurns = resumeViewportDefaultTailTurns
+	}
+	olderChunkTurns := int(req.GetOlderChunkTurns())
+	if olderChunkTurns <= 0 {
+		olderChunkTurns = resumeViewportDefaultOlderChunk
+	}
+
+	tail, tailStart, total, err := store.GetTailTurns(ctx, convID, tailTurns)
+	if err != nil {
+		return err
+	}
+	if err := stream.Send(resumeViewportEvent(proto.ResumeConversationViewportFirstEvent_TAIL, convID, tail, tailStart, total)); err != nil {
+		return err
+	}
+
+	hydrationDone := make(chan error, 1)
+	go func() {
+		_, err := x.convAgent.ResumeConversation(ctx, convID)
+		hydrationDone <- err
+	}()
+
+	hydrationSent := false
+	flushHydration := func(block bool) error {
+		if hydrationSent {
+			return nil
+		}
+		if block {
+			select {
+			case err := <-hydrationDone:
+				if err != nil {
+					return err
+				}
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		} else {
+			select {
+			case err := <-hydrationDone:
+				if err != nil {
+					return err
+				}
+			default:
+				return nil
+			}
+		}
+		hydrationSent = true
+		return stream.Send(resumeViewportEvent(proto.ResumeConversationViewportFirstEvent_HYDRATION_COMPLETE, convID, nil, tailStart, total))
+	}
+
+	for before := tailStart; before > 0; {
+		if err := flushHydration(false); err != nil {
+			return err
+		}
+		start := before - olderChunkTurns
+		if start < 0 {
+			start = 0
+		}
+		page, err := store.GetTurnPage(ctx, convID, start, before-start)
+		if err != nil {
+			return err
+		}
+		if err := stream.Send(resumeViewportEvent(proto.ResumeConversationViewportFirstEvent_OLDER, convID, page, start, total)); err != nil {
+			return err
+		}
+		before = start
+	}
+	if err := stream.Send(resumeViewportEvent(proto.ResumeConversationViewportFirstEvent_BACKFILL_COMPLETE, convID, nil, 0, total)); err != nil {
+		return err
+	}
+	return flushHydration(true)
+}
+
+func resumeViewportEvent(kind proto.ResumeConversationViewportFirstEvent_Kind, conversationID string, turns []conversation.Turn, startIndex, total int) *proto.ResumeConversationViewportFirstEvent {
+	out := &proto.ResumeConversationViewportFirstEvent{
+		Kind:           kind,
+		ConversationId: conversationID,
+		StartIndex:     int32(startIndex),
+		TotalTurns:     int32(total),
+	}
+	if len(turns) > 0 {
+		out.Turns = make([]*proto.PersistedTurn, 0, len(turns))
+		for _, t := range turns {
+			out.Turns = append(out.Turns, persistedTurnProto(t))
+		}
+	}
+	return out
 }
 
 func sendResumeTurnChunks(conversationID string, turns []conversation.Turn, targetBytes int, send func(*proto.ResumeConversationChunk) error) error {

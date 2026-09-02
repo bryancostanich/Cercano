@@ -467,6 +467,29 @@ type PersistedTurn struct {
 	ContentJSON    string
 }
 
+// ResumeViewportEventKind identifies one progressive viewport-first resume event.
+type ResumeViewportEventKind int
+
+const (
+	ResumeViewportEventUnspecified ResumeViewportEventKind = iota
+	ResumeViewportEventTail
+	ResumeViewportEventOlder
+	ResumeViewportEventHydrationComplete
+	ResumeViewportEventBackfillComplete
+)
+
+// ResumeViewportEvent is one tail-first resume page or progress marker. Tail and
+// older pages carry chronological turns with StartIndex/TotalTurns describing
+// their logical position in the full persisted transcript.
+type ResumeViewportEvent struct {
+	Kind           ResumeViewportEventKind
+	ConversationID string
+	Turns          []PersistedTurn
+	StartIndex     int
+	TotalTurns     int
+	Error          string
+}
+
 // ListConversations returns the persisted conversation history.
 func (c *Client) ListConversations(ctx context.Context, projectDir string, limit int) ([]ConversationInfo, error) {
 	resp, err := c.agent.ListConversations(ctx, &proto.ListConversationsRequest{
@@ -491,6 +514,64 @@ func (c *Client) ListConversations(ctx context.Context, projectDir string, limit
 		})
 	}
 	return out, nil
+}
+
+// StreamResumeConversationViewportFirst delivers tail-first resume events as
+// they arrive. Unlike ResumeConversation, it does not collect the full stream
+// before returning data to the caller.
+func (c *Client) StreamResumeConversationViewportFirst(ctx context.Context, conversationID string, tailTurns, olderChunkTurns int, handle func(ResumeViewportEvent) error) error {
+	if handle == nil {
+		return errors.New("resume viewport handler required")
+	}
+	stream, err := c.agent.StreamResumeConversationViewportFirst(ctx, &proto.ResumeConversationViewportFirstRequest{
+		ConversationId:  conversationID,
+		TailTurns:       int32(tailTurns),
+		OlderChunkTurns: int32(olderChunkTurns),
+	})
+	if err != nil {
+		return err
+	}
+	for {
+		ev, err := stream.Recv()
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if err := handle(resumeViewportEventFromProto(ev)); err != nil {
+			return err
+		}
+	}
+}
+
+func resumeViewportEventFromProto(ev *proto.ResumeConversationViewportFirstEvent) ResumeViewportEvent {
+	out := ResumeViewportEvent{
+		Kind:           resumeViewportKindFromProto(ev.GetKind()),
+		ConversationID: ev.GetConversationId(),
+		StartIndex:     int(ev.GetStartIndex()),
+		TotalTurns:     int(ev.GetTotalTurns()),
+		Error:          ev.GetError(),
+	}
+	if turns := ev.GetTurns(); len(turns) > 0 {
+		out.Turns = appendPersistedTurns(nil, turns)
+	}
+	return out
+}
+
+func resumeViewportKindFromProto(kind proto.ResumeConversationViewportFirstEvent_Kind) ResumeViewportEventKind {
+	switch kind {
+	case proto.ResumeConversationViewportFirstEvent_TAIL:
+		return ResumeViewportEventTail
+	case proto.ResumeConversationViewportFirstEvent_OLDER:
+		return ResumeViewportEventOlder
+	case proto.ResumeConversationViewportFirstEvent_HYDRATION_COMPLETE:
+		return ResumeViewportEventHydrationComplete
+	case proto.ResumeConversationViewportFirstEvent_BACKFILL_COMPLETE:
+		return ResumeViewportEventBackfillComplete
+	default:
+		return ResumeViewportEventUnspecified
+	}
 }
 
 // ResumeConversation loads the turns of a persisted conversation and

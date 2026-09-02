@@ -43,6 +43,12 @@ service Agent {
   // ResumeConversation, but in bounded batches so large histories do not become
   // one oversized gRPC message.
   rpc StreamResumeConversation (ResumeConversationRequest) returns (stream ResumeConversationChunk) {}
+
+  // StreamResumeConversationViewportFirst renders long resumes interactively:
+  // it sends the newest tail page first, hydrates the server session
+  // concurrently, then eagerly streams older pages for backfill. Existing
+  // ResumeConversation APIs keep chronological/full-resume semantics.
+  rpc StreamResumeConversationViewportFirst (ResumeConversationViewportFirstRequest) returns (stream ResumeConversationViewportFirstEvent) {}
   rpc DeleteConversation (DeleteConversationRequest) returns (DeleteConversationResponse) {}
   rpc RenameConversation (RenameConversationRequest) returns (RenameConversationResponse) {}
   rpc GetConversation (GetConversationRequest) returns (Conversation) {}
@@ -807,6 +813,28 @@ message ListConversationsResponse {
 message ResumeConversationRequest  { string conversation_id = 1; }
 message ResumeConversationResponse { repeated PersistedTurn turns = 1; }
 message ResumeConversationChunk    { repeated PersistedTurn turns = 1; }
+
+message ResumeConversationViewportFirstRequest {
+  string conversation_id = 1;
+  int32 tail_turns = 2;
+  int32 older_chunk_turns = 3;
+}
+
+message ResumeConversationViewportFirstEvent {
+  enum Kind {
+    KIND_UNSPECIFIED = 0;
+    TAIL = 1;
+    OLDER = 2;
+    HYDRATION_COMPLETE = 3;
+    BACKFILL_COMPLETE = 4;
+  }
+  Kind kind = 1;
+  string conversation_id = 2;
+  repeated PersistedTurn turns = 3;
+  int32 start_index = 4;
+  int32 total_turns = 5;
+  string error = 6;
+}
 
 message DeleteConversationRequest  { string conversation_id = 1; }
 message DeleteConversationResponse { bool ok = 1; }

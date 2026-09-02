@@ -19,76 +19,77 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Agent_ProcessRequest_FullMethodName             = "/agent.Agent/ProcessRequest"
-	Agent_StreamProcessRequest_FullMethodName       = "/agent.Agent/StreamProcessRequest"
-	Agent_AttachConversation_FullMethodName         = "/agent.Agent/AttachConversation"
-	Agent_UpdateConfig_FullMethodName               = "/agent.Agent/UpdateConfig"
-	Agent_ShutdownAgent_FullMethodName              = "/agent.Agent/ShutdownAgent"
-	Agent_GetConfig_FullMethodName                  = "/agent.Agent/GetConfig"
-	Agent_ListConversations_FullMethodName          = "/agent.Agent/ListConversations"
-	Agent_ResumeConversation_FullMethodName         = "/agent.Agent/ResumeConversation"
-	Agent_StreamResumeConversation_FullMethodName   = "/agent.Agent/StreamResumeConversation"
-	Agent_DeleteConversation_FullMethodName         = "/agent.Agent/DeleteConversation"
-	Agent_RenameConversation_FullMethodName         = "/agent.Agent/RenameConversation"
-	Agent_GetConversation_FullMethodName            = "/agent.Agent/GetConversation"
-	Agent_ListSubAgents_FullMethodName              = "/agent.Agent/ListSubAgents"
-	Agent_DismissSubAgent_FullMethodName            = "/agent.Agent/DismissSubAgent"
-	Agent_GetContextUsage_FullMethodName            = "/agent.Agent/GetContextUsage"
-	Agent_GetCompactionState_FullMethodName         = "/agent.Agent/GetCompactionState"
-	Agent_ElideContext_FullMethodName               = "/agent.Agent/ElideContext"
-	Agent_SuggestNextPrompt_FullMethodName          = "/agent.Agent/SuggestNextPrompt"
-	Agent_GetOpenRuntimeStatus_FullMethodName       = "/agent.Agent/GetOpenRuntimeStatus"
-	Agent_InstallOpenRuntime_FullMethodName         = "/agent.Agent/InstallOpenRuntime"
-	Agent_RegenerateContext_FullMethodName          = "/agent.Agent/RegenerateContext"
-	Agent_ExportContext_FullMethodName              = "/agent.Agent/ExportContext"
-	Agent_ExportTrajectory_FullMethodName           = "/agent.Agent/ExportTrajectory"
-	Agent_GetConversationTurns_FullMethodName       = "/agent.Agent/GetConversationTurns"
-	Agent_GetToolCall_FullMethodName                = "/agent.Agent/GetToolCall"
-	Agent_ListTools_FullMethodName                  = "/agent.Agent/ListTools"
-	Agent_InvokeTool_FullMethodName                 = "/agent.Agent/InvokeTool"
-	Agent_InvokeCapability_FullMethodName           = "/agent.Agent/InvokeCapability"
-	Agent_ListModels_FullMethodName                 = "/agent.Agent/ListModels"
-	Agent_GetRuntimeStatus_FullMethodName           = "/agent.Agent/GetRuntimeStatus"
-	Agent_ListRuntimeModels_FullMethodName          = "/agent.Agent/ListRuntimeModels"
-	Agent_ListRuntimeEndpoints_FullMethodName       = "/agent.Agent/ListRuntimeEndpoints"
-	Agent_StartRuntimeModel_FullMethodName          = "/agent.Agent/StartRuntimeModel"
-	Agent_StopRuntimeModel_FullMethodName           = "/agent.Agent/StopRuntimeModel"
-	Agent_RestartRuntime_FullMethodName             = "/agent.Agent/RestartRuntime"
-	Agent_DownloadRuntimeModel_FullMethodName       = "/agent.Agent/DownloadRuntimeModel"
-	Agent_CancelRuntimeModelDownload_FullMethodName = "/agent.Agent/CancelRuntimeModelDownload"
-	Agent_DeleteRuntimeModel_FullMethodName         = "/agent.Agent/DeleteRuntimeModel"
-	Agent_RefreshOnlineCatalog_FullMethodName       = "/agent.Agent/RefreshOnlineCatalog"
-	Agent_GetModelRAMEstimate_FullMethodName        = "/agent.Agent/GetModelRAMEstimate"
-	Agent_StreamRuntimeLogs_FullMethodName          = "/agent.Agent/StreamRuntimeLogs"
-	Agent_ListSkills_FullMethodName                 = "/agent.Agent/ListSkills"
-	Agent_GetSkill_FullMethodName                   = "/agent.Agent/GetSkill"
-	Agent_SetPermissionMode_FullMethodName          = "/agent.Agent/SetPermissionMode"
-	Agent_GetPermissionMode_FullMethodName          = "/agent.Agent/GetPermissionMode"
-	Agent_SetSessionProfile_FullMethodName          = "/agent.Agent/SetSessionProfile"
-	Agent_GetSessionProfile_FullMethodName          = "/agent.Agent/GetSessionProfile"
-	Agent_SubscribeEvents_FullMethodName            = "/agent.Agent/SubscribeEvents"
-	Agent_AllowToolCall_FullMethodName              = "/agent.Agent/AllowToolCall"
-	Agent_DenyToolCall_FullMethodName               = "/agent.Agent/DenyToolCall"
-	Agent_AcceptRollover_FullMethodName             = "/agent.Agent/AcceptRollover"
-	Agent_DeclineRollover_FullMethodName            = "/agent.Agent/DeclineRollover"
-	Agent_GetProviderCapabilities_FullMethodName    = "/agent.Agent/GetProviderCapabilities"
-	Agent_ProposeContextEdit_FullMethodName         = "/agent.Agent/ProposeContextEdit"
-	Agent_DeleteConversationTurns_FullMethodName    = "/agent.Agent/DeleteConversationTurns"
-	Agent_ListMcpServers_FullMethodName             = "/agent.Agent/ListMcpServers"
-	Agent_AddMcpServer_FullMethodName               = "/agent.Agent/AddMcpServer"
-	Agent_RemoveMcpServer_FullMethodName            = "/agent.Agent/RemoveMcpServer"
-	Agent_RestartMcpServer_FullMethodName           = "/agent.Agent/RestartMcpServer"
-	Agent_GetCloudProfiles_FullMethodName           = "/agent.Agent/GetCloudProfiles"
-	Agent_GetCloudProviders_FullMethodName          = "/agent.Agent/GetCloudProviders"
-	Agent_SetActiveCloudProfile_FullMethodName      = "/agent.Agent/SetActiveCloudProfile"
-	Agent_SetBackupCloudProfile_FullMethodName      = "/agent.Agent/SetBackupCloudProfile"
-	Agent_SetCloudProfileKey_FullMethodName         = "/agent.Agent/SetCloudProfileKey"
-	Agent_UpsertCloudProfile_FullMethodName         = "/agent.Agent/UpsertCloudProfile"
-	Agent_RemoveCloudProfile_FullMethodName         = "/agent.Agent/RemoveCloudProfile"
-	Agent_ListCloudProfileModels_FullMethodName     = "/agent.Agent/ListCloudProfileModels"
-	Agent_StartChatGPTLogin_FullMethodName          = "/agent.Agent/StartChatGPTLogin"
-	Agent_StartClaudeLogin_FullMethodName           = "/agent.Agent/StartClaudeLogin"
-	Agent_ExportImage_FullMethodName                = "/agent.Agent/ExportImage"
+	Agent_ProcessRequest_FullMethodName                        = "/agent.Agent/ProcessRequest"
+	Agent_StreamProcessRequest_FullMethodName                  = "/agent.Agent/StreamProcessRequest"
+	Agent_AttachConversation_FullMethodName                    = "/agent.Agent/AttachConversation"
+	Agent_UpdateConfig_FullMethodName                          = "/agent.Agent/UpdateConfig"
+	Agent_ShutdownAgent_FullMethodName                         = "/agent.Agent/ShutdownAgent"
+	Agent_GetConfig_FullMethodName                             = "/agent.Agent/GetConfig"
+	Agent_ListConversations_FullMethodName                     = "/agent.Agent/ListConversations"
+	Agent_ResumeConversation_FullMethodName                    = "/agent.Agent/ResumeConversation"
+	Agent_StreamResumeConversation_FullMethodName              = "/agent.Agent/StreamResumeConversation"
+	Agent_StreamResumeConversationViewportFirst_FullMethodName = "/agent.Agent/StreamResumeConversationViewportFirst"
+	Agent_DeleteConversation_FullMethodName                    = "/agent.Agent/DeleteConversation"
+	Agent_RenameConversation_FullMethodName                    = "/agent.Agent/RenameConversation"
+	Agent_GetConversation_FullMethodName                       = "/agent.Agent/GetConversation"
+	Agent_ListSubAgents_FullMethodName                         = "/agent.Agent/ListSubAgents"
+	Agent_DismissSubAgent_FullMethodName                       = "/agent.Agent/DismissSubAgent"
+	Agent_GetContextUsage_FullMethodName                       = "/agent.Agent/GetContextUsage"
+	Agent_GetCompactionState_FullMethodName                    = "/agent.Agent/GetCompactionState"
+	Agent_ElideContext_FullMethodName                          = "/agent.Agent/ElideContext"
+	Agent_SuggestNextPrompt_FullMethodName                     = "/agent.Agent/SuggestNextPrompt"
+	Agent_GetOpenRuntimeStatus_FullMethodName                  = "/agent.Agent/GetOpenRuntimeStatus"
+	Agent_InstallOpenRuntime_FullMethodName                    = "/agent.Agent/InstallOpenRuntime"
+	Agent_RegenerateContext_FullMethodName                     = "/agent.Agent/RegenerateContext"
+	Agent_ExportContext_FullMethodName                         = "/agent.Agent/ExportContext"
+	Agent_ExportTrajectory_FullMethodName                      = "/agent.Agent/ExportTrajectory"
+	Agent_GetConversationTurns_FullMethodName                  = "/agent.Agent/GetConversationTurns"
+	Agent_GetToolCall_FullMethodName                           = "/agent.Agent/GetToolCall"
+	Agent_ListTools_FullMethodName                             = "/agent.Agent/ListTools"
+	Agent_InvokeTool_FullMethodName                            = "/agent.Agent/InvokeTool"
+	Agent_InvokeCapability_FullMethodName                      = "/agent.Agent/InvokeCapability"
+	Agent_ListModels_FullMethodName                            = "/agent.Agent/ListModels"
+	Agent_GetRuntimeStatus_FullMethodName                      = "/agent.Agent/GetRuntimeStatus"
+	Agent_ListRuntimeModels_FullMethodName                     = "/agent.Agent/ListRuntimeModels"
+	Agent_ListRuntimeEndpoints_FullMethodName                  = "/agent.Agent/ListRuntimeEndpoints"
+	Agent_StartRuntimeModel_FullMethodName                     = "/agent.Agent/StartRuntimeModel"
+	Agent_StopRuntimeModel_FullMethodName                      = "/agent.Agent/StopRuntimeModel"
+	Agent_RestartRuntime_FullMethodName                        = "/agent.Agent/RestartRuntime"
+	Agent_DownloadRuntimeModel_FullMethodName                  = "/agent.Agent/DownloadRuntimeModel"
+	Agent_CancelRuntimeModelDownload_FullMethodName            = "/agent.Agent/CancelRuntimeModelDownload"
+	Agent_DeleteRuntimeModel_FullMethodName                    = "/agent.Agent/DeleteRuntimeModel"
+	Agent_RefreshOnlineCatalog_FullMethodName                  = "/agent.Agent/RefreshOnlineCatalog"
+	Agent_GetModelRAMEstimate_FullMethodName                   = "/agent.Agent/GetModelRAMEstimate"
+	Agent_StreamRuntimeLogs_FullMethodName                     = "/agent.Agent/StreamRuntimeLogs"
+	Agent_ListSkills_FullMethodName                            = "/agent.Agent/ListSkills"
+	Agent_GetSkill_FullMethodName                              = "/agent.Agent/GetSkill"
+	Agent_SetPermissionMode_FullMethodName                     = "/agent.Agent/SetPermissionMode"
+	Agent_GetPermissionMode_FullMethodName                     = "/agent.Agent/GetPermissionMode"
+	Agent_SetSessionProfile_FullMethodName                     = "/agent.Agent/SetSessionProfile"
+	Agent_GetSessionProfile_FullMethodName                     = "/agent.Agent/GetSessionProfile"
+	Agent_SubscribeEvents_FullMethodName                       = "/agent.Agent/SubscribeEvents"
+	Agent_AllowToolCall_FullMethodName                         = "/agent.Agent/AllowToolCall"
+	Agent_DenyToolCall_FullMethodName                          = "/agent.Agent/DenyToolCall"
+	Agent_AcceptRollover_FullMethodName                        = "/agent.Agent/AcceptRollover"
+	Agent_DeclineRollover_FullMethodName                       = "/agent.Agent/DeclineRollover"
+	Agent_GetProviderCapabilities_FullMethodName               = "/agent.Agent/GetProviderCapabilities"
+	Agent_ProposeContextEdit_FullMethodName                    = "/agent.Agent/ProposeContextEdit"
+	Agent_DeleteConversationTurns_FullMethodName               = "/agent.Agent/DeleteConversationTurns"
+	Agent_ListMcpServers_FullMethodName                        = "/agent.Agent/ListMcpServers"
+	Agent_AddMcpServer_FullMethodName                          = "/agent.Agent/AddMcpServer"
+	Agent_RemoveMcpServer_FullMethodName                       = "/agent.Agent/RemoveMcpServer"
+	Agent_RestartMcpServer_FullMethodName                      = "/agent.Agent/RestartMcpServer"
+	Agent_GetCloudProfiles_FullMethodName                      = "/agent.Agent/GetCloudProfiles"
+	Agent_GetCloudProviders_FullMethodName                     = "/agent.Agent/GetCloudProviders"
+	Agent_SetActiveCloudProfile_FullMethodName                 = "/agent.Agent/SetActiveCloudProfile"
+	Agent_SetBackupCloudProfile_FullMethodName                 = "/agent.Agent/SetBackupCloudProfile"
+	Agent_SetCloudProfileKey_FullMethodName                    = "/agent.Agent/SetCloudProfileKey"
+	Agent_UpsertCloudProfile_FullMethodName                    = "/agent.Agent/UpsertCloudProfile"
+	Agent_RemoveCloudProfile_FullMethodName                    = "/agent.Agent/RemoveCloudProfile"
+	Agent_ListCloudProfileModels_FullMethodName                = "/agent.Agent/ListCloudProfileModels"
+	Agent_StartChatGPTLogin_FullMethodName                     = "/agent.Agent/StartChatGPTLogin"
+	Agent_StartClaudeLogin_FullMethodName                      = "/agent.Agent/StartClaudeLogin"
+	Agent_ExportImage_FullMethodName                           = "/agent.Agent/ExportImage"
 )
 
 // AgentClient is the client API for Agent service.
@@ -128,6 +129,11 @@ type AgentClient interface {
 	// ResumeConversation, but in bounded batches so large histories do not become
 	// one oversized gRPC message.
 	StreamResumeConversation(ctx context.Context, in *ResumeConversationRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ResumeConversationChunk], error)
+	// StreamResumeConversationViewportFirst renders long resumes interactively:
+	// it sends the newest tail page first, hydrates the server session
+	// concurrently, then eagerly streams older pages for backfill. Existing
+	// ResumeConversation APIs keep chronological/full-resume semantics.
+	StreamResumeConversationViewportFirst(ctx context.Context, in *ResumeConversationViewportFirstRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ResumeConversationViewportFirstEvent], error)
 	DeleteConversation(ctx context.Context, in *DeleteConversationRequest, opts ...grpc.CallOption) (*DeleteConversationResponse, error)
 	RenameConversation(ctx context.Context, in *RenameConversationRequest, opts ...grpc.CallOption) (*RenameConversationResponse, error)
 	GetConversation(ctx context.Context, in *GetConversationRequest, opts ...grpc.CallOption) (*Conversation, error)
@@ -433,6 +439,25 @@ func (c *agentClient) StreamResumeConversation(ctx context.Context, in *ResumeCo
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Agent_StreamResumeConversationClient = grpc.ServerStreamingClient[ResumeConversationChunk]
 
+func (c *agentClient) StreamResumeConversationViewportFirst(ctx context.Context, in *ResumeConversationViewportFirstRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ResumeConversationViewportFirstEvent], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[3], Agent_StreamResumeConversationViewportFirst_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[ResumeConversationViewportFirstRequest, ResumeConversationViewportFirstEvent]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Agent_StreamResumeConversationViewportFirstClient = grpc.ServerStreamingClient[ResumeConversationViewportFirstEvent]
+
 func (c *agentClient) DeleteConversation(ctx context.Context, in *DeleteConversationRequest, opts ...grpc.CallOption) (*DeleteConversationResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(DeleteConversationResponse)
@@ -535,7 +560,7 @@ func (c *agentClient) GetOpenRuntimeStatus(ctx context.Context, in *GetOpenRunti
 
 func (c *agentClient) InstallOpenRuntime(ctx context.Context, in *InstallOpenRuntimeRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[InstallProgress], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[3], Agent_InstallOpenRuntime_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[4], Agent_InstallOpenRuntime_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -554,7 +579,7 @@ type Agent_InstallOpenRuntimeClient = grpc.ServerStreamingClient[InstallProgress
 
 func (c *agentClient) RegenerateContext(ctx context.Context, in *RegenerateContextRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[RegenerateContextProgress], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[4], Agent_RegenerateContext_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[5], Agent_RegenerateContext_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -583,7 +608,7 @@ func (c *agentClient) ExportContext(ctx context.Context, in *ExportContextReques
 
 func (c *agentClient) ExportTrajectory(ctx context.Context, in *ExportTrajectoryRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ExportTrajectoryEvent], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[5], Agent_ExportTrajectory_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[6], Agent_ExportTrajectory_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -772,7 +797,7 @@ func (c *agentClient) GetModelRAMEstimate(ctx context.Context, in *GetModelRAMEs
 
 func (c *agentClient) StreamRuntimeLogs(ctx context.Context, in *StreamRuntimeLogsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[RuntimeLogEntry], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[6], Agent_StreamRuntimeLogs_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[7], Agent_StreamRuntimeLogs_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -851,7 +876,7 @@ func (c *agentClient) GetSessionProfile(ctx context.Context, in *GetSessionProfi
 
 func (c *agentClient) SubscribeEvents(ctx context.Context, in *SubscribeEventsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ClientEvent], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[7], Agent_SubscribeEvents_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[8], Agent_SubscribeEvents_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1060,7 +1085,7 @@ func (c *agentClient) ListCloudProfileModels(ctx context.Context, in *ListCloudP
 
 func (c *agentClient) StartChatGPTLogin(ctx context.Context, in *StartChatGPTLoginRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[StartChatGPTLoginEvent], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[8], Agent_StartChatGPTLogin_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[9], Agent_StartChatGPTLogin_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1079,7 +1104,7 @@ type Agent_StartChatGPTLoginClient = grpc.ServerStreamingClient[StartChatGPTLogi
 
 func (c *agentClient) StartClaudeLogin(ctx context.Context, in *StartClaudeLoginRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[StartClaudeLoginEvent], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[9], Agent_StartClaudeLogin_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[10], Agent_StartClaudeLogin_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1143,6 +1168,11 @@ type AgentServer interface {
 	// ResumeConversation, but in bounded batches so large histories do not become
 	// one oversized gRPC message.
 	StreamResumeConversation(*ResumeConversationRequest, grpc.ServerStreamingServer[ResumeConversationChunk]) error
+	// StreamResumeConversationViewportFirst renders long resumes interactively:
+	// it sends the newest tail page first, hydrates the server session
+	// concurrently, then eagerly streams older pages for backfill. Existing
+	// ResumeConversation APIs keep chronological/full-resume semantics.
+	StreamResumeConversationViewportFirst(*ResumeConversationViewportFirstRequest, grpc.ServerStreamingServer[ResumeConversationViewportFirstEvent]) error
 	DeleteConversation(context.Context, *DeleteConversationRequest) (*DeleteConversationResponse, error)
 	RenameConversation(context.Context, *RenameConversationRequest) (*RenameConversationResponse, error)
 	GetConversation(context.Context, *GetConversationRequest) (*Conversation, error)
@@ -1357,6 +1387,9 @@ func (UnimplementedAgentServer) ResumeConversation(context.Context, *ResumeConve
 }
 func (UnimplementedAgentServer) StreamResumeConversation(*ResumeConversationRequest, grpc.ServerStreamingServer[ResumeConversationChunk]) error {
 	return status.Error(codes.Unimplemented, "method StreamResumeConversation not implemented")
+}
+func (UnimplementedAgentServer) StreamResumeConversationViewportFirst(*ResumeConversationViewportFirstRequest, grpc.ServerStreamingServer[ResumeConversationViewportFirstEvent]) error {
+	return status.Error(codes.Unimplemented, "method StreamResumeConversationViewportFirst not implemented")
 }
 func (UnimplementedAgentServer) DeleteConversation(context.Context, *DeleteConversationRequest) (*DeleteConversationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DeleteConversation not implemented")
@@ -1702,6 +1735,17 @@ func _Agent_StreamResumeConversation_Handler(srv interface{}, stream grpc.Server
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Agent_StreamResumeConversationServer = grpc.ServerStreamingServer[ResumeConversationChunk]
+
+func _Agent_StreamResumeConversationViewportFirst_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(ResumeConversationViewportFirstRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(AgentServer).StreamResumeConversationViewportFirst(m, &grpc.GenericServerStream[ResumeConversationViewportFirstRequest, ResumeConversationViewportFirstEvent]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Agent_StreamResumeConversationViewportFirstServer = grpc.ServerStreamingServer[ResumeConversationViewportFirstEvent]
 
 func _Agent_DeleteConversation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(DeleteConversationRequest)
@@ -3014,6 +3058,11 @@ var Agent_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "StreamResumeConversation",
 			Handler:       _Agent_StreamResumeConversation_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "StreamResumeConversationViewportFirst",
+			Handler:       _Agent_StreamResumeConversationViewportFirst_Handler,
 			ServerStreams: true,
 		},
 		{

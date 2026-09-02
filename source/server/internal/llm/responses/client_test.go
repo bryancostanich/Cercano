@@ -124,6 +124,66 @@ func TestClientChat_RetriesWithoutUnsupportedTemperature(t *testing.T) {
 	}
 }
 
+func TestClientStreamChat_RetriesWithoutUnsupportedTemperature(t *testing.T) {
+	var bodies []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		bodies = append(bodies, string(b))
+		w.Header().Set("Content-Type", "text/event-stream")
+		if strings.Contains(string(b), `"temperature"`) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(400)
+			io.WriteString(w, `{"error":{"message":"Unsupported parameter: temperature","type":"invalid_request_error"}}`)
+			return
+		}
+		io.WriteString(w, "data: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\n")
+		io.WriteString(w, "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":7,\"output_tokens\":3}}}\n\n")
+	}))
+	defer srv.Close()
+
+	c := NewClient(Config{BaseURL: srv.URL, APIKey: "k", Model: "gpt-5"})
+	zero := 0.0
+	req := llm.ChatRequest{
+		Model: "gpt-5.5", Temperature: &zero,
+		Messages: []llm.Message{{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: "hi"}}}},
+	}
+
+	rd, err := c.StreamChat(context.Background(), req)
+	if err != nil {
+		t.Fatalf("expected streaming retry without temperature to succeed, got: %v", err)
+	}
+	defer rd.Close()
+	var text string
+	for {
+		ev, ok, err := rd.Next()
+		if err != nil {
+			t.Fatalf("stream next: %v", err)
+		}
+		if !ok {
+			break
+		}
+		if ev.Type == llm.EventTextDelta {
+			text += ev.TextDelta
+		}
+	}
+	if text != "ok" {
+		t.Fatalf("stream text = %q", text)
+	}
+	if len(bodies) != 2 || !strings.Contains(bodies[0], `"temperature"`) || strings.Contains(bodies[1], `"temperature"`) {
+		t.Fatalf("expected rejected+temperature-free streaming retry, got %d bodies: %v", len(bodies), bodies)
+	}
+
+	bodies = nil
+	rd, err = c.StreamChat(context.Background(), req)
+	if err != nil {
+		t.Fatalf("cached streaming temperature avoidance failed: %v", err)
+	}
+	rd.Close()
+	if len(bodies) != 1 || strings.Contains(bodies[0], `"temperature"`) {
+		t.Fatalf("expected cached streaming temperature omission, got bodies: %v", bodies)
+	}
+}
+
 func TestClientChatAPIError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(400)

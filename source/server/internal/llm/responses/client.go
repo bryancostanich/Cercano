@@ -331,8 +331,23 @@ func (c *Client) chatOnce(ctx context.Context, req llm.ChatRequest) (llm.ChatRes
 }
 
 // StreamChat opens a streaming Responses request and returns a StreamReader that
-// emits llm.StreamEvents.
+// emits llm.StreamEvents. Match Chat's temperature compatibility behavior: some
+// reasoning models reject an explicit temperature, so retry once without it and
+// remember that model for later streaming and non-streaming calls.
 func (c *Client) StreamChat(ctx context.Context, req llm.ChatRequest) (llm.StreamReader, error) {
+	if req.Temperature != nil && c.tempUnsupportedLoad(req.Model) {
+		req.Temperature = nil
+	}
+	rd, err := c.streamOnce(ctx, req)
+	if err != nil && req.Temperature != nil && isTemperatureUnsupported(err) {
+		c.tempUnsupportedStore(req.Model)
+		req.Temperature = nil
+		rd, err = c.streamOnce(ctx, req)
+	}
+	return rd, err
+}
+
+func (c *Client) streamOnce(ctx context.Context, req llm.ChatRequest) (llm.StreamReader, error) {
 	built, err := c.buildRequest(req, true)
 	if err != nil {
 		return nil, err

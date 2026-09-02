@@ -192,6 +192,11 @@ type Model struct {
 
 	recap string // living one-line work summary; shown in the chat footer
 
+	resumeGen         int
+	resumeHydrating   bool
+	resumeBackfilling bool
+	resumeTurns       []agentclient.PersistedTurn
+
 	// taskPane is the V1 task drawer: a right-side collapsible pane. It is only a
 	// shell for now; TaskChange consumption fills it in later. Kept as layout
 	// state rather than hardcoding "right pane" into the task model so future
@@ -910,6 +915,50 @@ type ctxUsageTickMsg struct{}
 // request path).
 func ctxUsageTick() tea.Cmd {
 	return tea.Tick(2*time.Second, func(time.Time) tea.Msg { return ctxUsageTickMsg{} })
+}
+
+type resumeViewportStreamMsg struct {
+	gen   int
+	event agentclient.ResumeViewportEvent
+	err   error
+	done  bool
+	ch    <-chan resumeViewportStreamMsg
+}
+
+const (
+	progressiveResumeTailTurns       = 80
+	progressiveResumeOlderChunkTurns = 200
+)
+
+func startProgressiveResumeCmd(ag *agentclient.Client, conversationID string, gen int) tea.Cmd {
+	ch := make(chan resumeViewportStreamMsg, 8)
+	go func() {
+		defer close(ch)
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		err := ag.StreamResumeConversationViewportFirst(ctx, conversationID, progressiveResumeTailTurns, progressiveResumeOlderChunkTurns, func(ev agentclient.ResumeViewportEvent) error {
+			select {
+			case ch <- resumeViewportStreamMsg{gen: gen, event: ev, ch: ch}:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		})
+		if err != nil {
+			ch <- resumeViewportStreamMsg{gen: gen, err: err, ch: ch}
+		}
+	}()
+	return waitProgressiveResumeCmd(ch)
+}
+
+func waitProgressiveResumeCmd(ch <-chan resumeViewportStreamMsg) tea.Cmd {
+	return func() tea.Msg {
+		msg, ok := <-ch
+		if !ok {
+			return resumeViewportStreamMsg{done: true}
+		}
+		return msg
+	}
 }
 
 // Update is the Bubble Tea reducer.
@@ -2471,12 +2520,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case resumeRequestedMsg:
 		// Fired by the history picker's OnSelect after the overlay closes.
-		var resumeCmd tea.Cmd
-		m, resumeCmd = m.applyResume(msg.ConversationID)
+		m, resumeCmd := m.beginProgressiveResume(msg.ConversationID)
 		if msg.Title != "" {
 			m.sessionTitle = msg.Title
 		}
 		return m, resumeCmd
+
+	case resumeViewportStreamMsg:
+		return m.applyProgressiveResumeEvent(msg)
 
 	case dragScrollTickMsg:
 		cmd, _ := m.activeChat().DragScrollTick()
@@ -2613,6 +2664,10 @@ func (m Model) submit(text string, images []agentclient.InlineImage) (tea.Model,
 	// the store, and the provider (see docs/bugs/2026-07-04-user-message-tear.md).
 	text = strings.ReplaceAll(text, "\r\n", "\n")
 	text = strings.ReplaceAll(text, "\r", "\n")
+	if m.resumeHydrating {
+		m.errMsg = "rehydrating conversation — please wait before sending"
+		return m, nil
+	}
 	// Record for ↑/↓ history recall (skip consecutive duplicates), and reset
 	// the browse position back to the live input.
 	if n := len(m.inputHistory); n == 0 || m.inputHistory[n-1] != text {
@@ -3661,6 +3716,87 @@ func (m *Model) restoreSubAgentTabs(ctx context.Context, conversationID string) 
 			tab.restored = true
 		}
 	}
+}
+
+func (m Model) beginProgressiveResume(conversationID string) (Model, tea.Cmd) {
+	if m.agent == nil {
+		m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: "resume failed: agent unavailable"})
+		m.refreshViewport()
+		return m, nil
+	}
+	m.resumeGen++
+	gen := m.resumeGen
+	m.resumeHydrating = true
+	m.resumeBackfilling = true
+	m.resumeTurns = nil
+	m.convID = conversationID
+	if m.convRef != nil {
+		m.convRef.id = conversationID
+	}
+	m.workDirOverride = ""
+	if m.wdRef != nil {
+		m.wdRef.dir = ""
+	}
+	m.cumIn = 0
+	m.cumOut = 0
+	m.mainChat().ExitToolNav()
+	m.splashShown = false
+	m.dropSubAgentTabs()
+	m.mainChat().SetEntriesSlice([]*Entry{{Role: RoleSystem, Content: "loading conversation…"}})
+	m.mainChat().SetEntries(m.mainChat().entries)
+	m.errMsg = "rehydrating conversation…"
+	return m, startProgressiveResumeCmd(m.agent, conversationID, gen)
+}
+
+func (m Model) applyProgressiveResumeEvent(msg resumeViewportStreamMsg) (Model, tea.Cmd) {
+	if msg.done {
+		return m, nil
+	}
+	if msg.gen != m.resumeGen {
+		if msg.ch != nil {
+			return m, waitProgressiveResumeCmd(msg.ch)
+		}
+		return m, nil
+	}
+	if msg.err != nil {
+		m.resumeHydrating = false
+		m.resumeBackfilling = false
+		m.errMsg = "resume failed"
+		m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: "resume failed: " + msg.err.Error()})
+		m.refreshViewport()
+		return m, nil
+	}
+	var cmds []tea.Cmd
+	if msg.ch != nil {
+		cmds = append(cmds, waitProgressiveResumeCmd(msg.ch))
+	}
+	switch msg.event.Kind {
+	case agentclient.ResumeViewportEventTail:
+		m.resumeTurns = append([]agentclient.PersistedTurn(nil), msg.event.Turns...)
+		m.mainChat().BeginProgressiveLoad(resumeEntries(msg.event.Turns, 0), msg.event.StartIndex > 0)
+		m.mainChat().PrependBanner(m.splash.Meta, m.splash.Started())
+		m.mainChat().SetEntries(m.mainChat().entries)
+	case agentclient.ResumeViewportEventOlder:
+		older := append([]agentclient.PersistedTurn(nil), msg.event.Turns...)
+		m.resumeTurns = append(older, m.resumeTurns...)
+		m.mainChat().PrependProgressiveEntries(resumeEntries(older, 0))
+	case agentclient.ResumeViewportEventBackfillComplete:
+		m.resumeBackfilling = false
+		m.mainChat().CompleteProgressiveLoad()
+		m.hydrateTaskPaneFromResumedTurns(m.resumeTurns)
+		m.inputHistory = resumeInputHistory(m.resumeTurns)
+		m.historyIdx = len(m.inputHistory)
+		m.historyStash = ""
+	case agentclient.ResumeViewportEventHydrationComplete:
+		m.resumeHydrating = false
+		m.errMsg = ""
+		cmds = append(cmds, fetchContextUsage(m.agent, m.convID), fetchSessionProfileCmd(m.agent, m.convID), fetchRecap(m.agent, m.convID))
+	}
+	if !m.bannerTickActive {
+		m.bannerTickActive = true
+		cmds = append(cmds, banner.Tick())
+	}
+	return m, tea.Batch(cmds...)
 }
 
 // applyResume updates the model + the convRef shared with the slash registry,

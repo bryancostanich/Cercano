@@ -48,6 +48,10 @@ func (m *mockAgentClient) AttachConversation(ctx context.Context, in *proto.Atta
 	return nil, nil
 }
 
+func (m *mockAgentClient) StreamResumeConversationViewportFirst(ctx context.Context, in *proto.ResumeConversationViewportFirstRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[proto.ResumeConversationViewportFirstEvent], error) {
+	return nil, nil
+}
+
 func (m *mockAgentClient) ExportImage(ctx context.Context, in *proto.ExportImageRequest, opts ...grpc.CallOption) (*proto.ExportImageResponse, error) {
 	return &proto.ExportImageResponse{}, nil
 }

@@ -229,6 +229,104 @@ func (c *chatView) SetEntriesSlice(es []*Entry) {
 	c.flushRenderCaches()
 }
 
+const progressiveOlderLoadingText = "loading older conversation history…"
+
+func (c *chatView) BeginProgressiveLoad(tail []*Entry, hasOlder bool) {
+	entries := make([]*Entry, 0, len(tail)+1)
+	if hasOlder {
+		entries = append(entries, &Entry{Role: RoleSystem, Content: progressiveOlderLoadingText})
+	}
+	entries = append(entries, tail...)
+	c.SetEntries(entries)
+	c.GotoBottom()
+}
+
+func (c *chatView) PrependProgressiveEntries(entries []*Entry) {
+	if len(entries) == 0 {
+		return
+	}
+	wasAtBottom := c.AtBottom()
+	oldOffset := c.YOffset()
+	oldTotal := c.TotalLineCount()
+	marker := c.progressiveOlderLoadingIndex()
+	insertLine := 0
+	if marker >= 0 {
+		insertLine = c.entryEndLine(marker)
+	}
+	next := make([]*Entry, 0, len(c.entries)+len(entries))
+	if marker >= 0 {
+		next = append(next, c.entries[:marker+1]...)
+		next = append(next, entries...)
+		next = append(next, c.entries[marker+1:]...)
+	} else {
+		next = append(next, entries...)
+		next = append(next, c.entries...)
+	}
+	c.SetEntries(next)
+	if wasAtBottom {
+		c.GotoBottom()
+		return
+	}
+	inserted := c.TotalLineCount() - oldTotal
+	if inserted > 0 && oldOffset >= insertLine {
+		c.SetYOffset(oldOffset + inserted)
+	} else {
+		c.SetYOffset(oldOffset)
+	}
+}
+
+func (c *chatView) CompleteProgressiveLoad() {
+	marker := c.progressiveOlderLoadingIndex()
+	if marker < 0 {
+		return
+	}
+	wasAtBottom := c.AtBottom()
+	oldOffset := c.YOffset()
+	oldTotal := c.TotalLineCount()
+	markerStartLine := c.entryStartLine(marker)
+	next := make([]*Entry, 0, len(c.entries)-1)
+	next = append(next, c.entries[:marker]...)
+	next = append(next, c.entries[marker+1:]...)
+	c.SetEntries(next)
+	if wasAtBottom {
+		c.GotoBottom()
+		return
+	}
+	removed := oldTotal - c.TotalLineCount()
+	if removed > 0 && oldOffset > markerStartLine {
+		c.SetYOffset(oldOffset - removed)
+	} else {
+		c.SetYOffset(oldOffset)
+	}
+}
+
+func (c *chatView) entryStartLine(entryIndex int) int {
+	for _, u := range c.layout.units {
+		if u.kind == unitEntry && u.startEntry <= entryIndex && entryIndex <= u.endEntry {
+			return u.startLine
+		}
+	}
+	return 0
+}
+
+func (c *chatView) entryEndLine(entryIndex int) int {
+	for _, u := range c.layout.units {
+		if u.kind == unitEntry && u.startEntry <= entryIndex && entryIndex <= u.endEntry {
+			return u.startLine + u.lineCount
+		}
+	}
+	return 0
+}
+
+func (c *chatView) progressiveOlderLoadingIndex() int {
+	for i, e := range c.entries {
+		if e != nil && e.Role == RoleSystem && e.Content == progressiveOlderLoadingText {
+			return i
+		}
+	}
+	return -1
+}
+
 // PrependBanner inserts the wordmark banner as entry zero, so it persists at
 // the top of the transcript once the splash chrome is dismissed. Idempotent.
 // Must be called before any tool-group interaction: groupExpanded keys are

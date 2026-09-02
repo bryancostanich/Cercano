@@ -1657,22 +1657,110 @@ func (s *Server) scheduleSelfShutdown() {
 
 // ListConversations implements proto.AgentServer — delegates to persistSvc.
 func (s *Server) ListConversations(ctx context.Context, req *proto.ListConversationsRequest) (*proto.ListConversationsResponse, error) {
-	return s.persistSvc.ListConversations(ctx, req)
+	started := time.Now()
+	if s.resumePersistenceUnavailable("list_conversations") {
+		// Preserve current behavior (the persistence service returns an empty
+		// result), but record why the resume page cannot populate.
+		s.logResumeRPCFailure("list_conversations", req, nil, started, nil, "persistence_unavailable")
+	}
+	resp, err := s.persistSvc.ListConversations(ctx, req)
+	if err != nil {
+		s.logResumeRPCFailure("list_conversations", req, nil, started, err, "db_failure")
+	}
+	return resp, err
 }
 
 // GetConversation implements proto.AgentServer — delegates to persistSvc.
 func (s *Server) GetConversation(ctx context.Context, req *proto.GetConversationRequest) (*proto.Conversation, error) {
-	return s.persistSvc.GetConversation(ctx, req)
+	started := time.Now()
+	if s.resumePersistenceUnavailable("get_conversation") {
+		s.logResumeRPCFailure("get_conversation", nil, req, started, nil, "persistence_unavailable")
+	}
+	resp, err := s.persistSvc.GetConversation(ctx, req)
+	if err != nil {
+		s.logResumeRPCFailure("get_conversation", nil, req, started, err, "db_failure")
+	}
+	return resp, err
 }
 
 // ResumeConversation implements proto.AgentServer — delegates to persistSvc.
 func (s *Server) ResumeConversation(ctx context.Context, req *proto.ResumeConversationRequest) (*proto.ResumeConversationResponse, error) {
-	return s.persistSvc.ResumeConversation(ctx, req)
+	started := time.Now()
+	if s.resumePersistenceUnavailable("resume_conversation") {
+		s.logResumeRPCFailure("resume_conversation", nil, req, started, nil, "persistence_unavailable")
+	}
+	resp, err := s.persistSvc.ResumeConversation(ctx, req)
+	if err != nil {
+		s.logResumeRPCFailure("resume_conversation", nil, req, started, err, "db_failure")
+	}
+	return resp, err
 }
 
 // StreamResumeConversation implements proto.AgentServer — delegates to persistSvc.
 func (s *Server) StreamResumeConversation(req *proto.ResumeConversationRequest, stream proto.Agent_StreamResumeConversationServer) error {
-	return s.persistSvc.StreamResumeConversation(req, stream)
+	started := time.Now()
+	if s.resumePersistenceUnavailable("stream_resume_conversation") {
+		s.logResumeRPCFailure("stream_resume_conversation", nil, req, started, nil, "persistence_unavailable")
+	}
+	err := s.persistSvc.StreamResumeConversation(req, stream)
+	if err != nil {
+		s.logResumeRPCFailure("stream_resume_conversation", nil, req, started, err, "db_failure")
+	}
+	return err
+}
+
+func (s *Server) resumePersistenceUnavailable(operation string) bool {
+	return s == nil || s.persistSvc == nil || s.persistSvc.Store() == nil
+}
+
+func (s *Server) logResumeRPCFailure(operation string, listReq *proto.ListConversationsRequest, convReq interface{ GetConversationId() string }, started time.Time, err error, reason string) {
+	if s == nil || s.failureLog == nil {
+		return
+	}
+	fields := failurelog.Event{
+		"scope":               "resume_page",
+		"operation":           operation,
+		"reason":              reason,
+		"duration_ms":         time.Since(started).Milliseconds(),
+		"pid":                 os.Getpid(),
+		"persistence_enabled": s.persistSvc != nil && s.persistSvc.Store() != nil,
+	}
+	if listReq != nil {
+		fields["project_dir"] = listReq.GetProjectDir()
+		fields["limit"] = listReq.GetLimit()
+	}
+	if convReq != nil {
+		fields["conversation_id"] = convReq.GetConversationId()
+	}
+	if err != nil {
+		fields["message"] = failurelog.SanitizeMessage(err.Error())
+		fields["error_kind"] = classifyResumeRPCError(err)
+		if code := grpcstatus.Code(err); code != codes.OK {
+			fields["grpc_code"] = code.String()
+		}
+	}
+	s.failureLog.Log("resume.rpc_failure", fields)
+}
+
+func classifyResumeRPCError(err error) string {
+	if err == nil {
+		return "none"
+	}
+	msg := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(msg, "database is locked"), strings.Contains(msg, "database table is locked"), strings.Contains(msg, "sqlite_locked"), strings.Contains(msg, "sqlite_busy"):
+		return "sqlite_locked"
+	case strings.Contains(msg, "no such table"), strings.Contains(msg, "migration"), strings.Contains(msg, "schema"):
+		return "sqlite_schema"
+	case errors.Is(err, context.Canceled), strings.Contains(msg, "context canceled"):
+		return "canceled"
+	case errors.Is(err, context.DeadlineExceeded), strings.Contains(msg, "deadline exceeded"):
+		return "deadline_exceeded"
+	case strings.Contains(msg, "not found"):
+		return "not_found"
+	default:
+		return "unknown"
+	}
 }
 
 // DeleteConversation implements proto.AgentServer — delegates to persistSvc.

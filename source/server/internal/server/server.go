@@ -1709,6 +1709,19 @@ func (s *Server) StreamResumeConversation(req *proto.ResumeConversationRequest, 
 	return err
 }
 
+// StreamResumeConversationViewportFirst implements proto.AgentServer — delegates to persistSvc.
+func (s *Server) StreamResumeConversationViewportFirst(req *proto.ResumeConversationViewportFirstRequest, stream proto.Agent_StreamResumeConversationViewportFirstServer) error {
+	started := time.Now()
+	if s.resumePersistenceUnavailable("stream_resume_conversation_viewport_first") {
+		s.logResumeRPCFailure("stream_resume_conversation_viewport_first", nil, req, started, nil, "persistence_unavailable")
+	}
+	err := s.persistSvc.StreamResumeConversationViewportFirst(req, stream)
+	if err != nil {
+		s.logResumeRPCFailure("stream_resume_conversation_viewport_first", nil, req, started, err, "db_failure")
+	}
+	return err
+}
+
 func (s *Server) resumePersistenceUnavailable(operation string) bool {
 	return s == nil || s.persistSvc == nil || s.persistSvc.Store() == nil
 }

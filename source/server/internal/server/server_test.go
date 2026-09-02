@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -21,7 +22,9 @@ import (
 	"cercano/source/server/pkg/proto"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 )
 
@@ -100,6 +103,31 @@ func TestAgentServer_ProcessRequest(t *testing.T) {
 	}
 	if res.Output == "" {
 		t.Errorf("Expected output, got empty string")
+	}
+}
+
+func TestAgentServer_StreamResumeConversationViewportFirstIsImplemented(t *testing.T) {
+	ctx := context.Background()
+	conn, err := grpc.DialContext(ctx, "bufnet", grpc.WithContextDialer(bufDialer), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatalf("Failed to dial bufnet: %v", err)
+	}
+	defer conn.Close()
+
+	client := proto.NewAgentClient(conn)
+	stream, err := client.StreamResumeConversationViewportFirst(ctx, &proto.ResumeConversationViewportFirstRequest{ConversationId: "missing-conversation"})
+	if err != nil {
+		if status.Code(err) == codes.Unimplemented {
+			t.Fatalf("StreamResumeConversationViewportFirst is not wired on the registered server: %v", err)
+		}
+		t.Fatalf("StreamResumeConversationViewportFirst failed before stream recv: %v", err)
+	}
+	_, err = stream.Recv()
+	if err != nil && err != io.EOF {
+		if status.Code(err) == codes.Unimplemented {
+			t.Fatalf("StreamResumeConversationViewportFirst is not wired on the registered server: %v", err)
+		}
+		t.Fatalf("StreamResumeConversationViewportFirst recv failed: %v", err)
 	}
 }
 

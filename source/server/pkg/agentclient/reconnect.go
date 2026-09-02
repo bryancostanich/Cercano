@@ -343,13 +343,10 @@ func (c *Client) reconnect(ctx context.Context) error {
 			if !shouldRespawn(attempt) {
 				continue
 			}
-			if _, spawnErr := autoLaunchServer(c.addr); spawnErr != nil {
-				// Spawn itself failed (missing binary, permission,
-				// etc.) — the next scheduled attempt gets another shot
-				// in case the OLD server is coming back up.
-				continue
-			}
-			if err := waitForPort(c.addr, 8*time.Second); err != nil {
+			if _, _, launchErr := ensureServerLaunched(ctx, c.addr, 8*time.Second); launchErr != nil {
+				// Launch itself failed (missing binary, permission, slow
+				// bind, etc.) — the next scheduled attempt gets another
+				// shot in case the OLD server is coming back up.
 				continue
 			}
 			fresh, err = connect(ctx, c.addr, 3*time.Second)

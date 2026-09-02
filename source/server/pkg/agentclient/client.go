@@ -94,18 +94,21 @@ func Dial(ctx context.Context, addr string) (*Client, error) {
 		return c, nil
 	}
 
-	logPath, err := autoLaunchServer(addr)
+	logPath, launched, err := ensureServerLaunched(ctx, addr, 8*time.Second)
 	if err != nil {
+		if logPath != "" {
+			return nil, fmt.Errorf("no agent at %s and auto-launch failed (log: %s): %w", addr, logPath, err)
+		}
 		return nil, fmt.Errorf("no agent at %s and could not auto-launch: %w", addr, err)
-	}
-	if err := waitForPort(addr, 8*time.Second); err != nil {
-		return nil, fmt.Errorf("auto-launched cercano did not bind %s in time (log: %s): %w", addr, logPath, err)
 	}
 	c, err := connect(ctx, addr, 3*time.Second)
 	if err != nil {
-		return nil, fmt.Errorf("auto-launched cercano bound %s but gRPC dial failed (log: %s): %w", addr, logPath, err)
+		if logPath != "" {
+			return nil, fmt.Errorf("auto-launched cercano bound %s but gRPC dial failed (log: %s): %w", addr, logPath, err)
+		}
+		return nil, fmt.Errorf("agent became reachable at %s but gRPC dial failed: %w", addr, err)
 	}
-	c.AutoLaunched = true
+	c.AutoLaunched = launched
 	c.ServerLog = logPath
 	c.addr = addr
 	c.stopWatch = make(chan struct{})
@@ -130,6 +133,30 @@ func connect(ctx context.Context, addr string, timeout time.Duration) (*Client, 
 		return nil, err
 	}
 	return &Client{conn: conn, agent: proto.NewAgentClient(conn)}, nil
+}
+
+func ensureServerLaunched(ctx context.Context, addr string, timeout time.Duration) (string, bool, error) {
+	lock, err := acquireAutoLaunchLock()
+	if err != nil {
+		return "", false, err
+	}
+	defer releaseAutoLaunchLock(lock)
+
+	// Another client may have launched the server while this process waited for
+	// the lock. Check again before spawning.
+	if c, err := connect(ctx, addr, 600*time.Millisecond); err == nil {
+		_ = c.Close()
+		return "", false, nil
+	}
+
+	logPath, err := autoLaunchServer(addr)
+	if err != nil {
+		return "", false, err
+	}
+	if err := waitForPort(addr, timeout); err != nil {
+		return logPath, true, err
+	}
+	return logPath, true, nil
 }
 
 // autoLaunchServer spawns `cercano` (the agent server binary) in the background.

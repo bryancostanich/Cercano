@@ -1658,10 +1658,10 @@ func (s *Server) scheduleSelfShutdown() {
 // ListConversations implements proto.AgentServer — delegates to persistSvc.
 func (s *Server) ListConversations(ctx context.Context, req *proto.ListConversationsRequest) (*proto.ListConversationsResponse, error) {
 	started := time.Now()
-	if s.resumePersistenceUnavailable("list_conversations") {
-		// Preserve current behavior (the persistence service returns an empty
-		// result), but record why the resume page cannot populate.
-		s.logResumeRPCFailure("list_conversations", req, nil, started, nil, "persistence_unavailable")
+	if s.resumePersistenceUnavailable() {
+		err := resumePersistenceUnavailableError()
+		s.logResumeRPCFailure("list_conversations", req, nil, started, err, "persistence_unavailable")
+		return nil, err
 	}
 	resp, err := s.persistSvc.ListConversations(ctx, req)
 	if err != nil {
@@ -1673,8 +1673,10 @@ func (s *Server) ListConversations(ctx context.Context, req *proto.ListConversat
 // GetConversation implements proto.AgentServer — delegates to persistSvc.
 func (s *Server) GetConversation(ctx context.Context, req *proto.GetConversationRequest) (*proto.Conversation, error) {
 	started := time.Now()
-	if s.resumePersistenceUnavailable("get_conversation") {
-		s.logResumeRPCFailure("get_conversation", nil, req, started, nil, "persistence_unavailable")
+	if s.resumePersistenceUnavailable() {
+		err := resumePersistenceUnavailableError()
+		s.logResumeRPCFailure("get_conversation", nil, req, started, err, "persistence_unavailable")
+		return nil, err
 	}
 	resp, err := s.persistSvc.GetConversation(ctx, req)
 	if err != nil {
@@ -1686,8 +1688,10 @@ func (s *Server) GetConversation(ctx context.Context, req *proto.GetConversation
 // ResumeConversation implements proto.AgentServer — delegates to persistSvc.
 func (s *Server) ResumeConversation(ctx context.Context, req *proto.ResumeConversationRequest) (*proto.ResumeConversationResponse, error) {
 	started := time.Now()
-	if s.resumePersistenceUnavailable("resume_conversation") {
-		s.logResumeRPCFailure("resume_conversation", nil, req, started, nil, "persistence_unavailable")
+	if s.resumePersistenceUnavailable() {
+		err := resumePersistenceUnavailableError()
+		s.logResumeRPCFailure("resume_conversation", nil, req, started, err, "persistence_unavailable")
+		return nil, err
 	}
 	resp, err := s.persistSvc.ResumeConversation(ctx, req)
 	if err != nil {
@@ -1699,8 +1703,10 @@ func (s *Server) ResumeConversation(ctx context.Context, req *proto.ResumeConver
 // StreamResumeConversation implements proto.AgentServer — delegates to persistSvc.
 func (s *Server) StreamResumeConversation(req *proto.ResumeConversationRequest, stream proto.Agent_StreamResumeConversationServer) error {
 	started := time.Now()
-	if s.resumePersistenceUnavailable("stream_resume_conversation") {
-		s.logResumeRPCFailure("stream_resume_conversation", nil, req, started, nil, "persistence_unavailable")
+	if s.resumePersistenceUnavailable() {
+		err := resumePersistenceUnavailableError()
+		s.logResumeRPCFailure("stream_resume_conversation", nil, req, started, err, "persistence_unavailable")
+		return err
 	}
 	err := s.persistSvc.StreamResumeConversation(req, stream)
 	if err != nil {
@@ -1712,8 +1718,10 @@ func (s *Server) StreamResumeConversation(req *proto.ResumeConversationRequest, 
 // StreamResumeConversationViewportFirst implements proto.AgentServer — delegates to persistSvc.
 func (s *Server) StreamResumeConversationViewportFirst(req *proto.ResumeConversationViewportFirstRequest, stream proto.Agent_StreamResumeConversationViewportFirstServer) error {
 	started := time.Now()
-	if s.resumePersistenceUnavailable("stream_resume_conversation_viewport_first") {
-		s.logResumeRPCFailure("stream_resume_conversation_viewport_first", nil, req, started, nil, "persistence_unavailable")
+	if s.resumePersistenceUnavailable() {
+		err := resumePersistenceUnavailableError()
+		s.logResumeRPCFailure("stream_resume_conversation_viewport_first", nil, req, started, err, "persistence_unavailable")
+		return err
 	}
 	err := s.persistSvc.StreamResumeConversationViewportFirst(req, stream)
 	if err != nil {
@@ -1722,8 +1730,12 @@ func (s *Server) StreamResumeConversationViewportFirst(req *proto.ResumeConversa
 	return err
 }
 
-func (s *Server) resumePersistenceUnavailable(operation string) bool {
+func (s *Server) resumePersistenceUnavailable() bool {
 	return s == nil || s.persistSvc == nil || s.persistSvc.Store() == nil
+}
+
+func resumePersistenceUnavailableError() error {
+	return grpcstatus.Error(codes.Unavailable, "conversation persistence unavailable; restart the agent")
 }
 
 func (s *Server) logResumeRPCFailure(operation string, listReq *proto.ListConversationsRequest, convReq interface{ GetConversationId() string }, started time.Time, err error, reason string) {
@@ -1761,6 +1773,8 @@ func classifyResumeRPCError(err error) string {
 	}
 	msg := strings.ToLower(err.Error())
 	switch {
+	case strings.Contains(msg, "conversation persistence unavailable"), strings.Contains(msg, "no persistent store configured"):
+		return "persistence_unavailable"
 	case strings.Contains(msg, "database is locked"), strings.Contains(msg, "database table is locked"), strings.Contains(msg, "sqlite_locked"), strings.Contains(msg, "sqlite_busy"):
 		return "sqlite_locked"
 	case strings.Contains(msg, "no such table"), strings.Contains(msg, "migration"), strings.Contains(msg, "schema"):

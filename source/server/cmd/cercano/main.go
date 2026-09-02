@@ -115,6 +115,62 @@ func checkOllama(baseURL string) error {
 	return nil
 }
 
+var conversationStoreOpenRetryDelays = []time.Duration{
+	100 * time.Millisecond,
+	200 * time.Millisecond,
+	400 * time.Millisecond,
+	800 * time.Millisecond,
+	1600 * time.Millisecond,
+}
+
+type conversationStoreOpenFunc func(string) (conversation.Store, error)
+type conversationStoreSleepFunc func(time.Duration)
+
+func openAgentConversationStore(path string) (conversation.Store, error) {
+	return openConversationStoreWithRetry(path, conversation.Open, time.Sleep, conversationStoreOpenRetryDelays)
+}
+
+func openConversationStoreWithRetry(path string, open conversationStoreOpenFunc, sleep conversationStoreSleepFunc, delays []time.Duration) (conversation.Store, error) {
+	if open == nil {
+		return nil, errors.New("nil conversation store opener")
+	}
+	if sleep == nil {
+		sleep = time.Sleep
+	}
+
+	var lastErr error
+	attempts := 0
+	for {
+		attempts++
+		store, err := open(path)
+		if err == nil {
+			return store, nil
+		}
+		lastErr = err
+		if attempts > len(delays) || !isTransientConversationStoreOpenError(err) {
+			break
+		}
+		sleep(delays[attempts-1])
+	}
+
+	if attempts == 1 {
+		return nil, fmt.Errorf("failed to open conversation store at %s: %w", path, lastErr)
+	}
+	return nil, fmt.Errorf("failed to open conversation store at %s after %d attempts: %w", path, attempts, lastErr)
+}
+
+func isTransientConversationStoreOpenError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "database is locked") ||
+		strings.Contains(msg, "database table is locked") ||
+		strings.Contains(msg, "database is busy") ||
+		strings.Contains(msg, "sqlite_locked") ||
+		strings.Contains(msg, "sqlite_busy")
+}
+
 // ollamaStartupWarning probes Ollama and, if unreachable, returns a warning
 // for the startup log. Ollama down is never fatal: the configured runtime may
 // be llama_server and the primary route may be cloud, neither of which needs
@@ -216,19 +272,17 @@ func startGRPCServer(cfg config.Config, bindAddr string, events *crashlog.Writer
 	convStore := agent.NewConversationStore(sessionSvc, 3)
 
 	// Persistent SQLite-backed conversation store for /history and /resume.
-	// If the open fails (disk full, perms), log and continue without
-	// persistence — the agent still works for transient turns.
-	var persistentStore conversation.Store
-	if path, err := conversation.DefaultPath(); err == nil {
-		if ps, err := conversation.Open(path); err == nil {
-			persistentStore = ps
-			fmt.Fprintf(os.Stderr, "Conversation store: %s\n", path)
-		} else {
-			fmt.Fprintf(os.Stderr, "[WARN] Failed to open conversation store at %s: %v — /history & /resume disabled.\n", path, err)
-		}
-	} else {
-		fmt.Fprintf(os.Stderr, "[WARN] Could not resolve conversation store path: %v — /history & /resume disabled.\n", err)
+	// The public agent must not bind without it: otherwise /resume renders an
+	// empty picker while a degraded singleton owns the port.
+	persistentStorePath, err := conversation.DefaultPath()
+	if err != nil {
+		return "", nil, fmt.Errorf("resolve conversation store path: %w", err)
 	}
+	persistentStore, err := openAgentConversationStore(persistentStorePath)
+	if err != nil {
+		return "", nil, fmt.Errorf("%w; refusing to start agent without /history and /resume persistence", err)
+	}
+	fmt.Fprintf(os.Stderr, "Conversation store: %s\n", persistentStorePath)
 
 	// Context-window meter: per-conversation running token counters keyed
 	// by conversation id. The CLI polls GetContextUsage after each turn.

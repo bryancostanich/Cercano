@@ -12,6 +12,9 @@ import (
 
 	"cercano/source/server/internal/failurelog"
 	"cercano/source/server/pkg/proto"
+
+	"google.golang.org/grpc/codes"
+	grpcstatus "google.golang.org/grpc/status"
 )
 
 func TestLogResumeRPCFailureRecordsDBDiagnostics(t *testing.T) {
@@ -86,6 +89,44 @@ func TestLogResumeRPCFailureRecordsConversationIDAndTimeoutKind(t *testing.T) {
 	}
 	if event["error_kind"] != "deadline_exceeded" {
 		t.Fatalf("error_kind = %v, want deadline_exceeded", event["error_kind"])
+	}
+}
+
+func TestListConversationsReturnsUnavailableWhenPersistenceMissing(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "failures.jsonl")
+	w, err := failurelog.NewWriter(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+
+	s := &Server{failureLog: w}
+	resp, err := s.ListConversations(context.Background(), &proto.ListConversationsRequest{
+		ProjectDir: "/repo",
+		Limit:      100,
+	})
+	if err == nil {
+		t.Fatal("ListConversations() error = nil, want Unavailable")
+	}
+	if code := grpcstatus.Code(err); code != codes.Unavailable {
+		t.Fatalf("ListConversations() code = %v, want Unavailable", code)
+	}
+	if resp != nil {
+		t.Fatalf("ListConversations() response = %#v, want nil", resp)
+	}
+
+	event := readOneFailureEvent(t, path)
+	if event["reason"] != "persistence_unavailable" {
+		t.Fatalf("reason = %v, want persistence_unavailable", event["reason"])
+	}
+	if event["grpc_code"] != "Unavailable" {
+		t.Fatalf("grpc_code = %v, want Unavailable", event["grpc_code"])
+	}
+	if event["error_kind"] != "persistence_unavailable" {
+		t.Fatalf("error_kind = %v, want persistence_unavailable", event["error_kind"])
+	}
+	if event["persistence_enabled"] != false {
+		t.Fatalf("persistence_enabled = %v, want false", event["persistence_enabled"])
 	}
 }
 

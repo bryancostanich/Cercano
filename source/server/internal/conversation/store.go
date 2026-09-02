@@ -203,6 +203,18 @@ type Store interface {
 	// GetTurns returns all turns for a conversation, ordered by created_at.
 	GetTurns(ctx context.Context, conversationID string) ([]Turn, error)
 
+	// CountTurns returns the number of turns in a conversation.
+	CountTurns(ctx context.Context, conversationID string) (int, error)
+
+	// GetTurnPage returns a chronological page of turns using zero-based logical
+	// indices in the same order as GetTurns. start is clamped to the available
+	// range; limit <= 0 returns no turns.
+	GetTurnPage(ctx context.Context, conversationID string, start, limit int) ([]Turn, error)
+
+	// GetTailTurns returns the newest limit turns in chronological order, plus
+	// the zero-based start index of that tail and the total turn count.
+	GetTailTurns(ctx context.Context, conversationID string, limit int) ([]Turn, int, int, error)
+
 	// Delete removes a conversation and (via FK cascade) all its turns.
 	Delete(ctx context.Context, conversationID string) error
 
@@ -673,12 +685,68 @@ func (s *sqliteStore) ListChildren(ctx context.Context, parentID string) ([]Info
 func (s *sqliteStore) GetTurns(ctx context.Context, conversationID string) ([]Turn, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.getTurnPageLocked(ctx, conversationID, 0, -1)
+}
 
-	rows, err := s.db.QueryContext(ctx, `
+func (s *sqliteStore) CountTurns(ctx context.Context, conversationID string) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.countTurnsLocked(ctx, conversationID)
+}
+
+func (s *sqliteStore) GetTurnPage(ctx context.Context, conversationID string, start, limit int) ([]Turn, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+	if start < 0 {
+		start = 0
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.getTurnPageLocked(ctx, conversationID, start, limit)
+}
+
+func (s *sqliteStore) GetTailTurns(ctx context.Context, conversationID string, limit int) ([]Turn, int, int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	total, err := s.countTurnsLocked(ctx, conversationID)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	if limit <= 0 || total == 0 {
+		return nil, total, total, nil
+	}
+	start := total - limit
+	if start < 0 {
+		start = 0
+	}
+	turns, err := s.getTurnPageLocked(ctx, conversationID, start, total-start)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	return turns, start, total, nil
+}
+
+func (s *sqliteStore) countTurnsLocked(ctx context.Context, conversationID string) (int, error) {
+	var total int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM turns WHERE conversation_id = ?`, conversationID).Scan(&total); err != nil {
+		return 0, err
+	}
+	return total, nil
+}
+
+func (s *sqliteStore) getTurnPageLocked(ctx context.Context, conversationID string, start, limit int) ([]Turn, error) {
+	query := `
 		SELECT id, conversation_id, role, content, content_json, tokens_in, tokens_out, latency_ms, created_at
 		FROM turns
 		WHERE conversation_id = ?
-		ORDER BY created_at ASC, rowid ASC`, conversationID)
+		ORDER BY created_at ASC, rowid ASC`
+	args := []any{conversationID}
+	if limit >= 0 {
+		query += ` LIMIT ? OFFSET ?`
+		args = append(args, limit, start)
+	}
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}

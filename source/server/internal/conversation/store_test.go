@@ -2,6 +2,7 @@ package conversation
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -296,10 +297,14 @@ func TestListIncludesRecap(t *testing.T) {
 
 func TestGetTurns_SameSecondPreservesInsertionOrder(t *testing.T) {
 	s, err := Open(":memory:")
-	if err != nil { t.Fatalf("Open: %v", err) }
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
 	defer s.Close()
 	ctx := context.Background()
-	if err := s.EnsureConversation(ctx, "c1", "", "m"); err != nil { t.Fatalf("Ensure: %v", err) }
+	if err := s.EnsureConversation(ctx, "c1", "", "m"); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
 
 	ts := time.Unix(1_700_000_000, 0) // identical timestamp for all three
 	for _, c := range []string{"a", "b", "c"} {
@@ -308,9 +313,13 @@ func TestGetTurns_SameSecondPreservesInsertionOrder(t *testing.T) {
 		}
 	}
 	turns, err := s.GetTurns(ctx, "c1")
-	if err != nil { t.Fatalf("GetTurns: %v", err) }
+	if err != nil {
+		t.Fatalf("GetTurns: %v", err)
+	}
 	got := []string{}
-	for _, tn := range turns { got = append(got, tn.Content) }
+	for _, tn := range turns {
+		got = append(got, tn.Content)
+	}
 	if strings.Join(got, "") != "abc" {
 		t.Fatalf("order not preserved: got %v, want [a b c]", got)
 	}
@@ -318,11 +327,17 @@ func TestGetTurns_SameSecondPreservesInsertionOrder(t *testing.T) {
 
 func TestDeleteTurns_RemovesOnlyNamed(t *testing.T) {
 	s, err := Open(":memory:")
-	if err != nil { t.Fatalf("open: %v", err) }
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
 	defer s.Close()
 	ctx := context.Background()
-	if err := s.EnsureConversation(ctx, "c1", "", "m"); err != nil { t.Fatalf("ensure: %v", err) }
-	if err := s.EnsureConversation(ctx, "c2", "", "m"); err != nil { t.Fatalf("ensure: %v", err) }
+	if err := s.EnsureConversation(ctx, "c1", "", "m"); err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+	if err := s.EnsureConversation(ctx, "c2", "", "m"); err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
 	// c1: three turns with known ids; c2: one turn that must survive.
 	for _, tn := range []Turn{
 		{ID: "a", ConversationID: "c1", Role: "user", Content: "one"},
@@ -330,7 +345,9 @@ func TestDeleteTurns_RemovesOnlyNamed(t *testing.T) {
 		{ID: "c", ConversationID: "c1", Role: "user", Content: "three"},
 		{ID: "z", ConversationID: "c2", Role: "user", Content: "other"},
 	} {
-		if err := s.Append(ctx, tn); err != nil { t.Fatalf("append: %v", err) }
+		if err := s.Append(ctx, tn); err != nil {
+			t.Fatalf("append: %v", err)
+		}
 	}
 
 	if err := s.DeleteTurns(ctx, "c1", []string{"a", "c", "ghost"}); err != nil {
@@ -484,5 +501,103 @@ func TestEnsureConversation_DoesNotOverwriteExistingProjectAndModel(t *testing.T
 	if info.ProjectDir != "/orig" || info.Model != "model-A" {
 		t.Errorf("re-ensure overwrote project/model: got (%q, %q), want (/orig, model-A)",
 			info.ProjectDir, info.Model)
+	}
+}
+
+func TestTurnPagingTailAndPages(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	convID := "conv-paging"
+	if err := s.EnsureConversation(ctx, convID, "/tmp/project", "model"); err != nil {
+		t.Fatalf("EnsureConversation: %v", err)
+	}
+	base := time.Unix(1000, 0)
+	for i := 0; i < 7; i++ {
+		if err := s.Append(ctx, Turn{ID: fmt.Sprintf("t%d", i), ConversationID: convID, Role: "assistant", Content: fmt.Sprintf("turn-%d", i), CreatedAt: base.Add(time.Duration(i) * time.Second)}); err != nil {
+			t.Fatalf("Append %d: %v", i, err)
+		}
+	}
+
+	total, err := s.CountTurns(ctx, convID)
+	if err != nil {
+		t.Fatalf("CountTurns: %v", err)
+	}
+	if total != 7 {
+		t.Fatalf("CountTurns = %d, want 7", total)
+	}
+
+	page, err := s.GetTurnPage(ctx, convID, 2, 3)
+	if err != nil {
+		t.Fatalf("GetTurnPage: %v", err)
+	}
+	assertTurnContents(t, page, []string{"turn-2", "turn-3", "turn-4"})
+
+	tail, start, total, err := s.GetTailTurns(ctx, convID, 3)
+	if err != nil {
+		t.Fatalf("GetTailTurns: %v", err)
+	}
+	if start != 4 || total != 7 {
+		t.Fatalf("tail start,total = %d,%d; want 4,7", start, total)
+	}
+	assertTurnContents(t, tail, []string{"turn-4", "turn-5", "turn-6"})
+}
+
+func TestTurnPagingBoundariesAndStableSameSecondOrder(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	convID := "conv-paging-boundaries"
+	if err := s.EnsureConversation(ctx, convID, "/tmp/project", "model"); err != nil {
+		t.Fatalf("EnsureConversation: %v", err)
+	}
+	sameSecond := time.Unix(2000, 0)
+	for i := 0; i < 4; i++ {
+		if err := s.Append(ctx, Turn{ID: fmt.Sprintf("same-%d", i), ConversationID: convID, Role: "assistant", Content: fmt.Sprintf("same-%d", i), CreatedAt: sameSecond}); err != nil {
+			t.Fatalf("Append %d: %v", i, err)
+		}
+	}
+
+	oversized, start, total, err := s.GetTailTurns(ctx, convID, 99)
+	if err != nil {
+		t.Fatalf("GetTailTurns oversized: %v", err)
+	}
+	if start != 0 || total != 4 {
+		t.Fatalf("oversized tail start,total = %d,%d; want 0,4", start, total)
+	}
+	assertTurnContents(t, oversized, []string{"same-0", "same-1", "same-2", "same-3"})
+
+	beyond, err := s.GetTurnPage(ctx, convID, 99, 10)
+	if err != nil {
+		t.Fatalf("GetTurnPage beyond: %v", err)
+	}
+	if len(beyond) != 0 {
+		t.Fatalf("GetTurnPage beyond len = %d, want 0", len(beyond))
+	}
+
+	emptyTail, start, total, err := s.GetTailTurns(ctx, "missing", 10)
+	if err != nil {
+		t.Fatalf("GetTailTurns missing: %v", err)
+	}
+	if len(emptyTail) != 0 || start != 0 || total != 0 {
+		t.Fatalf("missing tail len,start,total = %d,%d,%d; want 0,0,0", len(emptyTail), start, total)
+	}
+}
+
+func assertTurnContents(t *testing.T, turns []Turn, want []string) {
+	t.Helper()
+	if len(turns) != len(want) {
+		t.Fatalf("len(turns) = %d, want %d", len(turns), len(want))
+	}
+	for i := range turns {
+		if turns[i].Content != want[i] {
+			t.Fatalf("turn[%d].Content = %q, want %q", i, turns[i].Content, want[i])
+		}
 	}
 }

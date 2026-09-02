@@ -9,9 +9,10 @@ import (
 type SummaryCall func(ctx context.Context, prompt string, maxTokens int) (StructuredSummary, error)
 
 type BudgetedSummaryStats struct {
-	Chunks       int
-	Merged       bool
-	PromptTokens []int
+	Chunks            int
+	Merged            bool
+	PromptTokens      []int
+	ToolResultsElided int
 }
 
 // SummarizeBudgetedLocal summarizes messages using only local calls that fit
@@ -22,11 +23,13 @@ func SummarizeBudgetedLocal(ctx context.Context, messages []llm.Message, context
 	if outputReserve <= 0 {
 		outputReserve = DefaultSummaryOutputReserve
 	}
+	messages, deduped := ElideSupersededToolResults(messages)
+	messages, lossyElided := KeepLastNToolResults(messages, DefaultLossyElisionKeepLast)
 	chunks, err := PackSummaryChunks(messages, contextWindow, outputReserve)
 	if err != nil {
-		return StructuredSummary{}, BudgetedSummaryStats{}, err
+		return StructuredSummary{}, BudgetedSummaryStats{ToolResultsElided: deduped + lossyElided}, err
 	}
-	stats := BudgetedSummaryStats{Chunks: len(chunks)}
+	stats := BudgetedSummaryStats{Chunks: len(chunks), ToolResultsElided: deduped + lossyElided}
 	if len(chunks) == 0 {
 		return StructuredSummary{}, stats, nil
 	}

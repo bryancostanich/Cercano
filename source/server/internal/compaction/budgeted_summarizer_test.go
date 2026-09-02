@@ -49,3 +49,32 @@ func TestSummarizeBudgetedLocal_MinimalOverflowDefersBeforeProvider(t *testing.T
 		t.Fatalf("expected DeferralError, got %T %v", err, err)
 	}
 }
+
+func TestSummarizeBudgetedLocal_PreElidesHugeToolResults(t *testing.T) {
+	huge := strings.Repeat("tool-output ", 2000)
+	msgs := []llm.Message{{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockToolResult, ToolUseRef: "u1", Content: huge}}}}
+
+	calls := 0
+	_, stats, err := SummarizeBudgetedLocal(context.Background(), msgs, 2000, 256, func(ctx context.Context, prompt string, maxTokens int) (StructuredSummary, error) {
+		calls++
+		if strings.Contains(prompt, huge) {
+			t.Fatal("local summary prompt retained the oversized tool result")
+		}
+		if !strings.Contains(prompt, "[elided: tool result") {
+			t.Fatalf("local summary prompt did not include an elision marker: %q", prompt)
+		}
+		if budget := EstimateSummaryBudget(prompt, maxTokens, 2000); !budget.Fits {
+			t.Fatalf("provider was called with over-budget prompt after elision: %+v", budget)
+		}
+		return StructuredSummary{State: "ok"}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 {
+		t.Fatalf("calls = %d, want 1", calls)
+	}
+	if stats.ToolResultsElided != 1 {
+		t.Fatalf("ToolResultsElided = %d, want 1", stats.ToolResultsElided)
+	}
+}

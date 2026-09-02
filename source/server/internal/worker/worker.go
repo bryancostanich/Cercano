@@ -490,9 +490,22 @@ func wrapWorkerResilience(
 	cfg pkgcfg.Config,
 	credSource credentialFetcher,
 ) inference.Provider {
-	opts := resilience.Options{OnEvent: func(ev resilience.Event) {
-		log.Printf("[worker] resilience %s (%s, %s): %s: %v", ev.Action, ev.Stage, ev.Class, ev.Notice(), ev.Err)
-	}}
+	primaryProf, _ := profileByName(cfg.CloudProfiles, primaryName)
+	profiles := cfg.ModelProfiles
+	opts := resilience.Options{
+		PrimaryModelFor: func(tier string) string {
+			if tier == "" {
+				return primaryProf.Model
+			}
+			if model := profiles.ResolveCloudModelForTier(primaryProf, pkgcfg.Tier(tier)); model != "" {
+				return model
+			}
+			return primaryProf.Model
+		},
+		OnEvent: func(ev resilience.Event) {
+			log.Printf("[worker] resilience %s (%s, %s): %s: %v", ev.Action, ev.Stage, ev.Class, ev.Notice(), ev.Err)
+		},
+	}
 	if backup, backupModelFor, ok := buildWorkerBackup(ctx, primaryName, cfg, credSource); ok {
 		opts.Backup = backup
 		opts.BackupModelFor = backupModelFor
@@ -562,13 +575,22 @@ func buildWorkerBackup(
 	}
 	// Same experience-preserving rewrite as the in-process builder: tiered
 	// requests re-resolve the tier against the backup vendor's cost table
-	// (ModelProfiles rides the config snapshot); untiered get bp.Model.
+	// (ModelProfiles rides the config snapshot); untiered get the backup default.
 	profiles := cfg.ModelProfiles
+	bpDefault := bp.Model
 	backupModelFor := func(tier string) string {
 		if tier == "" {
-			return bp.Model
+			return bpDefault
 		}
-		return profiles.ResolveCloudModelForTier(bp, pkgcfg.Tier(tier))
+		// Re-resolve against the original profile shape. If bp.Model already holds
+		// the provider-construction default, ResolveCloudModelForTier treats it as a
+		// pin and masks the requested tier.
+		resolveProf := bp
+		resolveProf.Model = ""
+		if model := profiles.ResolveCloudModelForTier(resolveProf, pkgcfg.Tier(tier)); model != "" {
+			return model
+		}
+		return bpDefault
 	}
 	return backup, backupModelFor, true
 }

@@ -582,3 +582,57 @@ func TestName_ImpersonatesPrimary(t *testing.T) {
 		t.Error("composite must impersonate the primary")
 	}
 }
+
+func TestChat_PrimaryModelForNormalizesTieredForeignModel(t *testing.T) {
+	primary := &fakeProvider{name: "anthropic"}
+	p, _, _ := build(primary, nil)
+	p.primaryModelFor = func(tier string) string {
+		if tier != "fast_light_text" {
+			t.Fatalf("tier = %q, want %q", tier, "fast_light_text")
+		}
+		return "claude-haiku-5"
+	}
+
+	if _, err := p.Chat(context.Background(), inference.Call{
+		Model: "gpt-5-mini",
+		Tier:  "fast_light_text",
+	}); err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	if len(primary.models) != 1 || primary.models[0] != "claude-haiku-5" {
+		t.Fatalf("primary observed models = %v, want [claude-haiku-5]", primary.models)
+	}
+}
+
+func TestStreamChat_PrimaryModelForNormalizesTieredForeignModel(t *testing.T) {
+	primary := &fakeProvider{name: "anthropic"}
+	p, _, _ := build(primary, nil)
+	p.primaryModelFor = func(tier string) string { return "claude-haiku-5" }
+
+	r, err := p.StreamChat(context.Background(), inference.Call{
+		Model: "gpt-5-mini",
+		Tier:  "fast_light_text",
+	})
+	if err != nil {
+		t.Fatalf("StreamChat: %v", err)
+	}
+	if _, err := collectStream(t, r); err != nil {
+		t.Fatalf("collectStream: %v", err)
+	}
+	if len(primary.models) != 1 || primary.models[0] != "claude-haiku-5" {
+		t.Fatalf("primary observed models = %v, want [claude-haiku-5]", primary.models)
+	}
+}
+
+func TestChat_PrimaryModelForLeavesUntieredOverrideAlone(t *testing.T) {
+	primary := &fakeProvider{name: "anthropic"}
+	p, _, _ := build(primary, nil)
+	p.primaryModelFor = func(string) string { return "claude-haiku-5" }
+
+	if _, err := p.Chat(context.Background(), inference.Call{Model: "explicit-one-off-model"}); err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	if len(primary.models) != 1 || primary.models[0] != "explicit-one-off-model" {
+		t.Fatalf("primary observed models = %v, want explicit override untouched", primary.models)
+	}
+}

@@ -95,6 +95,12 @@ func (e Event) Notice() string {
 // Options configures the engine. Zero values give: no backup, silent events,
 // 500ms default retry wait, 2s cap, 1h quota cooldown.
 type Options struct {
+	// PrimaryModelFor maps a capability-tier name to the primary vendor's model
+	// for that tier. When set, tiered requests are normalized before the first
+	// primary attempt, so a stale or foreign request Model cannot leak across
+	// cloud vendors (for example gpt-* into Anthropic). Untiered requests keep
+	// their explicit Model.
+	PrimaryModelFor func(tier string) string
 	// Backup, when non-nil, serves calls the primary failed in a way a
 	// different vendor could plausibly serve.
 	Backup inference.Provider
@@ -125,13 +131,14 @@ const (
 // Provider is the engine. It impersonates the primary everywhere except the
 // moment of a decision, which is narrated via EventNotice / OnEvent.
 type Provider struct {
-	primary        inference.Provider
-	backup         inference.Provider
-	backupModelFor func(tier string) string
-	onEvent        func(Event)
-	retryWait      time.Duration
-	retryWaitCap   time.Duration
-	quotaCooldown  time.Duration
+	primary         inference.Provider
+	primaryModelFor func(tier string) string
+	backup          inference.Provider
+	backupModelFor  func(tier string) string
+	onEvent         func(Event)
+	retryWait       time.Duration
+	retryWaitCap    time.Duration
+	quotaCooldown   time.Duration
 	// sleep and now are injection seams for tests; production uses ctx-aware
 	// sleep and the wall clock.
 	sleep func(ctx context.Context, d time.Duration) bool
@@ -233,16 +240,37 @@ func (p *Provider) quotaCoolingDown() bool {
 	return p.now().Before(p.quotaCooldownUntil)
 }
 
+// primaryRequest rewrites tiered requests into the primary provider's model
+// namespace before the first attempt. This is intentionally symmetric with
+// backupRequest: callers may carry a stale Model string from a previous active
+// profile, but Tier is the provider-neutral intent. Untiered requests keep
+// their explicit Model so one-off overrides still work.
+func (p *Provider) primaryRequest(req inference.Call) inference.Call {
+	if p.primaryModelFor == nil || req.Tier == "" {
+		return req
+	}
+	if model := p.primaryModelFor(req.Tier); model != "" {
+		req.Model = model
+	}
+	return req
+}
+
 // backupRequest rewrites the request into the backup provider's model
 // namespace, preserving the request's capability tier when it carries one.
 func (p *Provider) backupRequest(req inference.Call) inference.Call {
-	req.Model = p.backupModelFor(req.Tier)
+	if p.backupModelFor == nil {
+		return req
+	}
+	if model := p.backupModelFor(req.Tier); model != "" {
+		req.Model = model
+	}
 	return req
 }
 
 // Chat runs the non-streaming policy. Notices reach logs via OnEvent only —
 // there is no user-visible stream on this path.
 func (p *Provider) Chat(ctx context.Context, req inference.Call) (inference.Result, error) {
+	req = p.primaryRequest(req)
 	if p.quotaCoolingDown() {
 		return p.backup.Chat(ctx, p.backupRequest(req))
 	}
@@ -281,6 +309,7 @@ func (p *Provider) Chat(ctx context.Context, req inference.Call) (inference.Resu
 // following Next() — so the UI shows "trying once more" while the engine
 // waits, not after.
 func (p *Provider) StreamChat(ctx context.Context, req inference.Call) (inference.Stream, error) {
+	req = p.primaryRequest(req)
 	if p.quotaCoolingDown() {
 		return p.backup.StreamChat(ctx, p.backupRequest(req))
 	}

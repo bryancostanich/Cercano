@@ -382,23 +382,36 @@ func (p *service) rebuildCloud() error {
 // reported and skipped — a broken backup must never take down a working
 // primary, so every backup failure path degrades to a backup-less engine.
 func (p *service) wrapResilience(primary inference.Provider, primaryName string, c cfg.Config) inference.Provider {
-	opts := resilience.Options{OnEvent: func(ev resilience.Event) {
-		log.Printf("[cloud] resilience %s (%s, %s): %s: %v", ev.Action, ev.Stage, ev.Class, ev.Notice(), ev.Err)
-		if p.routingLog != nil {
-			p.routingLog.Log("cloud.resilience", routinglog.Event{
-				"primary_profile": primaryName,
-				"backup_profile":  c.BackupCloudProfile,
-				"action":          string(ev.Action),
-				"stage":           ev.Stage,
-				"error_class":     string(ev.Class),
-				"from_provider":   ev.From,
-				"to_provider":     ev.To,
-				"wait_ms":         ev.Wait.Milliseconds(),
-				"notice":          ev.Notice(),
-				"error":           errorString(ev.Err),
-			})
-		}
-	}}
+	primaryProf, _ := profileByName(c.CloudProfiles, primaryName)
+	profiles := c.ModelProfiles
+	opts := resilience.Options{
+		PrimaryModelFor: func(tier string) string {
+			if tier == "" {
+				return primaryProf.Model
+			}
+			if model := profiles.ResolveCloudModelForTier(primaryProf, cfg.Tier(tier)); model != "" {
+				return model
+			}
+			return primaryProf.Model
+		},
+		OnEvent: func(ev resilience.Event) {
+			log.Printf("[cloud] resilience %s (%s, %s): %s: %v", ev.Action, ev.Stage, ev.Class, ev.Notice(), ev.Err)
+			if p.routingLog != nil {
+				p.routingLog.Log("cloud.resilience", routinglog.Event{
+					"primary_profile": primaryName,
+					"backup_profile":  c.BackupCloudProfile,
+					"action":          string(ev.Action),
+					"stage":           ev.Stage,
+					"error_class":     string(ev.Class),
+					"from_provider":   ev.From,
+					"to_provider":     ev.To,
+					"wait_ms":         ev.Wait.Milliseconds(),
+					"notice":          ev.Notice(),
+					"error":           errorString(ev.Err),
+				})
+			}
+		},
+	}
 	if backup, backupModelFor, ok := p.buildBackup(primaryName, c); ok {
 		opts.Backup = backup
 		opts.BackupModelFor = backupModelFor
@@ -433,7 +446,8 @@ func (p *service) buildBackup(primaryName string, c cfg.Config) (inference.Provi
 		log.Printf("[cloud] backup profile %q has no API key; running without failover", name)
 		return nil, nil, false
 	}
-	bp.Model = c.ModelProfiles.ResolveCloudModelForTier(bp, cfg.TierEveryday)
+	bpDefault := c.ModelProfiles.ResolveCloudModelForTier(bp, cfg.TierEveryday)
+	bp.Model = bpDefault
 	var opts cloudfactory.Options
 	if bp.Flavor == cloudfactory.FlavorResponses && bp.Route == cloudfactory.RouteChatGPT {
 		opts.TokenSource = chatgptauth.NewSource(st, bp.Name, chatgptauth.Flow{})
@@ -455,12 +469,18 @@ func (p *service) buildBackup(primaryName string, c cfg.Config) (inference.Provi
 	profiles := c.ModelProfiles
 	backupModelFor := func(tier string) string {
 		if tier == "" {
-			return bp.Model
+			return bpDefault
 		}
-		if model := profiles.ResolveCloudModelForTier(bp, cfg.Tier(tier)); model != "" {
+		// Re-resolve against the original profile shape. bp.Model has been set to
+		// the backup default for provider construction; if we passed that mutated
+		// profile back into ResolveCloudModelForTier it would look like an explicit
+		// user pin and mask the requested tier.
+		resolveProf := bp
+		resolveProf.Model = ""
+		if model := profiles.ResolveCloudModelForTier(resolveProf, cfg.Tier(tier)); model != "" {
 			return model
 		}
-		return bp.Model
+		return bpDefault
 	}
 	return backup, backupModelFor, true
 }

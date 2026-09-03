@@ -260,6 +260,14 @@ func Advance(ctx context.Context, turns []conversation.Turn, state conversation.
 	// turn: capping works on segments of messages, but FrozenThrough is a turn
 	// timestamp, so we must map the capped message boundary to a turn.
 	eligibleMsgs, turnIdx := eligibleMessagesWithTurns(eligible)
+	// Drop image payloads before anything measures or splits this span. The
+	// summary prompt renders images as "[image]" regardless, so the base64 is
+	// pure overhead downstream: it inflates SegmentByTokens by ~1 token per 4
+	// encoded bytes and makes its message unsplittable. Stripping here (before
+	// the cadence gate) keeps every later token count describing the work that
+	// will actually be sent. Message count and order are preserved, so turnIdx
+	// stays aligned.
+	eligibleMsgs, _ = compaction.StripImagesForSummary(eligibleMsgs)
 	if compaction.TotalTokens(tok, eligibleMsgs) < cfg.SegmentTokens {
 		return state, false, false, nil // cadence gate — let the tail accumulate
 	}

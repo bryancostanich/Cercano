@@ -33,10 +33,10 @@ Spec: `efforts/cached-context-usage/spec.md`
 
 ## Phase 5 — client and UI
 
-- [ ] pending — Add freshness fields to agentclient.ContextUsage
-- [ ] pending — Stop zeroing meter state on poll error in the CLI model
-- [ ] pending — Surface stale/unknown state in the context view
-- [ ] pending — Tests for retain-on-error and stale rendering
+- [x] pending — Add freshness fields to agentclient.ContextUsage
+- [x] pending — Stop zeroing meter state on poll error in the CLI model
+- [x] pending — Surface stale/unknown state in the context view
+- [x] pending — Tests for retain-on-error and stale rendering
   Verification: `go test ./internal/ui/...` in `source/clients/cli`
 
 ## Phase 6 — end-to-end verification
@@ -46,4 +46,4 @@ Spec: `efforts/cached-context-usage/spec.md`
 - [ ] pending — Verify meter survives agent restart before any turn
 - [ ] pending — Full module test runs
   Verification: `go build ./...` both modules; `go test ./...` in
-                                  `source/server` and `source/clients/cli`
+                                            `source/server` and `source/clients/cli`

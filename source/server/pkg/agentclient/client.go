@@ -796,6 +796,45 @@ type ContextUsage struct {
 	OutputReserveTokens    int
 	EstimatedRequestTokens int
 	ContextWindowKnown     bool
+
+	// UsageSource reports where the accounting came from, so the UI can be
+	// honest about precision instead of implying a fresh exact measurement:
+	//
+	//	"live"         accounting from a turn served by the running agent
+	//	"snapshot"     durable cache; survives restarts
+	//	"raw_estimate" cold-start storage estimate; a lower bound
+	//	"none"         not computed yet — unknown, NOT zero usage
+	UsageSource string
+	// UsageComputedAt is when the accounting was measured (zero if unknown).
+	UsageComputedAt time.Time
+	// UsageStale marks a snapshot that predates newer turns, so its numbers
+	// are a lower bound on current usage.
+	UsageStale bool
+}
+
+// Known reports whether the meter has any real reading to show. False means
+// "not computed yet" — the UI must not render that as 0 tokens used.
+//
+// An explicit "none" is the only negative answer. An empty UsageSource is
+// treated as known when there are numbers to show, so a client still renders
+// correctly against an agent that predates the provenance fields.
+func (u *ContextUsage) Known() bool {
+	if u == nil {
+		return false
+	}
+	if u.UsageSource == "none" {
+		return false
+	}
+	if u.UsageSource != "" {
+		return true
+	}
+	return u.TokensUsed > 0 || u.EstimatedRequestTokens > 0 || u.RawTokens > 0
+}
+
+// Approximate reports whether the reading is a lower bound rather than a
+// current, complete measurement.
+func (u *ContextUsage) Approximate() bool {
+	return u != nil && (u.UsageStale || u.UsageSource == "raw_estimate")
 }
 
 // GetContextUsage fetches the live context-window meter for a conversation.
@@ -816,7 +855,19 @@ func (c *Client) GetContextUsage(ctx context.Context, conversationID string) (*C
 		OutputReserveTokens:    int(resp.GetOutputReserveTokens()),
 		EstimatedRequestTokens: int(resp.GetEstimatedRequestTokens()),
 		ContextWindowKnown:     resp.GetContextWindowKnown(),
+		UsageSource:            resp.GetUsageSource(),
+		UsageComputedAt:        unixOrZero(resp.GetUsageComputedAt()),
+		UsageStale:             resp.GetUsageStale(),
 	}, nil
+}
+
+// unixOrZero converts unix seconds to a time, mapping 0 to the zero time so
+// "unknown" stays distinguishable from the epoch.
+func unixOrZero(sec int64) time.Time {
+	if sec <= 0 {
+		return time.Time{}
+	}
+	return time.Unix(sec, 0)
 }
 
 // ToolCallDetail is the full args + result body for one tool call, fetched

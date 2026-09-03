@@ -149,6 +149,13 @@ type Model struct {
 	ctxOutputReserveTokens  int
 	ctxEstimatedRequest     int
 	ctxWindowKnown          bool
+	// ctxUsageSource is the provenance of the meter reading ("live",
+	// "snapshot", "raw_estimate", "none", or "" before the first poll).
+	// ctxUsageStale marks a reading that is a lower bound: either the agent
+	// reported it as predating newer turns, or the most recent poll failed and
+	// we are still showing the previous value.
+	ctxUsageSource          string
+	ctxUsageStale           bool
 	compacting              bool
 	ctxPollTicks            int
 	ctxPolling              bool      // a ctxUsageTick loop is currently running (avoid double-scheduling)
@@ -755,6 +762,8 @@ type ctxUsageMsg struct {
 	EstimatedRequestTokens int
 	ContextWindowKnown     bool
 	Compacting             bool
+	UsageSource            string
+	UsageStale             bool
 }
 
 // fetchContextUsage produces a tea.Cmd that asks the agent for the live
@@ -782,6 +791,8 @@ func fetchContextUsage(ag *agentclient.Client, convID string) tea.Cmd {
 			EstimatedRequestTokens: u.EstimatedRequestTokens,
 			ContextWindowKnown:     u.ContextWindowKnown,
 			Compacting:             u.Compacting,
+			UsageSource:            u.UsageSource,
+			UsageStale:             u.UsageStale,
 		}
 	}
 }
@@ -1908,17 +1919,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case ctxUsageMsg:
-		// Authoritative context-window meter from the agent; overrides
-		// our locally-summed cumIn approximation. If the poll fails, clear
-		// request-specific fields so the footer cannot keep showing a stale
-		// pre-elision estimate from an earlier accounting path.
+		// Authoritative context-window meter from the agent; overrides our
+		// locally-summed cumIn approximation.
+		//
+		// A failed poll means "we don't know right now", NOT "the context is
+		// empty". Clearing these fields here was what turned a slow or failed
+		// poll into a confident 0 in the footer on large conversations. Keep
+		// the last known reading and mark it stale instead; only `compacting`
+		// is cleared, because an unobserved pass should not animate forever.
 		if msg.Err != nil {
-			m.ctxRaw = 0
-			m.ctxMessageTokens = 0
-			m.ctxSystemTokens = 0
-			m.ctxToolSchemaTokens = 0
-			m.ctxOutputReserveTokens = 0
-			m.ctxEstimatedRequest = 0
+			m.ctxUsageStale = true
 			m.compacting = false
 			return m, nil
 		}
@@ -1935,6 +1945,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.ctxOutputReserveTokens = msg.OutputReserveTokens
 		m.ctxEstimatedRequest = msg.EstimatedRequestTokens
 		m.ctxWindowKnown = msg.ContextWindowKnown
+		m.ctxUsageSource = msg.UsageSource
+		m.ctxUsageStale = msg.UsageStale
 		m.compacting = msg.Compacting
 		// Kick the per-frame animation loop whenever compacting is reported
 		// and no tick is in flight — not just on the false→true edge. The

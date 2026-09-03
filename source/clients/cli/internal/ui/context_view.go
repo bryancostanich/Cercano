@@ -475,6 +475,11 @@ func (c *contextView) renderHeader() string {
 		return c.styles.Muted.Render("context  usage unavailable")
 	}
 	u := c.snapshot.Usage
+	// "Not computed yet" is not the same as "zero tokens". Say so, rather than
+	// rendering a 0 / window bar that reads as an empty context.
+	if !u.Known() {
+		return c.styles.Muted.Render("context  not computed yet")
+	}
 	used := u.EstimatedRequestTokens
 	if used == 0 {
 		used = u.TokensUsed
@@ -507,6 +512,11 @@ func (c *contextView) renderHeader() string {
 	}
 	if u.EstimatedRequestTokens > 0 && u.ModelMax > 0 && !u.ContextWindowKnown {
 		head += c.styles.Muted.Render("  ·  window estimated")
+	}
+	// Mark readings that are a lower bound: a cold-start storage estimate, or a
+	// snapshot the agent reported as predating newer turns.
+	if u.Approximate() {
+		head += c.styles.Muted.Render("  ·  ≈ approximate")
 	}
 
 	cs := c.snapshot.Compaction

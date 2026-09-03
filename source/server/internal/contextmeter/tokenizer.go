@@ -94,6 +94,99 @@ func (t *tiktokenTokenizer) Count(s string) int {
 	return len(t.enc.Encode(s, nil, nil))
 }
 
+// Memoization bounds. Turn content is immutable once written, so the same
+// strings are re-counted many times: once per Assemble pass, and again on
+// every request for the life of the conversation. Short strings tokenize
+// fast enough that caching them wastes entries, so only sizeable blocks are
+// memoized.
+const (
+	minMemoLen     = 256
+	maxMemoEntries = 1 << 16
+)
+
+// memoEntry stores a cached count alongside the source length. Length is
+// checked on lookup so a hash collision must also match the exact byte
+// length before a stale count can be returned.
+type memoEntry struct {
+	length int
+	count  int
+}
+
+// memoTokenizer wraps a Tokenizer with a bounded, concurrency-safe cache
+// keyed on a 64-bit FNV-1a hash of the input.
+//
+// Keying on the hash rather than the string matters: a map with string keys
+// would pin every counted block in memory for the process lifetime (tens of
+// megabytes for a large conversation), because the key holds a reference to
+// the original bytes. The hash keeps the cache flat regardless of content
+// size.
+//
+// Collision risk is accepted deliberately and is negligible in practice: a
+// 64-bit hash plus an exact length check, over a cache capped at 65 536
+// entries, puts the odds of a wrong count far below the error already
+// inherent in using cl100k_base as a proxy for non-OpenAI tokenizers. The
+// counts drive budget decisions, not correctness of message content.
+type memoTokenizer struct {
+	inner Tokenizer
+
+	mu    sync.RWMutex
+	cache map[uint64]memoEntry
+}
+
+// Memoizing wraps tok so repeated Count calls on identical strings are served
+// from cache. Returns tok unchanged if it is nil or already memoizing.
+func Memoizing(tok Tokenizer) Tokenizer {
+	if tok == nil {
+		return nil
+	}
+	if _, ok := tok.(*memoTokenizer); ok {
+		return tok
+	}
+	return &memoTokenizer{inner: tok, cache: make(map[uint64]memoEntry)}
+}
+
+func (t *memoTokenizer) Count(s string) int {
+	if len(s) < minMemoLen {
+		return t.inner.Count(s)
+	}
+	key := hashString(s)
+
+	t.mu.RLock()
+	e, ok := t.cache[key]
+	t.mu.RUnlock()
+	if ok && e.length == len(s) {
+		return e.count
+	}
+
+	n := t.inner.Count(s)
+
+	t.mu.Lock()
+	// Bounded by wholesale reset rather than LRU eviction: the access pattern
+	// is dominated by one conversation's working set, so a rare full clear is
+	// cheaper than per-entry bookkeeping on every lookup.
+	if len(t.cache) >= maxMemoEntries {
+		t.cache = make(map[uint64]memoEntry)
+	}
+	t.cache[key] = memoEntry{length: len(s), count: n}
+	t.mu.Unlock()
+
+	return n
+}
+
+// hashString is FNV-1a over the raw bytes, computed without allocating.
+func hashString(s string) uint64 {
+	const (
+		offset64 = 14695981039346656037
+		prime64  = 1099511628211
+	)
+	h := uint64(offset64)
+	for i := 0; i < len(s); i++ {
+		h ^= uint64(s[i])
+		h *= prime64
+	}
+	return h
+}
+
 // fallbackTokenizer is a char-count/4 estimator used when tiktoken
 // initialisation fails (no network for vocabulary download, etc.). Crude but
 // keeps the meter advancing instead of showing 0.
@@ -115,10 +208,15 @@ func Default() Tokenizer {
 	defaultOnce.Do(func() {
 		enc, err := tiktoken.GetEncoding("cl100k_base")
 		if err != nil {
+			// The fallback is len/4 arithmetic — already cheaper than a map
+			// lookup, so memoizing it would only add overhead.
 			defaultTok = fallbackTokenizer{}
 			return
 		}
-		defaultTok = &tiktokenTokenizer{enc: enc}
+		// Memoized: the shared default is called repeatedly on identical,
+		// immutable turn content during request assembly, where re-encoding
+		// dominates request latency on large conversations.
+		defaultTok = Memoizing(&tiktokenTokenizer{enc: enc})
 	})
 	return defaultTok
 }

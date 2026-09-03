@@ -140,7 +140,7 @@ type Model struct {
 	// path that invokes m.cancelStream — the NEW turn's cancel func.
 	turnGen int
 
-	tokIn, tokOut           int
+	tokOut                  int
 	cumIn, cumOut           int
 	ctxRaw                  int
 	ctxMessageTokens        int
@@ -189,7 +189,7 @@ type Model struct {
 	turnCloud       bool      // true when the turn routed to a cloud engine
 	turnToolStarted int       // tool calls started in this turn, for long-turn progress visibility
 	turnToolDone    int       // tool executions completed in this turn, for long-turn progress visibility
-	hadTurn         bool      // a turn has completed; gate the idle token counter
+
 
 	content contentPage
 
@@ -3086,9 +3086,7 @@ func (m *Model) applyTurnTelemetry(d chatDoneMsg) {
 	} else {
 		m.cloudState = "ok"
 	}
-	m.tokIn = d.tokIn
 	m.tokOut = d.tokOut
-	m.hadTurn = true
 	// cumIn/cumOut here are local approximations until the agent answers
 	// GetContextUsage; the RPC's authoritative total overrides cumIn on arrival.
 	m.cumIn += d.tokIn
@@ -5736,16 +5734,8 @@ func (m Model) renderStatus() string {
 	case "ok":
 		cloudPart = m.statusDivider() + m.styles.Muted.Render("cloud:") + m.styles.Success.Render(" ok")
 	}
-	// Show the token counter only once a turn has completed — no "0↑/0↓" on a
-	// fresh session — and label it "last turn" since it's the prior turn's total.
-	turnPart := ""
-	if m.hadTurn {
-		turnPart = m.statusDivider() +
-			m.styles.Muted.Render(fmt.Sprintf("last turn %d↑/%d↓", m.tokIn, m.tokOut))
-	}
 	parts := []string{
 		m.renderContextMeter(),
-		turnPart,
 		cloudPart,
 		m.renderConnStateChip(),
 		m.renderPermissionModeChip(),
@@ -5907,9 +5897,6 @@ func (m Model) renderContextMeter() string {
 	if m.ctxRaw > messageUsed && messageUsed > 0 {
 		saved := int(100 * (1 - float64(messageUsed)/float64(m.ctxRaw)))
 		badge = m.statusDivider() + m.styles.Muted.Render(fmt.Sprintf("▣ %d%%↓", saved))
-	}
-	if m.ctxEstimatedRequest > 0 {
-		badge += m.statusDivider() + m.styles.Muted.Render(fmt.Sprintf("msg %s", formatTokens(messageUsed)))
 	}
 	if m.ctxEstimatedRequest > 0 && m.modelMaxTokens > 0 && !m.ctxWindowKnown {
 		badge += m.statusDivider() + m.styles.Muted.Render("window est")

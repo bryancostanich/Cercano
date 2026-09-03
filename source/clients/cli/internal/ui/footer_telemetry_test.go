@@ -19,17 +19,15 @@ func driveStreamDone(t *testing.T, m *Model, tokIn, tokOut int, notice, model st
 	})
 }
 
-// TestFooterReflectsLastTurn drives a scripted Done event and asserts the
-// footer shows the expected token counts and cloud state.
-func TestFooterReflectsLastTurn(t *testing.T) {
+// TestFooterReflectsCloudState drives a scripted Done event and asserts the
+// footer shows cloud state. Per-turn token counts are deliberately absent:
+// they were footer noise and were removed.
+func TestFooterReflectsCloudState(t *testing.T) {
 	m := newStreamTestModel()
 	driveStreamDone(t, &m, 12, 34, "", "qwen3-coder")
 
 	plain := stripAnsiCSI(m.renderStatus())
 
-	if !strings.Contains(plain, "last turn 12↑/34↓") {
-		t.Errorf("renderStatus missing last-turn token counts; got: %q", plain)
-	}
 	if !strings.Contains(plain, "cloud:") || !strings.Contains(plain, "ok") {
 		t.Errorf("renderStatus missing cloud:ok; got: %q", plain)
 	}
@@ -48,14 +46,30 @@ func TestFooterCloudNoneOnNotice(t *testing.T) {
 	}
 }
 
-// TestFooterHiddenBeforeFirstTurn asserts a fresh model (no turn yet) does
-// not emit a "last turn" section.
-func TestFooterHiddenBeforeFirstTurn(t *testing.T) {
+// TestFooterOmitsPerTurnAndMessageCounts guards the removal of two noisy
+// footer segments: the per-turn "last turn N↑/N↓" counter and the "msg N"
+// message-token badge. Both are checked after a completed turn, since that is
+// when they used to appear.
+func TestFooterOmitsPerTurnAndMessageCounts(t *testing.T) {
 	m := newStreamTestModel()
+	m.width = 200
+	m.modelMaxTokens = 128000
+	m.ctxMessageTokens = 44000
+	m.ctxEstimatedRequest = 61392
+	m.ctxRaw = 900000
+	driveStreamDone(t, &m, 12, 34, "", "qwen3-coder")
+
 	plain := stripAnsiCSI(m.renderStatus())
 
 	if strings.Contains(plain, "last turn") {
-		t.Errorf("renderStatus should not show last-turn before any turn completes; got: %q", plain)
+		t.Errorf("footer should not show per-turn token counts; got: %q", plain)
+	}
+	if strings.Contains(plain, "msg ") {
+		t.Errorf("footer should not show the msg token badge; got: %q", plain)
+	}
+	// The context meter itself must survive the removal.
+	if !strings.Contains(plain, "ctx ") {
+		t.Errorf("context meter should still render; got: %q", plain)
 	}
 }
 
@@ -83,16 +97,15 @@ func TestFooterDividersUseSingleSpacePadding(t *testing.T) {
 func TestApplyTelemetry(t *testing.T) {
 	m := newStreamTestModel()
 
-	t.Run("sets tokIn/tokOut/hadTurn/cloudState ok", func(t *testing.T) {
+	t.Run("sets tokOut/cumulative/cloudState ok", func(t *testing.T) {
 		m.applyTurnTelemetry(chatDoneMsg{tokIn: 100, tokOut: 200, notice: "", model: "my-model"})
-		if m.tokIn != 100 {
-			t.Errorf("tokIn = %d, want 100", m.tokIn)
-		}
+		// tokOut still feeds the live turn-status line. Per-turn input is only
+		// accumulated now; the "last turn N↑/N↓" footer segment was removed.
 		if m.tokOut != 200 {
 			t.Errorf("tokOut = %d, want 200", m.tokOut)
 		}
-		if !m.hadTurn {
-			t.Error("hadTurn should be true after applyTurnTelemetry")
+		if m.cumIn != 100 {
+			t.Errorf("cumIn = %d, want 100", m.cumIn)
 		}
 		if m.cloudState != "ok" {
 			t.Errorf("cloudState = %q, want \"ok\"", m.cloudState)

@@ -2,7 +2,9 @@ package compaction
 
 import (
 	"fmt"
+	"sync"
 
+	"cercano/source/server/internal/contextmeter"
 	"cercano/source/server/internal/llm"
 )
 
@@ -44,11 +46,29 @@ func EstimateSummaryBudget(prompt string, outputReserve, contextWindow int) Budg
 	return res
 }
 
+// budgetTokenizer is the tokenizer used for all summary-budget math. It is
+// lazily constructed because contextmeter.Default() loads a tiktoken encoding,
+// which is too expensive to do at package init.
+var budgetTokenizer = sync.OnceValue(contextmeter.Default)
+
+// estimateTokens returns the token cost of s using the real tokenizer rather
+// than a characters-per-token approximation.
+//
+// This used to be len([]rune(s))/4 + 1. That heuristic is calibrated for
+// English prose and undercounts badly on the content compaction actually sees:
+// JSON tool input, diffs, shell output and source code all tokenize far denser
+// than four characters per token. Undercounting here is not a cosmetic error —
+// every consumer of this number (chunk packing, oversized-block splitting, and
+// the maxFittingRunes binary search) concludes a chunk fits when it does not,
+// and the resulting prompt overflows the local model's context at call time.
+//
+// Real tokenization costs roughly 6ms per 60K characters, which is negligible
+// against a summarization pass that spends tens of seconds in the model.
 func estimateTokens(s string) int {
 	if s == "" {
 		return 0
 	}
-	return len([]rune(s))/4 + 1
+	return budgetTokenizer().Count(s)
 }
 
 // PackSummaryChunks splits messages so each rendered BuildSummaryPrompt(chunk)

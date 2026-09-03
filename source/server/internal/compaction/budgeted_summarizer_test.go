@@ -12,7 +12,7 @@ import (
 func TestSummarizeBudgetedLocal_ChunksAndMergesWithoutCloud(t *testing.T) {
 	msgs := []llm.Message{}
 	for i := 0; i < 4; i++ {
-		msgs = append(msgs, budgetTextMsg(llm.RoleUser, fmt.Sprintf("msg-%d %s", i, strings.Repeat("x", 1800))))
+		msgs = append(msgs, budgetTextMsg(llm.RoleUser, fmt.Sprintf("msg-%d %s", i, strings.Repeat("alpha beta gamma delta ", 225))))
 	}
 	calls := 0
 	got, stats, err := SummarizeBudgetedLocal(context.Background(), msgs, 2500, 256, func(ctx context.Context, prompt string, maxTokens int) (StructuredSummary, error) {

@@ -11,10 +11,10 @@ Spec: `efforts/cached-context-usage/spec.md`
 
 ## Phase 2 — write at compaction points
 
-- [ ] pending — Add nil-safe snapshot-persist seam to compactiongen.Generator
-- [ ] pending — Persist post-pass snapshot in runCompaction
-- [ ] pending — Persist snapshot in Regenerate and Clear
-- [ ] pending — Tests for compaction-path snapshot persistence
+- [x] pending — Add nil-safe snapshot-persist seam to compactiongen.Generator
+- [x] pending — Persist post-pass snapshot in runCompaction
+- [x] pending — Persist snapshot in Regenerate and Clear
+- [x] pending — Tests for compaction-path snapshot persistence
   Verification: `go test ./internal/compactiongen ./internal/compactor`
 
 ## Phase 3 — write at turn accounting
@@ -46,4 +46,4 @@ Spec: `efforts/cached-context-usage/spec.md`
 - [ ] pending — Verify meter survives agent restart before any turn
 - [ ] pending — Full module test runs
   Verification: `go build ./...` both modules; `go test ./...` in
-        `source/server` and `source/clients/cli`
+                  `source/server` and `source/clients/cli`

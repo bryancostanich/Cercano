@@ -159,3 +159,15 @@ func TestModelMax_ClaudeGenericMatch(t *testing.T) {
 		}
 	}
 }
+
+func TestKnownModelMaxIgnoresRoutingPrefixes(t *testing.T) {
+	if got, ok := KnownModelMax("llama_server:catalog:glm-4.5-air-q4_k_m"); ok || got != 0 {
+		t.Fatalf("KnownModelMax runtime-prefixed GLM = %d/%v, want 0/false", got, ok)
+	}
+	if got := ModelMax("llama_server:catalog:glm-4.5-air-q4_k_m"); got != 128_000 {
+		t.Fatalf("ModelMax runtime-prefixed GLM = %d, want unknown-model default 128000", got)
+	}
+	if got := ModelMax("llama_server:catalog:llama3.1:8b"); got != 131_072 {
+		t.Fatalf("ModelMax runtime-prefixed llama3.1 = %d, want 131072", got)
+	}
+}

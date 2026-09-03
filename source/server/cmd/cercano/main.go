@@ -348,13 +348,7 @@ func startGRPCServer(cfg config.Config, bindAddr string, events *crashlog.Writer
 			// window swung 0/7 to 7/7 on anchor retention between samples, while
 			// temperature 0 reproduced exactly and kept every proposal anchor.
 			greedy := engine.Greedy()
-			localSummaryWindow := contextmeter.ModelMax(summarizerModel)
-			if localSummaryWindow <= 0 {
-				localSummaryWindow = cfg.LlamaServer.ContextSize
-			}
-			if localSummaryWindow <= 0 {
-				localSummaryWindow = cfg.MistralRS.MaxSeqLen
-			}
+			localSummaryWindow := contextmeter.LocalRuntimeWindow(cfg, summarizerModel)
 			parseLogged := func(output, via string) compaction.StructuredSummary {
 				s := compaction.ParseSummary(output)
 				if s.IsEmpty() {
@@ -434,7 +428,11 @@ func startGRPCServer(cfg config.Config, bindAddr string, events *crashlog.Writer
 		if budgetPct <= 0 {
 			budgetPct = compactedBudgetDefaultPct
 		}
-		budgetTokens := int(float64(contextmeter.ModelMax(openChatModel(cfg))) * budgetPct)
+		budgetWindow := contextmeter.LocalRuntimeWindow(cfg, openChatModel(cfg))
+		if budgetWindow <= 0 {
+			budgetWindow = contextmeter.ModelMax(openChatModel(cfg))
+		}
+		budgetTokens := int(float64(budgetWindow) * budgetPct)
 		if budgetTokens < compactedBudgetFloorTokens {
 			budgetTokens = compactedBudgetFloorTokens
 		}

@@ -53,7 +53,7 @@ func ModelMax(model string) int { return ModelWindowFor(model).Tokens }
 // a known family. The boolean lets routing policy distinguish a deliberate
 // window from ModelMax's conservative default.
 func KnownModelMax(model string) (int, bool) {
-	m := strings.ToLower(model)
+	m := normalizeModelName(model)
 	switch {
 	case strings.Contains(m, "qwen3-coder-next"):
 		return 262_144, true // qwen3-coder-next:latest publishes 256K
@@ -79,6 +79,22 @@ func KnownModelMax(model string) (int, bool) {
 		return 8_192, true
 	}
 	return 0, false
+}
+
+func normalizeModelName(model string) string {
+	m := strings.ToLower(strings.TrimSpace(model))
+	for _, prefix := range []string{
+		"llama_server:catalog:",
+		"llama_server:online:",
+		"llama_server:",
+		"ollama:",
+		"mistralrs:",
+	} {
+		if strings.HasPrefix(m, prefix) {
+			return strings.TrimPrefix(m, prefix)
+		}
+	}
+	return m
 }
 
 // tiktokenTokenizer wraps a tiktoken encoding. Single-instance per encoding

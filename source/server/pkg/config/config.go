@@ -174,9 +174,16 @@ func (m ModelProfiles) vendorHasModel(vendor, model string) bool {
 // updates automatically take effect for existing users. A profile Model is an
 // explicit pin/override and wins over the catalog for every tier.
 func (m ModelProfiles) ResolveCloudModelForTier(prof CloudProfile, tier Tier) string {
-	vendor := prof.Provider
-	if vendor == "" {
-		vendor = inferProviderVendor(prof)
+	baseVendor := prof.Provider
+	if baseVendor == "" {
+		baseVendor = inferProviderVendor(prof)
+	}
+	// An explicit Provider names a table directly and is taken at face value;
+	// only inferred vendors get route-qualified, so a user who hand-wrote
+	// provider: openai keeps addressing that exact table.
+	vendor := baseVendor
+	if prof.Provider == "" {
+		vendor = vendorForRoute(baseVendor, prof.Route)
 	}
 	if prof.Model != "" {
 		m.guardCloudModel(vendor, prof.Model, prof.Model)
@@ -186,6 +193,16 @@ func (m ModelProfiles) ResolveCloudModelForTier(prof CloudProfile, tier Tier) st
 	if ct, ok := CostTierForCapability(tier); ok {
 		if resolved, ok := m.ResolveCloud(vendor, ct); ok {
 			model = resolved
+		} else if vendor != baseVendor {
+			// No route-specific table configured (e.g. a hand-written config
+			// carrying only the bare vendor key). Fall back to the vendor's
+			// direct lineup rather than resolving to nothing: an unqualified
+			// model the provider might reject still beats an empty model that
+			// fails every request.
+			if resolved, ok := m.ResolveCloud(baseVendor, ct); ok {
+				model = resolved
+				vendor = baseVendor
+			}
 		}
 	}
 	m.guardCloudModel(vendor, model, prof.Model)
@@ -229,6 +246,36 @@ func CostTierForCapability(t Tier) (CostTier, bool) {
 // existing/legacy configs a vendor without a hand edit. Flavor strings are
 // duplicated as literals here rather than imported from cloudfactory to avoid
 // an import cycle (cloudfactory depends on config).
+// routeVendorSuffix maps a non-default access route to the suffix that
+// distinguishes its model lineup from the vendor's direct-API lineup.
+//
+// Model availability is a function of (vendor, access route), not vendor
+// alone: a ChatGPT subscription reached through Codex serves a strictly
+// narrower lineup than the same vendor's direct API (notably, it rejects the
+// mini models outright). Keying the cost tables on the combined identity is
+// what the provider catalog already does for subscription entries, and it
+// keeps guardCloudModel honest — the guard asks "is this model in this
+// vendor's table?", which only answers the real question when the table is
+// route-specific.
+//
+// Routes absent from this map (direct, and the empty default) use the bare
+// vendor key, so existing configs resolve exactly as before.
+var routeVendorSuffix = map[string]string{
+	"chatgpt": "chatgpt",
+}
+
+// vendorForRoute qualifies a base vendor with the profile's access route.
+// Returns the bare vendor for direct/unknown routes.
+func vendorForRoute(vendor, route string) string {
+	if vendor == "" {
+		return ""
+	}
+	if suffix, ok := routeVendorSuffix[route]; ok {
+		return vendor + "-" + suffix
+	}
+	return vendor
+}
+
 func inferProviderVendor(p CloudProfile) string {
 	switch p.Flavor {
 	case "responses":
@@ -548,6 +595,18 @@ func Defaults() Config {
 					},
 					"openai": {
 						Economy:  CostTierModel{Model: "gpt-5-mini"},
+						Standard: CostTierModel{Model: "gpt-5.5"},
+						Premium:  CostTierModel{Model: "gpt-5.5"},
+					},
+					// OpenAI reached through a ChatGPT subscription (Codex)
+					// serves a narrower lineup than the direct API: the mini
+					// models are rejected with a 400 ("not supported when
+					// using Codex with a ChatGPT account"). Economy therefore
+					// resolves to the same model as standard — this route has
+					// no cheaper option, and a working expensive summarizer
+					// beats a broken cheap one.
+					"openai-chatgpt": {
+						Economy:  CostTierModel{Model: "gpt-5.5"},
 						Standard: CostTierModel{Model: "gpt-5.5"},
 						Premium:  CostTierModel{Model: "gpt-5.5"},
 					},

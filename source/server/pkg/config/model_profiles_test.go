@@ -119,6 +119,57 @@ func TestResolveCloudModelForTier(t *testing.T) {
 	}
 }
 
+// The ChatGPT subscription route rejects the mini models that the direct
+// OpenAI API accepts, so economy-tier work (compaction, summarization) must
+// not resolve to gpt-5-mini when the profile carries route: chatgpt.
+func TestResolveCloudModelForTierIsRouteAware(t *testing.T) {
+	d := Defaults()
+
+	chatgpt := CloudProfile{Flavor: "responses", Route: "chatgpt"} // Provider empty -> inferred
+	directAPI := CloudProfile{Flavor: "chat_completions", Backend: "openai"}
+
+	// The regression: economy on the ChatGPT route must not be a mini model.
+	got := d.ModelProfiles.ResolveCloudModelForTier(chatgpt, TierFastLightText)
+	if got == "gpt-5-mini" {
+		t.Errorf("chatgpt route economy resolved to %q — Codex rejects mini models with a 400", got)
+	}
+	if got != "gpt-5.5" {
+		t.Errorf("chatgpt route economy = %q, want gpt-5.5", got)
+	}
+
+	// The direct API keeps its cheaper economy model: the fix must not make
+	// every OpenAI caller pay premium prices.
+	if got := d.ModelProfiles.ResolveCloudModelForTier(directAPI, TierFastLightText); got != "gpt-5-mini" {
+		t.Errorf("direct openai economy = %q, want gpt-5-mini (unchanged)", got)
+	}
+}
+
+// A config carrying only the bare vendor key (hand-written, or predating the
+// route-qualified tables) must still resolve a model rather than silently
+// returning "" and failing every request.
+func TestResolveCloudModelForTierFallsBackToBaseVendor(t *testing.T) {
+	m := ModelProfiles{Cloud: CloudCostProfiles{Providers: map[string]VendorCostTiers{
+		"openai": {Economy: CostTierModel{Model: "gpt-5-mini"}},
+	}}}
+	chatgpt := CloudProfile{Flavor: "responses", Route: "chatgpt"}
+	if got := m.ResolveCloudModelForTier(chatgpt, TierFastLightText); got != "gpt-5-mini" {
+		t.Errorf("missing route table: got %q, want fallback to base vendor gpt-5-mini", got)
+	}
+}
+
+// An explicit provider: names a table directly and must be honored verbatim,
+// so a user who pinned a vendor table keeps addressing exactly that table.
+func TestExplicitProviderIsNotRouteQualified(t *testing.T) {
+	m := ModelProfiles{Cloud: CloudCostProfiles{Providers: map[string]VendorCostTiers{
+		"openai":         {Economy: CostTierModel{Model: "gpt-5-mini"}},
+		"openai-chatgpt": {Economy: CostTierModel{Model: "gpt-5.5"}},
+	}}}
+	explicit := CloudProfile{Provider: "openai", Flavor: "responses", Route: "chatgpt"}
+	if got := m.ResolveCloudModelForTier(explicit, TierFastLightText); got != "gpt-5-mini" {
+		t.Errorf("explicit provider = %q, want gpt-5-mini (taken at face value)", got)
+	}
+}
+
 func TestDefaultsSeedsCostTables(t *testing.T) {
 	d := Defaults()
 	if got, ok := d.ModelProfiles.ResolveCloud("anthropic", CostPremium); !ok || got != "claude-fable-5" {

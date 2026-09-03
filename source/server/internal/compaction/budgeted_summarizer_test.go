@@ -36,17 +36,20 @@ func TestSummarizeBudgetedLocal_ChunksAndMergesWithoutCloud(t *testing.T) {
 	}
 }
 
-func TestSummarizeBudgetedLocal_MinimalOverflowDefersBeforeProvider(t *testing.T) {
-	called := false
-	_, _, err := SummarizeBudgetedLocal(context.Background(), []llm.Message{budgetTextMsg(llm.RoleUser, strings.Repeat("x", 20000))}, 2000, 256, func(ctx context.Context, prompt string, maxTokens int) (StructuredSummary, error) {
-		called = true
-		return StructuredSummary{}, nil
+func TestSummarizeBudgetedLocal_SplitsOversizedTextBeforeProvider(t *testing.T) {
+	calls := 0
+	_, stats, err := SummarizeBudgetedLocal(context.Background(), []llm.Message{budgetTextMsg(llm.RoleUser, strings.Repeat("x", 20000))}, 2000, 256, func(ctx context.Context, prompt string, maxTokens int) (StructuredSummary, error) {
+		calls++
+		if budget := EstimateSummaryBudget(prompt, maxTokens, 2000); !budget.Fits {
+			t.Fatalf("provider was called with over-budget split prompt: %+v", budget)
+		}
+		return StructuredSummary{Decisions: []string{fmt.Sprintf("part-%d", calls)}}, nil
 	})
-	if called {
-		t.Fatal("minimal overflow must defer before calling provider")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, ok := err.(*DeferralError); !ok {
-		t.Fatalf("expected DeferralError, got %T %v", err, err)
+	if calls < 2 || stats.Chunks != calls || !stats.Merged {
+		t.Fatalf("expected oversized text to split and merge, calls=%d stats=%+v", calls, stats)
 	}
 }
 

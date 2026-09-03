@@ -65,8 +65,34 @@ func TestPackSummaryChunks_MultipleChunksStableOrder(t *testing.T) {
 	}
 }
 
-func TestPackSummaryChunks_SingleOversizedMessageDefers(t *testing.T) {
-	msgs := []llm.Message{budgetTextMsg(llm.RoleUser, string(make([]byte, 20000)))}
+func TestPackSummaryChunks_SingleOversizedTextMessageSplitsLosslessly(t *testing.T) {
+	text := string(make([]byte, 20000))
+	msgs := []llm.Message{budgetTextMsg(llm.RoleUser, text)}
+	chunks, err := PackSummaryChunks(msgs, 2000, 256)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(chunks) < 2 {
+		t.Fatalf("expected oversized message to split into multiple chunks, got %d", len(chunks))
+	}
+	var got string
+	for _, chunk := range chunks {
+		if len(chunk) != 1 {
+			t.Fatalf("split oversized chunks should contain one synthetic message, got %#v", chunk)
+		}
+		budget := EstimateSummaryBudget(BuildSummaryPrompt(chunk), 256, 2000)
+		if !budget.Fits {
+			t.Fatalf("split chunk over budget: %+v", budget)
+		}
+		got += chunk[0].Blocks[0].Text
+	}
+	if got != text {
+		t.Fatalf("split text did not round trip: got %d bytes want %d", len(got), len(text))
+	}
+}
+
+func TestPackSummaryChunks_SingleOversizedUnsplittableBlockDefers(t *testing.T) {
+	msgs := []llm.Message{{Role: llm.RoleAssistant, Blocks: []llm.Block{{Type: llm.BlockToolUse, ToolName: "huge", ToolInput: []byte(fmt.Sprintf(`{"payload":%q}`, string(make([]byte, 20000))))}}}}
 	_, err := PackSummaryChunks(msgs, 2000, 256)
 	var def *DeferralError
 	if !errors.As(err, &def) {

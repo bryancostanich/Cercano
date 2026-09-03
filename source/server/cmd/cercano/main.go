@@ -203,6 +203,32 @@ const (
 	compactedBudgetFloorTokens = 16000
 )
 
+// cloudFallbackTimeout bounds the compaction cloud fallback on its own clock.
+// The fallback previously inherited the pass context, so a local summarizer
+// that burned most of the pass deadline handed the cloud call whatever was
+// left — often seconds — and it died with "context deadline exceeded" before
+// the request was even sent. The fallback is a fresh piece of work and gets a
+// fresh budget. Kept well under drainGrace so a shutdown still drains cleanly.
+const cloudFallbackTimeout = 2 * time.Minute
+
+// cloudIsPrimaryLocus reports whether the configured locus puts the cloud in
+// front for compaction's summarization work. It is the gate for spending cloud
+// tokens on a segment the LOCAL summarizer declined on size (a DeferralError):
+// worth it when the user already pays for cloud-first, wrong when they asked to
+// stay open/local.
+//
+// This is deliberately Coproc(), not Main(): summarization is one-shot
+// co-processor work, and under cloud_primary the locus package keeps that kind
+// of grunt work local while the main LLM runs on cloud. An unparseable mode
+// falls back to the package default rather than silently enabling cloud spend.
+func cloudIsPrimaryLocus(cfg config.Config) bool {
+	mode, err := locus.ParseMode(cfg.LocusMode)
+	if err != nil {
+		mode = locus.DefaultMode
+	}
+	return mode.Coproc().Preferred == locus.TierCloud
+}
+
 // startGRPCServer initializes all providers and starts the gRPC server.
 // Returns the listener address and a cleanup function.
 // events may be nil (MCP embedded mode opens no log); a nil writer makes
@@ -390,6 +416,19 @@ func startGRPCServer(cfg config.Config, bindAddr string, events *crashlog.Writer
 				// (providers.SetCloudProvider); an absent/failed cloud surfaces
 				// the original local error. No ModelOverride — the cloud provider
 				// uses its configured model, not the local summarizer id.
+
+				// A DeferralError is not a liveness failure — the local
+				// summarizer worked fine and refused on size. The cloud's
+				// window is larger, so the segment might fit there, but
+				// spending cloud tokens on an oversized segment is only
+				// consistent with the user's intent when the cloud is their
+				// primary locus. Under open_* the answer is to defer and let
+				// the segmenter produce something that fits.
+				var deferral *compaction.DeferralError
+				if errors.As(err, &deferral) && !cloudIsPrimaryLocus(cfg) {
+					fmt.Fprintf(os.Stderr, "[compaction] local summarizer deferred (%v) — not falling back to cloud under locus_mode=%q\n", err, cfg.LocusMode)
+					return compaction.StructuredSummary{}, err
+				}
 				if cloud := lazyRouter.Tiers().Cloud; cloud != nil {
 					// Tier rides along so a mid-call failover re-resolves the
 					// backup vendor's economy model instead of its default.
@@ -403,7 +442,22 @@ func startGRPCServer(cfg config.Config, bindAddr string, events *crashlog.Writer
 						}
 					}
 					fmt.Fprintf(os.Stderr, "[compaction] local summarizer failed (%v) — falling back to cloud (model %q)\n", err, cloudReq.ModelOverride)
-					cresp, cerr := cloud.Process(ctx, cloudReq)
+					// Detach from the pass deadline (see cloudFallbackTimeout)
+					// but keep cancellation: context.WithoutCancel would let
+					// the call outlive a shutdown, so derive from the parent's
+					// cancellation while replacing its deadline.
+					cloudCtx, cancelCloud := context.WithTimeout(context.WithoutCancel(ctx), cloudFallbackTimeout)
+					// Propagate real cancellation (shutdown) but NOT deadline
+					// expiry — the pass deadline is exactly what this call is
+					// meant to outlive, and ctx.Done() fires for both.
+					stopPropagate := context.AfterFunc(ctx, func() {
+						if !errors.Is(context.Cause(ctx), context.DeadlineExceeded) {
+							cancelCloud()
+						}
+					})
+					cresp, cerr := cloud.Process(cloudCtx, cloudReq)
+					stopPropagate()
+					cancelCloud()
 					if cerr == nil {
 						return parseLogged(cresp.Output, "cloud fallback"), nil
 					}

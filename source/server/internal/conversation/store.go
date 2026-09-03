@@ -156,6 +156,35 @@ type Compaction struct {
 	UpdatedAt            time.Time
 }
 
+// ContextUsage is a cached snapshot of a conversation's context accounting.
+//
+// It is a derived cache, not a source of truth: raw turns and Compaction are.
+// It exists so the context meter can be served without assembling full history,
+// which on large conversations exceeds the client's poll deadline.
+//
+// Source records how the snapshot was produced:
+//
+//	"turn"        exact provider-facing accounting captured while serving a turn
+//	"compaction"  post-pass send-view totals a compaction pass already computed
+//
+// Model records the model whose window the snapshot was measured against, so a
+// snapshot taken under a different route can be recognized instead of trusted.
+type ContextUsage struct {
+	ConversationID     string
+	TokensUsed         int // the sent (compacted) size
+	RawTokens          int // the uncompacted size
+	MessageTokens      int
+	SystemTokens       int
+	ToolSchemaTokens   int
+	OutputReserve      int
+	EstimatedRequest   int
+	ContextWindow      int
+	ContextWindowKnown bool
+	Model              string
+	Source             string
+	ComputedAt         time.Time
+}
+
 // PrunedBodyStub replaces a frozen turn's content when it ages out of raw
 // retention; the consolidated summary carries the substance.
 const PrunedBodyStub = "[pruned after 90 days — see summary]"
@@ -236,6 +265,14 @@ type Store interface {
 	GetCompaction(ctx context.Context, conversationID string) (Compaction, error)
 	// SaveCompaction upserts the derived compaction state.
 	SaveCompaction(ctx context.Context, c Compaction) error
+
+	// GetContextUsage returns the cached context-accounting snapshot for a
+	// conversation. ok is false when no snapshot has been computed yet, which
+	// callers must report as unknown rather than as zero usage.
+	GetContextUsage(ctx context.Context, conversationID string) (usage ContextUsage, ok bool, err error)
+	// SaveContextUsage upserts the cached context-accounting snapshot. Callers
+	// pass values they already computed; this must never trigger assembly.
+	SaveContextUsage(ctx context.Context, u ContextUsage) error
 
 	// CreateAutonomyRun inserts one append-only autonomous run record. It fails if
 	// the new run would violate the one-active-run-per-conversation invariant.
@@ -943,6 +980,75 @@ func (s *sqliteStore) GetCompaction(ctx context.Context, conversationID string) 
 	}
 	c.UpdatedAt = time.Unix(updated, 0)
 	return c, nil
+}
+
+func (s *sqliteStore) GetContextUsage(ctx context.Context, conversationID string) (ContextUsage, bool, error) {
+	if conversationID == "" {
+		return ContextUsage{}, false, errors.New("conversation id required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	u := ContextUsage{ConversationID: conversationID}
+	var windowKnown int
+	var computed int64
+	err := s.db.QueryRowContext(ctx,
+		`SELECT tokens_used, raw_tokens, message_tokens, system_tokens, tool_schema_tokens,
+		        output_reserve, estimated_request, context_window, window_known,
+		        model, source, computed_at
+		 FROM conversation_context_usage WHERE conversation_id = ?`, conversationID).
+		Scan(&u.TokensUsed, &u.RawTokens, &u.MessageTokens, &u.SystemTokens, &u.ToolSchemaTokens,
+			&u.OutputReserve, &u.EstimatedRequest, &u.ContextWindow, &windowKnown,
+			&u.Model, &u.Source, &computed)
+	if err == sql.ErrNoRows {
+		// No snapshot yet. Report "unknown", never zero usage — a confident 0
+		// on a large conversation is exactly the bug this cache fixes.
+		return ContextUsage{ConversationID: conversationID}, false, nil
+	}
+	if err != nil {
+		return ContextUsage{}, false, err
+	}
+	u.ContextWindowKnown = windowKnown != 0
+	u.ComputedAt = time.Unix(computed, 0)
+	return u, true, nil
+}
+
+func (s *sqliteStore) SaveContextUsage(ctx context.Context, u ContextUsage) error {
+	if u.ConversationID == "" {
+		return errors.New("conversation id required")
+	}
+	windowKnown := 0
+	if u.ContextWindowKnown {
+		windowKnown = 1
+	}
+	computed := u.ComputedAt
+	if computed.IsZero() {
+		computed = time.Now()
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO conversation_context_usage
+			(conversation_id, tokens_used, raw_tokens, message_tokens, system_tokens,
+			 tool_schema_tokens, output_reserve, estimated_request, context_window,
+			 window_known, model, source, computed_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(conversation_id) DO UPDATE SET
+			tokens_used=excluded.tokens_used,
+			raw_tokens=excluded.raw_tokens,
+			message_tokens=excluded.message_tokens,
+			system_tokens=excluded.system_tokens,
+			tool_schema_tokens=excluded.tool_schema_tokens,
+			output_reserve=excluded.output_reserve,
+			estimated_request=excluded.estimated_request,
+			context_window=excluded.context_window,
+			window_known=excluded.window_known,
+			model=excluded.model,
+			source=excluded.source,
+			computed_at=excluded.computed_at`,
+		u.ConversationID, u.TokensUsed, u.RawTokens, u.MessageTokens, u.SystemTokens,
+		u.ToolSchemaTokens, u.OutputReserve, u.EstimatedRequest, u.ContextWindow,
+		windowKnown, u.Model, u.Source, computed.Unix())
+	return err
 }
 
 func (s *sqliteStore) SaveCompaction(ctx context.Context, c Compaction) error {

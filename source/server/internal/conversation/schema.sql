@@ -66,6 +66,36 @@ CREATE TABLE IF NOT EXISTS conversation_compaction (
     updated_at        INTEGER NOT NULL DEFAULT 0
 );
 
+-- conversation_context_usage: a derived cache of the context meter's
+-- accounting (1:1 with a conversation). It is NOT a source of truth — raw turns
+-- and conversation_compaction are. It exists because recomputing provider-facing
+-- accounting requires assembling full history, which on large conversations far
+-- exceeds the UI's context-poll deadline and made the meter read 0.
+--
+-- Rows are written only where accurate numbers are already computed: after a
+-- compaction pass (which already builds and totals the send view) and after a
+-- real turn's request accounting. No writer performs extra assembly work.
+--
+-- source records provenance: 'turn' (exact provider-facing accounting from a
+-- served turn) or 'compaction' (post-pass send-view totals). model records which
+-- model's window the snapshot was computed against, so a stale snapshot taken
+-- under a different route can be identified rather than trusted blindly.
+CREATE TABLE IF NOT EXISTS conversation_context_usage (
+    conversation_id     TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
+    tokens_used         INTEGER NOT NULL DEFAULT 0,
+    raw_tokens          INTEGER NOT NULL DEFAULT 0,
+    message_tokens      INTEGER NOT NULL DEFAULT 0,
+    system_tokens       INTEGER NOT NULL DEFAULT 0,
+    tool_schema_tokens  INTEGER NOT NULL DEFAULT 0,
+    output_reserve      INTEGER NOT NULL DEFAULT 0,
+    estimated_request   INTEGER NOT NULL DEFAULT 0,
+    context_window      INTEGER NOT NULL DEFAULT 0,
+    window_known        INTEGER NOT NULL DEFAULT 0,
+    model               TEXT    NOT NULL DEFAULT '',
+    source              TEXT    NOT NULL DEFAULT '',
+    computed_at         INTEGER NOT NULL DEFAULT 0
+);
+
 -- autonomy_runs: append-only autonomous-run ledger. The profile remains
 -- conversation-scoped, but each approved autonomous run gets its own durable row
 -- so later runs do not overwrite earlier briefs, decisions, or review records.

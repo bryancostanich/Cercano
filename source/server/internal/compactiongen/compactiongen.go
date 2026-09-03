@@ -15,6 +15,7 @@ import (
 	"cercano/source/server/internal/compactor"
 	"cercano/source/server/internal/contextmeter"
 	"cercano/source/server/internal/conversation"
+	"cercano/source/server/internal/requestassembly"
 )
 
 // Store is the subset of conversation.Store the generator needs.
@@ -55,11 +56,12 @@ type Generator struct {
 	elideFn func(ctx context.Context, conversationID string) (pre, post, stubbed int, changed bool, err error)
 
 	// usageFn persists the context-usage snapshot after a pass, using the
-	// send-view total the pass already computed. A callback rather than a
-	// direct store write because resolving the meter's model and window is the
-	// persistence service's job, not the compactor's. Nil disables the write —
-	// the snapshot is a cache, so failing to update it must never fail a pass.
-	usageFn func(ctx context.Context, conversationID string, sentTokens int)
+	// send-view and raw totals the pass already computed. A callback rather
+	// than a direct store write because resolving the meter's model and window
+	// is the persistence service's job, not the compactor's. Nil disables the
+	// write — the snapshot is a cache, so failing to update it must never fail
+	// a pass.
+	usageFn func(ctx context.Context, conversationID string, sentTokens, rawTokens int)
 }
 
 func New(store Store, summarize compaction.SummarizeFunc, cfg compactor.Config, tok contextmeter.Tokenizer, debounce time.Duration) *Generator {
@@ -100,9 +102,10 @@ func (g *Generator) SetElideOnlyFn(fn func(ctx context.Context, conversationID s
 }
 
 // SetContextUsageFn wires the context-usage snapshot writer. Passes call it
-// with the post-pass send-view token total they already computed, so caching
-// the meter costs no additional assembly work. Nil (the default) disables it.
-func (g *Generator) SetContextUsageFn(fn func(ctx context.Context, conversationID string, sentTokens int)) {
+// with the post-pass send-view and raw token totals they already computed, so
+// caching the meter costs no additional assembly work. Nil (the default)
+// disables it.
+func (g *Generator) SetContextUsageFn(fn func(ctx context.Context, conversationID string, sentTokens, rawTokens int)) {
 	g.mu.Lock()
 	g.usageFn = fn
 	g.mu.Unlock()
@@ -111,14 +114,21 @@ func (g *Generator) SetContextUsageFn(fn func(ctx context.Context, conversationI
 // recordUsage persists the post-pass context-usage snapshot, if a writer is
 // wired. Best-effort by construction: the snapshot is a derived cache and must
 // never turn a successful compaction pass into a failure.
-func (g *Generator) recordUsage(ctx context.Context, conversationID string, sentTokens int) {
+func (g *Generator) recordUsage(ctx context.Context, conversationID string, sentTokens, rawTokens int) {
 	g.mu.Lock()
 	fn := g.usageFn
 	g.mu.Unlock()
 	if fn == nil || conversationID == "" || sentTokens <= 0 {
 		return
 	}
-	fn(ctx, conversationID, sentTokens)
+	fn(ctx, conversationID, sentTokens, rawTokens)
+}
+
+// rawTokensOf is the cheap uncompacted-size estimate for turns already loaded
+// by a pass. Deliberately the same estimator the meter uses, and deliberately
+// only called where turns are already in memory.
+func rawTokensOf(turns []conversation.Turn) int {
+	return requestassembly.EstimateRawTokens(turns)
 }
 
 func (g *Generator) elisionOnly() (func(ctx context.Context, conversationID string) (int, int, int, bool, error), bool) {
@@ -202,7 +212,10 @@ func (g *Generator) runCompaction(ctx context.Context, conversationID string) er
 		}
 		g.logf("[compaction] pass ok %s (elision-only): %d -> %d tokens in %s (%d tool results stubbed)\n",
 			conversationID, pre, post, time.Since(start).Round(time.Millisecond), stubbed)
-		g.recordUsage(ctx, conversationID, post)
+		// rawTokens=0 means "no new raw measurement": the elision-only pass
+		// never loads turns, and elision does not change the raw size anyway.
+		// The writer preserves any previously cached raw value.
+		g.recordUsage(ctx, conversationID, post, 0)
 		return nil
 	}
 
@@ -256,7 +269,7 @@ func (g *Generator) runCompaction(ctx context.Context, conversationID string) er
 	g.logf("[compaction] pass ok %s: %d -> %d tokens in %s (more=%v)\n", conversationID, pre, post, time.Since(start).Round(time.Millisecond), more)
 	// The pass already built and totaled the post-pass send view; cache it so
 	// the meter never has to reassemble this conversation to answer a poll.
-	g.recordUsage(ctx, conversationID, post)
+	g.recordUsage(ctx, conversationID, post, rawTokensOf(turns))
 	if more {
 		// Backlog remains; a bounded pass persisted its progress. Reschedule so
 		// the next chunk runs after the debounce — the backlog converges one
@@ -332,7 +345,7 @@ func (g *Generator) Regenerate(ctx context.Context, conversationID string, incre
 		}
 		progress(fmt.Sprintf("pass %d: view ~%d tokens (%s)", pass, postTokens, time.Since(start).Round(time.Second)))
 		if !more {
-			g.recordUsage(ctx, conversationID, postTokens)
+			g.recordUsage(ctx, conversationID, postTokens, rawTokensOf(turns))
 			return preTokens, postTokens, nil
 		}
 		if !changed {
@@ -381,7 +394,7 @@ func (g *Generator) Clear(ctx context.Context, conversationID string, progress f
 	// Clearing raises the send-view size (the raw backlog is rehydrated). Cache
 	// the post-clear total so the meter doesn't keep serving the smaller
 	// pre-clear snapshot.
-	g.recordUsage(ctx, conversationID, postTokens)
+	g.recordUsage(ctx, conversationID, postTokens, rawTokensOf(turns))
 	return preTokens, postTokens, nil
 }
 

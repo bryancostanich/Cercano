@@ -15,6 +15,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/compaction"
@@ -97,6 +98,12 @@ type Service interface {
 	SetCompactionGenerator(g *compactiongen.Generator)
 	SetContextLoader(l *projectctx.Loader)
 
+	// RecordTurnContextUsage caches the exact provider-facing request
+	// accounting captured while serving a turn, so the context meter survives
+	// an agent restart instead of resetting to "unknown". Best-effort: a cache
+	// write must never fail a turn.
+	RecordTurnContextUsage(ctx context.Context, convID string, u TurnContextUsage)
+
 	// RPC-body implementations (front door delegates to these).
 	ListConversations(ctx context.Context, req *proto.ListConversationsRequest) (*proto.ListConversationsResponse, error)
 	GetConversation(ctx context.Context, req *proto.GetConversationRequest) (*proto.Conversation, error)
@@ -117,6 +124,28 @@ type Service interface {
 	DeleteConversationTurns(ctx context.Context, req *proto.DeleteConversationTurnsRequest) (*proto.DeleteConversationTurnsResponse, error)
 	SuggestNextPrompt(ctx context.Context, req *proto.SuggestNextPromptRequest) (*proto.SuggestNextPromptResponse, error)
 }
+
+// TurnContextUsage is the provider-facing request accounting captured while
+// serving one turn. Unlike a compaction pass, a real turn knows the true system
+// prompt and tool-schema costs, so this is the highest-fidelity snapshot the
+// meter can cache.
+type TurnContextUsage struct {
+	MessageTokens          int
+	SystemTokens           int
+	ToolSchemaTokens       int
+	OutputReserveTokens    int
+	EstimatedRequestTokens int
+	ContextWindow          int
+	ContextWindowKnown     bool
+}
+
+// Provenance values for a cached context-usage snapshot. "turn" is exact
+// provider-facing accounting captured while serving a real turn; "compaction"
+// is the post-pass send-view total a compaction pass already computed.
+const (
+	contextUsageSourceTurn       = "turn"
+	contextUsageSourceCompaction = "compaction"
+)
 
 // svc is the concrete implementation of Service.
 type svc struct {
@@ -257,11 +286,100 @@ func (x *svc) SetCompactionGenerator(g *compactiongen.Generator) {
 	x.compactionGen = g
 	if g != nil {
 		g.SetElideOnlyFn(x.advanceElisionFloor)
+		g.SetContextUsageFn(x.recordCompactionContextUsage)
+	}
+}
+
+// recordCompactionContextUsage caches the context accounting a compaction pass
+// already computed. The pass supplies the send-view total (and, when it loaded
+// turns, the raw total); this fills in the model/window the meter measures
+// against, which is provider state the compactor has no business knowing.
+//
+// rawTokens <= 0 means "no new raw measurement" (the elision-only pass never
+// loads turns), so any previously cached raw value is preserved rather than
+// overwritten with a bogus zero.
+func (x *svc) recordCompactionContextUsage(ctx context.Context, convID string, sentTokens, rawTokens int) {
+	store := x.Store()
+	if store == nil || convID == "" || sentTokens <= 0 {
+		return
+	}
+	model := x.primaryModel()
+	window := contextmeter.ModelWindowFor(model)
+
+	if rawTokens <= 0 {
+		if prev, ok, err := store.GetContextUsage(ctx, convID); err == nil && ok {
+			rawTokens = prev.RawTokens
+		}
+	}
+
+	// A compaction pass measures conversation content, not a full provider
+	// request: it has no system prompt or tool schemas to account for. Record
+	// what it actually measured and leave the request-overhead fields to the
+	// turn writer, which sees real provider requests.
+	usage := conversation.ContextUsage{
+		ConversationID:     convID,
+		TokensUsed:         sentTokens,
+		RawTokens:          rawTokens,
+		MessageTokens:      sentTokens,
+		ContextWindow:      window.Tokens,
+		ContextWindowKnown: window.Known,
+		Model:              model,
+		Source:             contextUsageSourceCompaction,
+		ComputedAt:         time.Now(),
+	}
+	if err := store.SaveContextUsage(ctx, usage); err != nil {
+		fmt.Fprintf(os.Stderr, "[compaction] cache context usage failed %s: %v\n", convID, err)
 	}
 }
 
 // SetContextLoader attaches the project-context loader.
 func (x *svc) SetContextLoader(l *projectctx.Loader) { x.contextLoader = l }
+
+// RecordTurnContextUsage caches a turn's exact request accounting. The meter
+// prefers this over a compaction-derived snapshot because it includes real
+// system-prompt and tool-schema overhead.
+//
+// The raw (uncompacted) size is not recomputed here — deriving it would mean
+// re-reading every turn on the turn path, which is exactly the cost this cache
+// exists to avoid. Any previously cached raw value is carried forward instead.
+func (x *svc) RecordTurnContextUsage(ctx context.Context, convID string, u TurnContextUsage) {
+	store := x.Store()
+	if store == nil || convID == "" || u.EstimatedRequestTokens <= 0 {
+		return
+	}
+
+	raw := 0
+	if prev, ok, err := store.GetContextUsage(ctx, convID); err == nil && ok {
+		raw = prev.RawTokens
+	}
+
+	model := x.primaryModel()
+	window := u.ContextWindow
+	known := u.ContextWindowKnown
+	if window <= 0 {
+		w := contextmeter.ModelWindowFor(model)
+		window, known = w.Tokens, w.Known
+	}
+
+	usage := conversation.ContextUsage{
+		ConversationID:     convID,
+		TokensUsed:         u.MessageTokens,
+		RawTokens:          raw,
+		MessageTokens:      u.MessageTokens,
+		SystemTokens:       u.SystemTokens,
+		ToolSchemaTokens:   u.ToolSchemaTokens,
+		OutputReserve:      u.OutputReserveTokens,
+		EstimatedRequest:   u.EstimatedRequestTokens,
+		ContextWindow:      window,
+		ContextWindowKnown: known,
+		Model:              model,
+		Source:             contextUsageSourceTurn,
+		ComputedAt:         time.Now(),
+	}
+	if err := store.SaveContextUsage(ctx, usage); err != nil {
+		fmt.Fprintf(os.Stderr, "[context-meter] cache turn usage failed %s: %v\n", convID, err)
+	}
+}
 
 // --- Accessors for owned fields used by the front door ---
 

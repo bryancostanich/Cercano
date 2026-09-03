@@ -199,6 +199,25 @@ func (s *Server) recordRequestAccounting(conv string, snap requestAccountingSnap
 	s.requestAccounting[conv] = snap
 }
 
+// persistTurnContextUsage durably caches a turn's request accounting via the
+// persistence service (which owns model/window resolution). Best-effort and
+// non-blocking in spirit: any failure is swallowed by the service, because a
+// context-meter cache write must never affect a turn.
+func (s *Server) persistTurnContextUsage(conv string, acct runnersvc.RequestAccounting) {
+	if s == nil || conv == "" || s.persistSvc == nil || acct.EstimatedRequestTokens <= 0 {
+		return
+	}
+	s.persistSvc.RecordTurnContextUsage(context.Background(), conv, persistsvc.TurnContextUsage{
+		MessageTokens:          acct.MessageTokens,
+		SystemTokens:           acct.SystemTokens,
+		ToolSchemaTokens:       acct.ToolSchemaTokens,
+		OutputReserveTokens:    acct.OutputReserveTokens,
+		EstimatedRequestTokens: acct.EstimatedRequestTokens,
+		ContextWindow:          acct.ContextWindow,
+		ContextWindowKnown:     acct.ContextWindowKnown,
+	})
+}
+
 func (s *Server) latestRequestAccounting(conv string) (requestAccountingSnapshot, bool) {
 	if s == nil || conv == "" {
 		return requestAccountingSnapshot{}, false
@@ -3172,6 +3191,10 @@ func (s *brokerSink) RecordRequestAccounting(acct runnersvc.RequestAccounting) {
 		ContextWindow:          acct.ContextWindow,
 		ContextWindowKnown:     acct.ContextWindowKnown,
 	})
+	// Also cache it durably. The in-memory map above is per-process, so without
+	// this the meter resets to "unknown" on restart and for any conversation
+	// loaded without running a turn — the case that showed a context of 0.
+	s.server.persistTurnContextUsage(s.conv, acct)
 }
 
 // streamResponseSender is the minimal interface required by sendRunnerEvent so

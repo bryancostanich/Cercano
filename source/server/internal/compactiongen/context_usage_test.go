@@ -16,13 +16,15 @@ type usageRecorder struct {
 	mu    sync.Mutex
 	convs []string
 	sizes []int
+	raws  []int
 }
 
-func (r *usageRecorder) fn(_ context.Context, conversationID string, sentTokens int) {
+func (r *usageRecorder) fn(_ context.Context, conversationID string, sentTokens, rawTokens int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.convs = append(r.convs, conversationID)
 	r.sizes = append(r.sizes, sentTokens)
+	r.raws = append(r.raws, rawTokens)
 }
 
 func (r *usageRecorder) last() (string, int, bool) {
@@ -32,6 +34,15 @@ func (r *usageRecorder) last() (string, int, bool) {
 		return "", 0, false
 	}
 	return r.convs[len(r.convs)-1], r.sizes[len(r.sizes)-1], true
+}
+
+func (r *usageRecorder) lastRaw() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.raws) == 0 {
+		return 0
+	}
+	return r.raws[len(r.raws)-1]
 }
 
 func (r *usageRecorder) count() int {
@@ -78,6 +89,16 @@ func TestCompactNow_PersistsContextUsageSnapshot(t *testing.T) {
 	}
 	if want := compaction.TotalTokens(contextmeter.Default(), view); sent != want {
 		t.Errorf("snapshot total %d != post-pass view total %d", sent, want)
+	}
+
+	// Raw size is measured from turns the pass already loaded, and a compacted
+	// send view must be smaller than the raw backlog it summarizes.
+	raw := rec.lastRaw()
+	if raw <= 0 {
+		t.Errorf("expected a positive raw-token measurement, got %d", raw)
+	}
+	if raw <= sent {
+		t.Errorf("raw tokens (%d) should exceed the compacted send view (%d)", raw, sent)
 	}
 }
 

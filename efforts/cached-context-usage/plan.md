@@ -19,8 +19,8 @@ Spec: `efforts/cached-context-usage/spec.md`
 
 ## Phase 3 — write at turn accounting
 
-- [ ] pending — Persist durable snapshot from recordRequestAccounting
-- [ ] pending — Test turn accounting persists a readable snapshot
+- [x] pending — Persist durable snapshot from recordRequestAccounting
+- [x] pending — Test turn accounting persists a readable snapshot
   Verification: `go test ./internal/server`
 
 ## Phase 4 — proto and read path
@@ -46,4 +46,4 @@ Spec: `efforts/cached-context-usage/spec.md`
 - [ ] pending — Verify meter survives agent restart before any turn
 - [ ] pending — Full module test runs
   Verification: `go build ./...` both modules; `go test ./...` in
-                  `source/server` and `source/clients/cli`
+                        `source/server` and `source/clients/cli`

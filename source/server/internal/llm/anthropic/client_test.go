@@ -180,6 +180,40 @@ func TestClient_Chat_RetriesWithoutDeprecatedTemperature(t *testing.T) {
 	}
 }
 
+func TestClient_Chat_DoesNotSendResponsesOnlyFields(t *testing.T) {
+	var seenBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(`{"id":"m_1","type":"message","role":"assistant","content":[{"type":"text","text":"ok"}],"model":"claude","stop_reason":"end_turn","usage":{"input_tokens":5,"output_tokens":3}}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(Config{BaseURL: srv.URL, APIKey: "dummy", Model: "claude"})
+	_, err := c.Chat(t.Context(), ChatRequest{
+		Model:     "claude",
+		MaxTokens: 10,
+		Messages: []llm.Message{
+			{Role: llm.RoleAssistant, Blocks: []llm.Block{{Type: llm.BlockReasoning, ReasoningID: "rs_1", ReasoningData: "ENC"}}},
+			{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: "next"}}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	body := string(seenBody)
+	for _, banned := range []string{"reasoning.encrypted_content", `"store"`, `"include"`, `"max_output_tokens"`, `"reasoning"`, "rs_1", "ENC"} {
+		if strings.Contains(body, banned) {
+			t.Fatalf("Anthropic request leaked Responses-only field %q: %s", banned, body)
+		}
+	}
+	if strings.Contains(body, "gpt") {
+		t.Fatalf("Anthropic request leaked GPT model/content: %s", body)
+	}
+}
+
 func TestClient_BuildParams_TemperatureZeroReachesWire(t *testing.T) {
 	// Temperature is a pointer: nil = provider default (omit from the wire),
 	// &0 = greedy decoding, which MUST be sent — the compaction summarizer

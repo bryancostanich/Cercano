@@ -41,9 +41,9 @@ Spec: `efforts/cached-context-usage/spec.md`
 
 ## Phase 6 — end-to-end verification
 
-- [ ] pending — Build server and CLI
-- [ ] pending — Verify nonzero meter for conversation 230386d992670d7e
-- [ ] pending — Verify meter survives agent restart before any turn
-- [ ] pending — Full module test runs
+- [x] pending — Build server and CLI
+- [x] pending — Verify nonzero meter for conversation 230386d992670d7e
+- [x] pending — Verify meter survives agent restart before any turn
+- [x] pending — Full module test runs
   Verification: `go build ./...` both modules; `go test ./...` in
-                                            `source/server` and `source/clients/cli`
+                                                      `source/server` and `source/clients/cli`

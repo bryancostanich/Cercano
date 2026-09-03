@@ -8,6 +8,40 @@ import (
 	"cercano/source/server/pkg/config"
 )
 
+// MeterWindow reports the context window the meter should measure against for
+// model under cfg's locus mode, and whether that number is authoritative.
+//
+// The two locus routes need different sources of truth:
+//
+//   - cloud routes: the window is a property of the remote model, so the
+//     published per-family table (ModelWindowFor) is authoritative.
+//   - local routes: the window is whatever we launch the runtime with, so the
+//     configured context size wins. A local model's published window is
+//     irrelevant when llama-server is started with a smaller --ctx-size, and
+//     guessing the family default over-reports headroom by ~8x.
+//
+// This is why the local branch does NOT consult ModelWindowFor: a local model
+// that happens to match a known family (e.g. a qwen build) would otherwise
+// report its published 128K while the runtime actually serves the configured
+// size. Config is the only thing that reflects the process we really spawn.
+//
+// The local size is read from cfg at call time, so changing llama_server's
+// context_size (or mistralrs's max_seq_len) moves the meter with no code change.
+func MeterWindow(cfg config.Config, model string) ModelWindow {
+	switch cfg.LocusMode {
+	case "open_primary", "open_only":
+		if n := LocalRuntimeWindow(cfg, model); n > 0 {
+			return ModelWindow{Tokens: n, Known: true}
+		}
+		// Config yielded nothing usable (e.g. no runtime configured); fall
+		// through to the published table rather than reporting a zero window,
+		// which would render as a divide-by-zero meter.
+		return ModelWindowFor(model)
+	default:
+		return ModelWindowFor(model)
+	}
+}
+
 // LocalRuntimeWindow reports the context window the configured local runtime
 // will actually serve for model, which is NOT always the configured value: a
 // curated catalog model may pin its own --ctx-size in ExtraArgs, and because

@@ -308,7 +308,7 @@ func (x *svc) recordCompactionContextUsage(ctx context.Context, convID string, s
 		return
 	}
 	model := x.primaryModel()
-	window := contextmeter.ModelWindowFor(model)
+	window := contextmeter.MeterWindow(x.cfgSvc.Get(), model)
 
 	if rawTokens <= 0 {
 		if prev, ok, err := store.GetContextUsage(ctx, convID); err == nil && ok {
@@ -871,7 +871,9 @@ func (x *svc) GetContextUsage(ctx context.Context, req *proto.GetContextUsageReq
 	// whatever model served the last turn and defaults to the open model on a
 	// fresh registry, which made the bar jump (e.g. 200k → 128k) after every
 	// restart until the first cloud-served turn re-baselined it.
-	modelWindow := contextmeter.ModelWindowFor(x.primaryModel())
+	// On local locus routes the denominator is the size we actually launch the
+	// runtime with, not the model family's published window — see MeterWindow.
+	modelWindow := contextmeter.MeterWindow(x.cfgSvc.Get(), x.primaryModel())
 	max := modelWindow.Tokens
 
 	isCompacting := false

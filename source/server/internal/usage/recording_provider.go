@@ -9,6 +9,7 @@ package usage
 
 import (
 	"context"
+	"time"
 
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
@@ -18,11 +19,18 @@ import (
 type Usage struct {
 	Source               string // who initiated it, e.g. "main", "coproc:summarize", "dispatch"
 	Model                string
+	Provider             string // provider name, e.g. "anthropic", "openai-responses", "ollama"
 	IsCloud              bool
 	InputTokens          int
 	OutputTokens         int
 	ContentTokensAvoided int  // estimated cloud tokens saved by handling locally
 	TokenSaving          bool // true when this call substitutes for a cloud call
+
+	// DurationMs is wall-clock latency for the call. For Chat it spans the
+	// round trip. For StreamChat it spans StreamChat() to stream exhaustion —
+	// i.e. the full generation, not time-to-first-token — because that is the
+	// number that explains a slow turn.
+	DurationMs int64
 }
 
 // Wrap returns a provider that reports a Usage to sink after each call. sink
@@ -43,26 +51,38 @@ func (r *recordingProvider) Name() string                         { return r.inn
 func (r *recordingProvider) Capabilities() inference.Capabilities { return r.inner.Capabilities() }
 
 func (r *recordingProvider) Chat(ctx context.Context, req llm.ChatRequest) (llm.ChatResponse, error) {
+	start := time.Now()
 	resp, err := r.inner.Chat(ctx, req)
 	if err == nil {
-		r.report(req.Model, resp.InputTokens, resp.OutputTokens)
+		r.report(req.Model, resp.InputTokens, resp.OutputTokens, time.Since(start))
 	}
 	return resp, err
 }
 
 func (r *recordingProvider) StreamChat(ctx context.Context, req llm.ChatRequest) (llm.StreamReader, error) {
+	// Start the clock before StreamChat so connection setup is charged to the
+	// call: for a slow provider that wait is a real part of the latency.
+	start := time.Now()
 	inner, err := r.inner.StreamChat(ctx, req)
 	if err != nil {
 		return nil, err
 	}
-	return &recordingReader{inner: inner, model: req.Model, rp: r}, nil
+	return &recordingReader{inner: inner, model: req.Model, rp: r, start: start}, nil
 }
 
-func (r *recordingProvider) report(model string, in, out int) {
+func (r *recordingProvider) report(model string, in, out int, d time.Duration) {
 	if r.sink == nil {
 		return
 	}
-	r.sink(Usage{Source: r.source, Model: model, IsCloud: r.isCloud, InputTokens: in, OutputTokens: out})
+	r.sink(Usage{
+		Source:       r.source,
+		Model:        model,
+		Provider:     r.inner.Name(),
+		IsCloud:      r.isCloud,
+		InputTokens:  in,
+		OutputTokens: out,
+		DurationMs:   d.Milliseconds(),
+	})
 }
 
 // recordingReader accumulates token counts off the stream and reports exactly
@@ -73,6 +93,7 @@ type recordingReader struct {
 	rp       *recordingProvider
 	in, out  int
 	reported bool
+	start    time.Time
 }
 
 func (rr *recordingReader) Next() (llm.StreamEvent, bool, error) {
@@ -101,5 +122,5 @@ func (rr *recordingReader) flush() {
 		return
 	}
 	rr.reported = true
-	rr.rp.report(rr.model, rr.in, rr.out)
+	rr.rp.report(rr.model, rr.in, rr.out, time.Since(rr.start))
 }

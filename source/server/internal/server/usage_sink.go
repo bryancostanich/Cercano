@@ -21,13 +21,20 @@ func UsageEventSink(emit func(*telemetry.Event)) func(usage.Usage) {
 			Model:        u.Model,
 			InputTokens:  u.InputTokens,
 			OutputTokens: u.OutputTokens,
+			DurationMs:   u.DurationMs,
 		}
 		e.ContentTokensAvoided = u.ContentTokensAvoided
 		e.TokenSaving = u.TokenSaving
 		// Mirror emitEvent convention: for cloud calls, populate the cloud
-		// identification fields so telemetry can distinguish tiers.
+		// identification fields so telemetry can distinguish tiers. Use the
+		// provider's own name — hardcoding "anthropic" mislabelled every
+		// OpenAI/other-provider call and made per-provider latency
+		// comparison impossible.
 		if u.IsCloud {
-			e.CloudProvider = "anthropic"
+			e.CloudProvider = u.Provider
+			if e.CloudProvider == "" {
+				e.CloudProvider = "cloud"
+			}
 			e.CloudModel = u.Model
 		}
 		emit(e)

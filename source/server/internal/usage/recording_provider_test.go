@@ -3,6 +3,7 @@ package usage
 import (
 	"context"
 	"testing"
+	"time"
 
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
@@ -111,5 +112,81 @@ func TestWrapRecordsStreamUsageOnDrain(t *testing.T) {
 	}
 	if got[0].InputTokens != 20 || got[0].OutputTokens != 5 || got[0].Model != "local-x" || got[0].IsCloud {
 		t.Fatalf("bad stream usage: %+v", got[0])
+	}
+}
+
+// slowProvider sleeps before responding so the recorded duration is
+// unambiguously nonzero on every platform clock.
+type slowProvider struct {
+	fakeProvider
+	delay time.Duration
+}
+
+func (s slowProvider) Chat(ctx context.Context, req llm.ChatRequest) (llm.ChatResponse, error) {
+	time.Sleep(s.delay)
+	return s.fakeProvider.Chat(ctx, req)
+}
+
+func (s slowProvider) StreamChat(ctx context.Context, req llm.ChatRequest) (llm.StreamReader, error) {
+	time.Sleep(s.delay)
+	return s.fakeProvider.StreamChat(ctx, req)
+}
+
+// Latency is the whole point of this telemetry: a zero here means "why was
+// that turn slow" can only be answered by parsing server logs, which is
+// exactly what this field exists to avoid.
+func TestWrapRecordsChatDurationAndProvider(t *testing.T) {
+	var got []Usage
+	inner := slowProvider{
+		fakeProvider: fakeProvider{resp: llm.ChatResponse{InputTokens: 3, OutputTokens: 5}},
+		delay:        15 * time.Millisecond,
+	}
+	p := Wrap(inner, "main", true, func(u Usage) { got = append(got, u) })
+
+	if _, err := p.Chat(context.Background(), llm.ChatRequest{Model: "m"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("want 1 usage event, got %d", len(got))
+	}
+	if got[0].DurationMs < 10 {
+		t.Fatalf("DurationMs = %d, want >= 10 for a 15ms call", got[0].DurationMs)
+	}
+	if got[0].Provider != "fake" {
+		t.Fatalf("Provider = %q, want %q", got[0].Provider, "fake")
+	}
+}
+
+// Streaming must charge the FULL generation, including the StreamChat setup
+// wait — that is where a slow cloud call actually spends its time.
+func TestWrapRecordsStreamDuration(t *testing.T) {
+	var got []Usage
+	inner := slowProvider{
+		fakeProvider: fakeProvider{stream: []llm.StreamEvent{
+			{Type: llm.EventMessageStart, InputTokens: 9},
+			{Type: llm.EventMessageStop, OutputTokens: 4},
+		}},
+		delay: 15 * time.Millisecond,
+	}
+	p := Wrap(inner, "main", true, func(u Usage) { got = append(got, u) })
+
+	r, err := p.StreamChat(context.Background(), llm.ChatRequest{Model: "m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for {
+		_, ok, err := r.Next()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !ok {
+			break
+		}
+	}
+	if len(got) != 1 {
+		t.Fatalf("want 1 usage event, got %d", len(got))
+	}
+	if got[0].DurationMs < 10 {
+		t.Fatalf("DurationMs = %d, want >= 10 for a 15ms stream", got[0].DurationMs)
 	}
 }

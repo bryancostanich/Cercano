@@ -31,6 +31,58 @@ func TestCtxUsageTick_DecrementsAndSettles(t *testing.T) {
 	}
 }
 
+// An over-window conversation has a compaction backlog that advances with no
+// turn involved. If the poll loop idles there, nothing ever restarts it and
+// the meter freezes at a stale number for the rest of the backlog — which is
+// exactly what happened when a poll sampled the gap between two passes and saw
+// compacting=false. Such a conversation keeps a slow heartbeat instead.
+func TestCtxUsageTick_HeartbeatsWhenOverWindow(t *testing.T) {
+	m := Model{
+		styles: theme.NewStyles(theme.Cracker()), convID: "c1",
+		ctxPollTicks: 0, ctxPolling: true, compacting: false,
+		cumIn: 10294039, modelMaxTokens: 200000,
+	}
+	m1, cmd := m.Update(ctxUsageTickMsg{})
+	m = m1.(Model)
+	if !m.ctxPolling {
+		t.Error("over-window conversation must keep polling, not idle")
+	}
+	if cmd == nil {
+		t.Error("expected a re-tick command to keep the loop alive")
+	}
+}
+
+// The heartbeat is scoped to over-window conversations only. A normal
+// conversation still settles to idle when its warm window expires, so ordinary
+// sessions don't poll forever in the background.
+func TestCtxUsageTick_IdlesWhenUnderWindow(t *testing.T) {
+	m := Model{
+		styles: theme.NewStyles(theme.Cracker()), convID: "c1",
+		ctxPollTicks: 0, ctxPolling: true, compacting: false,
+		cumIn: 18000, modelMaxTokens: 200000,
+	}
+	m1, _ := m.Update(ctxUsageTickMsg{})
+	m = m1.(Model)
+	if m.ctxPolling {
+		t.Error("under-window conversation should settle to idle")
+	}
+}
+
+// An unknown window is not an over-window claim: with no max reported we must
+// not infer a backlog and heartbeat forever.
+func TestCtxUsageTick_IdlesWhenWindowUnknown(t *testing.T) {
+	m := Model{
+		styles: theme.NewStyles(theme.Cracker()), convID: "c1",
+		ctxPollTicks: 0, ctxPolling: true, compacting: false,
+		cumIn: 999999, modelMaxTokens: 0,
+	}
+	m1, _ := m.Update(ctxUsageTickMsg{})
+	m = m1.(Model)
+	if m.ctxPolling {
+		t.Error("unknown window should settle to idle, not heartbeat")
+	}
+}
+
 func TestCtxUsageTick_StaysWhileCompacting(t *testing.T) {
 	// Warm window exhausted, but a compaction pass is in flight → keep polling
 	// so the footer observes the flag clearing.

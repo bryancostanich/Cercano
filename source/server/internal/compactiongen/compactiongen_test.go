@@ -275,6 +275,48 @@ func TestIsCompacting_TrueDuringPass(t *testing.T) {
 	}
 }
 
+// A multi-pass backlog alternates pass → debounce gap → pass. During the gap
+// no pass is in flight, but one is scheduled, and the conversation is very
+// much still compacting. Reporting false there froze the CLI meter, because
+// its poll loop shuts down on a single false sample. A scheduled-but-not-yet-
+// running pass must read as compacting.
+func TestIsCompacting_TrueDuringDebounceGap(t *testing.T) {
+	fs := &fakeStore{turns: bigTurns(12, 1000)}
+	summarize := func(context.Context, []llm.Message) (compaction.StructuredSummary, error) {
+		return compaction.StructuredSummary{Goal: "g"}, nil
+	}
+	cfg := compactor.Config{ActivationFloorTokens: 1000, SegmentTokens: 4000, VerbatimRecent: 2}
+	// Long debounce so the scheduled pass stays pending for the whole test:
+	// this is precisely the window the meter poll used to sample as "idle".
+	g := New(fs, summarize, cfg, contextmeter.Default(), 30*time.Second)
+	g.SetEnabled(true)
+
+	if g.IsCompacting("c1") {
+		t.Fatal("nothing scheduled yet → IsCompacting must be false")
+	}
+	g.Schedule("c1")
+	if !g.IsCompacting("c1") {
+		t.Error("a scheduled (pending-debounce) pass must report as compacting")
+	}
+}
+
+// The kill switch makes Schedule a noop, so nothing is pending and nothing
+// will run — the meter must not be told compaction is underway.
+func TestIsCompacting_FalseWhenDisabled(t *testing.T) {
+	fs := &fakeStore{turns: bigTurns(12, 1000)}
+	summarize := func(context.Context, []llm.Message) (compaction.StructuredSummary, error) {
+		return compaction.StructuredSummary{Goal: "g"}, nil
+	}
+	cfg := compactor.Config{ActivationFloorTokens: 1000, SegmentTokens: 4000, VerbatimRecent: 2}
+	g := New(fs, summarize, cfg, contextmeter.Default(), 30*time.Second)
+	g.SetEnabled(false)
+
+	g.Schedule("c1")
+	if g.IsCompacting("c1") {
+		t.Error("disabled generator schedules nothing → IsCompacting must be false")
+	}
+}
+
 func TestRegenerate_RebuildsFromRaw(t *testing.T) {
 	fs := &fakeStore{
 		turns: bigTurns(12, 1000),

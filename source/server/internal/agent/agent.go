@@ -149,7 +149,10 @@ func (a *Agent) CompactNow(ctx context.Context, conversationID string) error {
 	return nil
 }
 
-// IsCompacting reports whether a compaction pass is currently running. Nil-safe.
+// IsCompacting reports whether compaction work is underway for the
+// conversation — a pass running now, or one scheduled and pending its
+// debounce. Nil-safe. The pending case counts so a multi-pass backlog reads as
+// continuously compacting across the gaps between its passes.
 func (a *Agent) IsCompacting(conversationID string) bool {
 	if a.compaction != nil {
 		return a.compaction.IsCompacting(conversationID)

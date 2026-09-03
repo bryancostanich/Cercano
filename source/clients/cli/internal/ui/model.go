@@ -928,6 +928,15 @@ func ctxUsageTick() tea.Cmd {
 	return tea.Tick(2*time.Second, func(time.Time) tea.Msg { return ctxUsageTickMsg{} })
 }
 
+// ctxUsageHeartbeatTick is the slow cadence used when a conversation is over
+// its context window but no pass is currently reported. Background compaction
+// moves the number with no turn involved, so the loop must stay alive to
+// observe it; 15s is slow enough to be free (the poll reads one cached row)
+// and fast enough that the meter is never far behind.
+func ctxUsageHeartbeatTick() tea.Cmd {
+	return tea.Tick(15*time.Second, func(time.Time) tea.Msg { return ctxUsageTickMsg{} })
+}
+
 type resumeViewportStreamMsg struct {
 	gen   int
 	event agentclient.ResumeViewportEvent
@@ -2557,6 +2566,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.ctxPollTicks > 0 || m.compacting {
 			return m, tea.Batch(fetchContextUsage(m.agent, m.convID), ctxUsageTick())
 		}
+		// Over-window conversations keep a slow heartbeat instead of going
+		// fully idle. Going idle is only safe when the next turn is what
+		// changes the number — but on a conversation past its window, a
+		// background compaction backlog changes it with no turn involved, and
+		// nothing else would ever restart this loop. Without the heartbeat a
+		// single poll sampling an inter-pass gap froze the meter permanently.
+		if m.ctxOverWindow() {
+			return m, tea.Batch(fetchContextUsage(m.agent, m.convID), ctxUsageHeartbeatTick())
+		}
 		m.ctxPolling = false                           // loop goes idle; the next turn restarts it
 		return m, fetchContextUsage(m.agent, m.convID) // one final settle, no re-tick
 
@@ -2870,6 +2888,15 @@ func (m *Model) cancelCurrentStreamWithNotice(showNotice bool) {
 // in-progress because its completion event was dropped — makes the tick
 // self-perpetuate and pin a CPU core until the process restarts. Every
 // turn-termination path must call this, not just the happy-path done event.
+// ctxOverWindow reports whether the last known meter reading puts the
+// conversation at or past its context window. Such a conversation has a
+// compaction backlog that advances without any turn, so the usage poll loop
+// keeps a slow heartbeat rather than idling. Requires both a known window and
+// a reading — an unknown window is not an over-window claim.
+func (m *Model) ctxOverWindow() bool {
+	return m.modelMaxTokens > 0 && m.cumIn >= m.modelMaxTokens
+}
+
 func (m *Model) clearTurnAnimationState() {
 	m.compacting = false
 	m.mainChat().resolveStaleInProgressTools()

@@ -398,10 +398,23 @@ func (g *Generator) Clear(ctx context.Context, conversationID string, progress f
 	return preTokens, postTokens, nil
 }
 
-// IsCompacting reports whether a compaction pass is currently running for the
-// conversation.
+// IsCompacting reports whether compaction work is underway for the
+// conversation — either a pass running right now, or a debounced pass already
+// scheduled to run.
+//
+// The pending-timer arm matters more than it looks. A multi-pass backlog
+// alternates between a pass (minutes) and the debounce gap (seconds), and
+// during that gap inflight is false. Reporting false there told the CLI's
+// meter poll loop "nothing is happening", and that loop shuts itself down on a
+// single false sample — so one poll landing in one gap froze the meter for the
+// rest of a multi-hour backlog while compaction carried on underneath. A
+// conversation with a pass queued is still compacting, so say so.
 func (g *Generator) IsCompacting(conversationID string) bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	return g.inflight[conversationID]
+	if g.inflight[conversationID] {
+		return true
+	}
+	_, scheduled := g.timers[conversationID]
+	return scheduled
 }

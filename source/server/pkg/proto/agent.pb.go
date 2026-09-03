@@ -5203,8 +5203,20 @@ type GetContextUsageResponse struct {
 	OutputReserveTokens    int32 `protobuf:"varint,9,opt,name=output_reserve_tokens,json=outputReserveTokens,proto3" json:"output_reserve_tokens,omitempty"`
 	EstimatedRequestTokens int32 `protobuf:"varint,10,opt,name=estimated_request_tokens,json=estimatedRequestTokens,proto3" json:"estimated_request_tokens,omitempty"`
 	ContextWindowKnown     bool  `protobuf:"varint,11,opt,name=context_window_known,json=contextWindowKnown,proto3" json:"context_window_known,omitempty"`
-	unknownFields          protoimpl.UnknownFields
-	sizeCache              protoimpl.SizeCache
+	// Provenance of the accounting above, so a client can render an honest meter
+	// instead of collapsing an unavailable reading to a confident zero.
+	//
+	//	usage_source = "live"      accounting from a turn served by this process
+	//	usage_source = "snapshot"  durable cache (survives restart)
+	//	usage_source = "none"      not computed yet — unknown, NOT zero usage
+	//
+	// usage_computed_at is unix seconds (0 when unknown). usage_stale marks a
+	// snapshot known to predate newer turns, so the numbers are a lower bound.
+	UsageComputedAt int64  `protobuf:"varint,12,opt,name=usage_computed_at,json=usageComputedAt,proto3" json:"usage_computed_at,omitempty"`
+	UsageSource     string `protobuf:"bytes,13,opt,name=usage_source,json=usageSource,proto3" json:"usage_source,omitempty"`
+	UsageStale      bool   `protobuf:"varint,14,opt,name=usage_stale,json=usageStale,proto3" json:"usage_stale,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *GetContextUsageResponse) Reset() {
@@ -5310,6 +5322,27 @@ func (x *GetContextUsageResponse) GetEstimatedRequestTokens() int32 {
 func (x *GetContextUsageResponse) GetContextWindowKnown() bool {
 	if x != nil {
 		return x.ContextWindowKnown
+	}
+	return false
+}
+
+func (x *GetContextUsageResponse) GetUsageComputedAt() int64 {
+	if x != nil {
+		return x.UsageComputedAt
+	}
+	return 0
+}
+
+func (x *GetContextUsageResponse) GetUsageSource() string {
+	if x != nil {
+		return x.UsageSource
+	}
+	return ""
+}
+
+func (x *GetContextUsageResponse) GetUsageStale() bool {
+	if x != nil {
+		return x.UsageStale
 	}
 	return false
 }
@@ -14413,7 +14446,7 @@ const file_agent_proto_rawDesc = "" +
 	"\x05title\x18\x03 \x01(\tR\x05title\x12#\n" +
 	"\rgranted_tools\x18\x04 \x03(\tR\fgrantedTools\"A\n" +
 	"\x16GetContextUsageRequest\x12'\n" +
-	"\x0fconversation_id\x18\x01 \x01(\tR\x0econversationId\"\xca\x03\n" +
+	"\x0fconversation_id\x18\x01 \x01(\tR\x0econversationId\"\xba\x04\n" +
 	"\x17GetContextUsageResponse\x12\x1f\n" +
 	"\vtokens_used\x18\x01 \x01(\x05R\n" +
 	"tokensUsed\x12\x1b\n" +
@@ -14430,7 +14463,11 @@ const file_agent_proto_rawDesc = "" +
 	"\x15output_reserve_tokens\x18\t \x01(\x05R\x13outputReserveTokens\x128\n" +
 	"\x18estimated_request_tokens\x18\n" +
 	" \x01(\x05R\x16estimatedRequestTokens\x120\n" +
-	"\x14context_window_known\x18\v \x01(\bR\x12contextWindowKnown\"C\n" +
+	"\x14context_window_known\x18\v \x01(\bR\x12contextWindowKnown\x12*\n" +
+	"\x11usage_computed_at\x18\f \x01(\x03R\x0fusageComputedAt\x12!\n" +
+	"\fusage_source\x18\r \x01(\tR\vusageSource\x12\x1f\n" +
+	"\vusage_stale\x18\x0e \x01(\bR\n" +
+	"usageStale\"C\n" +
 	"\x18SuggestNextPromptRequest\x12'\n" +
 	"\x0fconversation_id\x18\x01 \x01(\tR\x0econversationId\";\n" +
 	"\x19SuggestNextPromptResponse\x12\x1e\n" +

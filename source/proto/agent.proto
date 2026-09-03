@@ -891,6 +891,19 @@ message GetContextUsageResponse {
   int32 output_reserve_tokens     = 9;
   int32 estimated_request_tokens  = 10;
   bool  context_window_known      = 11;
+
+  // Provenance of the accounting above, so a client can render an honest meter
+  // instead of collapsing an unavailable reading to a confident zero.
+  //
+  //   usage_source = "live"      accounting from a turn served by this process
+  //   usage_source = "snapshot"  durable cache (survives restart)
+  //   usage_source = "none"      not computed yet — unknown, NOT zero usage
+  //
+  // usage_computed_at is unix seconds (0 when unknown). usage_stale marks a
+  // snapshot known to predate newer turns, so the numbers are a lower bound.
+  int64  usage_computed_at        = 12;
+  string usage_source             = 13;
+  bool   usage_stale              = 14;
 }
 
 message SuggestNextPromptRequest  { string conversation_id = 1; }

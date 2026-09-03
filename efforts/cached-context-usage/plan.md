@@ -25,10 +25,10 @@ Spec: `efforts/cached-context-usage/spec.md`
 
 ## Phase 4 — proto and read path
 
-- [ ] pending — Add usage freshness fields to GetContextUsageResponse and regenerate
-- [ ] pending — Rework GetContextUsage to resolve live then snapshot then none
-- [ ] pending — Tests for snapshot path, missing snapshot, and live precedence
-- [ ] pending — Reconcile existing context-usage tests with the new contract
+- [x] pending — Add usage freshness fields to GetContextUsageResponse and regenerate
+- [x] pending — Rework GetContextUsage to resolve live then snapshot then none
+- [x] pending — Tests for snapshot path, missing snapshot, and live precedence
+- [x] pending — Reconcile existing context-usage tests with the new contract
   Verification: `go test ./internal/server ./internal/hostsvc/...`
 
 ## Phase 5 — client and UI
@@ -46,4 +46,4 @@ Spec: `efforts/cached-context-usage/spec.md`
 - [ ] pending — Verify meter survives agent restart before any turn
 - [ ] pending — Full module test runs
   Verification: `go build ./...` both modules; `go test ./...` in
-                        `source/server` and `source/clients/cli`
+                                  `source/server` and `source/clients/cli`

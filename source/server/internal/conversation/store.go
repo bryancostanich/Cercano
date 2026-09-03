@@ -274,6 +274,12 @@ type Store interface {
 	// pass values they already computed; this must never trigger assembly.
 	SaveContextUsage(ctx context.Context, u ContextUsage) error
 
+	// EstimateRawTokens returns the cheap len/4 uncompacted size estimate for a
+	// conversation, computed as a SQL aggregate so turn bodies never leave the
+	// database. Mirrors requestassembly.EstimateRawTokens, but bounded enough
+	// to run on a UI poll for conversations far too large to assemble.
+	EstimateRawTokens(ctx context.Context, conversationID string) (int, error)
+
 	// CreateAutonomyRun inserts one append-only autonomous run record. It fails if
 	// the new run would violate the one-active-run-per-conversation invariant.
 	CreateAutonomyRun(ctx context.Context, r AutonomyRun) (AutonomyRun, error)
@@ -1010,6 +1016,28 @@ func (s *sqliteStore) GetContextUsage(ctx context.Context, conversationID string
 	u.ContextWindowKnown = windowKnown != 0
 	u.ComputedAt = time.Unix(computed, 0)
 	return u, true, nil
+}
+
+// EstimateRawTokens mirrors requestassembly.EstimateRawTokens — per turn, the
+// larger of the text and block-JSON body, summed, divided by four — but does
+// the summing in SQLite so a 300MB transcript is never materialized in Go.
+func (s *sqliteStore) EstimateRawTokens(ctx context.Context, conversationID string) (int, error) {
+	if conversationID == "" {
+		return 0, errors.New("conversation id required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var total sql.NullInt64
+	err := s.db.QueryRowContext(ctx, `
+		SELECT SUM(MAX(LENGTH(COALESCE(content, '')), LENGTH(COALESCE(content_json, ''))))
+		FROM turns WHERE conversation_id = ?`, conversationID).Scan(&total)
+	if err != nil {
+		return 0, err
+	}
+	if !total.Valid || total.Int64 <= 0 {
+		return 0, nil
+	}
+	return int((total.Int64 + 3) / 4), nil
 }
 
 func (s *sqliteStore) SaveContextUsage(ctx context.Context, u ContextUsage) error {

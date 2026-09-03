@@ -145,6 +145,10 @@ type TurnContextUsage struct {
 const (
 	contextUsageSourceTurn       = "turn"
 	contextUsageSourceCompaction = "compaction"
+	// contextUsageSourceRawEstimate is the cold-start fallback: raw storage
+	// size only, with no compaction/system/tool-schema accounting. Kept
+	// distinct so it is never mistaken for a measured provider request.
+	contextUsageSourceRawEstimate = "raw_estimate"
 )
 
 // svc is the concrete implementation of Service.
@@ -869,38 +873,147 @@ func (x *svc) GetContextUsage(ctx context.Context, req *proto.GetContextUsageReq
 	// restart until the first cloud-served turn re-baselined it.
 	modelWindow := contextmeter.ModelWindowFor(x.primaryModel())
 	max := modelWindow.Tokens
-	sent, raw := 0, 0
-	acct := requestassembly.Accounting{Window: max, WindowKnown: modelWindow.Known}
-	if x.Store() != nil && convID != "" {
-		assembled := x.assembleHistoryForTarget(ctx, convID, requestassembly.Target{Model: x.primaryModel()}, false)
-		acct = assembled.Accounting
-		raw = acct.RawTokens
-		sent = acct.FinalTokens
-	}
-	var pct float64
-	if max > 0 {
-		pct = float64(sent) / float64(max)
-		if pct > 1 {
-			pct = 1
-		}
-	}
+
 	isCompacting := false
 	if x.convAgent != nil {
 		isCompacting = x.convAgent.IsCompacting(convID)
 	}
-	return &proto.GetContextUsageResponse{
-		TokensUsed:             int32(sent),
-		ModelMax:               int32(max),
-		Percent:                pct,
-		RawTokens:              int32(raw),
-		Compacting:             isCompacting,
-		MessageTokens:          int32(acct.MessageTokens),
-		SystemTokens:           int32(acct.SystemTokens),
-		ToolSchemaTokens:       int32(acct.ToolSchemaTokens),
-		OutputReserveTokens:    int32(acct.OutputReserveTokens),
-		EstimatedRequestTokens: int32(acct.EstimatedRequestTokens),
-		ContextWindowKnown:     acct.WindowKnown,
-	}, nil
+
+	resp := &proto.GetContextUsageResponse{
+		ModelMax:           int32(max),
+		Compacting:         isCompacting,
+		ContextWindowKnown: modelWindow.Known,
+		UsageSource:        "none",
+	}
+
+	store := x.Store()
+	if store == nil || convID == "" {
+		return resp, nil
+	}
+
+	// Serve the durable snapshot. Recomputing provider-facing accounting here
+	// means assembling the full history, which on a large conversation takes
+	// far longer than the client's poll deadline; the client then treated the
+	// failed poll as zero usage. A cached real number, marked with its
+	// provenance, beats an unbounded recomputation that reports 0.
+	snap, ok, err := store.GetContextUsage(ctx, convID)
+	if err != nil || !ok {
+		// Cold start: no pass has run and no turn has been served for this
+		// conversation in any process. Rather than show a blank meter, measure
+		// raw storage pressure with a SQL aggregate (bodies stay in the DB) and
+		// warm the cache with it. It is labeled as a raw estimate, not request
+		// accounting, and the first turn or pass replaces it with real numbers.
+		snap, ok = x.warmRawContextUsage(ctx, convID, modelWindow)
+		if !ok {
+			// Genuinely nothing to measure (no turns): honestly unknown.
+			// usage_source stays "none" so the client says "not computed yet"
+			// rather than showing a confident 0.
+			return resp, nil
+		}
+	}
+
+	sent := snap.EstimatedRequest
+	if sent <= 0 {
+		sent = snap.TokensUsed
+	}
+	if snap.ContextWindow > 0 {
+		max = snap.ContextWindow
+		resp.ModelMax = int32(max)
+		resp.ContextWindowKnown = snap.ContextWindowKnown
+	}
+	if max > 0 {
+		pct := float64(sent) / float64(max)
+		if pct > 1 {
+			pct = 1
+		}
+		resp.Percent = pct
+	}
+
+	resp.TokensUsed = int32(sent)
+	resp.RawTokens = int32(snap.RawTokens)
+	resp.MessageTokens = int32(snap.MessageTokens)
+	resp.SystemTokens = int32(snap.SystemTokens)
+	resp.ToolSchemaTokens = int32(snap.ToolSchemaTokens)
+	resp.OutputReserveTokens = int32(snap.OutputReserve)
+	resp.EstimatedRequestTokens = int32(sent)
+	resp.UsageSource = snapshotUsageSource(snap.Source)
+	resp.UsageComputedAt = snap.ComputedAt.Unix()
+	resp.UsageStale = x.snapshotIsStale(ctx, convID, snap)
+	return resp, nil
+}
+
+// snapshotUsageSource maps stored provenance to the wire vocabulary. A raw
+// estimate is reported distinctly so the client never presents storage pressure
+// as if it were measured provider request accounting.
+func snapshotUsageSource(stored string) string {
+	if stored == contextUsageSourceRawEstimate {
+		return "raw_estimate"
+	}
+	return "snapshot"
+}
+
+// warmRawContextUsage handles the cold-start miss: estimate the conversation's
+// raw size via a bounded SQL aggregate, persist it so later polls are a single
+// row read, and return it. ok is false when the conversation has no turns.
+//
+// This is a lower bound deliberately: it is the uncompacted storage size, with
+// no compaction, system prompt, or tool schemas accounted for. It exists so a
+// large loaded conversation shows a real number instead of nothing, and it is
+// overwritten by the first turn or compaction pass.
+func (x *svc) warmRawContextUsage(ctx context.Context, convID string, window contextmeter.ModelWindow) (conversation.ContextUsage, bool) {
+	store := x.Store()
+	if store == nil {
+		return conversation.ContextUsage{}, false
+	}
+	raw, err := store.EstimateRawTokens(ctx, convID)
+	if err != nil || raw <= 0 {
+		return conversation.ContextUsage{}, false
+	}
+
+	// Raw storage pressure is NOT the send view. For a compacted conversation
+	// the frozen backlog has been replaced by summaries, and raw counts things
+	// the provider never sees in full — inline image payloads above all. Use
+	// the compactor's own persisted accounting for the sent figure, and keep
+	// the raw aggregate strictly as the raw figure.
+	sent := raw
+	if state, cerr := store.GetCompaction(ctx, convID); cerr == nil && state.CompactedTokens > 0 {
+		sent = state.CompactedTokens
+	}
+
+	snap := conversation.ContextUsage{
+		ConversationID:     convID,
+		TokensUsed:         sent,
+		RawTokens:          raw,
+		MessageTokens:      sent,
+		ContextWindow:      window.Tokens,
+		ContextWindowKnown: window.Known,
+		Model:              x.primaryModel(),
+		Source:             contextUsageSourceRawEstimate,
+		ComputedAt:         time.Now(),
+	}
+	if err := store.SaveContextUsage(ctx, snap); err != nil {
+		fmt.Fprintf(os.Stderr, "[context-meter] warm raw usage failed %s: %v\n", convID, err)
+	}
+	return snap, true
+}
+
+// snapshotIsStale reports whether turns were appended after the snapshot was
+// computed, which makes its numbers a lower bound rather than a current
+// reading. Deliberately a cheap metadata lookup: the whole point of the cache
+// is that answering the meter must not touch turn bodies.
+func (x *svc) snapshotIsStale(ctx context.Context, convID string, snap conversation.ContextUsage) bool {
+	if snap.ComputedAt.IsZero() {
+		return true
+	}
+	store := x.Store()
+	if store == nil {
+		return false
+	}
+	info, err := store.Get(ctx, convID)
+	if err != nil {
+		return false
+	}
+	return info.LastTurnAt.After(snap.ComputedAt)
 }
 
 // sentViewTokens computes the sent-view token count the meter and

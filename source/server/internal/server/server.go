@@ -1916,6 +1916,8 @@ func (s *Server) GetContextUsage(ctx context.Context, req *proto.GetContextUsage
 			OutputReserveTokens:    int32(snap.OutputReserveTokens),
 			EstimatedRequestTokens: int32(snap.EstimatedRequestTokens),
 			ContextWindowKnown:     snap.ContextWindowKnown,
+			UsageSource:            "live",
+			UsageComputedAt:        time.Now().Unix(),
 		}
 		if snap.ContextWindow > 0 {
 			resp.ModelMax = int32(snap.ContextWindow)

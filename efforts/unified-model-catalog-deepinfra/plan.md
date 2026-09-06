@@ -84,14 +84,22 @@ model was fixed instead.
 
 **New:** `source/server/internal/deepinfracatalog/`
 
-- [ ] Client against `https://api.deepinfra.com/models/list` (no auth)
-- [ ] Implements `Source` and `Priced`; **does not** implement `Downloadable`
-- [ ] Eligibility filter applied in `List`
-- [ ] Map `quantization` → `Variant.Quantization`; normalize pricing
-- [ ] In-process TTL cache, serve stale on fetch failure
-- [ ] Bound the fetch with its own timeout: browse already tolerates a source
+- [x] Client against `https://api.deepinfra.com/models/list` (no auth)
+- [x] Implements `Source`; **does not** implement `Downloadable`
+- [x] Eligibility filter applied in `List`
+- [x] Map `quantization` → `Variant.Quantization`; normalize pricing
+- [x] In-process TTL cache, serve stale on fetch failure
+- [x] Bound the fetch with its own timeout: browse already tolerates a source
   that *fails*, but a source that is merely *slow* still holds the whole
   response until its context expires
+- [x] ~~`Priced` interface~~ — dropped. `Downloadable` earns its place because
+  a consumer type-asserts on it and the assertion prevents a real bug; nothing
+  would ever have asserted `Priced`. The actual need was different: since
+  `/models/list` returns price inline, `PriceIn`/`PriceOut` went onto
+  `catalog.Model` so browse shows cost without one `Detail` call per model.
+
+Verified against the live endpoint during development: 94 of 371 indexed
+models are eligible; the filter is doing real work rather than decoration.
   Eligibility filter detail:
                           - `type == "text-generation"` only — drops text-to-image, text-to-speech,
                             text-to-video, embeddings, speech-to-text.
@@ -104,10 +112,23 @@ model was fixed instead.
                           Mirrors the existing online-catalog posture: browse is on-demand, an error
                           degrades rather than fails.
                         
-                        **Verify:** unit tests against a recorded `/models/list` fixture — filter
-                        drops non-text and tool-less and deprecated entries; pricing math is exact;
-                        `var _ catalog.Downloadable = (*Source)(nil)` **fails to compile** (assert via
-                        a negative test that the runtime type assertion returns false).
+**Verify:** unit tests against a recorded `/models/list` fixture (11 entries
+covering every exclusion reason). Filter drops non-text, tool-less, and
+deprecated entries; pricing math is exact; a negative test asserts the runtime
+`catalog.Downloadable` assertion returns false.
+
+Mutation-checked three ways, each failing with a message naming the broken
+rule: replacing `math.Round` with truncation makes `0.0003` yield `2999999`
+instead of `3000000` (the IEEE-754 hazard the rounding exists for, found in
+the live data); dropping the tools-tag requirement lets
+`nvidia/Nemotron-Content-Safety-3.5` through; dropping the deprecated check
+lets retired `zai-org/GLM-4.5-Air` through. Source restored and re-verified
+identical afterward.
+
+`Detail` deliberately searches the *unfiltered* index while `List` does not: a
+model pinned in config can be retired upstream, and "unknown model" would hide
+the real problem where the retirement plus its `ReplacedBy` successor explains
+it.
                         
                         ---
 

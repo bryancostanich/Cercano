@@ -133,6 +133,18 @@ type Model struct {
 	// can be reported with a concrete migration target instead of just an
 	// error.
 	ReplacedBy string
+	// PriceIn and PriceOut are per-million-token costs in micro-USD for a
+	// metered model; both 0 for a downloadable one, whose cost is hardware
+	// rather than per-token. Carried on the list row (not just Detail)
+	// because a hosted source publishes price in its index, and cost is the
+	// attribute a user picks a hosted model on — putting it here lets browse
+	// rank and display it without a Detail call per model.
+	//
+	// Micro-USD per million tokens (not float dollars) keeps the arithmetic
+	// exact: provider prices are quoted in tiny fractions, and repeated
+	// float accumulation over token counts drifts.
+	PriceIn  int64
+	PriceOut int64
 	// Downloads and Likes are popularity signals; source-dependent and 0 when
 	// the source publishes none.
 	Downloads int

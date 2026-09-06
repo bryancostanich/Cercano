@@ -31,10 +31,10 @@ func NewBackend(c *Client) *Backend {
 	return &Backend{client: c}
 }
 
-// Name implements catalog.Backend.
+// Name implements catalog.Source.
 func (b *Backend) Name() string { return BackendName }
 
-// List implements catalog.Backend: the trusted-uploader-filtered GGUF index,
+// List implements catalog.Source: the trusted-uploader-filtered GGUF index,
 // optionally narrowed by a substring query on the repo id.
 func (b *Backend) List(ctx context.Context, opts catalog.ListOptions) ([]catalog.Model, error) {
 	models, err := b.client.ListModels(ctx, opts.Limit, opts.Format)
@@ -59,7 +59,7 @@ func (b *Backend) List(ctx context.Context, opts catalog.ListOptions) ([]catalog
 	return out, nil
 }
 
-// Detail implements catalog.Backend.
+// Detail implements catalog.Source.
 func (b *Backend) Detail(ctx context.Context, id string) (catalog.Detail, error) {
 	d, err := b.client.ModelDetail(ctx, id)
 	if err != nil {
@@ -76,7 +76,7 @@ func (b *Backend) Detail(ctx context.Context, id string) (catalog.Detail, error)
 	}, nil
 }
 
-// ResolveDownload implements catalog.Backend: it turns a chosen quant into the
+// ResolveDownload implements catalog.Downloadable: it turns a chosen quant into the
 // plain resolve URL(s). A normal quant is one file; a sharded quant (a split
 // GGUF) resolves to every shard in its group so the download manager fetches
 // them all.

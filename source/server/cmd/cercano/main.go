@@ -33,6 +33,7 @@ import (
 	"cercano/source/server/internal/contextmeter"
 	"cercano/source/server/internal/conversation"
 	"cercano/source/server/internal/crashlog"
+	"cercano/source/server/internal/deepinfracatalog"
 	"cercano/source/server/internal/engine"
 	llamaengine "cercano/source/server/internal/engine/llamaserver"
 	mistralengine "cercano/source/server/internal/engine/mistralrs"
@@ -574,13 +575,20 @@ func startGRPCServer(cfg config.Config, bindAddr string, events *crashlog.Writer
 	srv.SetCatalogManager(catalogManager)
 
 	// Build the catalog registry: HuggingFace and Ollama (wrapping the manager
-	// above). All registered sources are browsed together — a source is a
-	// category of origin, not an alternative to the others — and a model is
-	// addressed by the (source, id) ref that browse returned, so there is
-	// nothing here to select between.
+	// above), plus DeepInfra. All registered sources are browsed together — a
+	// source is a category of origin, not an alternative to the others — and a
+	// model is addressed by the (source, id) ref that browse returned, so
+	// there is nothing here to select between.
+	//
+	// DeepInfra is the first servable source: its models run on its hardware
+	// and are never downloaded, so it does not implement catalog.Downloadable
+	// and the download path rejects it by type rather than by check. It needs
+	// no credentials to browse — the index is public — so it lists before the
+	// user has configured a key.
 	catalogRegistry := catalog.NewRegistry()
 	catalogRegistry.Register(modelcatalog.NewBackend(&modelcatalog.Client{}))
 	catalogRegistry.Register(ollamacatalog.NewBackend(catalogManager))
+	catalogRegistry.Register(deepinfracatalog.New())
 	srv.SetCatalogRegistry(catalogRegistry)
 	if sweeper != nil {
 		srv.SetRetentionSweeper(sweeper)

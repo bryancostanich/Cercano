@@ -28,7 +28,7 @@ type ollamaSource interface {
 	Resolve(ctx context.Context, ref string) (downloadURL string, sizeBytes int64, err error)
 }
 
-// Backend adapts the Ollama library to catalog.Backend — the retained,
+// Backend adapts the Ollama library to catalog.Downloadable — the retained,
 // non-default backend. An Ollama model is a family of tags (its quant/size
 // variants). The architecture the gate needs is not in Ollama's API, so Detail
 // reads it from the GGUF header of a resolved blob; the OCI manifest→blob
@@ -52,10 +52,10 @@ func NewBackend(mgr *Manager) *Backend {
 	return b
 }
 
-// Name implements catalog.Backend.
+// Name implements catalog.Source.
 func (b *Backend) Name() string { return BackendName }
 
-// List implements catalog.Backend: the cached library families, optionally
+// List implements catalog.Source: the cached library families, optionally
 // narrowed by a substring query on the family name.
 func (b *Backend) List(_ context.Context, opts catalog.ListOptions) ([]catalog.Model, error) {
 	families := b.src.Models()
@@ -73,7 +73,7 @@ func (b *Backend) List(_ context.Context, opts catalog.ListOptions) ([]catalog.M
 	return out, nil
 }
 
-// Detail implements catalog.Backend: a family's tags become the downloadable
+// Detail implements catalog.Source: a family's tags become the downloadable
 // files, and the architecture is read from the first tag's blob header. The
 // arch read is best-effort — on failure the arch is left empty, which the
 // consumer's gate treats as unsupported (the safe default for an unknown arch).
@@ -103,7 +103,7 @@ func (b *Backend) Detail(ctx context.Context, id string) (catalog.Detail, error)
 	}, nil
 }
 
-// ResolveDownload implements catalog.Backend: it turns a family + tag into a
+// ResolveDownload implements catalog.Downloadable: it turns a family + tag into a
 // concrete blob download via the OCI manifest→blob resolution, so the download
 // manager just fetches the resulting URL.
 func (b *Backend) ResolveDownload(ctx context.Context, id, file string) (catalog.DownloadPlan, error) {

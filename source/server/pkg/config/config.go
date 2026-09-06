@@ -288,7 +288,42 @@ func inferProviderVendor(p CloudProfile) string {
 		if p.Backend != "" {
 			return p.Backend
 		}
+		// Backend-less OpenAI-compatible providers (DeepInfra, Together,
+		// OpenRouter, DeepSeek) all speak the chat-completions dialect but
+		// serve entirely different model lineups. Without this, every one of
+		// them inferred vendor "openai" and drew OpenAI model ids out of the
+		// cost tables — a DeepInfra profile would resolve to "gpt-5.5", send
+		// it to DeepInfra, and be rejected. The base URL is what actually
+		// distinguishes them.
+		if v := vendorByHost(p.BaseURL); v != "" {
+			return v
+		}
 		return "openai"
+	}
+	return ""
+}
+
+// vendorByHost maps a base URL to a cost-table vendor key for the
+// OpenAI-compatible providers that carry no Backend selector.
+//
+// This deliberately duplicates the host list in
+// cloudcatalog.providerIDByHost rather than sharing it. The two map into
+// different namespaces: that one produces catalog *display* ids, which are
+// route-qualified ("anthropic-subscription", "openai-responses"), while this
+// one produces *cost-table vendor keys*. Sharing would mean translating
+// between the two namespaces, and would put an import edge from this public
+// package into an internal one. The lists are pinned by tests on both sides.
+func vendorByHost(baseURL string) string {
+	host := strings.ToLower(baseURL)
+	switch {
+	case strings.Contains(host, "deepinfra."):
+		return "deepinfra"
+	case strings.Contains(host, "together."):
+		return "together"
+	case strings.Contains(host, "openrouter."):
+		return "openrouter"
+	case strings.Contains(host, "deepseek."):
+		return "deepseek"
 	}
 	return ""
 }
@@ -604,6 +639,24 @@ func Defaults() Config {
 						Economy:  CostTierModel{Model: "gpt-5.5"},
 						Standard: CostTierModel{Model: "gpt-5.5"},
 						Premium:  CostTierModel{Model: "gpt-5.5"},
+					},
+					// DeepInfra hosts many vendors' open-weight models rather
+					// than publishing its own, so these are chosen for the
+					// agent loop's actual requirement — tool calling — and
+					// then for cost. All three are verified present in the
+					// live /models/list index with the "tools" tag.
+					//
+					// Prices below are per million tokens (input/output) at
+					// the time of writing, for the record:
+					//   economy   gpt-oss-120b        $0.037 / $0.17
+					//   standard  GLM-5.3-Flash       $0.15  / $0.50
+					//   premium   DeepSeek-V4-Pro     $1.30  / $2.60
+					// The spread is the point: economy is ~35x cheaper than
+					// premium on input, so tier choice genuinely matters here.
+					"deepinfra": {
+						Economy:  CostTierModel{Model: "openai/gpt-oss-120b"},
+						Standard: CostTierModel{Model: "zai-org/GLM-5.3-Flash"},
+						Premium:  CostTierModel{Model: "deepseek-ai/DeepSeek-V4-Pro"},
 					},
 				},
 			},

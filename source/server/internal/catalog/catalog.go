@@ -49,13 +49,6 @@ type Downloadable interface {
 	ResolveDownload(ctx context.Context, id, file string) (DownloadPlan, error)
 }
 
-// Backend is the former name of Source.
-//
-// Deprecated: use Source, or Downloadable when the consumer fetches bytes.
-// Retained so the tree keeps building mid-refactor; removed once every call
-// site is migrated.
-type Backend = Source
-
 // Ref identifies one model unambiguously: an id is only meaningful within the
 // source that issued it ("qwen2.5-coder:7b" is an Ollama name and nothing to
 // a hosted provider), so the two always travel together.

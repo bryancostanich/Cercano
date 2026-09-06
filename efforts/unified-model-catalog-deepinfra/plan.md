@@ -137,14 +137,36 @@ it.
 **Files:** `cmd/cercano/main.go`, `pkg/config/config.go` (~590),
 `internal/cloudcatalog/cloudcatalog.go` (~53)
 
-- [ ] Register the DeepInfra source in the registry
-- [ ] Add a `deepinfra` entry to `bakedCloudCatalog()` mapping cost tiers to
+- [x] Register the DeepInfra source in the registry
+- [x] Add a `deepinfra` entry to `bakedCloudCatalog()` mapping cost tiers to
   concrete model ids so `ResolveCloudModelForTier` stops returning `""`
-- [ ] Revisit `Tier: TierUntested` on the DeepInfra cloud profile
-- [ ] Remove the `Backend = Source` alias from Step 1
-  **Verify:** `ResolveCloudModelForTier("deepinfra", <each tier>)` returns
-                        non-empty. `cloudcatalog` remains I/O-free — the HTTP index lives in
-                        `deepinfracatalog`, not there.
+- [x] Remove the `Backend = Source` alias from Step 1
+- [ ] Revisit `Tier: TierUntested` on the DeepInfra cloud profile — still
+  open, and correctly so: it needs a live authenticated *inference* call, and
+  everything verified so far is the unauthenticated catalog index
+
+**Found en route — the tier table alone would not have worked.** A DeepInfra
+profile is `chat_completions` with no `Backend`, so `inferProviderVendor`
+returned `"openai"` and tier resolution drew OpenAI ids from the cost tables:
+probing showed a DeepInfra profile resolving to `gpt-5.5`, which DeepInfra
+does not serve. The new `deepinfra` table would never have been consulted.
+
+`cloudcatalog.ProviderIDFor` already disambiguated these by base-URL host, but
+it maps into a different namespace (route-qualified display ids like
+`openai-responses`, not cost-table vendor keys), so `config.vendorByHost` was
+added alongside it rather than shared — deliberate, narrow duplication,
+documented at both sites and pinned by tests.
+
+This was never DeepInfra-specific: Together, OpenRouter, and DeepSeek all
+mis-resolved to OpenAI ids the same way, and all four are fixed.
+
+**Verify:** `ResolveCloudModelForTier` returns a non-empty,
+publisher-namespaced id for every tier, and economy ≠ premium so the cost knob
+is not decorative. All three table models confirmed present, tool-tagged, and
+live in the real index (`gpt-oss-120b` $0.037/$0.17, `GLM-5.3-Flash`
+$0.15/$0.50, `DeepSeek-V4-Pro` $1.30/$2.60 per Mtok). Mutation-checked:
+reverting the host disambiguation fails all four providers by name.
+`cloudcatalog` remains I/O-free — the HTTP index lives in `deepinfracatalog`.
                         
                         ---
 

@@ -48,7 +48,7 @@ func (s *Server) GetModelRAMEstimate(ctx context.Context, req *proto.GetModelRAM
 		// GGUF header (head counts), which a not-yet-downloaded model doesn't
 		// expose here, so it stays 0 and the client degrades to weights +
 		// context. (A remote header Range-read could restore it later.)
-		if f, ok := pickDefaultQuant(detail.Files); ok {
+		if f, ok := pickDefaultQuant(detail.Variants); ok {
 			resp.WeightsBytes = f.SizeBytes
 		}
 		return resp, nil

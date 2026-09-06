@@ -66,30 +66,85 @@ type ListOptions struct {
 	Format string
 }
 
-// Model is one entry from List — enough to rank and drill into.
+// Kind is what a model does. Sources that index more than text generation
+// (hosted providers commonly also serve image, speech, and embedding models)
+// report it so consumers can filter to the kinds they can actually drive.
+type Kind string
+
+const (
+	// KindUnknown is the zero value: the source did not say. Treated as
+	// text generation by consumers that require a kind, since that is what
+	// every source indexed so far serves by default.
+	KindUnknown Kind = ""
+	// KindTextGeneration is a chat/completion model — the only kind the
+	// agent loop can drive.
+	KindTextGeneration Kind = "text-generation"
+	KindEmbedding      Kind = "embedding"
+	KindImage          Kind = "image"
+	KindSpeech         Kind = "speech"
+	KindVideo          Kind = "video"
+)
+
+// Model is one entry from List — enough to rank, filter, and drill into.
 type Model struct {
-	Backend   string // which backend produced this
-	ID        string // backend-scoped id (HF repo, or Ollama name)
-	Author    string
+	Source string // which source produced this
+	ID     string // source-scoped id (HF repo, Ollama name, provider model id)
+	// Publisher is who put the model out: an HF author, or the org prefix of
+	// a hosted provider's model id.
+	Publisher string
+	Kind      Kind
+	// ContextLength is the model's window when the source's list surface
+	// exposes it; 0 means "ask Detail".
+	ContextLength int
+	// SupportsTools reports whether the model can call tools. Cercano's agent
+	// loop is useless without it, so a source that knows should say here
+	// rather than making every consumer fetch Detail to find out.
+	SupportsTools  bool
+	SupportsVision bool
+	// Deprecated marks a model the source has retired. Sources are expected
+	// to filter these out of List by default; the field carries the state for
+	// the case that matters — explaining a pinned model that has since died.
+	Deprecated bool
+	// ReplacedBy names the successor when Deprecated is set, so a stale pin
+	// can be reported with a concrete migration target instead of just an
+	// error.
+	ReplacedBy string
+	// Downloads and Likes are popularity signals; source-dependent and 0 when
+	// the source publishes none.
 	Downloads int
 	Likes     int
 }
 
-// File is one downloadable quant variant within a model.
-type File struct {
-	Name      string
+// Variant is one selectable form of a model. For a downloadable source that
+// is a quant file (with a size); for a hosted source it is a served flavor
+// such as a turbo or pre-quantized build (with a price). Neither the size nor
+// the price is mandatory — a variant carries whatever its source meters.
+type Variant struct {
+	Name         string
+	Quantization string
+	// SizeBytes is the on-disk size for a downloadable variant; 0 for a
+	// served one.
 	SizeBytes int64
+	// PriceIn and PriceOut are per-million-token costs in micro-USD for a
+	// metered variant; 0 for a downloadable one. Micro-USD (not float) keeps
+	// the arithmetic exact.
+	PriceIn  int64
+	PriceOut int64
 }
 
-// Detail is a model's per-file and identity metadata.
+// Detail is a model's per-variant and identity metadata.
 type Detail struct {
-	Backend       string
+	Source        string
 	ID            string
 	Format        string // "gguf" | "safetensors" — the model's on-disk format
 	Architecture  string // gate input (GGUF general.architecture, or config model_type)
 	ContextLength int
 	SupportsTools bool
-	Files         []File
+	// Deprecated and ReplacedBy mirror Model, so a drill-in on a pinned model
+	// can explain a retirement even when List filtered it out.
+	Deprecated bool
+	ReplacedBy string
+	Variants   []Variant
 }
 
 // DownloadPlan is what the download manager consumes: concrete URLs (one, or

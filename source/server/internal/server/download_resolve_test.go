@@ -8,12 +8,12 @@ import (
 	"cercano/source/server/internal/catalog"
 )
 
-// fakeCatalogBackend stubs catalog.Backend for the download-resolution tests,
-// capturing the file ResolveDownload is asked for.
+// fakeCatalogBackend stubs catalog.Downloadable for the download-resolution
+// tests, capturing the file ResolveDownload is asked for.
 type fakeCatalogBackend struct {
 	arch         string
 	tools        bool
-	files        []catalog.File
+	files        []catalog.Variant
 	urls         []string
 	primary      string
 	total        int64
@@ -25,7 +25,7 @@ func (f *fakeCatalogBackend) List(context.Context, catalog.ListOptions) ([]catal
 	return nil, nil
 }
 func (f *fakeCatalogBackend) Detail(_ context.Context, id string) (catalog.Detail, error) {
-	return catalog.Detail{Backend: "fake", ID: id, Architecture: f.arch, SupportsTools: f.tools, Files: f.files}, nil
+	return catalog.Detail{Source: "fake", ID: id, Architecture: f.arch, SupportsTools: f.tools, Variants: f.files}, nil
 }
 func (f *fakeCatalogBackend) ResolveDownload(_ context.Context, _, file string) (catalog.DownloadPlan, error) {
 	f.resolvedFile = file
@@ -36,7 +36,7 @@ func (f *fakeCatalogBackend) ResolveDownload(_ context.Context, _, file string) 
 // architecture llama.cpp can't load is refused before any download, even from
 // a backend that happily offers it.
 func TestBuildCatalogDownloadRecord_GatesUnsupportedArch(t *testing.T) {
-	b := &fakeCatalogBackend{arch: "qwen3next", files: []catalog.File{{Name: "x-Q4_K_M.gguf"}}}
+	b := &fakeCatalogBackend{arch: "qwen3next", files: []catalog.Variant{{Name: "x-Q4_K_M.gguf"}}}
 	_, err := buildCatalogDownloadRecord(context.Background(), b, "some/repo", "mid", "llama_server", "/models")
 	if err == nil {
 		t.Fatal("expected refusal for unsupported architecture qwen3next")
@@ -52,7 +52,7 @@ func TestBuildCatalogDownloadRecord_Compatible(t *testing.T) {
 	b := &fakeCatalogBackend{
 		arch:    "qwen2",
 		tools:   true,
-		files:   []catalog.File{{Name: "x-Q2_K.gguf"}, {Name: "x-Q4_K_M.gguf"}},
+		files:   []catalog.Variant{{Name: "x-Q2_K.gguf"}, {Name: "x-Q4_K_M.gguf"}},
 		urls:    []string{"https://hf/x-Q4_K_M.gguf"},
 		primary: "x-Q4_K_M.gguf",
 		total:   123,
@@ -79,11 +79,11 @@ func TestBuildCatalogDownloadRecord_Compatible(t *testing.T) {
 }
 
 func TestPickDefaultQuant(t *testing.T) {
-	f, ok := pickDefaultQuant([]catalog.File{{Name: "m-IQ2.gguf"}, {Name: "m-Q4_K_M.gguf"}, {Name: "m-Q8_0.gguf"}})
+	f, ok := pickDefaultQuant([]catalog.Variant{{Name: "m-IQ2.gguf"}, {Name: "m-Q4_K_M.gguf"}, {Name: "m-Q8_0.gguf"}})
 	if !ok || f.Name != "m-Q4_K_M.gguf" {
 		t.Errorf("pickDefaultQuant = %+v/%v, want m-Q4_K_M.gguf", f, ok)
 	}
-	f2, ok2 := pickDefaultQuant([]catalog.File{{Name: "a.gguf"}, {Name: "b.gguf"}})
+	f2, ok2 := pickDefaultQuant([]catalog.Variant{{Name: "a.gguf"}, {Name: "b.gguf"}})
 	if !ok2 || f2.Name != "a.gguf" {
 		t.Errorf("fallback = %+v, want first file a.gguf", f2)
 	}
@@ -99,7 +99,7 @@ func TestBuildCatalogDownloadRecord_RuntimeAwareGate(t *testing.T) {
 	newBackend := func() *fakeCatalogBackend {
 		return &fakeCatalogBackend{
 			arch:    "qwen3next",
-			files:   []catalog.File{{Name: "model-Q4_K_M.gguf"}},
+			files:   []catalog.Variant{{Name: "model-Q4_K_M.gguf"}},
 			urls:    []string{"https://hf/model-Q4_K_M.gguf"},
 			primary: "model-Q4_K_M.gguf",
 			total:   1,

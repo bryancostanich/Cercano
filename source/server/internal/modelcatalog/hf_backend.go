@@ -48,9 +48,10 @@ func (b *Backend) List(ctx context.Context, opts catalog.ListOptions) ([]catalog
 			continue
 		}
 		out = append(out, catalog.Model{
-			Backend:   BackendName,
+			Source:    BackendName,
 			ID:        m.Repo,
-			Author:    m.Author,
+			Publisher: m.Author,
+			Kind:      catalog.KindTextGeneration,
 			Downloads: m.Downloads,
 			Likes:     m.Likes,
 		})
@@ -65,13 +66,13 @@ func (b *Backend) Detail(ctx context.Context, id string) (catalog.Detail, error)
 		return catalog.Detail{}, err
 	}
 	return catalog.Detail{
-		Backend:       BackendName,
+		Source:        BackendName,
 		ID:            d.Repo,
 		Format:        d.Format,
 		Architecture:  d.Architecture,
 		ContextLength: d.ContextLength,
 		SupportsTools: d.SupportsTools,
-		Files:         toCatalogFiles(d.Files),
+		Variants:      toCatalogVariants(d.Files),
 	}, nil
 }
 
@@ -124,10 +125,10 @@ func manifestPlan(base, id string, manifest []HFFile) (catalog.DownloadPlan, err
 	return plan, nil
 }
 
-func toCatalogFiles(in []HFFile) []catalog.File {
-	out := make([]catalog.File, 0, len(in))
+func toCatalogVariants(in []HFFile) []catalog.Variant {
+	out := make([]catalog.Variant, 0, len(in))
 	for _, f := range in {
-		out = append(out, catalog.File{Name: f.Name, SizeBytes: f.SizeBytes})
+		out = append(out, catalog.Variant{Name: f.Name, SizeBytes: f.SizeBytes})
 	}
 	return out
 }

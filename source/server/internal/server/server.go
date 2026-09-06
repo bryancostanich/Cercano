@@ -2394,7 +2394,7 @@ func buildCatalogDownloadRecord(ctx context.Context, backend catalog.Downloadabl
 	if !runtimeArchSupported(runtime, detail.Architecture) {
 		return localruntime.ModelRecord{}, fmt.Errorf("%s can't run %q: unsupported architecture %q (switch the runtime or pick a compatible model)", runtime, id, detail.Architecture)
 	}
-	file, ok := pickDefaultQuant(detail.Files)
+	file, ok := pickDefaultQuant(detail.Variants)
 	if !ok {
 		return localruntime.ModelRecord{}, fmt.Errorf("no downloadable quant files for %q", id)
 	}
@@ -2433,9 +2433,9 @@ func buildCatalogDownloadRecord(ctx context.Context, backend catalog.Downloadabl
 // specific quant: prefer a Q4_K_M variant (the quality/size sweet spot), else
 // the first file. For a sharded quant this returns the first shard; the
 // backend's ResolveDownload expands it to the whole shard group.
-func pickDefaultQuant(files []catalog.File) (catalog.File, bool) {
+func pickDefaultQuant(files []catalog.Variant) (catalog.Variant, bool) {
 	if len(files) == 0 {
-		return catalog.File{}, false
+		return catalog.Variant{}, false
 	}
 	for _, f := range files {
 		if strings.Contains(strings.ToUpper(f.Name), "Q4_K_M") {

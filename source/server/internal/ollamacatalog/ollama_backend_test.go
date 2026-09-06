@@ -43,7 +43,7 @@ func TestOllamaBackend_ListMapsFamilies(t *testing.T) {
 	if len(got) != 3 {
 		t.Fatalf("got %d models, want 3", len(got))
 	}
-	if got[0].Backend != "ollama" || got[0].ID != "qwen2.5-coder" {
+	if got[0].Source != "ollama" || got[0].ID != "qwen2.5-coder" {
 		t.Errorf("model0 = %+v, want ollama/qwen2.5-coder", got[0])
 	}
 
@@ -75,8 +75,8 @@ func TestOllamaBackend_DetailTagsAndArch(t *testing.T) {
 	if d.Architecture != "qwen2" {
 		t.Errorf("arch = %q, want qwen2 (from the blob header read)", d.Architecture)
 	}
-	if len(d.Files) != 2 || d.Files[0].Name != "7b" || d.Files[1].Name != "1.5b" {
-		t.Errorf("files = %+v, want tags [7b 1.5b]", d.Files)
+	if len(d.Variants) != 2 || d.Variants[0].Name != "7b" || d.Variants[1].Name != "1.5b" {
+		t.Errorf("files = %+v, want tags [7b 1.5b]", d.Variants)
 	}
 	// Arch is read from the first tag's blob.
 	if src.resolvedRef != "qwen2.5-coder:7b" {
@@ -98,8 +98,8 @@ func TestOllamaBackend_DetailArchReadFailureLeavesEmpty(t *testing.T) {
 	if d.Architecture != "" {
 		t.Errorf("arch = %q, want empty on read failure (gate treats unknown as unsupported)", d.Architecture)
 	}
-	if len(d.Files) != 1 {
-		t.Errorf("files = %+v, want the one tag", d.Files)
+	if len(d.Variants) != 1 {
+		t.Errorf("files = %+v, want the one tag", d.Variants)
 	}
 }
 

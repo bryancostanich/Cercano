@@ -52,7 +52,7 @@ func TestBackend_ListMapsToCatalogModel(t *testing.T) {
 	if len(models) != 1 {
 		t.Fatalf("got %d models, want 1 (untrusted author filtered)", len(models))
 	}
-	if models[0].Backend != BackendName || models[0].ID != "unsloth/GLM-4.5-Air-GGUF" {
+	if models[0].Source != BackendName || models[0].ID != "unsloth/GLM-4.5-Air-GGUF" {
 		t.Errorf("model = %+v, want backend=huggingface id=unsloth/GLM-4.5-Air-GGUF", models[0])
 	}
 }
@@ -66,14 +66,14 @@ func TestBackend_DetailMapsArchAndTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Detail: %v", err)
 	}
-	if d.Backend != BackendName || d.Architecture != "glm4moe" {
-		t.Errorf("detail backend/arch = %q/%q", d.Backend, d.Architecture)
+	if d.Source != BackendName || d.Architecture != "glm4moe" {
+		t.Errorf("detail backend/arch = %q/%q", d.Source, d.Architecture)
 	}
 	if !d.SupportsTools {
 		t.Error("SupportsTools = false, want true")
 	}
-	if len(d.Files) != 3 {
-		t.Errorf("got %d files, want 3 (.gguf only, README filtered)", len(d.Files))
+	if len(d.Variants) != 3 {
+		t.Errorf("got %d files, want 3 (.gguf only, README filtered)", len(d.Variants))
 	}
 }
 

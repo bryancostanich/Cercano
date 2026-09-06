@@ -65,7 +65,7 @@ func (b *Backend) List(_ context.Context, opts catalog.ListOptions) ([]catalog.M
 		if query != "" && !strings.Contains(strings.ToLower(f.Name), query) {
 			continue
 		}
-		out = append(out, catalog.Model{Backend: BackendName, ID: f.Name})
+		out = append(out, catalog.Model{Source: BackendName, ID: f.Name, Kind: catalog.KindTextGeneration})
 		if opts.Limit > 0 && len(out) >= opts.Limit {
 			break
 		}
@@ -85,9 +85,9 @@ func (b *Backend) Detail(ctx context.Context, id string) (catalog.Detail, error)
 	if len(tags) == 0 {
 		return catalog.Detail{}, fmt.Errorf("ollamacatalog: no tags for %q", id)
 	}
-	files := make([]catalog.File, 0, len(tags))
+	variants := make([]catalog.Variant, 0, len(tags))
 	for _, t := range tags {
-		files = append(files, catalog.File{Name: t})
+		variants = append(variants, catalog.Variant{Name: t})
 	}
 	arch := ""
 	if blobURL, _, rerr := b.src.Resolve(ctx, id+":"+tags[0]); rerr == nil {
@@ -96,10 +96,10 @@ func (b *Backend) Detail(ctx context.Context, id string) (catalog.Detail, error)
 		}
 	}
 	return catalog.Detail{
-		Backend:      BackendName,
+		Source:       BackendName,
 		ID:           id,
 		Architecture: arch,
-		Files:        files,
+		Variants:     variants,
 	}, nil
 }
 

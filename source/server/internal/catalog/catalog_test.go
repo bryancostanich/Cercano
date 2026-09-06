@@ -10,10 +10,10 @@ type fakeBackend struct{ name string }
 
 func (f fakeBackend) Name() string { return f.name }
 func (f fakeBackend) List(context.Context, ListOptions) ([]Model, error) {
-	return []Model{{Backend: f.name, ID: f.name + "/model"}}, nil
+	return []Model{{Source: f.name, ID: f.name + "/model"}}, nil
 }
 func (f fakeBackend) Detail(context.Context, string) (Detail, error) {
-	return Detail{Backend: f.name}, nil
+	return Detail{Source: f.name}, nil
 }
 func (f fakeBackend) ResolveDownload(context.Context, string, string) (DownloadPlan, error) {
 	return DownloadPlan{}, nil

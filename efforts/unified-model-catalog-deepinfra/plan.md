@@ -16,8 +16,8 @@ the new integration in separate, separately-revertable commits.
 - [x] Keep `Model`/`Detail`/`File`/`DownloadPlan` byte-identical for now
 - [x] Retain `type Backend = Source` deprecated alias; removed in Step 6
   **Verify:** `go build ./...` clean. No behavior change.
-                
-                ---
+                        
+                        ---
 
 ## Step 2 — Assert the capability at the download call sites
 
@@ -28,26 +28,22 @@ the new integration in separate, separately-revertable commits.
 - [x] At `DownloadRuntimeModel`, type-assert; on failure return a clear error
 - [x] Add `var _ catalog.Downloadable = (*Backend)(nil)` to both backends
   **Verify:** existing catalog/server tests pass unchanged.
-                
-                ---
+                        
+                        ---
 
 ## Step 3 — Generalize `Model` and `Detail`
 
 **Files:** `catalog.go`, `modelcatalog/hf_backend.go`,
 `ollamacatalog/ollama_backend.go`
 
-- [ ] Add `Publisher`, `SupportsVision`, `Kind`, `Deprecated`, `ReplacedBy` to
-  `Model`; map HF `Author` → `Publisher`
-- [ ] Introduce `Variant` (`Name`, `Quantization`, `SizeBytes`, `PriceIn`,
-  `PriceOut`); `Detail.Files []File` → `Detail.Variants []Variant`
-- [ ] Update `pickDefaultQuant` and `filesForDownload` to operate on `Variant`;
-  Q4_K_M preference and shard-grouping logic unchanged
-                
-                **Verify:** existing HF and Ollama backend tests pass with only
-                type/field renames. Any test whose *expectations* change is a red flag —
-                this step must not alter behavior.
-                
-                ---
+- [x] Add Publisher/SupportsVision/Kind/Deprecated/ReplacedBy to Model
+- [x] Introduce Variant and change Detail.Files to Detail.Variants
+- [x] Update pickDefaultQuant and filesForDownload to operate on Variant
+  **Verify:** existing HF and Ollama backend tests pass with only
+                        type/field renames. Any test whose *expectations* change is a red flag —
+                        this step must not alter behavior.
+                        
+                        ---
 
 ## Step 4 — Multi-source registry
 
@@ -58,10 +54,10 @@ the new integration in separate, separately-revertable commits.
 - [ ] `ListRuntimeModels` fans out across `All()`, preserving current dedupe
 - [ ] Per-source list failure omits that source rather than failing the call
   **Verify:** with only HF + Ollama registered, list output is equivalent to
-                today's. Add a test with two stub sources asserting merge + partial-failure
-                tolerance.
-                
-                ---
+                        today's. Add a test with two stub sources asserting merge + partial-failure
+                        tolerance.
+                        
+                        ---
 
 ## Step 5 — DeepInfra source
 
@@ -73,23 +69,23 @@ the new integration in separate, separately-revertable commits.
 - [ ] Map `quantization` → `Variant.Quantization`; normalize pricing
 - [ ] In-process TTL cache, serve stale on fetch failure
   Eligibility filter detail:
-                  - `type == "text-generation"` only — drops text-to-image, text-to-speech,
-                    text-to-video, embeddings, speech-to-text.
-                  - must carry the `"tools"` tag.
-                  - drop entries with a non-zero `deprecated` timestamp; retain
-                    `replaced_by` on `Detail` so a pinned-but-retired model can be explained.
-                - Map `quantization` → `Variant.Quantization`; pricing (cents-per-token) →
-                  normalized per-million-token `PriceIn`/`PriceOut`.
-                - Cache the index in-process with a TTL and serve stale on fetch failure.
-                  Mirrors the existing online-catalog posture: browse is on-demand, an error
-                  degrades rather than fails.
-                
-                **Verify:** unit tests against a recorded `/models/list` fixture — filter
-                drops non-text and tool-less and deprecated entries; pricing math is exact;
-                `var _ catalog.Downloadable = (*Source)(nil)` **fails to compile** (assert via
-                a negative test that the runtime type assertion returns false).
-                
-                ---
+                          - `type == "text-generation"` only — drops text-to-image, text-to-speech,
+                            text-to-video, embeddings, speech-to-text.
+                          - must carry the `"tools"` tag.
+                          - drop entries with a non-zero `deprecated` timestamp; retain
+                            `replaced_by` on `Detail` so a pinned-but-retired model can be explained.
+                        - Map `quantization` → `Variant.Quantization`; pricing (cents-per-token) →
+                          normalized per-million-token `PriceIn`/`PriceOut`.
+                        - Cache the index in-process with a TTL and serve stale on fetch failure.
+                          Mirrors the existing online-catalog posture: browse is on-demand, an error
+                          degrades rather than fails.
+                        
+                        **Verify:** unit tests against a recorded `/models/list` fixture — filter
+                        drops non-text and tool-less and deprecated entries; pricing math is exact;
+                        `var _ catalog.Downloadable = (*Source)(nil)` **fails to compile** (assert via
+                        a negative test that the runtime type assertion returns false).
+                        
+                        ---
 
 ## Step 6 — Wire in, and give DeepInfra a cost-tier table
 
@@ -102,10 +98,10 @@ the new integration in separate, separately-revertable commits.
 - [ ] Revisit `Tier: TierUntested` on the DeepInfra cloud profile
 - [ ] Remove the `Backend = Source` alias from Step 1
   **Verify:** `ResolveCloudModelForTier("deepinfra", <each tier>)` returns
-                non-empty. `cloudcatalog` remains I/O-free — the HTTP index lives in
-                `deepinfracatalog`, not there.
-                
-                ---
+                        non-empty. `cloudcatalog` remains I/O-free — the HTTP index lives in
+                        `deepinfracatalog`, not there.
+                        
+                        ---
 
 ## Step 7 — Wire shape for the picker
 
@@ -119,9 +115,9 @@ the new integration in separate, separately-revertable commits.
 - [ ] Populate `runtime`/`format` only for downloadable sources
 - [ ] Keep existing field numbers; append new ones, no renumbering
   **Verify:** CLI models page renders both local and DeepInfra entries; a
-                DeepInfra entry offers no download affordance.
-                
-                ---
+                        DeepInfra entry offers no download affordance.
+                        
+                        ---
 
 ## Risks
 

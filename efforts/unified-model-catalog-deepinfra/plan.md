@@ -89,6 +89,9 @@ model was fixed instead.
 - [ ] Eligibility filter applied in `List`
 - [ ] Map `quantization` → `Variant.Quantization`; normalize pricing
 - [ ] In-process TTL cache, serve stale on fetch failure
+- [ ] Bound the fetch with its own timeout: browse already tolerates a source
+  that *fails*, but a source that is merely *slow* still holds the whole
+  response until its context expires
   Eligibility filter detail:
                           - `type == "text-generation"` only — drops text-to-image, text-to-speech,
                             text-to-video, embeddings, speech-to-text.
@@ -148,7 +151,7 @@ model was fixed instead.
 |---|---|
 | Step 3 silently changes download behavior | Steps 1–4 must not alter any existing test's expectations; only renames |
 | `/models/list` is unversioned and may change shape | Parse defensively, tolerate unknown fields, cache-and-serve-stale; fixture test pins current shape |
-| Registry fan-out slows the models page | Per-source failure is non-fatal (done in Step 4). Fan-out is currently **sequential** — acceptable for two fast sources, but must become concurrent, with a per-source TTL cache, before DeepInfra's network index joins the loop in Step 5 |
+| Registry fan-out slows the models page | Per-source failure is non-fatal (done in Step 4). Sources are independent — the fan-out is sequential only incidentally, so latency is the *sum* rather than the *max* of each `List`. HF's `List` is already a network call today, so DeepInfra makes it two round-trips rather than introducing the first. Concurrency + per-source TTL cache is a latency improvement, not a prerequisite. The sharper gap is a source that is **slow rather than dead**: failure is already tolerated, but a slow source still holds the response for its full timeout, so a per-source timeout matters at least as much as concurrency |
 | Unqualified-ref probe costs one `Detail` call per source | Only reached for a pre-Step-4 client; current clients always send the source. Probe stops at the first hit and skips failing sources |
 | Proto churn breaks an older CLI | Append-only fields, no renumbering |
 

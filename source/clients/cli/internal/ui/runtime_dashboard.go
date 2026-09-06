@@ -806,6 +806,14 @@ func (d *runtimeDashboard) startSelectedDownload() (tea.Cmd, bool) {
 		return nil, false
 	}
 	selected := models[clampIndex(d.catalogCursor, len(models))]
+	// A served model runs on the provider's hardware; there are no bytes to
+	// fetch. The server would reject this too (its download path takes a
+	// Downloadable source), but failing here says so plainly instead of
+	// surfacing a resolution error from a round trip.
+	if selected.Served() {
+		d.catalogMessage = "served by " + selected.CatalogSource + " — nothing to download"
+		return nil, false
+	}
 	if strings.EqualFold(selected.DownloadState, "downloaded") {
 		d.catalogMessage = "already downloaded"
 		return nil, false
@@ -1363,6 +1371,13 @@ func isCatalogDownloadModel(model agentclient.RuntimeModel) bool {
 	if source == "catalog" || source == "recommended" {
 		return true
 	}
+	// A served model belongs in the browse list even though it has no
+	// download state — the states below are a *download* lifecycle, and a
+	// model that is never downloaded has none. Without this it would be
+	// filtered out and never shown at all.
+	if model.Served() {
+		return true
+	}
 	switch state {
 	// "downloaded" stays listed on purpose — app-store semantics: a
 	// model doesn't vanish from catalog search the moment its download
@@ -1385,6 +1400,11 @@ func catalogModelMatches(model agentclient.RuntimeModel, query string) bool {
 		model.Quantization,
 		model.DownloadState,
 		model.RuntimeState,
+		// Served models are distinguished by publisher and provider rather
+		// than by format/quantization, which they do not have; without these
+		// a search for "deepinfra" or a publisher name would miss them.
+		model.Publisher,
+		model.CatalogSource,
 	), " "))
 	return strings.Contains(haystack, query)
 }

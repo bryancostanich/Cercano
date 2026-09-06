@@ -2223,6 +2223,37 @@ type RuntimeModel struct {
 	// Empty on entries with no catalog_id, and on responses from a server
 	// predating source-qualified refs.
 	CatalogSource string `protobuf:"bytes,24,opt,name=catalog_source,json=catalogSource,proto3" json:"catalog_source,omitempty"`
+	// acquisition says how this model is obtained, which is the axis the
+	// picker must not get wrong: "download" means bytes are fetched to disk and
+	// a download affordance applies; "serve" means it runs on a provider's
+	// hardware and downloading is meaningless. Empty on servers predating this
+	// field — clients should treat empty as "download", which is what every
+	// model was before hosted sources existed.
+	Acquisition string `protobuf:"bytes,25,opt,name=acquisition,proto3" json:"acquisition,omitempty"`
+	// publisher is who released the model (an author or org). Empty when the
+	// source publishes none.
+	Publisher string `protobuf:"bytes,26,opt,name=publisher,proto3" json:"publisher,omitempty"`
+	// kind is what the model does: "text-generation", "embedding", "image",
+	// "speech", "video". Empty means the source did not say; consumers treat
+	// that as text generation.
+	Kind string `protobuf:"bytes,27,opt,name=kind,proto3" json:"kind,omitempty"`
+	// deprecated marks a model the source has retired, and replaced_by names
+	// its successor when there is one. Sources filter retired models out of
+	// browse, so these carry the state for the case that matters: explaining a
+	// model pinned in config that has since died, with a concrete migration
+	// target rather than a bare error.
+	Deprecated bool   `protobuf:"varint,28,opt,name=deprecated,proto3" json:"deprecated,omitempty"`
+	ReplacedBy string `protobuf:"bytes,29,opt,name=replaced_by,json=replacedBy,proto3" json:"replaced_by,omitempty"`
+	// price_in and price_out are per-million-token costs in micro-USD for a
+	// metered (served) model; both 0 for a downloadable one, whose cost is
+	// hardware rather than per-token. Micro-USD integers rather than floats so
+	// the arithmetic stays exact — provider prices are quoted in tiny
+	// fractions and repeated float accumulation drifts.
+	PriceIn  int64 `protobuf:"varint,30,opt,name=price_in,json=priceIn,proto3" json:"price_in,omitempty"`
+	PriceOut int64 `protobuf:"varint,31,opt,name=price_out,json=priceOut,proto3" json:"price_out,omitempty"`
+	// context_length is the model's window when the source's list surface
+	// exposes it; 0 means unknown from the list alone.
+	ContextLength int64 `protobuf:"varint,32,opt,name=context_length,json=contextLength,proto3" json:"context_length,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2423,6 +2454,62 @@ func (x *RuntimeModel) GetCatalogSource() string {
 		return x.CatalogSource
 	}
 	return ""
+}
+
+func (x *RuntimeModel) GetAcquisition() string {
+	if x != nil {
+		return x.Acquisition
+	}
+	return ""
+}
+
+func (x *RuntimeModel) GetPublisher() string {
+	if x != nil {
+		return x.Publisher
+	}
+	return ""
+}
+
+func (x *RuntimeModel) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *RuntimeModel) GetDeprecated() bool {
+	if x != nil {
+		return x.Deprecated
+	}
+	return false
+}
+
+func (x *RuntimeModel) GetReplacedBy() string {
+	if x != nil {
+		return x.ReplacedBy
+	}
+	return ""
+}
+
+func (x *RuntimeModel) GetPriceIn() int64 {
+	if x != nil {
+		return x.PriceIn
+	}
+	return 0
+}
+
+func (x *RuntimeModel) GetPriceOut() int64 {
+	if x != nil {
+		return x.PriceOut
+	}
+	return 0
+}
+
+func (x *RuntimeModel) GetContextLength() int64 {
+	if x != nil {
+		return x.ContextLength
+	}
+	return 0
 }
 
 type RuntimeInstance struct {
@@ -14244,7 +14331,7 @@ const file_agent_proto_rawDesc = "" +
 	"\vmodified_at\x18\x03 \x01(\tR\n" +
 	"modifiedAt\">\n" +
 	"\x12ListModelsResponse\x12(\n" +
-	"\x06models\x18\x01 \x03(\v2\x10.agent.ModelInfoR\x06models\"\xba\x06\n" +
+	"\x06models\x18\x01 \x03(\v2\x10.agent.ModelInfoR\x06models\"\xae\b\n" +
 	"\fRuntimeModel\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\fdisplay_name\x18\x02 \x01(\tR\vdisplayName\x12\x18\n" +
@@ -14273,7 +14360,18 @@ const file_agent_proto_rawDesc = "" +
 	"catalog_id\x18\x15 \x01(\tR\tcatalogId\x12+\n" +
 	"\x12kv_bytes_per_token\x18\x16 \x01(\x03R\x0fkvBytesPerToken\x12,\n" +
 	"\x12max_context_tokens\x18\x17 \x01(\x03R\x10maxContextTokens\x12%\n" +
-	"\x0ecatalog_source\x18\x18 \x01(\tR\rcatalogSource\"\x87\x03\n" +
+	"\x0ecatalog_source\x18\x18 \x01(\tR\rcatalogSource\x12 \n" +
+	"\vacquisition\x18\x19 \x01(\tR\vacquisition\x12\x1c\n" +
+	"\tpublisher\x18\x1a \x01(\tR\tpublisher\x12\x12\n" +
+	"\x04kind\x18\x1b \x01(\tR\x04kind\x12\x1e\n" +
+	"\n" +
+	"deprecated\x18\x1c \x01(\bR\n" +
+	"deprecated\x12\x1f\n" +
+	"\vreplaced_by\x18\x1d \x01(\tR\n" +
+	"replacedBy\x12\x19\n" +
+	"\bprice_in\x18\x1e \x01(\x03R\apriceIn\x12\x1b\n" +
+	"\tprice_out\x18\x1f \x01(\x03R\bpriceOut\x12%\n" +
+	"\x0econtext_length\x18  \x01(\x03R\rcontextLength\"\x87\x03\n" +
 	"\x0fRuntimeInstance\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x18\n" +
 	"\aruntime\x18\x02 \x01(\tR\aruntime\x12\x19\n" +

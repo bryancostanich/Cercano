@@ -585,6 +585,43 @@ message RuntimeModel {
   // Empty on entries with no catalog_id, and on responses from a server
   // predating source-qualified refs.
   string catalog_source = 24;
+
+  // acquisition says how this model is obtained, which is the axis the
+  // picker must not get wrong: "download" means bytes are fetched to disk and
+  // a download affordance applies; "serve" means it runs on a provider's
+  // hardware and downloading is meaningless. Empty on servers predating this
+  // field — clients should treat empty as "download", which is what every
+  // model was before hosted sources existed.
+  string acquisition = 25;
+
+  // publisher is who released the model (an author or org). Empty when the
+  // source publishes none.
+  string publisher = 26;
+
+  // kind is what the model does: "text-generation", "embedding", "image",
+  // "speech", "video". Empty means the source did not say; consumers treat
+  // that as text generation.
+  string kind = 27;
+
+  // deprecated marks a model the source has retired, and replaced_by names
+  // its successor when there is one. Sources filter retired models out of
+  // browse, so these carry the state for the case that matters: explaining a
+  // model pinned in config that has since died, with a concrete migration
+  // target rather than a bare error.
+  bool deprecated = 28;
+  string replaced_by = 29;
+
+  // price_in and price_out are per-million-token costs in micro-USD for a
+  // metered (served) model; both 0 for a downloadable one, whose cost is
+  // hardware rather than per-token. Micro-USD integers rather than floats so
+  // the arithmetic stays exact — provider prices are quoted in tiny
+  // fractions and repeated float accumulation drifts.
+  int64 price_in = 30;
+  int64 price_out = 31;
+
+  // context_length is the model's window when the source's list surface
+  // exposes it; 0 means unknown from the list alone.
+  int64 context_length = 32;
 }
 
 message RuntimeInstance {

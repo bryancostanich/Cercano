@@ -2156,12 +2156,17 @@ func (s *Server) ListRuntimeModels(ctx context.Context, req *proto.ListRuntimeMo
 				log.Printf("[catalog] source %q list failed: %v (omitted from browse)", src.Name(), err)
 				continue
 			}
+			// Whether a source's models are downloaded or served is a
+			// property of the source, so it is asked once per source rather
+			// than guessed per model. A source that cannot produce a download
+			// plan is one whose models are served.
+			_, downloadable := src.(catalog.Downloadable)
 			for _, m := range online {
 				if seen[m.ID] {
 					continue
 				}
 				seen[m.ID] = true
-				resp.Models = append(resp.Models, catalogModelToProto(m))
+				resp.Models = append(resp.Models, catalogModelToProto(m, !downloadable))
 			}
 		}
 	}
@@ -2174,27 +2179,65 @@ func (s *Server) ListRuntimeModels(ctx context.Context, req *proto.ListRuntimeMo
 	return resp, nil
 }
 
-// catalogModelToProto converts a catalog.Model (from the active backend) to
-// the wire-level RuntimeModel shape. Sparse — the list view carries just the
-// backend id; the CLI fetches quant files and sizes on drill-in (Detail).
-// CatalogId carries the backend-scoped id (an HF repo, or an Ollama family),
-// which the download handler resolves through the active backend.
-func catalogModelToProto(m catalog.Model) *proto.RuntimeModel {
-	return &proto.RuntimeModel{
-		Id:            "llama_server:online:" + m.ID,
-		DisplayName:   m.ID,
-		Runtime:       "llama_server",
-		Source:        "catalog-online",
-		Format:        "gguf",
-		Family:        m.ID,
-		DownloadState: localruntime.DownloadNotStarted.String(),
-		CatalogId:     m.ID,
+// Acquisition values for RuntimeModel.acquisition — how a model is obtained.
+// This is the distinction a picker must not get wrong: offering a download
+// affordance on a served model promises something that cannot happen.
+const (
+	// acquisitionDownload: bytes are fetched to local disk and run by a local
+	// runtime.
+	acquisitionDownload = "download"
+	// acquisitionServe: the model runs on a provider's hardware and is
+	// reached over the network. Nothing to download, priced per token.
+	acquisitionServe = "serve"
+)
+
+// catalogModelToProto maps a browse result onto the wire. Sparse — the list
+// view carries identity plus the attributes a user picks on; the CLI fetches
+// variants and sizes on drill-in (Detail). CatalogId carries the
+// source-scoped id, and CatalogSource names the source that issued it, so the
+// pair round-trips back on download / RAM-estimate.
+//
+// The runtime/format/download fields are populated only for a downloadable
+// model. They used to be hardcoded to llama_server/gguf, which was true while
+// every source shipped GGUF files to disk and became false the moment a
+// hosted source joined browse: a DeepInfra model has no local format, is not
+// run by a local runtime, and has no download to be in a state of. Claiming
+// otherwise would render a download affordance on a model that cannot be
+// downloaded.
+func catalogModelToProto(m catalog.Model, servable bool) *proto.RuntimeModel {
+	out := &proto.RuntimeModel{
+		DisplayName: m.ID,
+		Family:      m.ID,
+		CatalogId:   m.ID,
 		// CatalogSource travels with CatalogId so the client can echo the
 		// qualified ref back on download / RAM-estimate instead of the server
 		// having to guess which source issued the id.
 		CatalogSource: m.Source,
 		SupportsChat:  true,
+		SupportsTools: m.SupportsTools,
+		Publisher:     m.Publisher,
+		Kind:          string(m.Kind),
+		Deprecated:    m.Deprecated,
+		ReplacedBy:    m.ReplacedBy,
+		ContextLength: int64(m.ContextLength),
 	}
+	if servable {
+		// Served by a provider: no local runtime, no on-disk format, no
+		// download. Priced per token instead.
+		out.Id = m.Source + ":served:" + m.ID
+		out.Source = "catalog-served"
+		out.Acquisition = acquisitionServe
+		out.PriceIn = m.PriceIn
+		out.PriceOut = m.PriceOut
+		return out
+	}
+	out.Id = "llama_server:online:" + m.ID
+	out.Runtime = "llama_server"
+	out.Source = "catalog-online"
+	out.Format = "gguf"
+	out.DownloadState = localruntime.DownloadNotStarted.String()
+	out.Acquisition = acquisitionDownload
+	return out
 }
 
 // RefreshOnlineCatalog implements proto.AgentServer — forces a fresh

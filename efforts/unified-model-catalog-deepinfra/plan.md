@@ -179,12 +179,37 @@ reverting the host disambiguation fails all four providers by name.
 
 - [x] `catalog_source` (field 24) — landed early in Step 4, since download and
   RAM-estimate need the qualified ref regardless of how the picker renders
-- [ ] Add `publisher`, `kind`, `deprecated`, `replaced_by`,
-  `price_in`/`price_out`, and `acquisition` (`download` | `serve`) fields
-- [ ] Populate `runtime`/`format` only for downloadable sources
+- [x] Add `publisher`, `kind`, `deprecated`, `replaced_by`,
+  `price_in`/`price_out`, `context_length`, and `acquisition`
+  (`download` | `serve`) — fields 25–32
+- [x] Populate `runtime`/`format`/`download_state` only for downloadable
+  sources; served entries get a source-scoped id (`deepinfra:served:<id>`)
+  instead of the `llama_server:online:` prefix, which would have collided
+  across providers serving the same model name
 - [x] Keep existing field numbers; append new ones, no renumbering
-  **Verify:** CLI models page renders both local and DeepInfra entries; a
-                        DeepInfra entry offers no download affordance.
+- [x] `agentclient.RuntimeModel.Downloadable()` / `.Served()` accessors, so
+  the empty-acquisition compatibility case (an older server) is handled in
+  one place rather than at each call site
+
+**Two CLI gaps this surfaced.** Neither was in the plan; both would have made
+DeepInfra models unusable in the picker:
+
+1. `startSelectedDownload` had nothing stopping a served model from being sent
+   to download. The server would reject it, but only after a round trip and
+   with a resolution error rather than an explanation.
+2. `isCatalogDownloadModel` gates browse on *download-state* values. A served
+   model has no download lifecycle and so has no state — it was filtered out
+   of the list entirely and would never have appeared at all.
+
+Search was also extended to publisher and catalog source, since a served model
+has no format or quantization to match on.
+
+**Verify:** mapper tests pin both shapes — a downloadable model keeps
+runtime/format/download_state unchanged (backward compatibility), a served one
+omits all three and carries price/context/publisher instead. Mutation-checked
+four ways: forcing every source downloadable reproduces exactly the pre-Step-7
+bug; reverting the served id prefix collides; removing either CLI guard fails
+with the user-visible symptom named.
                         
                         ---
 

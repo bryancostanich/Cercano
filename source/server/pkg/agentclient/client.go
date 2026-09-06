@@ -424,7 +424,49 @@ type RuntimeModel struct {
 	// back to GetModelRAMEstimate).
 	KVBytesPerToken  int64
 	MaxContextTokens int64
+
+	// Acquisition is how the model is obtained: AcquisitionDownload (bytes
+	// fetched to disk, run by a local runtime) or AcquisitionServe (run on a
+	// provider's hardware, reached over the network). Empty from a server
+	// predating the field; use Downloadable rather than comparing directly,
+	// so that empty keeps meaning "download" as it always did.
+	Acquisition string
+	// Publisher is who released the model; Kind is what it does
+	// ("text-generation", "embedding", …). Empty when the source says nothing.
+	Publisher string
+	Kind      string
+	// Deprecated marks a model its source has retired, and ReplacedBy names
+	// the successor. Retired models are filtered out of browse, so these
+	// matter for explaining a config-pinned model that has since died.
+	Deprecated bool
+	ReplacedBy string
+	// PriceIn/PriceOut are per-million-token costs in micro-USD for a served
+	// model; 0 for a downloadable one, whose cost is hardware not per-token.
+	PriceIn  int64
+	PriceOut int64
+	// ContextLength is the model's window when browse exposes it; 0 =
+	// unknown from the list alone.
+	ContextLength int64
 }
+
+// Acquisition values for RuntimeModel.Acquisition.
+const (
+	AcquisitionDownload = "download"
+	AcquisitionServe    = "serve"
+)
+
+// Downloadable reports whether this model is obtained by fetching bytes.
+//
+// Empty Acquisition counts as downloadable: that is what a server predating
+// the field means, and it is what every model was before hosted sources
+// existed. Callers gate download affordances on this rather than on the raw
+// string so the compatibility case stays in one place.
+func (m RuntimeModel) Downloadable() bool {
+	return m.Acquisition != AcquisitionServe
+}
+
+// Served reports whether this model runs on a provider's hardware.
+func (m RuntimeModel) Served() bool { return m.Acquisition == AcquisitionServe }
 
 type RuntimeInstance struct {
 	ID           string
@@ -1828,6 +1870,14 @@ func mapRuntimeModel(model *proto.RuntimeModel) RuntimeModel {
 		CatalogSource:      model.GetCatalogSource(),
 		KVBytesPerToken:    model.GetKvBytesPerToken(),
 		MaxContextTokens:   model.GetMaxContextTokens(),
+		Acquisition:        model.GetAcquisition(),
+		Publisher:          model.GetPublisher(),
+		Kind:               model.GetKind(),
+		Deprecated:         model.GetDeprecated(),
+		ReplacedBy:         model.GetReplacedBy(),
+		PriceIn:            model.GetPriceIn(),
+		PriceOut:           model.GetPriceOut(),
+		ContextLength:      model.GetContextLength(),
 	}
 }
 

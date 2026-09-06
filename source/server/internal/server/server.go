@@ -2279,8 +2279,18 @@ func (s *Server) DownloadRuntimeModel(ctx context.Context, req *proto.DownloadRu
 	// A curated or on-disk model carries no catalog_id and falls straight
 	// through to the provider lookup in DownloadModel.
 	if id := req.GetCatalogId(); id != "" && s.catalogRegistry != nil {
-		if backend, ok := s.catalogRegistry.Active(); ok {
-			rec, err := buildCatalogDownloadRecord(ctx, backend, id, req.GetModelId(), req.GetRuntime(), defaultModelDir(s.cfgSvc.Get()))
+		if src, ok := s.catalogRegistry.Active(); ok {
+			// Only a Downloadable source produces local files. A servable-only
+			// source (a hosted inference provider) has nothing to fetch, so
+			// refuse explicitly rather than fail deeper in the manager.
+			dl, ok := src.(catalog.Downloadable)
+			if !ok {
+				return &proto.DownloadRuntimeModelResponse{
+					Ok:    false,
+					Error: fmt.Sprintf("catalog source %q serves models rather than downloading them; nothing to fetch for %q", src.Name(), id),
+				}, nil
+			}
+			rec, err := buildCatalogDownloadRecord(ctx, dl, id, req.GetModelId(), req.GetRuntime(), defaultModelDir(s.cfgSvc.Get()))
 			if err != nil {
 				return &proto.DownloadRuntimeModelResponse{Ok: false, Error: err.Error()}, nil
 			}
@@ -2372,7 +2382,11 @@ func runtimeArchSupported(runtime, arch string) bool {
 	return llamacompat.Supported(arch)
 }
 
-func buildCatalogDownloadRecord(ctx context.Context, backend catalog.Backend, id, modelID, runtime, modelDir string) (localruntime.ModelRecord, error) {
+// buildCatalogDownloadRecord takes a catalog.Downloadable, not a Source: only
+// a source that yields local files can produce a download record, and taking
+// the narrower interface makes handing it a servable-only source a
+// compile-time error.
+func buildCatalogDownloadRecord(ctx context.Context, backend catalog.Downloadable, id, modelID, runtime, modelDir string) (localruntime.ModelRecord, error) {
 	detail, err := backend.Detail(ctx, id)
 	if err != nil {
 		return localruntime.ModelRecord{}, fmt.Errorf("catalog detail for %q: %w", id, err)

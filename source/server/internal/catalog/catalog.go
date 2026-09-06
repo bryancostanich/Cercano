@@ -1,13 +1,19 @@
-// Package catalog abstracts model discovery behind a pluggable Backend
-// interface. Exactly one backend is active at a time (config-selected); the
-// server's browse, search, and download resolution all go through the active
-// backend, so adding a source — HuggingFace, Ollama, or something later — is a
-// new Backend implementation, not a change to the server.
+// Package catalog abstracts model discovery behind a pluggable Source
+// interface. A Source is any place models come from — a download host like
+// HuggingFace or Ollama, or a hosted inference provider whose models are
+// served rather than downloaded.
 //
-// The package deliberately depends on neither backend and knows nothing about
-// llama.cpp: the compatibility gate is a consumer concern (the server applies
-// it against Detail.Architecture when preparing a download into llama-server),
-// so a backend stays a pure source of models.
+// Acquisition is the only axis on which sources genuinely differ, so it is
+// factored into an optional capability interface rather than baked into the
+// core one: every Source implements List and Detail, and only a source whose
+// models become local files implements Downloadable. Consumers that need to
+// download type-assert for it, which makes routing a servable-only model into
+// the download manager a compile-time error rather than a runtime one.
+//
+// The package deliberately depends on no concrete source and knows nothing
+// about llama.cpp: the compatibility gate is a consumer concern (the server
+// applies it against Detail.Architecture when preparing a download into
+// llama-server), so a source stays a pure origin of models.
 package catalog
 
 import (
@@ -17,21 +23,37 @@ import (
 	"sync"
 )
 
-// Backend is a source of downloadable GGUF models (HuggingFace, Ollama, …).
-type Backend interface {
-	// Name is the backend's stable identifier ("huggingface", "ollama").
+// Source is an origin of models — downloadable (HuggingFace, Ollama) or
+// servable (a hosted inference provider). It carries only what every origin
+// can answer: identity, a browsable list, and per-model detail.
+type Source interface {
+	// Name is the source's stable identifier ("huggingface", "ollama").
 	Name() string
-	// List returns discoverable models, ranked/curated by the backend.
+	// List returns discoverable models, ranked/curated by the source.
 	List(ctx context.Context, opts ListOptions) ([]Model, error)
-	// Detail returns one model's quant files, architecture, tool support,
-	// and sizes — enough for the consumer to gate and to offer a quant pick.
+	// Detail returns one model's variants, architecture, tool support, and
+	// sizes — enough for the consumer to gate and to offer a variant pick.
 	Detail(ctx context.Context, id string) (Detail, error)
-	// ResolveDownload turns a chosen model + file into a concrete download
-	// plan (URLs the download manager fetches). A backend that needs manifest
+}
+
+// Downloadable is implemented only by sources whose models become local
+// files. Consumers that fetch bytes take a Downloadable, not a Source, so a
+// servable-only source cannot reach the download manager at all.
+type Downloadable interface {
+	Source
+	// ResolveDownload turns a chosen model + variant into a concrete download
+	// plan (URLs the download manager fetches). A source that needs manifest
 	// resolution (Ollama's OCI flow) does it here, so the download manager
-	// stays backend-agnostic.
+	// stays source-agnostic.
 	ResolveDownload(ctx context.Context, id, file string) (DownloadPlan, error)
 }
+
+// Backend is the former name of Source.
+//
+// Deprecated: use Source, or Downloadable when the consumer fetches bytes.
+// Retained so the tree keeps building mid-refactor; removed once every call
+// site is migrated.
+type Backend = Source
 
 // ListOptions bounds and filters a List call.
 type ListOptions struct {
@@ -79,23 +101,23 @@ type DownloadPlan struct {
 	TotalBytes  int64
 }
 
-// Registry holds the available backends and which one is active. Safe for
-// concurrent use. The wiring layer (main.go) constructs each backend and
-// registers it; nothing here imports a concrete backend.
+// Registry holds the available sources and which one is active. Safe for
+// concurrent use. The wiring layer (main.go) constructs each source and
+// registers it; nothing here imports a concrete source.
 type Registry struct {
 	mu       sync.RWMutex
-	backends map[string]Backend
+	backends map[string]Source
 	active   string
 }
 
 // NewRegistry returns an empty registry.
 func NewRegistry() *Registry {
-	return &Registry{backends: make(map[string]Backend)}
+	return &Registry{backends: make(map[string]Source)}
 }
 
-// Register adds a backend. The first backend registered becomes active until
+// Register adds a source. The first source registered becomes active until
 // SetActive says otherwise. Re-registering a name replaces it.
-func (r *Registry) Register(b Backend) {
+func (r *Registry) Register(b Source) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.backends[b.Name()] = b
@@ -104,7 +126,7 @@ func (r *Registry) Register(b Backend) {
 	}
 }
 
-// SetActive selects the active backend by name, erroring if it isn't
+// SetActive selects the active source by name, erroring if it isn't
 // registered — so a bad config value fails loudly instead of silently serving
 // the wrong source.
 func (r *Registry) SetActive(name string) error {
@@ -117,8 +139,8 @@ func (r *Registry) SetActive(name string) error {
 	return nil
 }
 
-// Active returns the active backend, or ok=false when none is registered.
-func (r *Registry) Active() (Backend, bool) {
+// Active returns the active source, or ok=false when none is registered.
+func (r *Registry) Active() (Source, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	b, ok := r.backends[r.active]

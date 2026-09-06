@@ -43,7 +43,7 @@ type Backend struct {
 	archReader func(ctx context.Context, blobURL string) (string, error)
 }
 
-var _ catalog.Backend = (*Backend)(nil)
+var _ catalog.Downloadable = (*Backend)(nil)
 
 // NewBackend wraps an Ollama Manager as a catalog backend.
 func NewBackend(mgr *Manager) *Backend {

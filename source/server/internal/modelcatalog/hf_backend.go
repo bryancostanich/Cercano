@@ -13,13 +13,15 @@ import (
 // BackendName is the catalog backend identifier for HuggingFace.
 const BackendName = "huggingface"
 
-// Backend adapts the HuggingFace Client to catalog.Backend — the default
-// active backend. HuggingFace is the real home of GGUF files, its API exposes
+// Backend adapts the HuggingFace Client to catalog.Downloadable — the default
+// active source. HuggingFace is the real home of GGUF files, its API exposes
 // the architecture the gate needs, and its downloads are plain resumable HTTPS
 // with no manifest step.
 type Backend struct {
 	client *Client
 }
+
+var _ catalog.Downloadable = (*Backend)(nil)
 
 // NewBackend wraps a Client; a nil client uses defaults.
 func NewBackend(c *Client) *Backend {

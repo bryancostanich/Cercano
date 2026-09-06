@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"cercano/source/server/internal/catalog"
 	"cercano/source/server/internal/gguf"
 	"cercano/source/server/internal/sysram"
 	"cercano/source/server/pkg/proto"
@@ -31,12 +32,18 @@ func (s *Server) GetModelRAMEstimate(ctx context.Context, req *proto.GetModelRAM
 			resp.Error = "catalog not configured"
 			return resp, nil
 		}
-		backend, ok := s.catalogRegistry.Active()
-		if !ok {
-			resp.Error = "no active catalog backend"
+		// Resolve against the source the client echoed back from the browse
+		// entry, so the id is read by the source that issued it. An older
+		// client sends no source, and Resolve probes instead of assuming.
+		src, ref, err := s.catalogRegistry.Resolve(ctx, catalog.Ref{
+			Source: req.GetCatalogSource(),
+			ID:     strings.TrimSpace(req.GetCatalogId()),
+		})
+		if err != nil {
+			resp.Error = err.Error()
 			return resp, nil
 		}
-		detail, err := backend.Detail(ctx, req.GetCatalogId())
+		detail, err := src.Detail(ctx, ref.ID)
 		if err != nil {
 			resp.Error = err.Error()
 			return resp, nil

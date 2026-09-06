@@ -68,7 +68,11 @@ func estimateKey(m agentclient.RuntimeModel) string {
 		return "local:" + m.Runtime + ":" + m.ID
 	}
 	if m.CatalogID != "" {
-		return "ref:" + m.CatalogID
+		// Scope the cache key by source: the same id can exist in more than
+		// one catalog source, and they are different models. An entry from a
+		// server predating source-qualified refs has no source and keys on
+		// the bare id, matching the old behavior.
+		return "ref:" + agentclient.CatalogRefOf(m).String()
 	}
 	return ""
 }
@@ -76,7 +80,7 @@ func estimateKey(m agentclient.RuntimeModel) string {
 // runtimeEstimateCmd fetches the estimate for one model off-thread.
 func runtimeEstimateCmd(ag *agentclient.Client, key string, model agentclient.RuntimeModel) tea.Cmd {
 	local := estimateIsLocal(model)
-	runtime, modelID, ref := model.Runtime, model.ID, model.CatalogID
+	runtime, modelID, ref := model.Runtime, model.ID, agentclient.CatalogRefOf(model)
 	return func() tea.Msg {
 		if ag == nil {
 			return runtimeEstimateMsg{key: key, est: agentclient.ModelRAMEstimate{Err: errors.New("agent client unavailable")}}
@@ -86,7 +90,7 @@ func runtimeEstimateCmd(ag *agentclient.Client, key string, model agentclient.Ru
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
 		if local {
-			return runtimeEstimateMsg{key: key, est: ag.GetModelRAMEstimate(ctx, "", runtime, modelID)}
+			return runtimeEstimateMsg{key: key, est: ag.GetModelRAMEstimate(ctx, agentclient.CatalogRef{}, runtime, modelID)}
 		}
 		return runtimeEstimateMsg{key: key, est: ag.GetModelRAMEstimate(ctx, ref, "", "")}
 	}

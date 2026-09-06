@@ -347,18 +347,14 @@ type Config struct {
 	// strips built-in vendor entries so user config does not pin moving cloud
 	// product defaults.
 	ModelProfiles ModelProfiles `yaml:"model_profiles,omitempty"`
-	// Catalog selects the active model-catalog backend for browse/search.
-	Catalog CatalogConfig `yaml:"catalog,omitempty"`
 }
 
-// CatalogConfig selects the active model-catalog backend. Exactly one backend
-// is active at a time; adding a source (HuggingFace, Ollama, …) is a new
-// backend, not a change to this shape.
-type CatalogConfig struct {
-	// Backend is the active catalog source: "huggingface" (default) or
-	// "ollama". An unknown value fails loud when the registry is wired.
-	Backend string `yaml:"backend,omitempty"`
-}
+// Note: the former `catalog.backend` key selected one active catalog source.
+// It was removed once models became addressable by a (source, id) ref: every
+// registered source is browsed together, and a download or RAM estimate uses
+// the source the browse entry came from, so there is nothing left to select.
+// A stale `catalog:` block in an existing config is ignored (unknown YAML keys
+// are skipped), so no migration is required.
 
 // CompactionConfig controls background context compaction. Thresholds are token
 // counts; HardOverridePct is a fraction of the cloud model's max context above
@@ -572,7 +568,6 @@ func Defaults() Config {
 		OllamaURL:     "http://localhost:11434",
 		OpenRuntime:   "llama_server",
 		LocusMode:     "cloud_primary",
-		Catalog:       CatalogConfig{Backend: "huggingface"},
 		Port:          "50052",
 		ExecutionMode: "worker",
 		// 0 is the "use the default" sentinel; WorkerIdleTimeout() resolves it to
@@ -989,9 +984,6 @@ func Load(path string) (Config, error) {
 		}
 		if cfg.Port == "" {
 			cfg.Port = defaults.Port
-		}
-		if cfg.Catalog.Backend == "" {
-			cfg.Catalog.Backend = defaults.Catalog.Backend
 		}
 		applyLlamaServerDefaults(&cfg.LlamaServer, defaults.LlamaServer)
 		applyMistralRSDefaults(&cfg.MistralRS, defaults.MistralRS)

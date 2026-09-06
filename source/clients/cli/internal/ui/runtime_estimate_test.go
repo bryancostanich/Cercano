@@ -68,6 +68,27 @@ func TestEstimateKey_RoutesLocalRefAndUnestimatable(t *testing.T) {
 	}
 }
 
+// The same catalog id offered by two sources is two different models, so the
+// estimate cache must not collapse them onto one key.
+func TestEstimateKey_ScopedBySource(t *testing.T) {
+	fromOllama := agentclient.RuntimeModel{ID: "a", CatalogID: "shared:7b", CatalogSource: "ollama"}
+	fromHF := agentclient.RuntimeModel{ID: "b", CatalogID: "shared:7b", CatalogSource: "huggingface"}
+
+	kOllama, kHF := estimateKey(fromOllama), estimateKey(fromHF)
+	if kOllama == kHF {
+		t.Fatalf("same key %q for the same id from different sources — estimates would cross-contaminate", kOllama)
+	}
+	if kOllama != "ref:ollama/shared:7b" {
+		t.Errorf("ollama key = %q, want ref:ollama/shared:7b", kOllama)
+	}
+	// An entry from a server predating source-qualified refs keys on the bare
+	// id, so upgrading the client alone does not break estimates.
+	unqualified := agentclient.RuntimeModel{ID: "c", CatalogID: "shared:7b"}
+	if got := estimateKey(unqualified); got != "ref:shared:7b" {
+		t.Errorf("unqualified key = %q, want the legacy bare-id form", got)
+	}
+}
+
 func TestEstimateContextPoints(t *testing.T) {
 	if got := estimateContextPoints(131072); len(got) != 3 || got[2] != 131072 {
 		t.Errorf("131k points = %v", got)

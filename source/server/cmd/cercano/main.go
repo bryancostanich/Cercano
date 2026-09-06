@@ -573,15 +573,14 @@ func startGRPCServer(cfg config.Config, bindAddr string, events *crashlog.Writer
 	catalogManager.Start(context.Background())
 	srv.SetCatalogManager(catalogManager)
 
-	// Build the pluggable catalog registry: HuggingFace (default active) and
-	// Ollama (wrapping the manager above) as selectable backends, the active
-	// one chosen by config. Browse/search go through the active backend.
+	// Build the catalog registry: HuggingFace and Ollama (wrapping the manager
+	// above). All registered sources are browsed together — a source is a
+	// category of origin, not an alternative to the others — and a model is
+	// addressed by the (source, id) ref that browse returned, so there is
+	// nothing here to select between.
 	catalogRegistry := catalog.NewRegistry()
 	catalogRegistry.Register(modelcatalog.NewBackend(&modelcatalog.Client{}))
 	catalogRegistry.Register(ollamacatalog.NewBackend(catalogManager))
-	if err := catalogRegistry.SetActive(cfg.Catalog.Backend); err != nil {
-		fmt.Fprintf(os.Stderr, "[WARN] catalog backend %q not available: %v (using default)\n", cfg.Catalog.Backend, err)
-	}
 	srv.SetCatalogRegistry(catalogRegistry)
 	if sweeper != nil {
 		srv.SetRetentionSweeper(sweeper)

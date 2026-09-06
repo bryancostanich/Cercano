@@ -110,7 +110,7 @@ func newWizardPage(ag *agentclient.Client, p theme.Palette, s theme.Styles, w, h
 	}
 	wp.applyFn = wp.applyConfig
 	wp.downloadFn = func(ctx context.Context, runtime, modelID string) error {
-		_, err := wp.agent.DownloadRuntimeModel(ctx, runtime, modelID, "")
+		_, err := wp.agent.DownloadRuntimeModel(ctx, runtime, modelID, agentclient.CatalogRef{})
 		return err
 	}
 	wp.commitKeyFn = wp.commitAPIKey

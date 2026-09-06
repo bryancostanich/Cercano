@@ -578,6 +578,13 @@ message RuntimeModel {
   // back to the RPC.
   int64 kv_bytes_per_token = 22;
   int64 max_context_tokens = 23;
+  // catalog_source names which catalog source issued catalog_id. A catalog
+  // id is only meaningful within its source ("qwen2.5-coder:7b" is an Ollama
+  // name and nothing to a hosted provider), so the two travel together and
+  // the client echoes both back on download / RAM-estimate calls.
+  // Empty on entries with no catalog_id, and on responses from a server
+  // predating source-qualified refs.
+  string catalog_source = 24;
 }
 
 message RuntimeInstance {
@@ -668,6 +675,10 @@ message GetModelRAMEstimateRequest {
   // runtime + model_id select a model already in the local inventory.
   string runtime = 2;
   string model_id = 3;
+  // catalog_source names the source that issued catalog_id (echoed back from
+  // the RuntimeModel entry the user picked). Empty from an older client, in
+  // which case the server probes the registered sources for the id.
+  string catalog_source = 4;
 }
 message GetModelRAMEstimateResponse {
   int64 weights_bytes = 1;
@@ -738,6 +749,10 @@ message DownloadRuntimeModelRequest {
   // rather than looking the model up through providers. Used for
   // downloading online-catalog entries the provider hasn't cached.
   string catalog_id = 3;
+  // catalog_source names the source that issued catalog_id (echoed back from
+  // the RuntimeModel entry the user picked). Empty from an older client, in
+  // which case the server probes the registered sources for the id.
+  string catalog_source = 4;
 }
 message DownloadRuntimeModelResponse {
   bool ok = 1;

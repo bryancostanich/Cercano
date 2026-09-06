@@ -414,7 +414,11 @@ type RuntimeModel struct {
 	SupportsEmbed      bool
 	SupportsTools      bool
 	CatalogID          string
-	Active             bool
+	// CatalogSource names the catalog source that issued CatalogID. A catalog
+	// id is only meaningful within its source, so callers pass the pair back
+	// (via CatalogRef) rather than letting the server guess.
+	CatalogSource string
+	Active        bool
 	// KVBytesPerToken/MaxContextTokens are pre-warmed RAM-estimation
 	// numbers embedded by the server (0 = not warmed yet; callers fall
 	// back to GetModelRAMEstimate).
@@ -1234,16 +1238,46 @@ func (c *Client) RestartRuntime(ctx context.Context, instanceID, runtimeName, mo
 	return &instance, nil
 }
 
-// DownloadRuntimeModel starts (or resumes) a model download. catalogID
-// is only needed for online-catalog entries that aren't enrolled with
-// the runtime manager yet (e.g. "qwen2.5-coder:7b" or a bare family
-// name, which the server defaults to the :latest tag); pass "" for
+// CatalogRef identifies an online-catalog model: the source that issued the
+// id, plus the id. Both halves travel together because an id only means
+// something within its source ("qwen2.5-coder:7b" is an Ollama name). Build
+// one with CatalogRefOf from the browse entry the user picked.
+type CatalogRef struct {
+	Source string
+	ID     string
+}
+
+// CatalogRefOf returns the catalog ref for a browse entry, or the zero ref
+// when the entry is not catalog-backed (a curated or on-disk model).
+func CatalogRefOf(m RuntimeModel) CatalogRef {
+	return CatalogRef{Source: m.CatalogSource, ID: m.CatalogID}
+}
+
+// Empty reports whether the ref names no catalog model at all.
+func (r CatalogRef) Empty() bool { return r.ID == "" }
+
+// String renders the ref as "source/id", or a bare id when the source is
+// unknown. Stable enough to use as a cache key: two ids that are equal but
+// come from different sources render differently, because they are different
+// models.
+func (r CatalogRef) String() string {
+	if r.Source == "" {
+		return r.ID
+	}
+	return r.Source + "/" + r.ID
+}
+
+// DownloadRuntimeModel starts (or resumes) a model download. ref is only
+// needed for online-catalog entries that aren't enrolled with the runtime
+// manager yet (e.g. "qwen2.5-coder:7b" or a bare family name, which the
+// server defaults to the :latest tag); pass the zero CatalogRef for
 // already-enrolled models.
-func (c *Client) DownloadRuntimeModel(ctx context.Context, runtimeName, modelID, catalogID string) (*RuntimeModel, error) {
+func (c *Client) DownloadRuntimeModel(ctx context.Context, runtimeName, modelID string, ref CatalogRef) (*RuntimeModel, error) {
 	resp, err := c.agent.DownloadRuntimeModel(ctx, &proto.DownloadRuntimeModelRequest{
-		Runtime:   runtimeName,
-		ModelId:   modelID,
-		CatalogId: catalogID,
+		Runtime:       runtimeName,
+		ModelId:       modelID,
+		CatalogId:     ref.ID,
+		CatalogSource: ref.Source,
 	})
 	if err != nil {
 		return nil, err
@@ -1633,15 +1667,16 @@ type ModelRAMEstimate struct {
 }
 
 // GetModelRAMEstimate resolves RAM-estimation numbers for either an
-// online catalog entry (catalogID, "name:tag" or bare family) or a
-// model in the local inventory (runtime + modelID). Estimate failures
-// come back in Err with SystemRAMBytes still populated; transport
-// failures also land in Err.
-func (c *Client) GetModelRAMEstimate(ctx context.Context, catalogID, runtime, modelID string) ModelRAMEstimate {
+// online catalog entry (ref, "name:tag" or bare family) or a model in
+// the local inventory (runtime + modelID, with the zero ref). Estimate
+// failures come back in Err with SystemRAMBytes still populated;
+// transport failures also land in Err.
+func (c *Client) GetModelRAMEstimate(ctx context.Context, ref CatalogRef, runtime, modelID string) ModelRAMEstimate {
 	resp, err := c.agent.GetModelRAMEstimate(ctx, &proto.GetModelRAMEstimateRequest{
-		CatalogId: catalogID,
-		Runtime:   runtime,
-		ModelId:   modelID,
+		CatalogId:     ref.ID,
+		CatalogSource: ref.Source,
+		Runtime:       runtime,
+		ModelId:       modelID,
 	})
 	if err != nil {
 		return ModelRAMEstimate{Err: err}
@@ -1790,6 +1825,7 @@ func mapRuntimeModel(model *proto.RuntimeModel) RuntimeModel {
 		SupportsTools:      model.GetSupportsTools(),
 		Active:             model.GetActive(),
 		CatalogID:          model.GetCatalogId(),
+		CatalogSource:      model.GetCatalogSource(),
 		KVBytesPerToken:    model.GetKvBytesPerToken(),
 		MaxContextTokens:   model.GetMaxContextTokens(),
 	}

@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 )
 
@@ -54,6 +55,29 @@ type Downloadable interface {
 // Retained so the tree keeps building mid-refactor; removed once every call
 // site is migrated.
 type Backend = Source
+
+// Ref identifies one model unambiguously: an id is only meaningful within the
+// source that issued it ("qwen2.5-coder:7b" is an Ollama name and nothing to
+// a hosted provider), so the two always travel together.
+//
+// A Ref with an empty Source is unqualified — it came from a client that
+// predates source-qualified references. Consumers resolve those through
+// Registry.Resolve, which searches for the id rather than assuming a source.
+type Ref struct {
+	Source string
+	ID     string
+}
+
+// String renders a Ref as "source/id", or bare id when unqualified.
+func (r Ref) String() string {
+	if r.Source == "" {
+		return r.ID
+	}
+	return r.Source + "/" + r.ID
+}
+
+// Qualified reports whether the Ref names its source.
+func (r Ref) Qualified() bool { return r.Source != "" && r.ID != "" }
 
 // ListOptions bounds and filters a List call.
 type ListOptions struct {
@@ -156,83 +180,125 @@ type DownloadPlan struct {
 	TotalBytes  int64
 }
 
-// Registry holds the available sources and which one is active. Safe for
-// concurrent use. The wiring layer (main.go) constructs each source and
-// registers it; nothing here imports a concrete source.
+// Registry is a lookup table of the registered sources. Safe for concurrent
+// use. The wiring layer (main.go) constructs each source and registers it;
+// nothing here imports a concrete source.
+//
+// There is deliberately no "active" source. A model is identified by the pair
+// (source, id) — an id is only meaningful within the source that issued it —
+// so every consumer either names the source it wants (Lookup, for a model it
+// already holds a Ref to) or wants all of them (All, for browse). Inferring
+// the source from ambient state is what made an id silently resolve against
+// the wrong source when the configured source changed.
 type Registry struct {
-	mu       sync.RWMutex
-	backends map[string]Source
-	active   string
+	mu      sync.RWMutex
+	sources map[string]Source
 }
 
 // NewRegistry returns an empty registry.
 func NewRegistry() *Registry {
-	return &Registry{backends: make(map[string]Source)}
+	return &Registry{sources: make(map[string]Source)}
 }
 
-// Register adds a source. The first source registered becomes active until
-// SetActive says otherwise. Re-registering a name replaces it.
-func (r *Registry) Register(b Source) {
+// Register adds a source. Re-registering a name replaces it.
+func (r *Registry) Register(s Source) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.backends[b.Name()] = b
-	if r.active == "" {
-		r.active = b.Name()
-	}
+	r.sources[s.Name()] = s
 }
 
-// SetActive selects the active source by name, erroring if it isn't
-// registered — so a bad config value fails loudly instead of silently serving
-// the wrong source.
-func (r *Registry) SetActive(name string) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if _, ok := r.backends[name]; !ok {
-		return fmt.Errorf("catalog: unknown backend %q (available: %s)", name, r.availableLocked())
-	}
-	r.active = name
-	return nil
-}
-
-// Active returns the active source, or ok=false when none is registered.
-func (r *Registry) Active() (Source, bool) {
+// Lookup returns the source with the given name. ok=false means no such
+// source is registered — the caller reports it against the Ref that named it,
+// rather than falling back to some other source and resolving the id wrongly.
+func (r *Registry) Lookup(name string) (Source, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	b, ok := r.backends[r.active]
-	return b, ok
+	s, ok := r.sources[name]
+	return s, ok
 }
 
-// ActiveName returns the active backend's name, or "" when none is registered.
-func (r *Registry) ActiveName() string {
+// LookupDownloadable returns the named source only if its models become local
+// files. ok=false covers both "no such source" and "that source serves rather
+// than downloads"; Available lets the caller say which.
+func (r *Registry) LookupDownloadable(name string) (Downloadable, bool) {
+	s, ok := r.Lookup(name)
+	if !ok {
+		return nil, false
+	}
+	d, ok := s.(Downloadable)
+	return d, ok
+}
+
+// All returns every registered source, ordered by name so browse results are
+// stable across calls.
+func (r *Registry) All() []Source {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return r.active
+	out := make([]Source, 0, len(r.sources))
+	for _, name := range r.namesLocked() {
+		out = append(out, r.sources[name])
+	}
+	return out
 }
 
-// Available returns the registered backend names, sorted.
+// Resolve turns a Ref into the source that can serve it.
+//
+// A qualified Ref is a direct lookup. An unqualified one (from a client that
+// predates source-qualified refs) is resolved by asking each source, in name
+// order, whether it knows the id — the first that does wins, and the returned
+// Ref is the qualified form the caller should use from then on. That probe is
+// the compatibility path, not the normal one: it costs one Detail call per
+// source until a hit, which is why qualified refs are what clients send.
+func (r *Registry) Resolve(ctx context.Context, ref Ref) (Source, Ref, error) {
+	if ref.ID == "" {
+		return nil, ref, fmt.Errorf("catalog: empty model id")
+	}
+	if ref.Source != "" {
+		s, ok := r.Lookup(ref.Source)
+		if !ok {
+			return nil, ref, fmt.Errorf("catalog: unknown source %q (available: %s)", ref.Source, r.AvailableList())
+		}
+		return s, ref, nil
+	}
+	for _, s := range r.All() {
+		if _, err := s.Detail(ctx, ref.ID); err == nil {
+			return s, Ref{Source: s.Name(), ID: ref.ID}, nil
+		}
+	}
+	return nil, ref, fmt.Errorf("catalog: no source recognizes model %q (searched: %s)", ref.ID, r.AvailableList())
+}
+
+// ResolveDownloadable is Resolve restricted to sources that produce local
+// files, so a servable-only model cannot reach the download manager.
+func (r *Registry) ResolveDownloadable(ctx context.Context, ref Ref) (Downloadable, Ref, error) {
+	s, got, err := r.Resolve(ctx, ref)
+	if err != nil {
+		return nil, got, err
+	}
+	d, ok := s.(Downloadable)
+	if !ok {
+		return nil, got, fmt.Errorf("catalog: source %q serves models rather than downloading them; nothing to fetch for %q", s.Name(), got.ID)
+	}
+	return d, got, nil
+}
+
+// Available returns the registered source names, sorted.
 func (r *Registry) Available() []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	out := make([]string, 0, len(r.backends))
-	for name := range r.backends {
-		out = append(out, name)
-	}
-	sort.Strings(out)
-	return out
+	return r.namesLocked()
 }
 
-func (r *Registry) availableLocked() string {
-	names := make([]string, 0, len(r.backends))
-	for name := range r.backends {
+// AvailableList renders the registered names for an error message.
+func (r *Registry) AvailableList() string {
+	return strings.Join(r.Available(), ", ")
+}
+
+func (r *Registry) namesLocked() []string {
+	names := make([]string, 0, len(r.sources))
+	for name := range r.sources {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	out := ""
-	for i, n := range names {
-		if i > 0 {
-			out += ", "
-		}
-		out += n
-	}
-	return out
+	return names
 }

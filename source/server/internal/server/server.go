@@ -2129,31 +2129,39 @@ func (s *Server) ListRuntimeModels(ctx context.Context, req *proto.ListRuntimeMo
 		return nil, err
 	}
 	resp := &proto.ListRuntimeModelsResponse{Models: mapRuntimeModels(models)}
-	// Online catalog: list from the active backend (HuggingFace by default,
-	// Ollama if selected in config). ListRuntimeModels is called on demand —
-	// when the models page opens or is refreshed, not on a tick — so a live
-	// fetch is acceptable; an error simply omits the online section rather than
-	// failing the whole list. (Backend-specific freshness and eager warmed RAM
-	// estimates, which were tied to the Ollama cache, return generically once
-	// the catalog cache and RAM-estimate generalization land; per-selection
-	// GetModelRAMEstimate still works meanwhile.)
+	// Online catalog: browse every registered source, not one selected by
+	// config — sources are categories (a download host, a hosted provider),
+	// not alternatives, so browsing one would hide the others.
+	// ListRuntimeModels is called on demand — when the models page opens or is
+	// refreshed, not on a tick — so a live fetch is acceptable; a failing
+	// source drops out of the list rather than failing the whole page.
+	// (Source-specific freshness and eager warmed RAM estimates, which were
+	// tied to the Ollama cache, return generically once the catalog cache and
+	// RAM-estimate generalization land; per-selection GetModelRAMEstimate
+	// still works meanwhile.)
 	if reg := s.catalogRegistry; reg != nil {
-		if backend, ok := reg.Active(); ok {
-			if online, err := backend.List(ctx, catalog.ListOptions{Format: s.activeCatalogFormat()}); err == nil && len(online) > 0 {
-				// Dedupe against inventory (hardcoded catalog OR downloaded on
-				// disk keeps its richer entry).
-				seen := make(map[string]bool, len(resp.Models))
-				for _, m := range resp.Models {
-					if m.GetFamily() != "" {
-						seen[m.GetFamily()] = true
-					}
+		// Dedupe against inventory (hardcoded catalog OR downloaded on disk
+		// keeps its richer entry), then across sources: the first source to
+		// offer an id wins, in the registry's stable name order.
+		seen := make(map[string]bool, len(resp.Models))
+		for _, m := range resp.Models {
+			if m.GetFamily() != "" {
+				seen[m.GetFamily()] = true
+			}
+		}
+		opts := catalog.ListOptions{Format: s.activeCatalogFormat()}
+		for _, src := range reg.All() {
+			online, err := src.List(ctx, opts)
+			if err != nil {
+				log.Printf("[catalog] source %q list failed: %v (omitted from browse)", src.Name(), err)
+				continue
+			}
+			for _, m := range online {
+				if seen[m.ID] {
+					continue
 				}
-				for _, m := range online {
-					if seen[m.ID] {
-						continue
-					}
-					resp.Models = append(resp.Models, catalogModelToProto(m))
-				}
+				seen[m.ID] = true
+				resp.Models = append(resp.Models, catalogModelToProto(m))
 			}
 		}
 	}
@@ -2181,6 +2189,10 @@ func catalogModelToProto(m catalog.Model) *proto.RuntimeModel {
 		Family:        m.ID,
 		DownloadState: localruntime.DownloadNotStarted.String(),
 		CatalogId:     m.ID,
+		// CatalogSource travels with CatalogId so the client can echo the
+		// qualified ref back on download / RAM-estimate instead of the server
+		// having to guess which source issued the id.
+		CatalogSource: m.Source,
 		SupportsChat:  true,
 	}
 }
@@ -2274,32 +2286,31 @@ func (s *Server) DownloadRuntimeModel(ctx context.Context, req *proto.DownloadRu
 	if rm == nil {
 		return &proto.DownloadRuntimeModelResponse{Ok: false, Error: "runtime manager not configured"}, nil
 	}
-	// Online-catalog download: resolve through the active backend and enroll a
-	// concrete, gate-checked, multi-shard-aware record before the manager runs.
-	// A curated or on-disk model carries no catalog_id and falls straight
-	// through to the provider lookup in DownloadModel.
+	// Online-catalog download: resolve the (source, id) ref the client echoed
+	// back from the browse entry, then enroll a concrete, gate-checked,
+	// multi-shard-aware record before the manager runs. A curated or on-disk
+	// model carries no catalog_id and falls straight through to the provider
+	// lookup in DownloadModel.
+	//
+	// ResolveDownloadable rejects a servable-only source (a hosted inference
+	// provider has no bytes to fetch) rather than failing deeper in the
+	// manager, and an unqualified ref from an older client is resolved by
+	// probing the registered sources instead of assuming one.
 	if id := req.GetCatalogId(); id != "" && s.catalogRegistry != nil {
-		if src, ok := s.catalogRegistry.Active(); ok {
-			// Only a Downloadable source produces local files. A servable-only
-			// source (a hosted inference provider) has nothing to fetch, so
-			// refuse explicitly rather than fail deeper in the manager.
-			dl, ok := src.(catalog.Downloadable)
-			if !ok {
-				return &proto.DownloadRuntimeModelResponse{
-					Ok:    false,
-					Error: fmt.Sprintf("catalog source %q serves models rather than downloading them; nothing to fetch for %q", src.Name(), id),
-				}, nil
-			}
-			rec, err := buildCatalogDownloadRecord(ctx, dl, id, req.GetModelId(), req.GetRuntime(), defaultModelDir(s.cfgSvc.Get()))
-			if err != nil {
-				return &proto.DownloadRuntimeModelResponse{Ok: false, Error: err.Error()}, nil
-			}
-			// Only the concrete InMemoryManager supports enrolment; an
-			// alternative implementation makes this a no-op and DownloadModel
-			// fails cleanly with "not found".
-			if imm, ok := rm.(*localruntime.InMemoryManager); ok {
-				imm.EnrollDownload(rec)
-			}
+		ref := catalog.Ref{Source: req.GetCatalogSource(), ID: id}
+		dl, got, err := s.catalogRegistry.ResolveDownloadable(ctx, ref)
+		if err != nil {
+			return &proto.DownloadRuntimeModelResponse{Ok: false, Error: err.Error()}, nil
+		}
+		rec, err := buildCatalogDownloadRecord(ctx, dl, got.ID, req.GetModelId(), req.GetRuntime(), defaultModelDir(s.cfgSvc.Get()))
+		if err != nil {
+			return &proto.DownloadRuntimeModelResponse{Ok: false, Error: err.Error()}, nil
+		}
+		// Only the concrete InMemoryManager supports enrolment; an
+		// alternative implementation makes this a no-op and DownloadModel
+		// fails cleanly with "not found".
+		if imm, ok := rm.(*localruntime.InMemoryManager); ok {
+			imm.EnrollDownload(rec)
 		}
 	}
 	model, err := rm.DownloadModel(ctx, localruntime.DownloadRequest{

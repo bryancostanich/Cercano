@@ -2216,8 +2216,15 @@ type RuntimeModel struct {
 	// back to the RPC.
 	KvBytesPerToken  int64 `protobuf:"varint,22,opt,name=kv_bytes_per_token,json=kvBytesPerToken,proto3" json:"kv_bytes_per_token,omitempty"`
 	MaxContextTokens int64 `protobuf:"varint,23,opt,name=max_context_tokens,json=maxContextTokens,proto3" json:"max_context_tokens,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// catalog_source names which catalog source issued catalog_id. A catalog
+	// id is only meaningful within its source ("qwen2.5-coder:7b" is an Ollama
+	// name and nothing to a hosted provider), so the two travel together and
+	// the client echoes both back on download / RAM-estimate calls.
+	// Empty on entries with no catalog_id, and on responses from a server
+	// predating source-qualified refs.
+	CatalogSource string `protobuf:"bytes,24,opt,name=catalog_source,json=catalogSource,proto3" json:"catalog_source,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *RuntimeModel) Reset() {
@@ -2409,6 +2416,13 @@ func (x *RuntimeModel) GetMaxContextTokens() int64 {
 		return x.MaxContextTokens
 	}
 	return 0
+}
+
+func (x *RuntimeModel) GetCatalogSource() string {
+	if x != nil {
+		return x.CatalogSource
+	}
+	return ""
 }
 
 type RuntimeInstance struct {
@@ -3013,8 +3027,12 @@ type GetModelRAMEstimateRequest struct {
 	// exclusive with runtime/model_id.
 	CatalogId string `protobuf:"bytes,1,opt,name=catalog_id,json=catalogId,proto3" json:"catalog_id,omitempty"`
 	// runtime + model_id select a model already in the local inventory.
-	Runtime       string `protobuf:"bytes,2,opt,name=runtime,proto3" json:"runtime,omitempty"`
-	ModelId       string `protobuf:"bytes,3,opt,name=model_id,json=modelId,proto3" json:"model_id,omitempty"`
+	Runtime string `protobuf:"bytes,2,opt,name=runtime,proto3" json:"runtime,omitempty"`
+	ModelId string `protobuf:"bytes,3,opt,name=model_id,json=modelId,proto3" json:"model_id,omitempty"`
+	// catalog_source names the source that issued catalog_id (echoed back from
+	// the RuntimeModel entry the user picked). Empty from an older client, in
+	// which case the server probes the registered sources for the id.
+	CatalogSource string `protobuf:"bytes,4,opt,name=catalog_source,json=catalogSource,proto3" json:"catalog_source,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3066,6 +3084,13 @@ func (x *GetModelRAMEstimateRequest) GetRuntime() string {
 func (x *GetModelRAMEstimateRequest) GetModelId() string {
 	if x != nil {
 		return x.ModelId
+	}
+	return ""
+}
+
+func (x *GetModelRAMEstimateRequest) GetCatalogSource() string {
+	if x != nil {
+		return x.CatalogSource
 	}
 	return ""
 }
@@ -3681,7 +3706,11 @@ type DownloadRuntimeModelRequest struct {
 	// server enrolls a fresh ModelRecord backed by Ollama's registry
 	// rather than looking the model up through providers. Used for
 	// downloading online-catalog entries the provider hasn't cached.
-	CatalogId     string `protobuf:"bytes,3,opt,name=catalog_id,json=catalogId,proto3" json:"catalog_id,omitempty"`
+	CatalogId string `protobuf:"bytes,3,opt,name=catalog_id,json=catalogId,proto3" json:"catalog_id,omitempty"`
+	// catalog_source names the source that issued catalog_id (echoed back from
+	// the RuntimeModel entry the user picked). Empty from an older client, in
+	// which case the server probes the registered sources for the id.
+	CatalogSource string `protobuf:"bytes,4,opt,name=catalog_source,json=catalogSource,proto3" json:"catalog_source,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3733,6 +3762,13 @@ func (x *DownloadRuntimeModelRequest) GetModelId() string {
 func (x *DownloadRuntimeModelRequest) GetCatalogId() string {
 	if x != nil {
 		return x.CatalogId
+	}
+	return ""
+}
+
+func (x *DownloadRuntimeModelRequest) GetCatalogSource() string {
+	if x != nil {
+		return x.CatalogSource
 	}
 	return ""
 }
@@ -14208,7 +14244,7 @@ const file_agent_proto_rawDesc = "" +
 	"\vmodified_at\x18\x03 \x01(\tR\n" +
 	"modifiedAt\">\n" +
 	"\x12ListModelsResponse\x12(\n" +
-	"\x06models\x18\x01 \x03(\v2\x10.agent.ModelInfoR\x06models\"\x93\x06\n" +
+	"\x06models\x18\x01 \x03(\v2\x10.agent.ModelInfoR\x06models\"\xba\x06\n" +
 	"\fRuntimeModel\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\fdisplay_name\x18\x02 \x01(\tR\vdisplayName\x12\x18\n" +
@@ -14236,7 +14272,8 @@ const file_agent_proto_rawDesc = "" +
 	"\n" +
 	"catalog_id\x18\x15 \x01(\tR\tcatalogId\x12+\n" +
 	"\x12kv_bytes_per_token\x18\x16 \x01(\x03R\x0fkvBytesPerToken\x12,\n" +
-	"\x12max_context_tokens\x18\x17 \x01(\x03R\x10maxContextTokens\"\x87\x03\n" +
+	"\x12max_context_tokens\x18\x17 \x01(\x03R\x10maxContextTokens\x12%\n" +
+	"\x0ecatalog_source\x18\x18 \x01(\tR\rcatalogSource\"\x87\x03\n" +
 	"\x0fRuntimeInstance\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x18\n" +
 	"\aruntime\x18\x02 \x01(\tR\aruntime\x12\x19\n" +
@@ -14294,12 +14331,13 @@ const file_agent_proto_rawDesc = "" +
 	"\x17recommended_open_models\x18\x04 \x03(\v2;.agent.ListRuntimeModelsResponse.RecommendedOpenModelsEntryR\x15recommendedOpenModels\x1aH\n" +
 	"\x1aRecommendedOpenModelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"p\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x97\x01\n" +
 	"\x1aGetModelRAMEstimateRequest\x12\x1d\n" +
 	"\n" +
 	"catalog_id\x18\x01 \x01(\tR\tcatalogId\x12\x18\n" +
 	"\aruntime\x18\x02 \x01(\tR\aruntime\x12\x19\n" +
-	"\bmodel_id\x18\x03 \x01(\tR\amodelId\"\x81\x02\n" +
+	"\bmodel_id\x18\x03 \x01(\tR\amodelId\x12%\n" +
+	"\x0ecatalog_source\x18\x04 \x01(\tR\rcatalogSource\"\x81\x02\n" +
 	"\x1bGetModelRAMEstimateResponse\x12#\n" +
 	"\rweights_bytes\x18\x01 \x01(\x03R\fweightsBytes\x12+\n" +
 	"\x12kv_bytes_per_token\x18\x02 \x01(\x03R\x0fkvBytesPerToken\x12,\n" +
@@ -14337,12 +14375,13 @@ const file_agent_proto_rawDesc = "" +
 	"\x16RestartRuntimeResponse\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\x122\n" +
-	"\binstance\x18\x03 \x01(\v2\x16.agent.RuntimeInstanceR\binstance\"q\n" +
+	"\binstance\x18\x03 \x01(\v2\x16.agent.RuntimeInstanceR\binstance\"\x98\x01\n" +
 	"\x1bDownloadRuntimeModelRequest\x12\x18\n" +
 	"\aruntime\x18\x01 \x01(\tR\aruntime\x12\x19\n" +
 	"\bmodel_id\x18\x02 \x01(\tR\amodelId\x12\x1d\n" +
 	"\n" +
-	"catalog_id\x18\x03 \x01(\tR\tcatalogId\"o\n" +
+	"catalog_id\x18\x03 \x01(\tR\tcatalogId\x12%\n" +
+	"\x0ecatalog_source\x18\x04 \x01(\tR\rcatalogSource\"o\n" +
 	"\x1cDownloadRuntimeModelResponse\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\x12)\n" +

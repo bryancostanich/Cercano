@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"cercano/source/server/internal/modelbudget"
-	"cercano/source/server/internal/tokens"
+	"cercano/source/server/internal/contextmeter"
 )
 
 // mockModelCaller is a test double for the local model.
@@ -460,7 +460,7 @@ func TestSynthesize_BudgetsFetchedSourcesBeforeModelCall(t *testing.T) {
 	if answer != "budgeted answer" {
 		t.Fatalf("answer = %q", answer)
 	}
-	if got := tokens.Estimate(model.lastPrompt); got > budget.InputTokens {
+	if got := contextmeter.Default().Count(model.lastPrompt); got > budget.InputTokens {
 		t.Fatalf("prompt estimate = %d, want <= %d\nprompt:\n%s", got, budget.InputTokens, model.lastPrompt)
 	}
 	if !strings.Contains(model.lastPrompt, "https://a.com") {

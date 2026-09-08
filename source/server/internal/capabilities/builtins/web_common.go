@@ -6,10 +6,10 @@ import (
 	"os"
 
 	"cercano/source/server/internal/capabilities"
+	"cercano/source/server/internal/contextmeter"
 	"cercano/source/server/internal/dispatch"
 	"cercano/source/server/internal/modelbudget"
 	"cercano/source/server/internal/research"
-	"cercano/source/server/internal/tokens"
 	"cercano/source/server/internal/web"
 	"cercano/source/server/pkg/config"
 )
@@ -73,7 +73,7 @@ func (m *dispatchModelCaller) Call(ctx context.Context, prompt string) (string, 
 		WorkDir:              m.call.WorkDir,
 		ModelOverride:        m.model,
 		Source:               m.source,
-		ContentTokensAvoided: tokens.Estimate(prompt),
+		ContentTokensAvoided: contextmeter.Default().Count(prompt),
 		RecordUsage:          true,
 	})
 	if err != nil {

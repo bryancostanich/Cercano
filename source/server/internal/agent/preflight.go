@@ -1,16 +1,26 @@
 package agent
 
-import "cercano/source/server/internal/llm"
+import (
+	"cercano/source/server/internal/contextmeter"
+	"cercano/source/server/internal/llm"
+)
 
 // preflightSafetyFraction is the share of a model's context window the
-// estimated prompt may occupy before the pre-flight check refuses to start the
-// loop. The estimate (estimateTokens) is deliberately rough — roughly four
-// characters per token — so the guard flags at a margin below the true window
-// rather than at 100%. This trades a few false negatives (a prompt that
-// squeaks in just over the fraction but under the real window) for near-zero
-// false positives that would block legitimate work. When the estimate is
-// optimistic and the real request still overflows, the provider's own
-// ErrContextOverflow (see llm/context_overflow.go) remains the backstop.
+// counted prompt may occupy before the pre-flight check refuses to start the
+// loop.
+//
+// This fraction originally compensated for estimator slop: estimateTokens was
+// char/4 arithmetic, and the margin absorbed its error. It no longer serves
+// that purpose — counting is now real cl100k_base tokenization — so the
+// fraction is retained as deliberate headroom for costs this guard cannot see:
+// provider-side prompt scaffolding, tool-schema serialization, and per-model
+// tokenizer differences (we count with cl100k as a proxy for Anthropic and
+// Qwen, which have their own vocabularies and will disagree by a few percent).
+//
+// It is NOT tuned against production data. 0.9 is the inherited value, kept
+// because re-tuning wants overflow-rate telemetry we do not yet collect.
+// When the count is right but the real request still overflows, the provider's
+// own ErrContextOverflow (see llm/context_overflow.go) remains the backstop.
 const preflightSafetyFraction = 0.9
 
 // localTailContextFraction is the share of a local/open context window used for
@@ -19,14 +29,16 @@ const preflightSafetyFraction = 0.9
 // model's answer.
 const localTailContextFraction = 0.8
 
-// estimateTokens returns a rough token count for s using the standard
-// ~4-characters-per-token heuristic. It is intentionally cheap and
-// provider-agnostic: no tokenizer, no network round-trip, no per-model vocab.
-// It exists to power a fail-fast guardrail, not to meter billing, so an error
-// of ±10-20% is acceptable — the guard applies a safety fraction on top.
+// estimateTokens returns the token count for s.
+//
+// Formerly char/4 arithmetic. That undercounted high-entropy content —
+// base64, hashes, minified JSON tool results tokenize near 1.8 chars/token,
+// where char/4 reports under half the true size — and undercounting is the
+// direction that lets an oversized prompt past the guard and into a provider
+// overflow. Now backed by real cl100k_base tokenization, memoized and bounded
+// (see contextmeter), so it stays cheap enough for a per-turn guardrail.
 func estimateTokens(s string) int {
-	// Round up so a short non-empty string never estimates to zero tokens.
-	return (len(s) + 3) / 4
+	return contextmeter.Default().Count(s)
 }
 
 // estimateMessageTokens sums the estimated tokens across a message's text-bearing

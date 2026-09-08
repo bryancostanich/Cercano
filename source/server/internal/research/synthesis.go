@@ -5,8 +5,9 @@ import (
 	"fmt"
 	"strings"
 
+	"cercano/source/server/internal/contextmeter"
 	"cercano/source/server/internal/modelbudget"
-	"cercano/source/server/internal/tokens"
+	"unicode/utf8"
 )
 
 // GenerateExecutiveSummary produces a 3-4 sentence TL;DR.
@@ -172,9 +173,9 @@ func findingSummariesForModel(ctx context.Context, model ModelCaller, findings [
 	if err != nil {
 		return "", fmt.Errorf("deep research synthesis budget: %w", err)
 	}
-	summaryBudget := budget.InputTokens - tokens.Estimate(emptyPrompt) - 16
+	summaryBudget := budget.InputTokens - contextmeter.Default().Count(emptyPrompt) - 16
 	if summaryBudget < 128 {
-		return "", fmt.Errorf("deep research synthesis budget too small after prompt overhead: input_budget=%d prompt_overhead=%d summary_budget=%d provider=%s model=%s context_window=%d", budget.InputTokens, tokens.Estimate(emptyPrompt), summaryBudget, budget.Target.Provider, budget.Target.Model, budget.Target.ContextWindow)
+		return "", fmt.Errorf("deep research synthesis budget too small after prompt overhead: input_budget=%d prompt_overhead=%d summary_budget=%d provider=%s model=%s context_window=%d", budget.InputTokens, contextmeter.Default().Count(emptyPrompt), summaryBudget, budget.Target.Provider, budget.Target.Model, budget.Target.ContextWindow)
 	}
 	summaries, included, _ := buildFindingSummariesBudgeted(findings, max, summaryBudget)
 	if included == 0 {
@@ -192,7 +193,7 @@ func buildFindingSummariesBudgeted(findings []AnnotatedFinding, max, summaryBudg
 	for i, f := range findings[:limit] {
 		prefix := fmt.Sprintf("%d. [%s] %s (relevance: %d/5, impact: %s)\n   ", i+1, f.Publication.Source, f.Publication.Title, f.RelevanceScore, f.ImpactRating)
 		suffix := "\n\n"
-		remaining := summaryBudget - tokens.Estimate(sb.String()) - tokens.Estimate(prefix) - tokens.Estimate(suffix)
+		remaining := summaryBudget - contextmeter.Default().Count(sb.String()) - contextmeter.Default().Count(prefix) - contextmeter.Default().Count(suffix)
 		if remaining <= 0 {
 			trimmed++
 			continue
@@ -202,7 +203,7 @@ func buildFindingSummariesBudgeted(findings []AnnotatedFinding, max, summaryBudg
 			summary = "(No summary available.)"
 		}
 		candidate := summary
-		if tokens.Estimate(candidate) > remaining {
+		if contextmeter.Default().Count(candidate) > remaining {
 			trimmed++
 			candidate = truncateTextToTokenBudget(candidate, remaining, " [...truncated to fit local model context]")
 		}
@@ -219,23 +220,23 @@ func truncateTextToTokenBudget(text string, budget int, marker string) string {
 	if budget <= 0 {
 		return ""
 	}
-	if tokens.Estimate(text) <= budget {
+	if contextmeter.Default().Count(text) <= budget {
 		return text
 	}
-	usable := budget - tokens.Estimate(marker)
+	usable := budget - contextmeter.Default().Count(marker)
 	if usable <= 0 {
 		return ""
 	}
-	chars := usable * 4
-	if chars > len(text) {
-		chars = len(text)
-	}
+	// Optimistic first guess: 4 chars/token holds for prose but overshoots
+	// badly on dense content (base64, hashes) that can run near 1.8. The
+	// shrink loop below is what actually enforces the budget.
+	chars := truncAtRuneBoundary(text, usable*4)
 	candidate := strings.TrimSpace(text[:chars]) + marker
-	for tokens.Estimate(candidate) > budget && chars > 0 {
-		chars = chars * 9 / 10
+	for contextmeter.Default().Count(candidate) > budget && chars > 0 {
+		chars = truncAtRuneBoundary(text, chars*9/10)
 		candidate = strings.TrimSpace(text[:chars]) + marker
 	}
-	if tokens.Estimate(candidate) > budget {
+	if contextmeter.Default().Count(candidate) > budget {
 		return ""
 	}
 	return candidate
@@ -252,4 +253,23 @@ func buildFindingSummaries(findings []AnnotatedFinding, max int) string {
 			i+1, f.Publication.Source, f.Publication.Title, f.RelevanceScore, f.ImpactRating, f.Summary))
 	}
 	return sb.String()
+}
+
+// truncAtRuneBoundary returns the largest n <= chars such that text[:n] ends
+// on a valid UTF-8 rune boundary, clamped to len(text).
+//
+// Slicing a Go string by byte count can split a multi-byte rune and leave an
+// invalid trailing fragment; the byte-oriented truncation above would do that
+// on any non-ASCII source content.
+func truncAtRuneBoundary(text string, chars int) int {
+	if chars >= len(text) {
+		return len(text)
+	}
+	if chars < 0 {
+		return 0
+	}
+	for chars > 0 && !utf8.RuneStart(text[chars]) {
+		chars--
+	}
+	return chars
 }

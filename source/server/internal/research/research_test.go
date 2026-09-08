@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"cercano/source/server/internal/modelbudget"
-	"cercano/source/server/internal/tokens"
+	"cercano/source/server/internal/contextmeter"
 )
 
 // --- Mocks ---
@@ -1538,7 +1538,7 @@ func TestGenerateExecutiveSummary_BudgetsFindingSummariesBeforeModelCall(t *test
 	if model.calls != 1 {
 		t.Fatalf("model calls = %d, want 1", model.calls)
 	}
-	if got := tokens.Estimate(model.lastPrompt); got > model.budget.InputTokens {
+	if got := contextmeter.Default().Count(model.lastPrompt); got > model.budget.InputTokens {
 		t.Fatalf("prompt estimate = %d, want <= %d\nprompt:\n%s", got, model.budget.InputTokens, model.lastPrompt)
 	}
 	if !strings.Contains(model.lastPrompt, "[SourceA] Finding A") {

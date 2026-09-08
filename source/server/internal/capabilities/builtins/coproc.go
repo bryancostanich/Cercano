@@ -5,8 +5,8 @@ import (
 	"errors"
 
 	"cercano/source/server/internal/capabilities"
+	"cercano/source/server/internal/contextmeter"
 	"cercano/source/server/internal/dispatch"
-	"cercano/source/server/internal/tokens"
 	"cercano/source/server/pkg/config"
 )
 
@@ -26,7 +26,7 @@ func runCoproc(ctx context.Context, call *capabilities.Call, source, prompt, con
 		WorkDir:              call.WorkDir,
 		WantsProjectContext:  true,
 		Source:               source,
-		ContentTokensAvoided: tokens.Estimate(content),
+		ContentTokensAvoided: contextmeter.Default().Count(content),
 		RecordUsage:          true,
 	})
 	if err != nil {

@@ -44,8 +44,12 @@ func TestEstimateRequestBudget_ToolsOnly(t *testing.T) {
 }
 
 func TestEstimateRequestBudget_OutputReserveCanOverflow(t *testing.T) {
+	// Fixture is repeated prose, not strings.Repeat("a", ...): BPE merges long
+	// single-character runs into very few tokens (2000x"a" counts 250, not the
+	// 500 a char/4 estimate implies), which is not enough to cross the budget.
+	// Repeated prose tokenizes near 2.3 chars/token, giving ~505 tokens.
 	budget := EstimateRequestBudget(RequestBudgetInput{
-		Messages:      []llm.Message{textMessage(llm.RoleUser, strings.Repeat("a", 2000))}, // ~500 tokens
+		Messages:      []llm.Message{textMessage(llm.RoleUser, strings.Repeat("the quick brown fox jumps over the lazy dog ", 56))}, // ~505 tokens
 		MaxTokens:     500,
 		ContextWindow: 1000,
 	})

@@ -6,9 +6,10 @@ import (
 	"strings"
 	"sync"
 
+	"cercano/source/server/internal/contextmeter"
 	"cercano/source/server/internal/modelbudget"
-	"cercano/source/server/internal/tokens"
 	"time"
+	"unicode/utf8"
 )
 
 // ModelCaller abstracts calling the local model. Implemented by the MCP server
@@ -200,7 +201,7 @@ func (p *ResearchPipeline) sourceCorpus(ctx context.Context, question string, pa
 	if err != nil {
 		return "", fmt.Errorf("research synthesis budget: %w", err)
 	}
-	emptyPromptTokens := tokens.Estimate(formatSynthesisPrompt(question, ""))
+	emptyPromptTokens := contextmeter.Default().Count(formatSynthesisPrompt(question, ""))
 	corpusBudget := budget.InputTokens - emptyPromptTokens - 16 // tokenizer/formatting safety margin
 	if corpusBudget < 128 {
 		return "", fmt.Errorf("research synthesis budget too small after prompt overhead: input_budget=%d prompt_overhead=%d corpus_budget=%d provider=%s model=%s context_window=%d", budget.InputTokens, emptyPromptTokens, corpusBudget, budget.Target.Provider, budget.Target.Model, budget.Target.ContextWindow)
@@ -239,7 +240,7 @@ func budgetedSourceCorpus(pages []FetchedPage, corpusBudget int) (corpus string,
 	for i, page := range pages {
 		header := fmt.Sprintf("--- Source %d: %s (%s) ---\n", i+1, page.Title, page.URL)
 		footer := "\n\n"
-		remaining := corpusBudget - tokens.Estimate(sb.String()) - tokens.Estimate(header) - tokens.Estimate(footer)
+		remaining := corpusBudget - contextmeter.Default().Count(sb.String()) - contextmeter.Default().Count(header) - contextmeter.Default().Count(footer)
 		if remaining <= 0 {
 			trimmed++
 			continue
@@ -249,7 +250,7 @@ func budgetedSourceCorpus(pages []FetchedPage, corpusBudget int) (corpus string,
 			content = "(No readable text content found.)"
 		}
 		candidate := content
-		if tokens.Estimate(candidate) > remaining {
+		if contextmeter.Default().Count(candidate) > remaining {
 			trimmed++
 			candidate = truncateToTokenBudget(candidate, remaining, "\n[...truncated to fit local model context]")
 		}
@@ -266,24 +267,24 @@ func truncateToTokenBudget(text string, budget int, marker string) string {
 	if budget <= 0 {
 		return ""
 	}
-	if tokens.Estimate(text) <= budget {
+	if contextmeter.Default().Count(text) <= budget {
 		return text
 	}
-	markerTokens := tokens.Estimate(marker)
+	markerTokens := contextmeter.Default().Count(marker)
 	usable := budget - markerTokens
 	if usable <= 0 {
 		return ""
 	}
-	chars := usable * 4
-	if chars > len(text) {
-		chars = len(text)
-	}
+	// Optimistic first guess: 4 chars/token holds for prose but overshoots
+	// badly on dense content (base64, hashes) that can run near 1.8. The
+	// shrink loop below is what actually enforces the budget.
+	chars := truncAtRuneBoundary(text, usable*4)
 	candidate := strings.TrimSpace(text[:chars]) + marker
-	for tokens.Estimate(candidate) > budget && chars > 0 {
-		chars = chars * 9 / 10
+	for contextmeter.Default().Count(candidate) > budget && chars > 0 {
+		chars = truncAtRuneBoundary(text, chars*9/10)
 		candidate = strings.TrimSpace(text[:chars]) + marker
 	}
-	if tokens.Estimate(candidate) > budget {
+	if contextmeter.Default().Count(candidate) > budget {
 		return ""
 	}
 	return candidate
@@ -457,4 +458,23 @@ func parseNumberedList(text string) []string {
 		}
 	}
 	return items
+}
+
+// truncAtRuneBoundary returns the largest n <= chars such that text[:n] ends
+// on a valid UTF-8 rune boundary, clamped to len(text).
+//
+// Slicing a Go string by byte count can split a multi-byte rune and leave an
+// invalid trailing fragment; the byte-oriented truncation above would do that
+// on any non-ASCII source content.
+func truncAtRuneBoundary(text string, chars int) int {
+	if chars >= len(text) {
+		return len(text)
+	}
+	if chars < 0 {
+		return 0
+	}
+	for chars > 0 && !utf8.RuneStart(text[chars]) {
+		chars--
+	}
+	return chars
 }

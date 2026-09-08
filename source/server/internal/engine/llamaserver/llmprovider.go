@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"cercano/source/server/internal/contextmeter"
 	"cercano/source/server/internal/crashlog"
 	"cercano/source/server/internal/engine"
 	"cercano/source/server/internal/failurelog"
@@ -230,8 +231,15 @@ func estimateRequestBudget(req llm.ChatRequest) requestBudgetEstimate {
 	return budget
 }
 
+// estimateTokens returns the token count for s.
+//
+// Formerly char/4. This function feeds request-budget diagnostics that count
+// serialized tool schemas — dense JSON, which tokenizes far worse than the
+// 4 chars/token char/4 assumes — so the old arithmetic understated exactly
+// the field it was most often applied to. Backed by real cl100k_base
+// tokenization (memoized, bounded) via contextmeter.
 func estimateTokens(s string) int {
-	return (len(s) + 3) / 4
+	return contextmeter.Default().Count(s)
 }
 
 func compactRuntimeLogs(logs []localruntime.LogEntry, instanceID string) []map[string]any {

@@ -8,21 +8,38 @@ import (
 	"cercano/source/server/internal/llm"
 )
 
-func TestEstimateTokens_RoughFourCharsPerToken(t *testing.T) {
+// TestEstimateTokens_UsesRealTokenization pins that estimateTokens performs
+// actual BPE tokenization rather than char/4 arithmetic.
+//
+// This test previously asserted the char/4 heuristic directly (e.g.
+// "abcdefgh" -> 2). Those expectations encoded the estimator's arithmetic,
+// not any property of tokenization, and every one of them was wrong about
+// real token counts: "abcdefgh" is a single cl100k token, not two.
+func TestEstimateTokens_UsesRealTokenization(t *testing.T) {
 	cases := []struct {
 		in   string
 		want int
 	}{
 		{"", 0},
-		{"a", 1},        // ceil(1/4)
-		{"abcd", 1},     // exactly 4 chars -> 1
-		{"abcde", 2},    // 5 chars -> ceil(5/4)=2
-		{"abcdefgh", 2}, // 8 chars -> 2
+		{"abcdefgh", 1},    // one merged BPE token, char/4 guessed 2
+		{"hello world", 2}, // common words are one token each
 	}
 	for _, c := range cases {
 		if got := estimateTokens(c.in); got != c.want {
 			t.Errorf("estimateTokens(%q) = %d, want %d", c.in, got, c.want)
 		}
+	}
+}
+
+// TestEstimateTokens_DenseContentExceedsCharDiv4 guards the property that
+// motivated the switch: high-entropy content tokenizes far worse than 4
+// chars/token, so char/4 undercounts it — the direction that lets an
+// oversized prompt past the guard and into a provider-side overflow.
+func TestEstimateTokens_DenseContentExceedsCharDiv4(t *testing.T) {
+	const dense = "h1:85ENo+3FpWgAACBaEUVp+lctuTcYUO7BtmfhlN/QTRo=" +
+		"9NiV+i9mJKGj1rYOT+njbv+ZwA/zJxYdewGl6qVatpg="
+	if got, div4 := estimateTokens(dense), (len(dense)+3)/4; got <= div4 {
+		t.Errorf("estimateTokens(dense) = %d, expected to exceed char/4 estimate %d", got, div4)
 	}
 }
 
@@ -61,9 +78,15 @@ func TestPreflightContextCheck_UnderBudgetPasses(t *testing.T) {
 }
 
 func TestPreflightContextCheck_OverBudgetReturnsContextOverflow(t *testing.T) {
-	// Build an input that estimates well over a small window's 90% budget.
-	// window=1000 -> budget=900 tokens -> need >900 tokens -> >3600 chars.
-	input := strings.Repeat("x", 8000) // ~2000 tokens
+	// Build an input that counts well over a small window's 90% budget.
+	// window=1000 -> budget=900 tokens -> need >900 tokens.
+	//
+	// Fixture must be realistic prose, not strings.Repeat: BPE merges long
+	// single-character runs aggressively (2000x"a" is only 250 tokens, ~8
+	// chars/token), so a repeat-based fixture counts far lower than its byte
+	// length suggests. Repeated prose tokenizes near 2.3 chars/token, so this
+	// lands around 1080 tokens.
+	input := strings.Repeat("the quick brown fox jumps over the lazy dog ", 120)
 	err := preflightContextCheck("", nil, input, 0, 1000)
 	if err == nil {
 		t.Fatal("over-budget prompt must return an error")

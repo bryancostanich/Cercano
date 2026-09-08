@@ -11,10 +11,10 @@ import (
 	"cercano/source/server/internal/capabilities"
 	"cercano/source/server/internal/capabilities/mcpadapter"
 	projectctx "cercano/source/server/internal/context"
+	"cercano/source/server/internal/contextmeter"
 	"cercano/source/server/internal/document"
 	"cercano/source/server/internal/research"
 	"cercano/source/server/internal/telemetry"
-	"cercano/source/server/internal/tokens"
 	"cercano/source/server/internal/web"
 	"cercano/source/server/pkg/config"
 	"cercano/source/server/pkg/proto"
@@ -432,7 +432,7 @@ func (s *Server) handleLocal(ctx context.Context, request *gomcp.CallToolRequest
 	if err != nil {
 		return nil, nil, formatGRPCError(err, "cercano_local")
 	}
-	s.emitEvent("cercano_local", resp, startTime, true, &args.cloudTokenFields, tokens.Estimate(input))
+	s.emitEvent("cercano_local", resp, startTime, true, &args.cloudTokenFields, contextmeter.Default().Count(input))
 
 	output := resp.Output
 	if len(resp.FileChanges) > 0 {
@@ -955,7 +955,7 @@ func (s *Server) handleDocument(ctx context.Context, request *gomcp.CallToolRequ
 			continue
 		}
 		lastResp = resp
-		s.emitEvent("cercano_document", resp, startTime, true, &args.cloudTokenFields, tokens.Estimate(sym.Body)*2)
+		s.emitEvent("cercano_document", resp, startTime, true, &args.cloudTokenFields, contextmeter.Default().Count(sym.Body)*2)
 
 		comment := document.FormatAsGoDoc(resp.Output)
 		if comment == "" {

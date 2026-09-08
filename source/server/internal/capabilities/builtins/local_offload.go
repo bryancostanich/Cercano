@@ -7,8 +7,8 @@ import (
 	"fmt"
 
 	"cercano/source/server/internal/capabilities"
+	"cercano/source/server/internal/contextmeter"
 	"cercano/source/server/internal/dispatch"
-	"cercano/source/server/internal/tokens"
 	"cercano/source/server/pkg/config"
 )
 
@@ -75,7 +75,7 @@ func (localCap) Execute(ctx context.Context, call *capabilities.Call) (*capabili
 		WantsProjectContext:  true,
 		ModelOverride:        a.Model,
 		Source:               "local",
-		ContentTokensAvoided: tokens.Estimate(input),
+		ContentTokensAvoided: contextmeter.Default().Count(input),
 		RecordUsage:          true,
 	})
 	if err != nil {

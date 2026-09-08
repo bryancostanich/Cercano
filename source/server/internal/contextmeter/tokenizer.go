@@ -9,6 +9,7 @@
 package contextmeter
 
 import (
+	"log"
 	"strings"
 	"sync"
 
@@ -204,8 +205,13 @@ func hashString(s string) uint64 {
 }
 
 // fallbackTokenizer is a char-count/4 estimator used when tiktoken
-// initialisation fails (no network for vocabulary download, etc.). Crude but
-// keeps the meter advancing instead of showing 0.
+// initialisation fails. Crude but keeps the meter advancing instead of
+// showing 0.
+//
+// With the BPE table embedded (see embedded_bpe.go) this should now be
+// unreachable in practice — reaching it means the vendored table failed to
+// parse, which is a build/packaging defect rather than an environmental one.
+// Callers that care can detect it via Exact().
 type fallbackTokenizer struct{}
 
 func (fallbackTokenizer) Count(s string) int { return (len(s) + 3) / 4 }
@@ -216,23 +222,47 @@ func (fallbackTokenizer) Count(s string) int { return (len(s) + 3) / 4 }
 //
 // The encoding is cached so repeated calls are cheap.
 var (
-	defaultOnce sync.Once
-	defaultTok  Tokenizer
+	defaultOnce  sync.Once
+	defaultTok   Tokenizer
+	defaultExact bool
 )
 
 func Default() Tokenizer {
-	defaultOnce.Do(func() {
-		enc, err := tiktoken.GetEncoding("cl100k_base")
-		if err != nil {
-			// The fallback is len/4 arithmetic — already cheaper than a map
-			// lookup, so memoizing it would only add overhead.
-			defaultTok = fallbackTokenizer{}
-			return
-		}
-		// Memoized: the shared default is called repeatedly on identical,
-		// immutable turn content during request assembly, where re-encoding
-		// dominates request latency on large conversations.
-		defaultTok = Memoizing(&tiktokenTokenizer{enc: enc})
-	})
+	defaultOnce.Do(initDefault)
 	return defaultTok
+}
+
+// Exact reports whether Default() is backed by real BPE tokenization rather
+// than the char/4 fallback. Budget-critical callers should treat a false
+// result as "counts are unreliable": char/4 undercounts high-entropy content
+// (base64, hashes, minified JSON) by more than 2x, which is the direction
+// that overflows a context window at call time.
+func Exact() bool {
+	defaultOnce.Do(initDefault)
+	return defaultExact
+}
+
+func initDefault() {
+	// Serve the vendored cl100k_base table instead of fetching it. Must
+	// precede GetEncoding, which is the call that triggers a load.
+	installEmbeddedBpeLoader()
+
+	enc, err := tiktoken.GetEncoding("cl100k_base")
+	if err != nil {
+		// Loud on purpose. The previous silent degrade meant budget numbers
+		// could differ between machines with no signal at all; if the
+		// embedded table ever fails to parse we want it in the log.
+		log.Printf("[contextmeter] FALLBACK TOKENIZER ACTIVE: embedded cl100k_base failed to load (%v); "+
+			"token counts degrade to char/4 and undercount dense content by >2x — budgets are unreliable", err)
+		// The fallback is len/4 arithmetic — already cheaper than a map
+		// lookup, so memoizing it would only add overhead.
+		defaultTok = fallbackTokenizer{}
+		defaultExact = false
+		return
+	}
+	// Memoized: the shared default is called repeatedly on identical,
+	// immutable turn content during request assembly, where re-encoding
+	// dominates request latency on large conversations.
+	defaultTok = Memoizing(&tiktokenTokenizer{enc: enc})
+	defaultExact = true
 }

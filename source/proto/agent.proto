@@ -1809,6 +1809,24 @@ message ConfigSnapshot {
 
   int32 tool_loop_max_iterations = 45;
   string model_profiles_json     = 46; // config.ModelProfiles as JSON (nested; not mirrored in proto)
+
+  // Host-resolved evidence for this turn. Empty or missing evidence does not
+  // establish model capability. Contains no credentials.
+  repeated ModelMetadataEntry model_metadata = 47;
+}
+
+message ModelMetadataEntry {
+  string provider = 1;
+  string base_url = 2;
+  string route = 3;
+  string model = 4;
+  int64 context_window = 5; // positive verified context capacity; 0 means unknown
+  enum Vision {
+    UNKNOWN = 0;
+    SUPPORTED = 1;
+    UNSUPPORTED = 2;
+  }
+  Vision vision = 6;
 }
 
 // CredentialRequest asks the host to resolve/refresh the provider credential

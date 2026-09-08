@@ -19,6 +19,7 @@ import (
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/locus"
+	"cercano/source/server/internal/modelwindow"
 	"cercano/source/server/internal/protocols"
 	"cercano/source/server/internal/requestassembly"
 	"cercano/source/server/internal/routinglog"
@@ -132,7 +133,7 @@ func (c *Core) contextWindowFor(isCloud bool, model string) int {
 
 func (c *Core) knownContextWindowFor(isCloud bool, model string) (int, bool) {
 	if c.d.Config != nil && !isCloud {
-		window := contextmeter.LocalRuntimeWindow(c.d.Config.Get(), model)
+		window := modelwindow.LocalRuntimeWindow(c.d.Config.Get(), model)
 		return window, window > 0
 	}
 	mw := contextmeter.ModelWindowFor(model)

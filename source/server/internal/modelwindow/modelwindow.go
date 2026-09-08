@@ -1,8 +1,9 @@
-package contextmeter
+package modelwindow
 
 import (
 	"strings"
 
+	"cercano/source/server/internal/contextmeter"
 	"cercano/source/server/internal/localruntime/llamaserver"
 	"cercano/source/server/internal/sysram"
 	"cercano/source/server/pkg/config"
@@ -27,18 +28,18 @@ import (
 //
 // The local size is read from cfg at call time, so changing llama_server's
 // context_size (or mistralrs's max_seq_len) moves the meter with no code change.
-func MeterWindow(cfg config.Config, model string) ModelWindow {
+func MeterWindow(cfg config.Config, model string) contextmeter.ModelWindow {
 	switch cfg.LocusMode {
 	case "open_primary", "open_only":
 		if n := LocalRuntimeWindow(cfg, model); n > 0 {
-			return ModelWindow{Tokens: n, Known: true}
+			return contextmeter.ModelWindow{Tokens: n, Known: true}
 		}
 		// Config yielded nothing usable (e.g. no runtime configured); fall
 		// through to the published table rather than reporting a zero window,
 		// which would render as a divide-by-zero meter.
-		return ModelWindowFor(model)
+		return contextmeter.ModelWindowFor(model)
 	default:
-		return ModelWindowFor(model)
+		return contextmeter.ModelWindowFor(model)
 	}
 }
 

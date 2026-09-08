@@ -50,6 +50,7 @@ import (
 	mcpserver "cercano/source/server/internal/mcp"
 	mcphost "cercano/source/server/internal/mcp_host"
 	"cercano/source/server/internal/modelcatalog"
+	"cercano/source/server/internal/modelwindow"
 	"cercano/source/server/internal/ollamacatalog"
 	"cercano/source/server/internal/openmodels"
 	"cercano/source/server/internal/protocols"
@@ -375,7 +376,7 @@ func startGRPCServer(cfg config.Config, bindAddr string, events *crashlog.Writer
 			// window swung 0/7 to 7/7 on anchor retention between samples, while
 			// temperature 0 reproduced exactly and kept every proposal anchor.
 			greedy := engine.Greedy()
-			localSummaryWindow := contextmeter.LocalRuntimeWindow(cfg, summarizerModel)
+			localSummaryWindow := modelwindow.LocalRuntimeWindow(cfg, summarizerModel)
 			parseLogged := func(output, via string) compaction.StructuredSummary {
 				s := compaction.ParseSummary(output)
 				if s.IsEmpty() {
@@ -483,7 +484,7 @@ func startGRPCServer(cfg config.Config, bindAddr string, events *crashlog.Writer
 		if budgetPct <= 0 {
 			budgetPct = compactedBudgetDefaultPct
 		}
-		budgetWindow := contextmeter.LocalRuntimeWindow(cfg, openChatModel(cfg))
+		budgetWindow := modelwindow.LocalRuntimeWindow(cfg, openChatModel(cfg))
 		if budgetWindow <= 0 {
 			budgetWindow = contextmeter.ModelMax(openChatModel(cfg))
 		}

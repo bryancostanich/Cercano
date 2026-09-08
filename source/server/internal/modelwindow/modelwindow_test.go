@@ -1,8 +1,9 @@
-package contextmeter
+package modelwindow
 
 import (
 	"testing"
 
+	"cercano/source/server/internal/contextmeter"
 	"cercano/source/server/pkg/config"
 )
 
@@ -38,7 +39,7 @@ func TestMeterWindowTracksConfiguredContextSize(t *testing.T) {
 func TestMeterWindowLocalIgnoresPublishedDefault(t *testing.T) {
 	const model = "llama_server:catalog:glm-4.5-air-q4_k_m"
 
-	if pub := ModelWindowFor(model); pub.Tokens != 128_000 || pub.Known {
+	if pub := contextmeter.ModelWindowFor(model); pub.Tokens != 128_000 || pub.Known {
 		t.Fatalf("precondition: ModelWindowFor = %+v, want {128000 false}", pub)
 	}
 	got := MeterWindow(localCfg("open_only", 16384), model)
@@ -53,7 +54,7 @@ func TestMeterWindowLocalIgnoresPublishedDefault(t *testing.T) {
 func TestMeterWindowLocalBeatsKnownFamilyWindow(t *testing.T) {
 	const model = "llama_server:catalog:qwen3-coder-next"
 
-	if pub, ok := KnownModelMax(model); !ok || pub != 262_144 {
+	if pub, ok := contextmeter.KnownModelMax(model); !ok || pub != 262_144 {
 		t.Fatalf("precondition: KnownModelMax = (%d,%v), want (262144,true)", pub, ok)
 	}
 	got := MeterWindow(localCfg("open_primary", 16384), model)

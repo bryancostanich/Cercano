@@ -29,6 +29,7 @@ import (
 	cfgsvc "cercano/source/server/internal/hostsvc/config"
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
+	"cercano/source/server/internal/modelwindow"
 	"cercano/source/server/internal/requestassembly"
 	"cercano/source/server/internal/retention"
 	"cercano/source/server/pkg/config"
@@ -308,7 +309,7 @@ func (x *svc) recordCompactionContextUsage(ctx context.Context, convID string, s
 		return
 	}
 	model := x.primaryModel()
-	window := contextmeter.MeterWindow(x.cfgSvc.Get(), model)
+	window := modelwindow.MeterWindow(x.cfgSvc.Get(), model)
 
 	if rawTokens <= 0 {
 		if prev, ok, err := store.GetContextUsage(ctx, convID); err == nil && ok {
@@ -873,7 +874,7 @@ func (x *svc) GetContextUsage(ctx context.Context, req *proto.GetContextUsageReq
 	// restart until the first cloud-served turn re-baselined it.
 	// On local locus routes the denominator is the size we actually launch the
 	// runtime with, not the model family's published window — see MeterWindow.
-	modelWindow := contextmeter.MeterWindow(x.cfgSvc.Get(), x.primaryModel())
+	modelWindow := modelwindow.MeterWindow(x.cfgSvc.Get(), x.primaryModel())
 	max := modelWindow.Tokens
 
 	isCompacting := false

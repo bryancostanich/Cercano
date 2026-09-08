@@ -30,6 +30,7 @@ import (
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/locus"
 	"cercano/source/server/internal/modelbudget"
+	"cercano/source/server/internal/modelwindow"
 	"cercano/source/server/internal/usage"
 	"cercano/source/server/pkg/config"
 )
@@ -124,7 +125,7 @@ func InstallCapabilities(svc tools.Catalog, d CapDeps) {
 				return modelbudget.Target{}, err
 			}
 			if !target.IsCloud && d.Config != nil {
-				window := contextmeter.LocalRuntimeWindow(*d.Config, target.Model)
+				window := modelwindow.LocalRuntimeWindow(*d.Config, target.Model)
 				target.ContextWindow = window
 				target.ContextWindowKnown = window > 0
 			} else if window, ok := contextmeter.KnownModelMax(target.Model); ok {

@@ -151,9 +151,10 @@ type Provider struct {
 // New builds the engine around primary.
 func New(primary inference.Provider, opts Options) *Provider {
 	p := &Provider{
-		primary:        primary,
-		backup:         opts.Backup,
-		backupModelFor: opts.BackupModelFor,
+		primary:         primary,
+		primaryModelFor: opts.PrimaryModelFor,
+		backup:          opts.Backup,
+		backupModelFor:  opts.BackupModelFor,
 		onEvent:        opts.OnEvent,
 		retryWait:      opts.RetryWait,
 		retryWaitCap:   opts.RetryWaitCap,

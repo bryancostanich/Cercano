@@ -406,7 +406,7 @@ func (c *Core) RunTurn(
 	}
 
 	// 6. Internal adapter: agent.LoopEvent → runner.Event, forwarded to sink.
-	loopSink := makeLoopSink(sink, c.d.FailureLog, req.ConversationID)
+	loopSink := c.makeLoopSink(sink, c.d.FailureLog, req.ConversationID)
 
 	// 7. Build the permission store for the loop.
 	var permStore *agent.PermissionStore
@@ -658,7 +658,7 @@ func retryNotice(provider string, class llm.ErrorClass) string {
 // It is the single point that maps the tool-loop's internal event vocabulary
 // to the runner's proto-free Event type. The host's protoSink then maps
 // runner.Event → stream.Send(proto...).
-func makeLoopSink(sink EventSink, failures *failurelog.Writer, conversationID string) func(agent.LoopEvent) {
+func (c *Core) makeLoopSink(sink EventSink, failures *failurelog.Writer, conversationID string) func(agent.LoopEvent) {
 	return func(ev agent.LoopEvent) {
 		switch ev.Kind {
 		case agent.LoopToolUseStart:
@@ -744,6 +744,24 @@ func makeLoopSink(sink EventSink, failures *failurelog.Writer, conversationID st
 			sink.Emit(Event{Kind: EventProgress, Text: ev.Summary, ToolUseID: ev.ToolUseID, ToolName: ev.ToolName})
 
 		case agent.LoopRequestAccounting:
+			// The tool loop computed this immediately before the provider call,
+			// so it is the only place that knows the true full-request shape:
+			// the assembled messages PLUS the system prompt, the advertised tool
+			// schemas, and the reserved output budget. Assembly-time accounting
+			// cannot know these — the system prompt and tool catalog are built
+			// later, in runLoop, and the catalog varies per iteration under the
+			// tight-context fallback. Log it here so the routing log records what
+			// was actually sent rather than the messages-only assembly estimate.
+			c.logRoute("request.budget", routinglog.Event{
+				"conversation_id":          conversationID,
+				"message_tokens":           ev.MessageTokens,
+				"system_tokens":            ev.SystemTokens,
+				"tool_schema_tokens":       ev.ToolSchemaTokens,
+				"output_reserve_tokens":    ev.OutputReserveTokens,
+				"estimated_request_tokens": ev.EstimatedRequestTokens,
+				"context_window":           ev.ContextWindow,
+				"context_window_known":     ev.ContextWindowKnown,
+			})
 			if rs, ok := sink.(RequestAccountingSink); ok {
 				rs.RecordRequestAccounting(RequestAccounting{
 					MessageTokens:          ev.MessageTokens,

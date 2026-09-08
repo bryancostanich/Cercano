@@ -86,32 +86,12 @@ func WindowForTarget(target Target) (int, bool) {
 	return mw.Tokens, mw.Known
 }
 
-// RequestEstimateInput carries provider-agnostic request components available
-// before a provider call.
-type RequestEstimateInput struct {
-	Messages      []llm.Message
-	System        string
-	Tools         []llm.Tool
-	OutputReserve int
-}
-
-// EstimateFullRequest fills full-request accounting fields on acct using the
-// same tokenizer family as send-view assembly. Counts are estimates: provider
-// tokenizers and wire formats can differ.
-func EstimateFullRequest(acct Accounting, in RequestEstimateInput, tok contextmeter.Tokenizer) Accounting {
-	if tok == nil {
-		tok = contextmeter.Default()
-	}
-	acct.MessageTokens = acct.FinalTokens
-	if acct.MessageTokens == 0 && len(in.Messages) > 0 {
-		acct.MessageTokens = compaction.ProviderTotalTokens(tok, in.Messages)
-	}
-	acct.SystemTokens = tok.Count(in.System)
-	acct.ToolSchemaTokens = EstimateToolSchemaTokens(tok, in.Tools)
-	acct.OutputReserveTokens = in.OutputReserve
-	acct.EstimatedRequestTokens = acct.MessageTokens + acct.SystemTokens + acct.ToolSchemaTokens + acct.OutputReserveTokens
-	return acct
-}
+// NOTE: EstimateFullRequest used to live here. It was unreachable — only its own
+// unit test called it — and it could not have been correct at this layer anyway:
+// the system prompt and tool catalog do not exist yet when Assemble runs, and
+// the catalog varies per iteration under the tight-context fallback. The tool
+// loop owns full-request accounting (agent.EstimateRequestBudget) and emits it
+// as the request.budget routing event immediately before each provider call.
 
 // EstimateToolSchemaTokens estimates the token cost of the advertised native
 // tool schemas without logging or exposing the schema bodies themselves.
@@ -179,6 +159,14 @@ func Assemble(turns []conversation.Turn, state conversation.Compaction, cfg conf
 	view = llm.RepairPairing(view)
 	acct.FinalTokens = compaction.ProviderTotalTokens(tok, view)
 	acct.MessageTokens = acct.FinalTokens
+	// Messages only. The system prompt and tool schemas are not known at
+	// assembly time (both are built later, in the tool loop, and the tool
+	// catalog varies per iteration under the tight-context fallback), so
+	// SystemTokens/ToolSchemaTokens/OutputReserveTokens stay zero here and this
+	// total is a lower bound on the real request. The tool loop computes the
+	// true full-request budget immediately before each provider call and emits
+	// it as the request.budget routing event; prefer that for any
+	// estimate-vs-actual analysis.
 	acct.EstimatedRequestTokens = acct.MessageTokens
 	return Result{Messages: view, Accounting: acct}
 }

@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"cercano/source/server/internal/conversation"
-	"cercano/source/server/internal/llm"
 	"cercano/source/server/pkg/config"
 )
 
@@ -50,24 +49,29 @@ func TestWindowForTargetReportsCertainty(t *testing.T) {
 	}
 }
 
-func TestEstimateFullRequestAddsMessagesSystemToolsAndReserve(t *testing.T) {
-	base := Accounting{FinalTokens: 10}
-	acct := EstimateFullRequest(base, RequestEstimateInput{
-		Messages:      []llm.Message{{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: "ignored because FinalTokens is set"}}}},
-		System:        "system",
-		Tools:         []llm.Tool{{Name: "Read", Description: "read files", Schema: []byte(`{"type":"object"}`)}},
-		OutputReserve: 7,
-	}, byteTokenizer{})
+// TestAssembleReportsMessagesOnlyEstimate pins the honest contract of
+// assembly-time accounting: it covers the messages it assembled and nothing
+// else. The system prompt and tool schemas are not knowable here, so the
+// decomposed fields stay zero rather than carrying a fabricated value. Callers
+// wanting the true request size read the request.budget routing event.
+func TestAssembleReportsMessagesOnlyEstimate(t *testing.T) {
+	turns := []conversation.Turn{
+		{Role: "user", Content: "hello there"},
+		{Role: "assistant", Content: "general kenobi"},
+	}
+	res := Assemble(turns, conversation.Compaction{}, config.CompactionConfig{}, 0,
+		Target{Model: "claude-opus-5"}, byteTokenizer{})
+	acct := res.Accounting
 
-	if acct.MessageTokens != 10 {
-		t.Fatalf("message tokens = %d, want final token count 10", acct.MessageTokens)
+	if acct.MessageTokens == 0 {
+		t.Fatal("message tokens should be counted")
 	}
-	if acct.SystemTokens != len("system") || acct.ToolSchemaTokens == 0 || acct.OutputReserveTokens != 7 {
-		t.Fatalf("unexpected decomposed request accounting: %+v", acct)
+	if acct.EstimatedRequestTokens != acct.MessageTokens {
+		t.Fatalf("estimate = %d, want it to equal message tokens %d",
+			acct.EstimatedRequestTokens, acct.MessageTokens)
 	}
-	want := acct.MessageTokens + acct.SystemTokens + acct.ToolSchemaTokens + acct.OutputReserveTokens
-	if acct.EstimatedRequestTokens != want {
-		t.Fatalf("estimated total = %d, want %d (%+v)", acct.EstimatedRequestTokens, want, acct)
+	if acct.SystemTokens != 0 || acct.ToolSchemaTokens != 0 || acct.OutputReserveTokens != 0 {
+		t.Fatalf("assembly cannot know system/tool/reserve costs; want zeros, got %+v", acct)
 	}
 }
 

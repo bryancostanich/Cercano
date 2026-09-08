@@ -35,7 +35,7 @@ func TestEvent_CarriesTokenAndToolPayloads(t *testing.T) {
 
 func TestMakeLoopSink_MapsTaskChangeProgress(t *testing.T) {
 	s := &captureSink{}
-	makeLoopSink(s, nil, "")(agent.LoopEvent{
+	(*Core)(nil).makeLoopSink(s, nil, "")(agent.LoopEvent{
 		Kind:           agent.LoopProgress,
 		TaskChangeKind: "updated",
 		TaskSnapshot: agenttools.TaskProgressSnapshot{
@@ -77,7 +77,7 @@ func TestRequest_IsProviderFree(t *testing.T) {
 
 func TestMakeLoopSink_EmitsProgressBeforeToolExec(t *testing.T) {
 	s := &captureSink{}
-	makeLoopSink(s, nil, "")(agent.LoopEvent{
+	(*Core)(nil).makeLoopSink(s, nil, "")(agent.LoopEvent{
 		Kind:      agent.LoopToolExecStart,
 		ToolUseID: "tool-1",
 		ToolName:  "Bash",
@@ -102,7 +102,7 @@ func TestMakeLoopSink_LogsSanitizedToolError(t *testing.T) {
 	defer w.Close()
 
 	s := &captureSink{}
-	makeLoopSink(s, w, "conv-main")(agent.LoopEvent{
+	(*Core)(nil).makeLoopSink(s, w, "conv-main")(agent.LoopEvent{
 		Kind:     agent.LoopToolExecComplete,
 		ToolName: "Bash",
 		IsError:  true,

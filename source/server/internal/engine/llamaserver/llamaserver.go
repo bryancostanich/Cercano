@@ -15,6 +15,7 @@ import (
 
 	"cercano/source/server/internal/engine"
 	"cercano/source/server/internal/failurelog"
+	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/localruntime"
 )
 
@@ -298,7 +299,7 @@ func (e *Engine) endpointFor(ctx context.Context, requested string) (endpoint st
 	if startingID != "" {
 		endpoint, err := e.awaitInstanceReady(ctx, startingID)
 		if err != nil {
-			return "", "", false, err
+			return "", "", false, &llm.LocalStartupError{Provider: runtimeName, Model: requested, Err: err}
 		}
 		return endpoint, modelNameForRequest(selected, requested), selected.SupportsVision, nil
 	}
@@ -316,10 +317,10 @@ func (e *Engine) endpointFor(ctx context.Context, requested string) (endpoint st
 		ModelID: startModelID,
 	})
 	if err != nil {
-		return "", "", false, err
+		return "", "", false, &llm.LocalStartupError{Provider: runtimeName, Model: requested, Err: err}
 	}
 	if start.Endpoint == "" {
-		return "", "", false, errors.New("llama-server started without an endpoint")
+		return "", "", false, &llm.LocalStartupError{Provider: runtimeName, Model: requested, Err: errors.New("llama-server started without an endpoint")}
 	}
 	return start.Endpoint, modelNameForRequest(selected, requested), selected.SupportsVision, nil
 }

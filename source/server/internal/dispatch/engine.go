@@ -187,7 +187,8 @@ func (e *Engine) Target(spec Spec) (modelbudget.Target, error) {
 // Dispatch executes spec and returns a Result.
 func (e *Engine) Dispatch(ctx context.Context, spec Spec) (Result, error) {
 	// 1. Select provider via locus (providers resolved fresh each dispatch).
-	sel, err := inference.Select(e.modeFn(), spec.Role, e.providersFn())
+	mode, candidates := e.modeFn(), e.providersFn()
+	sel, err := inference.Select(mode, spec.Role, candidates)
 	if err != nil {
 		return Result{}, err
 	}
@@ -216,13 +217,23 @@ func (e *Engine) Dispatch(ctx context.Context, spec Spec) (Result, error) {
 		spec.Tier = ""
 	}
 
+	sel = e.startupFallback(sel, candidates, mode, spec, tier)
+
 	// 3a. Agentic: delegate to the installed runner (lives in internal/server
 	// to avoid an import cycle with internal/agent).
 	if spec.Mode == Agentic {
 		if e.agenticRunner == nil {
 			return Result{}, errors.New("dispatch: agentic runner not configured")
 		}
-		return e.agenticRunner(ctx, spec, sel, model)
+		result, err := e.agenticRunner(ctx, spec, sel, model)
+		current, servedModel := CurrentRoute(sel, model)
+		if current.IsCloud != sel.IsCloud {
+			result.Provider = providerName(current)
+			result.IsCloud = current.IsCloud
+			result.Model = servedModel
+			result.Notice = current.Notice
+		}
+		return result, err
 	}
 
 	// 3b. A one-shot is not part of the calling conversation: give it its own
@@ -253,6 +264,7 @@ func (e *Engine) Dispatch(ctx context.Context, spec Spec) (Result, error) {
 
 	// 5. Call provider directly; emit usage only when the caller opts in.
 	resp, err := sel.Provider.Chat(ctx, req)
+	sel, model = CurrentRoute(sel, model)
 	if err != nil {
 		return Result{}, err
 	}
@@ -263,8 +275,8 @@ func (e *Engine) Dispatch(ctx context.Context, spec Spec) (Result, error) {
 			IsCloud:              sel.IsCloud,
 			InputTokens:          resp.InputTokens,
 			OutputTokens:         resp.OutputTokens,
-			ContentTokensAvoided: spec.ContentTokensAvoided,
-			TokenSaving:          true,
+			ContentTokensAvoided: avoidedTokens(spec.ContentTokensAvoided, sel.IsCloud),
+			TokenSaving:          !sel.IsCloud,
 		})
 	}
 
@@ -298,4 +310,11 @@ func providerName(sel inference.Selection) string {
 		return ""
 	}
 	return sel.Provider.Name()
+}
+
+func avoidedTokens(tokens int, isCloud bool) int {
+	if isCloud {
+		return 0
+	}
+	return tokens
 }

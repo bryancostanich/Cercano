@@ -566,6 +566,10 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 			emitDispatchProgress(spec.Emit, agenttools.ProgressEvent{SubAgentID: subConvID, SubAgentParentID: spec.ConversationID, SubAgentTitle: subTitle, Kind: "token", Text: t, GrantedTools: granted, IgnoredTools: ignored})
 		},
 		EventSink: func(ev agent.LoopEvent) {
+			sel, model = dispatch.CurrentRoute(sel, model)
+			if sel.Provider != nil {
+				provider = sel.Provider.Name()
+			}
 			if ev.Kind == agent.LoopToolExecComplete && ev.IsError {
 				x.logDispatchFailure("dispatch.tool_error", spec, subConvID, provider, model, sel.IsCloud, granted, ignored, nil, failurelog.Event{
 					"tool_name":   ev.ToolName,
@@ -580,6 +584,13 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 		OnTurnComplete: onTurn,
 		// PermissionRequester: nil — R-tier won't gate; W/X runs pre-authorized after the parent grant confirm.
 	})
+	sel, model = dispatch.CurrentRoute(sel, model)
+	if sel.Provider != nil {
+		provider = sel.Provider.Name()
+	}
+	if sel.IsCloud {
+		location = "cloud"
+	}
 	if err != nil {
 		log.Printf("[dispatch] subagent done: conv=%s err=%v", subConvID, err)
 		extra := failurelog.Event{}

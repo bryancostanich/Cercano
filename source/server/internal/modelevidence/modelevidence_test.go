@@ -216,13 +216,31 @@ func TestResolve_ForeignGatewayDoesNotInheritVendorCapability(t *testing.T) {
 	}
 }
 
-func TestResolve_ShippedContextWinsOverIndex(t *testing.T) {
-	// An identity with shipped knowledge should not need the index at all.
-	src := deepinfraSource(map[string]catalog.Detail{"claude-sonnet-4-6": {ContextLength: 999}})
+// A provider's published capacity must beat the model-name family heuristic.
+// The family table matches "qwen" and answers 131072; DeepInfra serves this
+// model with 262144. Preferring the heuristic here would silently shrink the
+// budget for every request against it.
+func TestResolve_PublishedCapacityBeatsFamilyHeuristic(t *testing.T) {
+	src := deepinfraSource(map[string]catalog.Detail{
+		"Qwen/Qwen3.8-2.4T-A95B": {ContextLength: 262144},
+	})
 	r := New(fakeRegistry{src})
-	id := modelmetadata.Identity{Provider: "anthropic", Model: "claude-sonnet-4-6"}
-	if got := r.Resolve(context.Background(), id).ContextWindow; got != 200000 {
-		t.Fatalf("context window = %d, want shipped 200000", got)
+	if got := r.Resolve(context.Background(), deepinfraID("Qwen/Qwen3.8-2.4T-A95B")).ContextWindow; got != 262144 {
+		t.Fatalf("context window = %d, want the published 262144", got)
+	}
+}
+
+// Shipped knowledge carries vision only. Capacity for vendors without an index
+// stays zero here, and callers fall back to the conventional window — the
+// behavior that existed before this resolver.
+func TestResolve_ShippedKnowledgeSuppliesVisionNotCapacity(t *testing.T) {
+	r := New(nil)
+	ev := r.Resolve(context.Background(), modelmetadata.Identity{Provider: "anthropic", Model: "claude-sonnet-4-6"})
+	if ev.Vision != modelmetadata.VisionSupported {
+		t.Fatalf("vision = %v, want supported", ev.Vision)
+	}
+	if ev.ContextWindow != 0 {
+		t.Fatalf("context window = %d; shipped knowledge must not override the conventional table", ev.ContextWindow)
 	}
 }
 

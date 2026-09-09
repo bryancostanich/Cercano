@@ -69,11 +69,14 @@ func WithContextLoader(l ContextLoader) AgentOption {
 
 // Agent is the top-level orchestrator for AI requests.
 type Agent struct {
-	router        Router
-	coordinator   Coordinator
-	conversation  *ConversationStore
-	persistent    conversation.Store
-	meter         *contextmeter.Registry
+	router       Router
+	coordinator  Coordinator
+	conversation *ConversationStore
+	persistent   conversation.Store
+	meter        *contextmeter.Registry
+	// contextWindow resolves a model's provider-published context capacity for
+	// the meter denominator. nil keeps the conventional per-family window.
+	contextWindow func(model string) (int, bool)
 	meterModel    string // active local model name, used as Max() baseline
 	contextLoader ContextLoader
 	recap         RecapScheduler
@@ -331,6 +334,31 @@ func (a *Agent) PersistentStore() conversation.Store {
 	return a.persistent
 }
 
+// SetContextWindowResolver installs an optional resolver for a model's
+// provider-published context capacity, used as the meter's denominator. It is
+// a function rather than a direct dependency so this package stays free of
+// config/catalog imports.
+//
+// Nil, or an ok=false answer, keeps the conventional per-family window — the
+// behavior before provider metadata existed.
+func (a *Agent) SetContextWindowResolver(fn func(model string) (int, bool)) {
+	if a == nil {
+		return
+	}
+	a.contextWindow = fn
+}
+
+// contextWindowFor picks the meter denominator: provider-published capacity
+// when known, otherwise the conventional per-family value.
+func (a *Agent) contextWindowFor(model string) int {
+	if a.contextWindow != nil {
+		if window, ok := a.contextWindow(model); ok && window > 0 {
+			return window
+		}
+	}
+	return contextmeter.ModelMax(model)
+}
+
 // RecordContextUsage snapshots a conversation's context-window meter from
 // provider-reported token usage, measured against the given model's window
 // (typically the cloud model that served the turn). Snapshot semantics:
@@ -342,7 +370,7 @@ func (a *Agent) RecordContextUsage(convID, model string, inputTokens, outputToke
 		return
 	}
 	c := a.meter.Get(convID, model)
-	c.SetMax(contextmeter.ModelMax(model))
+	c.SetMax(a.contextWindowFor(model))
 	c.Reset()
 	c.AddCount(inputTokens + outputTokens)
 }

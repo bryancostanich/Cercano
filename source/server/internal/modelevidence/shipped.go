@@ -3,7 +3,6 @@ package modelevidence
 import (
 	"strings"
 
-	"cercano/source/server/internal/contextmeter"
 	"cercano/source/server/internal/modelmetadata"
 )
 
@@ -19,14 +18,18 @@ import (
 //
 // Entries are affirmative or explicitly negative. A family absent from this
 // table is unknown, not unsupported.
+// Shipped knowledge covers VISION ONLY. It deliberately supplies no context
+// capacity, because the conventional per-family window is a heuristic on the
+// model NAME and a provider that publishes a real number must win over it.
+// Concretely: DeepInfra serves Qwen/Qwen3.8-2.4T-A95B with a 256K window, while
+// the family table matches "qwen" and answers 128K. Consulting the family table
+// here would have silently overridden the provider's own figure.
+//
+// Returning zero capacity is not a loss of information: callers already fall
+// back to contextmeter for anything this resolver does not know, so vendors
+// without an index behave exactly as before.
 func shippedEvidence(id modelmetadata.Identity) modelmetadata.Evidence {
-	ev := modelmetadata.Evidence{Vision: shippedVision(id)}
-	// contextmeter owns the published per-family windows. Reuse it rather than
-	// duplicating a second table that could drift from the meter's denominator.
-	if window, ok := contextmeter.KnownModelMax(id.Model); ok {
-		ev.ContextWindow = window
-	}
-	return ev
+	return modelmetadata.Evidence{Vision: shippedVision(id)}
 }
 
 // shippedVision reports image-input capability for verified families.

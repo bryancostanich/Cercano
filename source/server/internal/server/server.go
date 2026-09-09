@@ -987,6 +987,8 @@ func NewServer(a *agent.Agent, router RouterCloudUpdater, coordinator *loop.ADKC
 	// protocol, so their vision capability must come from the model, not the
 	// transport. Anthropic/Bedrock clients keep their fixed answer.
 	s.providerSvc.SetModelSupportsVision(s.cloudModelSupportsVision)
+	// The live meter denominator must track the same capacity the turn used.
+	s.agent.SetContextWindowResolver(s.cloudContextWindow)
 	// Build the shared vision-as-tool store and service. Cloud vision is preferred
 	// whenever the current locus permits cloud; open_only remains a hard no-cloud
 	// boundary. The local/open vision lane remains wired as fallback so images can
@@ -3872,8 +3874,11 @@ func (s *Server) GetProviderCapabilities(ctx context.Context, req *proto.GetProv
 			SupportsTools:         true,
 			SupportsParallelTools: true,
 			SupportsCaching:       true,
-			SupportsVision:        true,
-			MaxToolsPerCall:       0,
+			// No provider is built, so no model is selected and nothing
+			// confirms image support. Claiming vision here would advertise a
+			// capability nothing has established.
+			SupportsVision:  false,
+			MaxToolsPerCall: 0,
 		}, nil
 	}
 	c := s.providerSvc.Cloud().Capabilities()

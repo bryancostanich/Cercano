@@ -29,6 +29,7 @@ import (
 	cfgsvc "cercano/source/server/internal/hostsvc/config"
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
+	"cercano/source/server/internal/locus"
 	"cercano/source/server/internal/modelwindow"
 	"cercano/source/server/internal/requestassembly"
 	"cercano/source/server/internal/retention"
@@ -303,14 +304,32 @@ func (x *svc) SetCloudContextWindow(fn func(model string) (int, bool)) {
 // published capacity when known, otherwise the conventional per-family value.
 // Keeping this in one place is what makes the meter agree with the budget the
 // runner actually applied.
+// The local runtime ceiling wins first: on a local route the meter must measure
+// against the size we actually launch the runtime with, and provider metadata
+// for a same-named hosted model must never raise it. Only when that yields
+// nothing does provider-published capacity apply, and only then the model-name
+// family table — which cannot know a hosted model's real window.
+//
+// MeterWindow's own fallback is reused for the final step so this stays in step
+// with its locus policy rather than duplicating it.
 func (x *svc) resolveWindow(model string) (int, bool) {
+	cfg := x.cfgSvc.Get()
+	if n := modelwindow.LocalRuntimeWindow(cfg, model); n > 0 && isLocalLocus(cfg.LocusMode) {
+		return n, true
+	}
 	if x.cloudContextWindow != nil {
 		if window, ok := x.cloudContextWindow(model); ok && window > 0 {
 			return window, true
 		}
 	}
-	w := contextmeter.ModelWindowFor(model)
-	return w.Tokens, w.Known
+	mw := modelwindow.MeterWindow(cfg, model)
+	return mw.Tokens, mw.Known
+}
+
+// isLocalLocus reports whether the configured locus serves turns from the local
+// runtime, where the launched context size is authoritative.
+func isLocalLocus(mode string) bool {
+	return mode == string(locus.OpenPrimary) || mode == string(locus.OpenOnly)
 }
 
 // SetCompactionGenerator attaches the background compaction scheduler and
@@ -337,7 +356,10 @@ func (x *svc) recordCompactionContextUsage(ctx context.Context, convID string, s
 		return
 	}
 	model := x.primaryModel()
-	window := modelwindow.MeterWindow(x.cfgSvc.Get(), model)
+	// Through resolveWindow so a hosted model's published capacity reaches the
+	// compaction meter too; local routes keep their launched-size ceiling.
+	wTokens, wKnown := x.resolveWindow(model)
+	window := contextmeter.ModelWindow{Tokens: wTokens, Known: wKnown}
 
 	if rawTokens <= 0 {
 		if prev, ok, err := store.GetContextUsage(ctx, convID); err == nil && ok {
@@ -901,7 +923,10 @@ func (x *svc) GetContextUsage(ctx context.Context, req *proto.GetContextUsageReq
 	// restart until the first cloud-served turn re-baselined it.
 	// On local locus routes the denominator is the size we actually launch the
 	// runtime with, not the model family's published window — see MeterWindow.
-	modelWindow := modelwindow.MeterWindow(x.cfgSvc.Get(), x.primaryModel())
+	// Through resolveWindow so a hosted model's published capacity reaches the
+	// meter the UI reads; local routes keep their launched-size ceiling.
+	wTokens, wKnown := x.resolveWindow(x.primaryModel())
+	modelWindow := contextmeter.ModelWindow{Tokens: wTokens, Known: wKnown}
 	max := modelWindow.Tokens
 
 	isCompacting := false

@@ -19,13 +19,6 @@ import (
 	"cercano/source/server/pkg/proto"
 )
 
-// defaultChatGPTModel is set on a freshly signed-in subscription profile. The
-// ChatGPT-account codex backend REJECTS -codex-suffixed model names with
-// "model not supported when using Codex with a ChatGPT account"; the plain
-// gpt-5.x names are what it accepts. Verified live against the backend. The
-// user can change it from the model field afterward.
-const defaultChatGPTModel = "gpt-5.5"
-
 // StartChatGPTLogin implements proto.AgentServer.
 func (s *Server) StartChatGPTLogin(req *proto.StartChatGPTLoginRequest, stream proto.Agent_StartChatGPTLoginServer) error {
 	ctx := stream.Context()
@@ -39,7 +32,10 @@ func (s *Server) StartChatGPTLogin(req *proto.StartChatGPTLoginRequest, stream p
 	}
 	model := strings.TrimSpace(req.GetModel())
 	if model == "" {
-		model = defaultChatGPTModel
+		model = config.Defaults().ModelProfiles.ResolveCloudModelForTier(config.CloudProfile{
+			Flavor: cloudfactory.FlavorResponses,
+			Route:  cloudfactory.RouteChatGPT,
+		}, config.TierEveryday)
 	}
 
 	// Start the device authorization and show the user the code + URL.

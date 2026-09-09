@@ -133,8 +133,8 @@ func TestResolveCloudModelForTierIsRouteAware(t *testing.T) {
 	if got == "gpt-5-mini" {
 		t.Errorf("chatgpt route economy resolved to %q — Codex rejects mini models with a 400", got)
 	}
-	if got != "gpt-5.5" {
-		t.Errorf("chatgpt route economy = %q, want gpt-5.5", got)
+	if got != "gpt-6-astra" {
+		t.Errorf("chatgpt route economy = %q, want gpt-6-astra", got)
 	}
 
 	// The direct API keeps its cheaper economy model: the fix must not make
@@ -175,8 +175,39 @@ func TestDefaultsSeedsCostTables(t *testing.T) {
 	if got, ok := d.ModelProfiles.ResolveCloud("anthropic", CostPremium); !ok || got != "claude-fable-5" {
 		t.Errorf("anthropic premium => %q,%v want claude-fable-5,true", got, ok)
 	}
-	if got, ok := d.ModelProfiles.ResolveCloud("openai", CostStandard); !ok || got != "gpt-5.5" {
-		t.Errorf("openai standard => %q,%v want gpt-5.5,true", got, ok)
+	for _, vendor := range []string{"openai", "openai-chatgpt"} {
+		for _, tier := range []CostTier{CostEconomy, CostStandard, CostPremium} {
+			want := "gpt-6-astra"
+			if vendor == "openai" && tier == CostEconomy {
+				want = "gpt-5-mini"
+			}
+			if got, ok := d.ModelProfiles.ResolveCloud(vendor, tier); !ok || got != want {
+				t.Errorf("%s %s => %q,%v want %s,true", vendor, tier, got, ok, want)
+			}
+		}
+	}
+}
+
+func TestRetiredOpenAIDefaultFollowsCatalog(t *testing.T) {
+	for _, profile := range []CloudProfile{
+		{Flavor: "responses", Route: "chatgpt"},
+		{Flavor: "responses"},
+		{Provider: "openai-chatgpt", Flavor: "responses", Route: "chatgpt"},
+	} {
+		for _, pinned := range []bool{false, true} {
+			profile.Model = "gpt-5.5"
+			profile.ModelPinned = pinned
+			cfg := Defaults()
+			cfg.CloudProfiles = []CloudProfile{profile}
+			normalizeCloudModelDefaults(&cfg)
+			want := "gpt-6-astra"
+			if pinned {
+				want = "gpt-5.5"
+			}
+			if got := cfg.ModelProfiles.ResolveCloudModelForTier(cfg.CloudProfiles[0], TierEveryday); got != want {
+				t.Errorf("profile %+v: got %q, want %q", profile, got, want)
+			}
+		}
 	}
 }
 

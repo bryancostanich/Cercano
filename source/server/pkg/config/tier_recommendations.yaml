@@ -13,8 +13,8 @@ cloud:
     fast_light: [claude-haiku-4-5]
     fast_light_text: [claude-haiku-4-5]
   openai:
-    most_capable: [gpt-5.5, gpt-5.3-codex]
-    everyday: [gpt-5.4]
+    most_capable: [gpt-6-astra, gpt-5.3-codex]
+    everyday: [gpt-6-astra]
     fast_light: [gpt-5.4-mini]
     fast_light_text: [gpt-5.4-mini]
   gemini:

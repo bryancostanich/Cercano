@@ -625,8 +625,8 @@ func Defaults() Config {
 					},
 					"openai": {
 						Economy:  CostTierModel{Model: "gpt-5-mini"},
-						Standard: CostTierModel{Model: "gpt-5.5"},
-						Premium:  CostTierModel{Model: "gpt-5.5"},
+						Standard: CostTierModel{Model: "gpt-6-astra"},
+						Premium:  CostTierModel{Model: "gpt-6-astra"},
 					},
 					// OpenAI reached through a ChatGPT subscription (Codex)
 					// serves a narrower lineup than the direct API: the mini
@@ -636,9 +636,9 @@ func Defaults() Config {
 					// no cheaper option, and a working expensive summarizer
 					// beats a broken cheap one.
 					"openai-chatgpt": {
-						Economy:  CostTierModel{Model: "gpt-5.5"},
-						Standard: CostTierModel{Model: "gpt-5.5"},
-						Premium:  CostTierModel{Model: "gpt-5.5"},
+						Economy:  CostTierModel{Model: "gpt-6-astra"},
+						Standard: CostTierModel{Model: "gpt-6-astra"},
+						Premium:  CostTierModel{Model: "gpt-6-astra"},
 					},
 					// DeepInfra hosts many vendors' open-weight models rather
 					// than publishing its own, so these are chosen for the
@@ -919,7 +919,9 @@ func vendorCostTiersContain(tiers VendorCostTiers, model string) bool {
 
 func retiredCloudDefaultModels() map[string][]string {
 	return map[string][]string{
-		"anthropic": {"claude-opus-4-8"},
+		"anthropic":      {"claude-opus-4-8"},
+		"openai":         {"gpt-5.5"},
+		"openai-chatgpt": {"gpt-5.5"},
 	}
 }
 

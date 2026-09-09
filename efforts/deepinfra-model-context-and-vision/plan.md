@@ -59,7 +59,7 @@ Objective: prove both fixes work across the actual service interfaces and docume
 - [x] Run relevant formatting, generation consistency, build and static checks using repository-prescribed commands.
 - [x] Review for residual model-name-only cloud budget consumers and image paths that bypass selected-model validation.
 - [x] Record exact checks run, results and remaining limitations; do not mark unrun checks as verified.
-- [~] Update task statuses, checkpoint final explicit paths and report completion without pushing. If required execution tools are unavailable, report that blocker rather than claiming tests or commits occurred.
+- [x] Update task statuses, checkpoint final explicit paths and report completion without pushing. If required execution tools are unavailable, report that blocker rather than claiming tests or commits occurred.
 
 ## Transport gate resolved
 

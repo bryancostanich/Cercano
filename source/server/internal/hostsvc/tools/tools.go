@@ -542,16 +542,23 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 	var buf strings.Builder
 	// Resolve the sub-agent model's context window for the pre-flight size
 	// guard. 0 (unknown, or no resolver wired) disables the guard for this call.
+	// contextWindowFor's contract: 0 means "unknown" (no resolver wired, or a
+	// model whose window we don't track), so a positive result is exactly the
+	// condition under which the window is known. Propagating this alongside
+	// ContextWindow keeps sub-agent request accounting honest — leaving it unset
+	// reports a real window as unknown to the meter, persistence, and the UI.
 	contextWindow := 0
 	if x.contextWindowFor != nil {
 		contextWindow = x.contextWindowFor(model, sel.IsCloud)
 	}
+	contextWindowKnown := contextWindow > 0
 	res, err := agent.RunToolLoop(ctx, agent.ToolLoopInput{
 		Provider:           sel.Provider,
 		Model:              model,
 		Tier:               string(spec.Tier),
 		System:             system,
 		ContextWindow:      contextWindow,
+		ContextWindowKnown: contextWindowKnown,
 		Registry:           reg,
 		Permissions:        perms,
 		UserInput:          spec.Task,

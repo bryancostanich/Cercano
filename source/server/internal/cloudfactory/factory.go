@@ -39,6 +39,26 @@ type Options struct {
 	// AnthropicTokenSource supplies refreshing Claude subscription bearers for
 	// the messages flavor's subscription route.
 	AnthropicTokenSource anthropic.TokenSource
+	// ModelSupportsVision reports CONFIRMED image-input capability for the
+	// profile's model. It exists because the OpenAI-compatible flavors serve
+	// arbitrary models behind an identical wire protocol: the transport can
+	// always encode an image, but whether the model on the other end can read
+	// one is a property of the model, not the protocol.
+	//
+	// Nil means unconfirmed, which reports no vision capability. That is the
+	// conservative direction — a text-only model receives text rather than
+	// image blocks it cannot interpret. Flavors bound to a single vendor whose
+	// current families are all multimodal (Anthropic messages, Bedrock) keep
+	// their fixed answer and do not consult this.
+	ModelSupportsVision func(model string) bool
+}
+
+// visionConfirmed reports whether opts affirm image support for the model.
+func visionConfirmed(opts []Options, model string) bool {
+	if len(opts) == 0 || opts[0].ModelSupportsVision == nil {
+		return false
+	}
+	return opts[0].ModelSupportsVision(model)
 }
 
 // BuildCloudProvider maps a profile (+ its key) to an inference.Provider. Only the
@@ -65,7 +85,7 @@ func BuildCloudProvider(p config.CloudProfile, apiKey string, opts ...Options) (
 			Route:   p.Route,
 		}), nil
 	case FlavorChatCompletions:
-		return openai.NewClient(openai.Config{BaseURL: p.BaseURL, APIKey: apiKey, Model: p.Model, Backend: p.Backend, SupportsVision: true}), nil
+		return openai.NewClient(openai.Config{BaseURL: p.BaseURL, APIKey: apiKey, Model: p.Model, Backend: p.Backend, SupportsVision: visionConfirmed(opts, p.Model)}), nil
 	case FlavorResponses:
 		if p.Route == responses.RouteChatGPT {
 			var ts responses.TokenSource
@@ -75,9 +95,9 @@ func BuildCloudProvider(p config.CloudProfile, apiKey string, opts ...Options) (
 			if ts == nil {
 				return nil, fmt.Errorf("responses route %q requires a token source", p.Route)
 			}
-			return responses.NewClient(responses.Config{Model: p.Model, Route: p.Route, TokenSource: ts, SupportsVision: true}), nil
+			return responses.NewClient(responses.Config{Model: p.Model, Route: p.Route, TokenSource: ts, SupportsVision: visionConfirmed(opts, p.Model)}), nil
 		}
-		return responses.NewClient(responses.Config{BaseURL: p.BaseURL, APIKey: apiKey, Model: p.Model, SupportsVision: true}), nil
+		return responses.NewClient(responses.Config{BaseURL: p.BaseURL, APIKey: apiKey, Model: p.Model, SupportsVision: visionConfirmed(opts, p.Model)}), nil
 	case FlavorBedrock:
 		return bedrock.NewClient(bedrock.Config{
 			Region: p.Region, Model: p.Model, AWSProfile: p.AWSProfile, BaseURL: p.BaseURL,

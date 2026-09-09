@@ -51,6 +51,16 @@ const defaultTimeout = 10 * time.Second
 // less capable here — it cannot function at all.
 const toolTag = "tools"
 
+// multimodalTag marks a model DeepInfra serves with image input.
+//
+// The index publishes no explicit supports_vision boolean, so this tag is the
+// only affirmative image-capability evidence it offers. It is read in one
+// direction only: present means supported, absent means UNKNOWN — never
+// "unsupported". An untagged model may still accept images; we simply have no
+// evidence, and callers that would send an image must treat missing evidence
+// as a refusal rather than a denial of the capability.
+const multimodalTag = "multimodal"
+
 // wireModel is one entry of /models/list.
 //
 // Only the fields the catalog maps are declared; the endpoint sends many more
@@ -155,7 +165,10 @@ func toModel(m wireModel) catalog.Model {
 		Kind:          catalog.KindTextGeneration,
 		ContextLength: m.MaxTokens,
 		SupportsTools: true, // eligible() admitted it only if tagged
-		ReplacedBy:    m.ReplacedBy,
+		// Affirmative only: see multimodalTag. False here means "no evidence",
+		// which callers must not read as proof of absence.
+		SupportsVision: hasTag(m.Tags, multimodalTag),
+		ReplacedBy:     m.ReplacedBy,
 	}
 	if m.Deprecated != nil && *m.Deprecated != 0 {
 		out.Deprecated = true
@@ -180,12 +193,13 @@ func toModel(m wireModel) catalog.Model {
 func toDetail(m wireModel) catalog.Detail {
 	row := toModel(m)
 	return catalog.Detail{
-		Source:        SourceName,
-		ID:            m.ModelName,
-		ContextLength: m.MaxTokens,
-		SupportsTools: row.SupportsTools,
-		Deprecated:    row.Deprecated,
-		ReplacedBy:    m.ReplacedBy,
+		Source:         SourceName,
+		ID:             m.ModelName,
+		ContextLength:  m.MaxTokens,
+		SupportsTools:  row.SupportsTools,
+		SupportsVision: row.SupportsVision,
+		Deprecated:     row.Deprecated,
+		ReplacedBy:     m.ReplacedBy,
 		Variants: []catalog.Variant{{
 			Name:         m.ModelName,
 			Quantization: m.Quantization,

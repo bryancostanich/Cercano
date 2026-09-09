@@ -1,13 +1,32 @@
 package modelmetadata
 
-// Vision represents the vision capability status of a model
-type Vision string
+// Vision represents the vision capability status of a model.
+//
+// VisionUnknown is deliberately the ZERO value. A zero Evidence — from a map
+// miss, an unset struct field, or a decoded message with the field absent —
+// must mean "no evidence", and callers compare against VisionUnknown to detect
+// exactly that. Making unknown anything other than the zero value creates a
+// fourth, nameless state that compares equal to none of the three and silently
+// fails those checks.
+type Vision int
 
 const (
-	VisionUnknown     Vision = "unknown"
-	VisionSupported   Vision = "supported"
-	VisionUnsupported Vision = "unsupported"
+	VisionUnknown Vision = iota
+	VisionSupported
+	VisionUnsupported
 )
+
+// String renders the capability for logs and test failures.
+func (v Vision) String() string {
+	switch v {
+	case VisionSupported:
+		return "supported"
+	case VisionUnsupported:
+		return "unsupported"
+	default:
+		return "unknown"
+	}
+}
 
 // Identity represents a model's unique identifier without credentials
 type Identity struct {

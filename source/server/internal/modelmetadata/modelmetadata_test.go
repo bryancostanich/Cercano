@@ -29,7 +29,9 @@ func TestSnapshotIdentityIsolation(t *testing.T) {
 func TestSnapshotInvalidEvidence(t *testing.T) {
 	id := Identity{Provider: "deepinfra", Model: "fixture"}
 	for _, capacity := range []int{-1, 0, 8192, 1048576} {
-		for _, vision := range []Vision{"", "invalid", VisionUnknown, VisionSupported, VisionUnsupported} {
+		// Includes out-of-range values: a decoded message carrying an enum this
+		// build does not know must normalize to unknown, never to supported.
+		for _, vision := range []Vision{VisionUnknown, VisionSupported, VisionUnsupported, Vision(-1), Vision(99)} {
 			s := Snapshot{{Identity: id, Evidence: Evidence{ContextWindow: capacity, Vision: vision}}}
 			got, ok := s.Lookup(id)
 			if !ok {
@@ -45,5 +47,30 @@ func TestSnapshotInvalidEvidence(t *testing.T) {
 				t.Fatalf("invalid vision not unknown: %+v", got)
 			}
 		}
+	}
+}
+
+// A zero Evidence must read as "no evidence". Callers detect absence by
+// comparing against VisionUnknown; if unknown were not the zero value, a map
+// miss would produce a state equal to none of the three and quietly bypass
+// those checks.
+func TestZeroEvidenceIsUnknown(t *testing.T) {
+	var e Evidence
+	if e.Vision != VisionUnknown {
+		t.Fatalf("zero Evidence.Vision = %v, want unknown", e.Vision)
+	}
+	if e.Normalized().Vision != VisionUnknown {
+		t.Fatal("normalizing zero evidence changed its capability")
+	}
+}
+
+func TestMissingLookupIsUnknown(t *testing.T) {
+	var s Snapshot
+	ev, ok := s.Lookup(Identity{Model: "absent"})
+	if ok {
+		t.Fatal("empty snapshot reported a hit")
+	}
+	if ev.Vision != VisionUnknown {
+		t.Fatalf("missing lookup vision = %v, want unknown", ev.Vision)
 	}
 }

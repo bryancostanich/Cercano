@@ -133,8 +133,18 @@ func (c *Core) contextWindowFor(isCloud bool, model string) int {
 
 func (c *Core) knownContextWindowFor(isCloud bool, model string) (int, bool) {
 	if c.d.Config != nil && !isCloud {
+		// Local runtimes remain authoritative for local execution: the launched
+		// --ctx-size is a hard ceiling no provider metadata can override.
 		window := modelwindow.LocalRuntimeWindow(c.d.Config.Get(), model)
 		return window, window > 0
+	}
+	// Provider-published capacity for the model this attempt actually targets
+	// beats the per-family name table, which cannot know a hosted model's
+	// window and silently defaults it to 128K.
+	if isCloud && c.d.CloudContextWindow != nil {
+		if window, ok := c.d.CloudContextWindow(model); ok && window > 0 {
+			return window, true
+		}
 	}
 	mw := contextmeter.ModelWindowFor(model)
 	return mw.Tokens, mw.Known

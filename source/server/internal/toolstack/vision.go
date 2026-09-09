@@ -27,6 +27,21 @@ type VisionDeps struct {
 	// CloudVisionModel yields the cloud vision model id and ok=false when cloud
 	// vision is not configured. May be nil (equivalent to always-false).
 	CloudVisionModel func() (string, bool)
+	// CloudVisionConfirmed reports whether the given cloud model has confirmed
+	// image-input capability. It gates every cloud image request: a model whose
+	// capability is unknown or known-absent is treated as no cloud vision lane
+	// at all, so the locus falls back to open/local or reports unavailable.
+	//
+	// This is deliberately separate from the provider's SupportsVision
+	// capability flag. That flag describes the TRANSPORT — whether the client
+	// can encode image blocks — and every OpenAI-compatible client sets it
+	// unconditionally. Being able to send an image is not evidence that the
+	// selected model can read one.
+	//
+	// nil means unconfirmed for every model, which closes the cloud lane. That
+	// is the safe default for a partially-wired deployment: silence must not
+	// authorize sending user images to a model that may not support them.
+	CloudVisionConfirmed func(model string) bool
 	// Mode yields the current locus mode, read live per call so a runtime mode
 	// change takes effect. Governs whether cloud fallback is permitted at all
 	// (every mode except open_only).
@@ -74,6 +89,14 @@ func BuildVision(d VisionDeps) (*visionattach.Store, capabilities.VisionService)
 		cloudResolver := func() (visioninspect.Resolved, bool) {
 			id, ok := d.CloudVisionModel()
 			if !ok || id == "" {
+				return visioninspect.Resolved{}, false
+			}
+			// Confirmed-capability gate. Resolving to "no cloud target" rather
+			// than erroring is what preserves the existing policy: the locus
+			// wrapper then tries the open/local lane exactly as it does for an
+			// unconfigured cloud profile, and reports unavailable only if that
+			// lane is missing too.
+			if d.CloudVisionConfirmed == nil || !d.CloudVisionConfirmed(id) {
 				return visioninspect.Resolved{}, false
 			}
 			prov := d.CloudProvider()

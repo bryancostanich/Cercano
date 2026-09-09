@@ -68,6 +68,7 @@ func (r *openResolver) OpenLLMProvider() inference.Provider                     
 func (r *openResolver) SetCatalogManager(_ *ollamacatalog.Manager)                      {}
 func (r *openResolver) SetUsageSink(_ func(usage.Usage))                                {}
 func (r *openResolver) SetRoutingLog(_ *routinglog.Writer)                              {}
+func (r *openResolver) SetModelSupportsVision(_ func(model string) bool)                {}
 
 // TestBuildWorkerWatchdog_DisabledIsNil confirms the default-off path: an
 // unset (or explicitly disabled) watchdog config yields a nil watchdog, exactly

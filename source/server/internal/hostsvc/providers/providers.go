@@ -112,6 +112,12 @@ type Resolver interface {
 
 	// SetRoutingLog installs the structured routing/failover diagnostic sink.
 	SetRoutingLog(w *routinglog.Writer)
+
+	// SetModelSupportsVision installs the confirmed image-capability oracle used
+	// when building OpenAI-compatible cloud clients. Nil leaves those clients
+	// reporting no vision support, which is the safe default: the transport can
+	// always carry an image, but only the model can read one.
+	SetModelSupportsVision(fn func(model string) bool)
 }
 
 // service is the concrete Resolver implementation.
@@ -134,6 +140,11 @@ type service struct {
 	// usageSink wraps the main-loop provider for token recording.
 	usageSink  func(usage.Usage)
 	routingLog *routinglog.Writer
+
+	// modelSupportsVision reports confirmed image capability for a cloud model.
+	// Consulted when building OpenAI-compatible clients, whose transport can
+	// encode images for any model regardless of whether that model can read one.
+	modelSupportsVision func(model string) bool
 }
 
 // New constructs a Resolver with the collaborators it needs.
@@ -181,6 +192,9 @@ func (p *service) SetOpenLLMProvider(prov inference.Provider)  { p.openLLMProvid
 func (p *service) SetCatalogManager(cm *ollamacatalog.Manager) { p.catalogManager = cm }
 func (p *service) SetUsageSink(fn func(usage.Usage))           { p.usageSink = fn }
 func (p *service) SetRoutingLog(w *routinglog.Writer)          { p.routingLog = w }
+func (p *service) SetModelSupportsVision(fn func(model string) bool) {
+	p.modelSupportsVision = fn
+}
 func (p *service) SetOpenProviderFactory(fn func(cfg.Config) inference.Provider) {
 	p.openProviderFactory = fn
 }
@@ -341,7 +355,7 @@ func (p *service) rebuildCloud() error {
 		p.installAbsentCloud("no API key for profile " + prof.Name)
 		return fmt.Errorf("no API key for profile %s", prof.Name)
 	}
-	var cloudOpts cloudfactory.Options
+	cloudOpts := cloudfactory.Options{ModelSupportsVision: p.modelSupportsVision}
 	if prof.Flavor == cloudfactory.FlavorResponses && prof.Route == cloudfactory.RouteChatGPT {
 		// ChatGPT subscription: authenticate via a refreshing token source over
 		// the keychain (the profile's key slot holds the token JSON), not a
@@ -448,7 +462,7 @@ func (p *service) buildBackup(primaryName string, c cfg.Config) (inference.Provi
 	}
 	bpDefault := c.ModelProfiles.ResolveCloudModelForTier(bp, cfg.TierEveryday)
 	bp.Model = bpDefault
-	var opts cloudfactory.Options
+	opts := cloudfactory.Options{ModelSupportsVision: p.modelSupportsVision}
 	if bp.Flavor == cloudfactory.FlavorResponses && bp.Route == cloudfactory.RouteChatGPT {
 		opts.TokenSource = chatgptauth.NewSource(st, bp.Name, chatgptauth.Flow{})
 	}

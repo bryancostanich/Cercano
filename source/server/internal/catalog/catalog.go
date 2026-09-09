@@ -169,6 +169,9 @@ type Detail struct {
 	Architecture  string // gate input (GGUF general.architecture, or config model_type)
 	ContextLength int
 	SupportsTools bool
+	// SupportsVision mirrors Model: affirmative evidence only. False means the
+	// source published none, not that the model rejects images.
+	SupportsVision bool
 	// Deprecated and ReplacedBy mirror Model, so a drill-in on a pinned model
 	// can explain a retirement even when List filtered it out.
 	Deprecated bool

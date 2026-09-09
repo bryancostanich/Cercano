@@ -108,6 +108,16 @@ type Deps struct {
 	// zero Profile, means unrestricted (no fence) — the default posture.
 	Profiles func(convID string) agent.Profile
 
+	// CloudContextWindow resolves the discovered context capacity for a cloud
+	// model, returning ok=false when nothing is known about it. It is consulted
+	// per attempt, so a failover that changes the destination model gets that
+	// model's capacity rather than inheriting the primary's.
+	//
+	// Nil, or ok=false, leaves the existing conventional per-family fallback in
+	// place — this narrows nothing on its own; it only supplies provider truth
+	// where the model-name table has none.
+	CloudContextWindow func(model string) (int, bool)
+
 	// RoutingLog records provider/profile/model selection and fallback metadata
 	// for postmortems. Nil disables logging. The writer must not receive prompt
 	// bodies, tool args, API keys, or response text.

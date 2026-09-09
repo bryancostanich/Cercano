@@ -43,6 +43,7 @@ import (
 	"cercano/source/server/internal/hostsvc/permissions"
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
+	"cercano/source/server/internal/modelmetadata"
 	"cercano/source/server/internal/runner"
 	"cercano/source/server/internal/secrets"
 	pkgcfg "cercano/source/server/pkg/config"
@@ -64,6 +65,13 @@ type workerRunner struct {
 	// carries host-resolved models the worker can use without the catalog. nil
 	// on dial-injected test runners (they send no open tier models).
 	openTierModel func(pkgcfg.Tier) string
+
+	// modelEvidence resolves host-side capability evidence (context capacity,
+	// confirmed image support) for every model this turn might address,
+	// including the backup profile's. The worker cannot discover models itself,
+	// so whatever is not in this snapshot is unknown to it — which for image
+	// routing means "do not send". nil on dial-injected test runners.
+	modelEvidence func(ctx context.Context, cfg pkgcfg.Config) modelmetadata.Snapshot
 
 	// srcMu guards the per-profile token-source caches below. Reusing one
 	// Source per profile is what makes the sources' single-flight refresh
@@ -124,6 +132,7 @@ func NewWorkerRunner(
 	setProfile func(ctx context.Context, convID, name string) error,
 	openProvider func() inference.Provider,
 	openTierModel func(pkgcfg.Tier) string,
+	modelEvidence func(ctx context.Context, cfg pkgcfg.Config) modelmetadata.Snapshot,
 ) runner.TurnRunner {
 	pool := newWorkerPool(nil) // production: spawn via spawnWorker
 	// Start the idle-reaper with the configured window. The reaper runs on a
@@ -139,6 +148,7 @@ func NewWorkerRunner(
 		setProfile:     setProfile,
 		openProvider:   openProvider,
 		openTierModel:  openTierModel,
+		modelEvidence:  modelEvidence,
 		pool:           pool,
 	}
 }
@@ -250,6 +260,12 @@ func (w *workerRunner) RunTurn(
 	// Resolve the active runtime's effective open tier models host-side (the
 	// worker cannot see the catalog); the snapshot carries them as overrides.
 	snap := SnapshotConfig(cfg, "", w.resolveOpenTiers()) // no credential — worker fetches on demand
+	// Attach host-resolved model evidence. Discovery stays on the host: the
+	// worker has no catalog, and a per-turn snapshot keeps its view of the
+	// selected (and failover) models identical to the host's.
+	if w.modelEvidence != nil {
+		snap.ModelMetadata = MarshalModelMetadata(w.modelEvidence(ctx, cfg))
+	}
 	permMode := string(agent.ModePermissive)
 	if w.perms != nil {
 		permMode = string(w.perms.Mode())

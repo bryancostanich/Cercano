@@ -20,6 +20,7 @@ import (
 	"cercano/source/server/internal/llm"
 	ollamallm "cercano/source/server/internal/llm/ollama"
 	"cercano/source/server/internal/locus"
+	"cercano/source/server/internal/modelmetadata"
 	"cercano/source/server/internal/ollamacatalog"
 	"cercano/source/server/internal/routinglog"
 	"cercano/source/server/internal/runner"
@@ -231,6 +232,39 @@ func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, cr
 	cfg := ConfigFromSnapshot(start.GetConfig())
 	cfgService := cfgsvc.New("", cfg, secrets.NewMemory())
 
+	// Host-resolved capability evidence for this turn. The worker never
+	// discovers models; an identity absent from this snapshot is UNKNOWN here,
+	// which blocks images and leaves the conventional context fallback in place.
+	evidence := UnmarshalModelMetadata(start.GetConfig().GetModelMetadata())
+	cloudEvidence := func(model string) modelmetadata.Evidence {
+		if model == "" {
+			return modelmetadata.Evidence{}
+		}
+		// Active profile first, then backup: a failover attempt addresses a
+		// model on the backup's endpoint, and that leg must budget against its
+		// own window rather than inheriting the primary's.
+		for _, name := range []string{cfg.ActiveCloudProfile, cfg.BackupCloudProfile} {
+			if name == "" {
+				continue
+			}
+			prof, ok := profileByName(cfg.CloudProfiles, name)
+			if !ok {
+				continue
+			}
+			if ev, found := evidence.Lookup(modelmetadata.Identity{Provider: prof.Provider, BaseURL: prof.BaseURL, Route: prof.Route, Model: model}); found {
+				return ev
+			}
+		}
+		return modelmetadata.Evidence{}
+	}
+	// Confirmed image capability for the model a cloud client is built around.
+	// Unknown is not permission: an unconfirmed model gets a text-only client,
+	// so tool results carrying images degrade to text instead of being sent to a
+	// model that may not understand them.
+	visionConfirmed := func(model string) bool {
+		return cloudEvidence(model).Vision == modelmetadata.VisionSupported
+	}
+
 	// Build Providers.
 	var provSvc providerssvc.Resolver
 	if w.providerFactory != nil {
@@ -241,7 +275,7 @@ func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, cr
 		}
 	} else {
 		var err error
-		provSvc, err = buildWorkerProviders(ctx, cfg, credSource, openProxy)
+		provSvc, err = buildWorkerProviders(ctx, cfg, credSource, openProxy, visionConfirmed)
 		if err != nil {
 			return runner.Deps{}, fmt.Errorf("build providers: %w", err)
 		}
@@ -301,6 +335,12 @@ func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, cr
 			}
 			return cfg.CloudModel, cfg.CloudModel != ""
 		},
+		// Same confirmed-capability gate as the host, over host-resolved
+		// evidence: transport support is not model capability, and unknown is
+		// not permission.
+		CloudVisionConfirmed: func(model string) bool {
+			return cloudEvidence(model).Vision == modelmetadata.VisionSupported
+		},
 		Mode: func() locus.Mode { m, _ := locus.ParseMode(cfg.LocusMode); return m },
 	})
 
@@ -348,8 +388,14 @@ func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, cr
 		// Shared with the worker's inspect_image VisionService (built above): the
 		// runner registers image placeholders here; the tool looks them up.
 		VisionStore: visionStore,
-		RoutingLog:  routeLog,
-		FailureLog:  failureLog,
+		// Per-attempt destination capacity, mirroring the host so an isolated
+		// turn budgets identically.
+		CloudContextWindow: func(model string) (int, bool) {
+			w := cloudEvidence(model).ContextWindow
+			return w, w > 0
+		},
+		RoutingLog: routeLog,
+		FailureLog: failureLog,
 	}, nil
 }
 
@@ -376,7 +422,7 @@ func profileByName(profiles []pkgcfg.CloudProfile, name string) (pkgcfg.CloudPro
 	return pkgcfg.CloudProfile{}, false
 }
 
-func buildWorkerProviders(ctx context.Context, cfg pkgcfg.Config, credSource credentialFetcher, openProxy *streamOpenProvider) (providerssvc.Resolver, error) {
+func buildWorkerProviders(ctx context.Context, cfg pkgcfg.Config, credSource credentialFetcher, openProxy *streamOpenProvider, modelSupportsVision func(string) bool) (providerssvc.Resolver, error) {
 	cfgService := cfgsvc.New("", cfg, secrets.NewMemory())
 	r := &workerResolver{cfgSvc: cfgService}
 
@@ -394,12 +440,12 @@ func buildWorkerProviders(ctx context.Context, cfg pkgcfg.Config, credSource cre
 			// ChatGPT subscription: use a stream-backed token source so the host
 			// owns refresh and OAuth — the worker never holds the credential.
 			ts := &streamTokenSource{creds: credSource, profileName: prof.Name}
-			prov, buildErr = cloudfactory.BuildCloudProvider(prof, "", cloudfactory.Options{TokenSource: ts})
+			prov, buildErr = cloudfactory.BuildCloudProvider(prof, "", cloudfactory.Options{TokenSource: ts, ModelSupportsVision: modelSupportsVision})
 		} else if prof.Flavor == cloudfactory.FlavorMessages && prof.Route == cloudfactory.RouteSubscription {
 			// Anthropic subscription has the same worker/host split as ChatGPT, but
 			// its token source only returns the bearer token (no account id).
 			ts := &anthropicStreamTokenSource{creds: credSource, profileName: prof.Name}
-			prov, buildErr = cloudfactory.BuildCloudProvider(prof, "", cloudfactory.Options{AnthropicTokenSource: ts})
+			prov, buildErr = cloudfactory.BuildCloudProvider(prof, "", cloudfactory.Options{AnthropicTokenSource: ts, ModelSupportsVision: modelSupportsVision})
 		} else {
 			// Static-key route: fetch the key via the stream. A fetch FAILURE is
 			// treated as an EMPTY key, NOT a skip — mirror the host's rebuildCloud
@@ -415,7 +461,7 @@ func buildWorkerProviders(ctx context.Context, cfg pkgcfg.Config, credSource cre
 			if key == "" && prof.BaseURL == "" && prof.Flavor != cloudfactory.FlavorBedrock {
 				log.Printf("[worker] no credential and no proxy BaseURL for profile %q; continuing without cloud", prof.Name)
 			} else {
-				prov, buildErr = cloudfactory.BuildCloudProvider(prof, key)
+				prov, buildErr = cloudfactory.BuildCloudProvider(prof, key, cloudfactory.Options{ModelSupportsVision: modelSupportsVision})
 			}
 		}
 		if buildErr != nil {
@@ -430,7 +476,7 @@ func buildWorkerProviders(ctx context.Context, cfg pkgcfg.Config, credSource cre
 			// The resilience engine wraps every worker cloud primary, mirroring
 			// providers.wrapResilience; the backup credential is fetched via the
 			// stream credential proxy, keyed by the backup profile name.
-			r.cloudProv = wrapWorkerResilience(ctx, prov, prof.Name, cfg, credSource)
+			r.cloudProv = wrapWorkerResilience(ctx, prov, prof.Name, cfg, credSource, modelSupportsVision)
 		}
 	}
 	// No active profile → cloudProv remains nil.
@@ -489,6 +535,7 @@ func wrapWorkerResilience(
 	primaryName string,
 	cfg pkgcfg.Config,
 	credSource credentialFetcher,
+	modelSupportsVision func(string) bool,
 ) inference.Provider {
 	primaryProf, _ := profileByName(cfg.CloudProfiles, primaryName)
 	profiles := cfg.ModelProfiles
@@ -506,7 +553,7 @@ func wrapWorkerResilience(
 			log.Printf("[worker] resilience %s (%s, %s): %s: %v", ev.Action, ev.Stage, ev.Class, ev.Notice(), ev.Err)
 		},
 	}
-	if backup, backupModelFor, ok := buildWorkerBackup(ctx, primaryName, cfg, credSource); ok {
+	if backup, backupModelFor, ok := buildWorkerBackup(ctx, primaryName, cfg, credSource, modelSupportsVision); ok {
 		opts.Backup = backup
 		opts.BackupModelFor = backupModelFor
 	}
@@ -521,6 +568,7 @@ func buildWorkerBackup(
 	primaryName string,
 	cfg pkgcfg.Config,
 	credSource credentialFetcher,
+	modelSupportsVision func(string) bool,
 ) (inference.Provider, func(tier string) string, bool) {
 	name := cfg.BackupCloudProfile
 	if name == "" || name == primaryName {
@@ -557,7 +605,7 @@ func buildWorkerBackup(
 		log.Printf("[worker] backup profile %q has no credential; running without failover", name)
 		return nil, nil, false
 	}
-	var opts cloudfactory.Options
+	opts := cloudfactory.Options{ModelSupportsVision: modelSupportsVision}
 	if bp.Flavor == cloudfactory.FlavorResponses && bp.Route == cloudfactory.RouteChatGPT {
 		// ChatGPT subscription: the host owns refresh/OAuth; the worker proxies
 		// the token via the stream per call, keyed by the backup profile name.
@@ -669,6 +717,11 @@ func (r *workerResolver) Reconfigure(_ providerssvc.ReconfigureArgs)            
 func (r *workerResolver) SetCatalogManager(_ *ollamacatalog.Manager)                      {}
 func (r *workerResolver) SetUsageSink(_ func(usage.Usage))                                {}
 func (r *workerResolver) SetRoutingLog(_ *routinglog.Writer)                              {}
+
+// SetModelSupportsVision is a no-op here: the worker's providers are built once
+// per turn in buildWorkerProviders, which passes the capability oracle to
+// cloudfactory directly rather than installing it after the fact.
+func (r *workerResolver) SetModelSupportsVision(_ func(model string) bool) {}
 
 // The worker's capability/tool stack is assembled by buildWorkerToolSvc (see
 // worker_dispatch.go) through the shared internal/toolstack builder — the same

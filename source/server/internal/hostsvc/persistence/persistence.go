@@ -96,6 +96,10 @@ type Service interface {
 
 	// Setters called by wiring code (cmd/cercano or watchdog_wire).
 	SetRetentionSweeper(sw *retention.Sweeper)
+	// SetCloudContextWindow installs the resolver for a cloud model's
+	// provider-published context capacity. Nil, or an ok=false answer, keeps the
+	// existing conventional per-family fallback.
+	SetCloudContextWindow(fn func(model string) (int, bool))
 	SetCompactionGenerator(g *compactiongen.Generator)
 	SetContextLoader(l *projectctx.Loader)
 
@@ -182,6 +186,10 @@ type svc struct {
 
 	// cloudModel returns the active cloud model string for ProposeContextEdit.
 	cloudModel func() string
+
+	// cloudContextWindow resolves a cloud model's provider-published context
+	// capacity for the meter denominator. Nil keeps the conventional fallback.
+	cloudContextWindow func(model string) (int, bool)
 
 	// Owned fields (moved off Server.struct).
 	retentionSweeper *retention.Sweeper
@@ -285,6 +293,26 @@ func (x *svc) advanceElisionFloor(ctx context.Context, convID string) (pre, post
 // SetRetentionSweeper attaches the background retention sweeper.
 func (x *svc) SetRetentionSweeper(sw *retention.Sweeper) { x.retentionSweeper = sw }
 
+// SetCloudContextWindow installs the provider-published capacity resolver used
+// when a turn did not report its own window.
+func (x *svc) SetCloudContextWindow(fn func(model string) (int, bool)) {
+	x.cloudContextWindow = fn
+}
+
+// resolveWindow picks the meter denominator for a model: the provider's
+// published capacity when known, otherwise the conventional per-family value.
+// Keeping this in one place is what makes the meter agree with the budget the
+// runner actually applied.
+func (x *svc) resolveWindow(model string) (int, bool) {
+	if x.cloudContextWindow != nil {
+		if window, ok := x.cloudContextWindow(model); ok && window > 0 {
+			return window, true
+		}
+	}
+	w := contextmeter.ModelWindowFor(model)
+	return w.Tokens, w.Known
+}
+
 // SetCompactionGenerator attaches the background compaction scheduler and
 // wires the tool-elision-only pass implementation (the floors live here).
 func (x *svc) SetCompactionGenerator(g *compactiongen.Generator) {
@@ -362,8 +390,7 @@ func (x *svc) RecordTurnContextUsage(ctx context.Context, convID string, u TurnC
 	window := u.ContextWindow
 	known := u.ContextWindowKnown
 	if window <= 0 {
-		w := contextmeter.ModelWindowFor(model)
-		window, known = w.Tokens, w.Known
+		window, known = x.resolveWindow(model)
 	}
 
 	usage := conversation.ContextUsage{

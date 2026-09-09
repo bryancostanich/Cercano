@@ -249,6 +249,7 @@ func (f *fakeResolver) OpenLLMProvider() inference.Provider                     
 func (f *fakeResolver) SetCatalogManager(_ *ollamacatalog.Manager)                      {}
 func (f *fakeResolver) SetUsageSink(_ func(usage.Usage))                                {}
 func (f *fakeResolver) SetRoutingLog(_ *routinglog.Writer)                              {}
+func (f *fakeResolver) SetModelSupportsVision(_ func(model string) bool)                {}
 
 // ---------------------------------------------------------------------------
 // fakeTurnHistory — minimal TurnHistory; returns empty history.

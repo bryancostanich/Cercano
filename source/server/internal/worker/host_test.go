@@ -147,6 +147,7 @@ func (f *echoResolver) OpenLLMProvider() inference.Provider                     
 func (f *echoResolver) SetCatalogManager(_ *ollamacatalog.Manager)                      {}
 func (f *echoResolver) SetUsageSink(_ func(usage.Usage))                                {}
 func (f *echoResolver) SetRoutingLog(_ *routinglog.Writer)                              {}
+func (f *echoResolver) SetModelSupportsVision(_ func(model string) bool)                {}
 
 // ─── hostTestToolSvc ─────────────────────────────────────────────────────────
 

@@ -52,6 +52,8 @@ import (
 	"cercano/source/server/internal/loop"
 	mcphost "cercano/source/server/internal/mcp_host"
 	"cercano/source/server/internal/mistralrscompat"
+	"cercano/source/server/internal/modelevidence"
+	"cercano/source/server/internal/modelmetadata"
 	"cercano/source/server/internal/ollamacatalog"
 	"cercano/source/server/internal/openmodels"
 	"cercano/source/server/internal/protocols"
@@ -106,8 +108,14 @@ type Server struct {
 	// Ollama backends, one active). Held on Server directly — browse runs
 	// host-side; the worker doesn't discover models.
 	catalogRegistry *catalog.Registry
-	cfgSvc          cfgsvc.Service       // owns configPath, currentConfig, cfgMu, secrets
-	openModels      *openmodels.Resolver // single effective-open-model resolver (override ⊕ catalog)
+	// evidenceResolver answers capability questions (context capacity, image
+	// support) for the model a turn will actually talk to. Built lazily over
+	// catalogRegistry; see modelEvidence().
+	evidenceMu       sync.Mutex
+	evidenceResolver *modelevidence.Resolver
+	evidenceRegistry *catalog.Registry
+	cfgSvc           cfgsvc.Service       // owns configPath, currentConfig, cfgMu, secrets
+	openModels       *openmodels.Resolver // single effective-open-model resolver (override ⊕ catalog)
 	// visionStore is the shared per-conversation image attachment store backing
 	// vision-as-tool. The SAME instance is handed to the runner (which rewrites
 	// image blocks to placeholders and registers them here) and to the
@@ -554,6 +562,116 @@ func (s *Server) activeCloudModel() string {
 	return s.providerSvc.ActiveCloudModel()
 }
 
+// cloudEvidenceTimeout bounds an evidence lookup made from a synchronous
+// caller (an image routing decision, a context budget). The resolver caches,
+// so this bound is paid at most once per identity per TTL; exceeding it yields
+// "unknown", which is safe in both directions.
+const cloudEvidenceTimeout = 5 * time.Second
+
+// modelEvidence lazily builds the shared capability resolver over the catalog
+// registry. It is built on first use because the registry is installed after
+// NewServer (SetCatalogRegistry), and rebuilt if the registry changes.
+func (s *Server) modelEvidence() *modelevidence.Resolver {
+	s.evidenceMu.Lock()
+	defer s.evidenceMu.Unlock()
+	if s.evidenceResolver == nil || s.evidenceRegistry != s.catalogRegistry {
+		s.evidenceRegistry = s.catalogRegistry
+		if s.catalogRegistry == nil {
+			// Shipped evidence only. Vendors we ship knowledge about still
+			// work; everything else stays unknown.
+			s.evidenceResolver = modelevidence.New(nil)
+		} else {
+			s.evidenceResolver = modelevidence.New(s.catalogRegistry)
+		}
+	}
+	return s.evidenceResolver
+}
+
+// cloudVisionEvidence resolves capability evidence for a cloud model.
+//
+// It searches the active profile first, then the backup: a failover attempt
+// asks about a model that belongs to the backup's endpoint, and answering
+// "unknown" for it would silently shrink that leg's budget to the default.
+func (s *Server) cloudVisionEvidence(model string) modelmetadata.Evidence {
+	if model == "" {
+		return modelmetadata.Evidence{}
+	}
+	cfg := s.cfgSvc.Get()
+	ctx, cancel := context.WithTimeout(context.Background(), cloudEvidenceTimeout)
+	defer cancel()
+	res := s.modelEvidence()
+	for _, name := range []string{cfg.ActiveCloudProfile, cfg.BackupCloudProfile} {
+		if name == "" {
+			continue
+		}
+		prof, ok := profileByName(cfg.CloudProfiles, name)
+		if !ok {
+			continue
+		}
+		ev := res.Resolve(ctx, modelevidence.IdentityFor(prof, model))
+		if ev.ContextWindow > 0 || ev.Vision != modelmetadata.VisionUnknown {
+			return ev
+		}
+	}
+	return modelmetadata.Evidence{}
+}
+
+// cloudModelSupportsVision reports confirmed image-input capability for a
+// cloud model. Unknown is not permission: only an affirmative answer opens the
+// cloud image lane.
+func (s *Server) cloudModelSupportsVision(model string) bool {
+	return s.cloudVisionEvidence(model).Vision == modelmetadata.VisionSupported
+}
+
+// turnModelEvidence resolves evidence for every cloud model a worker turn
+// could address: the active profile's model for each capability tier, and the
+// same for the backup profile.
+//
+// The backup entries are the point. A turn that fails over changes model
+// mid-flight, and the worker cannot discover the replacement's capabilities on
+// its own; without its evidence in the snapshot the failover destination would
+// be unknown, which correctly blocks images but would also lose its true
+// context window. Resolving both profiles up front keeps the worker's view
+// identical to the host's on either leg.
+func (s *Server) turnModelEvidence(ctx context.Context, cfg config.Config) modelmetadata.Snapshot {
+	tiers := []config.Tier{
+		config.TierMostCapable,
+		config.TierEveryday,
+		config.TierFastLight,
+		config.TierFastLightText,
+		config.TierVision,
+	}
+	var ids []modelmetadata.Identity
+	addProfile := func(name string) {
+		if name == "" {
+			return
+		}
+		prof, ok := profileByName(cfg.CloudProfiles, name)
+		if !ok {
+			return
+		}
+		if prof.Model != "" {
+			ids = append(ids, modelevidence.IdentityFor(prof, prof.Model))
+		}
+		for _, t := range tiers {
+			if model := cfg.ModelProfiles.ResolveCloudModelForTier(prof, t); model != "" {
+				ids = append(ids, modelevidence.IdentityFor(prof, model))
+			}
+		}
+	}
+	addProfile(cfg.ActiveCloudProfile)
+	addProfile(cfg.BackupCloudProfile)
+	return s.modelEvidence().Snapshot(ctx, ids)
+}
+
+// cloudContextWindow returns the discovered context capacity for a cloud model
+// and whether it is known. A zero/false result means callers keep their
+// existing conventional fallback.
+func (s *Server) cloudContextWindow(model string) (int, bool) {
+	ev := s.cloudVisionEvidence(model)
+	return ev.ContextWindow, ev.ContextWindow > 0
+}
+
 // activeProfile returns the configured active cloud profile, or false if none.
 func (s *Server) activeProfile() (config.CloudProfile, bool) {
 	return s.cfgSvc.ActiveProfile()
@@ -865,6 +983,10 @@ func NewServer(a *agent.Agent, router RouterCloudUpdater, coordinator *loop.ADKC
 	}
 	s.providerSvc = providers.New(cfgService, openModelsResolver, router, coordinator, cloudFactory, registry, nil)
 	s.providerSvc.SetRoutingLog(routeLog)
+	// OpenAI-compatible cloud clients serve arbitrary models over one wire
+	// protocol, so their vision capability must come from the model, not the
+	// transport. Anthropic/Bedrock clients keep their fixed answer.
+	s.providerSvc.SetModelSupportsVision(s.cloudModelSupportsVision)
 	// Build the shared vision-as-tool store and service. Cloud vision is preferred
 	// whenever the current locus permits cloud; open_only remains a hard no-cloud
 	// boundary. The local/open vision lane remains wired as fallback so images can
@@ -879,7 +1001,8 @@ func NewServer(a *agent.Agent, router RouterCloudUpdater, coordinator *loop.ADKC
 			id := s.activeCloudModel()
 			return id, id != ""
 		},
-		Mode: func() locus.Mode { m, _ := locus.ParseMode(s.providerSvc.LocusMode()); return m },
+		CloudVisionConfirmed: s.cloudModelSupportsVision,
+		Mode:                 func() locus.Mode { m, _ := locus.ParseMode(s.providerSvc.LocusMode()); return m },
 	})
 	// Construct the persistence service. It wraps the agent for store access;
 	// the agent itself is NOT owned by this service. The func-value collaborators
@@ -899,6 +1022,9 @@ func NewServer(a *agent.Agent, router RouterCloudUpdater, coordinator *loop.ADKC
 		func() inference.Provider { return s.providerSvc.Cloud() },
 		func() string { return s.activeCloudModel() },
 	)
+	// The meter denominator must be the same capacity the runner budgeted
+	// against, or the UI reports a percentage of a window that was never used.
+	s.persistSvc.SetCloudContextWindow(s.cloudContextWindow)
 	// Construct the tool catalog service. permBroker is not yet wired here
 	// (SetPermissions is called by the caller after construction), so it is
 	// passed nil and updated via toolSvc.SetPermBroker in SetPermissions.
@@ -921,6 +1047,13 @@ func NewServer(a *agent.Agent, router RouterCloudUpdater, coordinator *loop.ADKC
 	// phantom ceiling and rejecting work the server would have accepted.
 	s.toolSvc.SetContextWindowResolver(func(model string, isCloud bool) int {
 		if isCloud {
+			// A cloud sub-agent's window is knowable when the provider
+			// publishes it; use that. Zero still means "no guard" for models
+			// we have no evidence for, so this only ever adds a ceiling we can
+			// justify — it never invents one.
+			if window, ok := s.cloudContextWindow(model); ok {
+				return window
+			}
 			return 0
 		}
 		llamaCfg := s.cfgSvc.Get().LlamaServer
@@ -960,8 +1093,12 @@ func (s *Server) runnerDeps() runnersvc.Deps {
 			}
 			return s.profileBroker.Active(convID)
 		},
-		RoutingLog: s.routingLog,
-		FailureLog: s.failureLog,
+		// Per-attempt destination capacity. Consulted with the model the
+		// attempt actually targets, so a failover to a different model budgets
+		// against that model's window instead of the primary's.
+		CloudContextWindow: s.cloudContextWindow,
+		RoutingLog:         s.routingLog,
+		FailureLog:         s.failureLog,
 	}
 }
 
@@ -1013,7 +1150,8 @@ func (s *Server) SelectExecutionMode() {
 			return s.setSessionProfile(convID, name)
 		}, // worker-side session-control capabilities: switch the host profile broker
 		func() inference.Provider { return s.OpenLLMProvider() }, // answers the worker's OpenInferenceRequests
-		s.openModels.Model, // resolves effective active-runtime open tier models for the snapshot
+		s.openModels.Model,  // resolves effective active-runtime open tier models for the snapshot
+		s.turnModelEvidence, // host-resolved capability evidence for every model the turn might address
 	)
 	log.Printf("[server] execution mode: worker (turns run in isolated child processes; " +
 		"MCP-involving turns fall back to in-process — worker MCP proxying is a future refinement)")

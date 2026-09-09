@@ -416,11 +416,21 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 	if in.MaxTokensPerTurn > 0 {
 		maxTokens = in.MaxTokensPerTurn
 	}
-	if in.TightContextFallback && in.ContextWindow > 0 {
+	if in.ContextWindow > 0 {
 		// A cloud-sized output reserve can consume most of a small local
 		// context before the compact tool catalog and system prompt are sent.
-		// Keep enough room for the prompt while still allowing a useful local
-		// response. Normal local and cloud turns retain the configured budget.
+		// The reserve is subtracted from the same window the prompt must fit
+		// in, so on a 16K local model the 8K default leaves too little room and
+		// the request fails preflight before a single token is sent.
+		//
+		// This clamp is deliberately NOT gated on TightContextFallback. That
+		// flag also switches the catalog to the restricted compact tool set, so
+		// reusing it here would silently strip a sub-agent's granted tools to
+		// fix a budgeting problem. Any caller with a resolved window gets the
+		// reserve bounded; only the tight-context retry changes the catalog.
+		//
+		// Large windows are unaffected: a 200K cloud window yields a 50K limit,
+		// far above the 8K default, so this is a no-op off small local models.
 		localOutputLimit := in.ContextWindow / 4
 		if localOutputLimit < 1024 {
 			localOutputLimit = 1024

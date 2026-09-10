@@ -4069,7 +4069,35 @@ func (m Model) confirmPromptHints(p *pendingToolCall) string {
 	return hints
 }
 
+// gitStashCommand recognizes the argv form used by the automatic stash gate.
+// Do not infer stash operations from shell strings or incidental argument text.
+func gitStashCommand(p *pendingToolCall) string {
+	if p.Name != "Bash" {
+		return ""
+	}
+	obj, ok := decodeArgObject(p.Args)
+	if !ok {
+		return ""
+	}
+	argv, ok := obj["cmd"].([]any)
+	if !ok || len(argv) < 2 || argv[0] != "git" || argv[1] != "stash" {
+		return ""
+	}
+	parts := make([]string, 0, len(argv))
+	for _, arg := range argv {
+		part, ok := arg.(string)
+		if !ok {
+			return ""
+		}
+		parts = append(parts, part)
+	}
+	return oneLine(strings.Join(parts, " "))
+}
+
 func confirmPromptTitle(p *pendingToolCall) string {
+	if gitStashCommand(p) != "" {
+		return "Allow git stash?"
+	}
 	if title := sessionControlPromptTitle(p); title != "" {
 		return title
 	}
@@ -4243,6 +4271,12 @@ func confirmPromptDetails(p *pendingToolCall) []string {
 		return nil
 	}
 	details := make([]string, 0, 2)
+	if command := gitStashCommand(p); command != "" {
+		details = append(details, "Command: "+truncateArgs(command, 200))
+		if cwd := oneLine(stringArg(obj, "cwd")); cwd != "" {
+			details = append(details, "Directory: "+truncateArgs(cwd, 120))
+		}
+	}
 	if isSessionControlTool(p.Name) {
 		// Show the model's rationale, plan summary, or autonomous brief as
 		// supporting detail while keeping the title a clean question.

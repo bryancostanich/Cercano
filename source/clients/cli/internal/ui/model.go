@@ -1072,20 +1072,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case tea.MouseClickMsg:
-		if m.pendingConfirm != nil {
-			// Confirm pending: the input is dormant, but fold-toggle clicks
-			// on tool entries stay live (like wheel scrolling) so the user
-			// can expand prior tool output to review what the call is about
-			// to touch before answering y/n. All other clicks are ignored.
-			mouse := msg.Mouse()
-			if mouse.Button == tea.MouseLeft && !m.contentPageActive() &&
-				m.activeChat().MouseToggleFold(mouse.X, mouse.Y-m.scrollbarTop) {
-				cmds := m.dispatchToolFetches()
-				m.refreshViewport()
-				return m, tea.Batch(cmds...)
-			}
-			return m, nil
-		}
+		// Confirmation gates keyboard input, not mouse selection or navigation.
 		mouse := msg.Mouse()
 		if mouse.Button == tea.MouseLeft && m.mouseInHeaderTitle(mouse.X, mouse.Y) {
 			m.beginHeaderSelection(mouse.X)
@@ -1187,12 +1174,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					scroller.ScrollTo(scrollOffsetFromClick(mouse.Y, m.contentTop(), state.Height, state.Total))
 				}
 			}
-			return m, nil
-		}
-		if m.pendingConfirm != nil {
-			m.activeChat().StopScrollbarDrag()
-			m.activeChat().ClearSelectionDrag()
-			m.input.CancelDrag()
 			return m, nil
 		}
 		if m.taskPane.Dragging {

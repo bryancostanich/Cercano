@@ -84,19 +84,57 @@ func TestConfirmPending_ClickTogglesFold(t *testing.T) {
 	}
 }
 
-// Clicks that don't land on an arrow row stay swallowed while a confirm is
-// pending — no selection drag, no input focus, confirm still pending.
-func TestConfirmPending_ProseClickStaysIgnored(t *testing.T) {
+// Confirmation captures keyboard input, not mouse selection. The normal
+// click, drag, and release-to-copy path must leave the confirmation pending.
+func TestConfirmPending_ProseSelectionCopies(t *testing.T) {
 	m := buildConfirmClickModel()
+	pending := m.pendingConfirm
 	line := findPlainLine(t, m.mainChat(), "prose after the tools")
 	m = send(t, m, tea.MouseClickMsg{X: 10, Y: line, Button: tea.MouseLeft})
+	if !m.mainChat().SelectionDragging() {
+		t.Fatal("a click during a pending confirm must begin a selection drag")
+	}
+	m = send(t, m, tea.MouseMotionMsg{X: 15, Y: line, Button: tea.MouseLeft})
+	if !m.mainChat().SelectionDragging() || !m.mainChat().SelectionHasRange() {
+		t.Fatal("mouse motion must extend selection during a pending confirm")
+	}
+	selected := m.mainChat().selectedText()
+	if selected == "" {
+		t.Fatal("drag must select non-empty text")
+	}
+	next, cmd := m.Update(tea.MouseReleaseMsg{X: 15, Y: line, Button: tea.MouseLeft})
+	m = next.(Model)
+	if cmd == nil || m.selectionNotice != "copied selection" {
+		t.Fatal("release must issue the normal selection copy command")
+	}
+	if m.mainChat().SelectionDragging() || m.mainChat().selectedText() != selected {
+		t.Fatal("release must stop dragging and retain the selected text")
+	}
 	if !m.mainChat().entries[1].Tool.Folded {
-		t.Error("a prose click must not toggle any fold")
+		t.Error("a prose drag must not toggle any fold")
 	}
-	if m.pendingConfirm == nil {
-		t.Error("a prose click must not resolve the pending confirm")
+	if m.pendingConfirm != pending {
+		t.Error("selection must not resolve or replace the pending confirm")
 	}
-	if m.mainChat().SelectionDragging() {
-		t.Error("a click during a pending confirm must not begin a selection drag")
+}
+
+func TestConfirmPending_ScrollbarDrag(t *testing.T) {
+	m := buildDragModel()
+	pending := &confirmRequest{}
+	m.pendingConfirm = pending
+	m = send(t, m, tea.MouseClickMsg{X: 79, Y: 2, Button: tea.MouseLeft})
+	if !m.mainChat().ScrollbarDragging() {
+		t.Fatal("confirmation must not block grabbing the scrollbar")
+	}
+	m = send(t, m, tea.MouseMotionMsg{X: 79, Y: 9, Button: tea.MouseLeft})
+	if m.mainChat().YOffset() == 0 {
+		t.Fatal("confirmation must not block dragging the scrollbar")
+	}
+	m = send(t, m, tea.MouseReleaseMsg{X: 79, Y: 9, Button: tea.MouseLeft})
+	if m.mainChat().ScrollbarDragging() {
+		t.Fatal("release must stop scrollbar dragging")
+	}
+	if m.pendingConfirm != pending {
+		t.Fatal("scrollbar interaction must leave confirmation pending")
 	}
 }

@@ -84,7 +84,7 @@ func TestRenderConfirmPrompt_SuggestPlan_AsksPlainQuestionNotDestructive(t *test
 	}
 }
 
-func TestRenderConfirmPrompt_RequestPlanApproval_AsksToExecute(t *testing.T) {
+func TestRenderConfirmPrompt_RequestPlanApproval_AsksToLeavePlanMode(t *testing.T) {
 	m := minimalModel()
 	raw := m.renderConfirmPrompt(&pendingToolCall{
 		Name:       "request_plan_approval",
@@ -92,8 +92,11 @@ func TestRenderConfirmPrompt_RequestPlanApproval_AsksToExecute(t *testing.T) {
 		Permission: "X",
 	})
 	s := stripAnsiCSI(raw)
-	if !strings.Contains(s, "start executing") {
-		t.Errorf("request_plan_approval prompt should ask to execute, got: %q", s)
+	if !strings.Contains(s, "Plan is ready — leave plan mode?") {
+		t.Errorf("request_plan_approval prompt should ask to leave plan mode, got: %q", s)
+	}
+	if strings.Contains(s, "executing") {
+		t.Errorf("request_plan_approval prompt should not imply execution, got: %q", s)
 	}
 	if strings.Contains(s, "DESTRUCTIVE") || strings.Contains(s, "⚠") {
 		t.Errorf("request_plan_approval must not be DESTRUCTIVE/⚠: %q", s)

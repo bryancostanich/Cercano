@@ -4399,7 +4399,7 @@ func sessionControlPromptTitle(p *pendingToolCall) string {
 	case "suggest_plan":
 		return "Enter plan mode to work this out before making changes?"
 	case "request_plan_approval":
-		return "Plan is ready — leave plan mode and start executing it?"
+		return "Plan is ready — leave plan mode?"
 	case "plan_exit":
 		return "Leave plan mode?"
 	case "suggest_autonomous":

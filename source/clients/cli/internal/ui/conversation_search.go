@@ -246,17 +246,35 @@ func (s *conversationSearch) jump(delta int) {
 }
 
 func (c *chatView) renderSearchOnLine(line string, row int) string {
-	if c.search == nil {
+	if c.search == nil || len(c.search.paint[row]) == 0 {
 		return line
 	}
+	// Matches are ordered, nonoverlapping terminal-cell spans. Always cut
+	// from the original line: cutting an already-highlighted line replays
+	// generated SGR sequences and makes repeated highlights grow exponentially.
+	var out strings.Builder
+	width := ansi.StringWidth(line)
+	cursor := 0
 	for _, paint := range c.search.paint[row] {
+		from, to := max(cursor, paint.span.from), min(width, paint.span.to)
+		if from >= to {
+			continue
+		}
+		if cursor < from {
+			out.WriteString(ansi.Cut(line, cursor, from))
+		}
 		sgr := "\x1b[4m"
 		if paint.match == c.search.active {
 			sgr = theme.SelectionBackgroundSGR(c.palette)
 		}
-		line = highlightRange(line, paint.span.from, paint.span.to, sgr)
+		segment := ansi.Cut(line, from, to)
+		out.WriteString(highlightRange(segment, 0, to-from, sgr))
+		cursor = to
 	}
-	return line
+	if cursor < width {
+		out.WriteString(ansi.Cut(line, cursor, width))
+	}
+	return out.String()
 }
 
 func (m Model) searchVisible() bool {

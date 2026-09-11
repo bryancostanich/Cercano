@@ -2,10 +2,7 @@
 
 ## Status
 
-Seed spec. This effort has no code and no plan yet. It exists to hold the
-requirements that accumulate while other efforts defer to it, so that when the
-restructure is planned it starts from recorded constraints rather than
-reconstructed memory.
+Supporting routing requirements for the coordinated routing-and-settings effort. The user approved delivering both together. The authoritative spec and single implementation plan live in efforts/deepinfra-cloud-profile-ux/. This document is not a separate prerequisite effort. Historical scope exclusions below are superseded by that approval; the combined plan remains an unapproved implementation draft.
 
 Two shipped specs already name this effort as out of scope and defer to it:
 
@@ -49,6 +46,12 @@ Preserve the existing cloud profile authentication system, including OS keychain
 storage and per-profile credentials. Preserve the canonical per-provider tier
 tables and the existing primary/backup failover mechanism, extending the latter
 to the new tier structure rather than replacing it.
+
+## Confirmed routing clarification
+
+Primary chat dispatches delegated work to the independent Secondary tier. Primary and Secondary each have an optional, independently configured backup. Primary's backup keeps the main chat running within Primary; Secondary's backup keeps delegated work running within Secondary. Secondary is not Primary's backup. Both backup assignments may be left unset. Dispatch defaults to Secondary / Premium; Primary chat defaults to Premium. Destination tiers and model quality tiers are distinct.
+
+These confirmed semantics supersede any suggestion below that Primary-to-Secondary failure escalation implements Primary backup. The older discussion of cross-tier degradation is not authorization to substitute one mechanism for the other. Tests must cover independent backup assignments, absent backups, and consistent host/worker routing. Automatic Secondary-to-Local fallback remains prohibited.
 
 ## Constraints
 

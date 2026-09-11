@@ -1,99 +1,77 @@
-# DeepInfra Cloud Profile Model Selection
+# Coordinated Routing and Cloud Profile Settings
 
 ## Problem and motivation
 
-The unified catalog can represent downloadable local models and hosted DeepInfra models, but the settings experience does not yet respect that distinction. Hosted models do not belong in local model management. DeepInfra selection belongs inside its cloud provider profile, where users can override the provider's recommended tier choices without changing the recommendations themselves.
+Settings and routing must describe the same execution model. The current binary Cloud/Local router cannot express Primary chat delegating to an independent Secondary destination. Its existing backup cloud profile serves Primary failover, not Secondary dispatch. Cloud settings expose one profile-wide model rather than independent model-quality choices, and hosted catalog entries do not belong in local download management.
 
-## Goals
+## Status and ownership
 
-Rename the Models settings tab to Local Models and exclude hosted entries from its browse and download workflow. Preserve local downloads, runtime management, tier selection, and source-qualified references.
+The user approved one coordinated routing-and-settings effort, Primary chat at Premium, dispatch to Secondary at Premium, and independently optional backups for both destinations. This document and plan.md are the authoritative effort. The earlier primary-secondary-local-tiers seed is supporting history, not a prerequisite or separate implementation plan. All earlier exclusions of the routing changes are withdrawn. Product approvals do not constitute execution approval of the plan.
 
-Inside a DeepInfra profile in Cloud settings, expose economy, standard, and premium model choices. Show the effective choice and whether it is inherited from the provider recommendation or explicitly overridden for this profile. Offer provider-specific model search with available pricing and context information. Selecting a model changes only that profile's choice for that tier. Restoring the recommendation removes the override rather than saving a copy of the current default.
+## Goals and approved decisions
 
-Ship these DeepInfra recommendations: economy is openai/gpt-oss-120b; standard is zai-org/GLM-5.3-Flash; premium is zai-org/GLM-5.3. Economy remains the provisional low-cost baseline. These choices were confirmed by the user after a research survey; benchmark leadership and live service reliability have not been established by Cercano testing.
+Primary is the main-chat execution destination. It normally uses a frontier model. If its configured provider becomes unavailable, busy, or exhausts its allowance, its optional backup can continue main-chat work within Primary. OpenAI to Claude is an example, not a required vendor pairing.
 
-## Constraints and invariants
+Primary dispatches delegated work to Secondary. Secondary is independent of Primary's preferred and backup profiles. Secondary has its own optional backup for continuity of delegated work. Either backup may be unset. Primary failover must neither select Secondary implicitly nor change Secondary's assignment. Secondary failover must not use Primary's backup merely because it exists.
 
-Provider recommendations remain shipped defaults. Persist only user customizations, so untouched choices follow future recommendation updates. Never rewrite provider defaults when editing a profile. Two profiles for the same provider may retain different model choices.
+Primary, Secondary, and Local are execution destinations. Economy, Standard, and Premium are model-quality levels within a destination. General chat defaults to Primary / Premium. Dispatch defaults to Secondary / Premium. Tasks contain destination/quality assignments, not persisted model IDs. Profile settings specify which models fill their quality levels. Existing per-invocation model overrides are separate functionality and remain supported; they do not restore legacy profile-wide pin precedence.
 
-Preserve the existing cloud authentication and per-profile keychain behavior, provider routes, and primary/backup failover. On failover, model selection must use the destination profile's applicable choices and provider recommendations, not blindly carry an originating vendor's model ID across vendors.
+Explicit dispatch difficulty overrides the saved quality default for that call only: light selects fast_light (Economy), standard selects everyday (Standard), and deep selects most_capable (Premium). Omitted difficulty uses the saved default, initially Premium. Preserve the existing fast_light handling of unrecognized difficulty rather than creating another product gate. Permission tiers are unrelated to model-quality tiers.
 
-Reuse the existing DeepInfra catalog source backed by /models/list, including its eligibility filters, bounded fetch, cache, and stale-on-failure behavior. Do not add a second independent DeepInfra index implementation. Provider-specific discovery must not leak unrelated provider models into a profile picker. Keep existing selections intact when discovery fails or no longer lists them. Missing metadata must not be presented as zero-cost service or unlimited context.
+Each cloud profile has sparse tier_overrides keyed economy, standard, and premium. Map most_capable to Premium, everyday to Standard, and fast_light/fast_light_text to Economy. Persist only customizations. Removing an override restores inherited recommendations, so future shipped changes affect untouched choices without replacing explicit choices. Two profiles for the same vendor can differ.
 
-Preserve cloud authentication and intentional user model choices, but do not assume that current profile-wide pin precedence correctly represents those choices. The user clarified two separate axes: provider model-set overrides and task assignments (general chat, sub-agent dispatch, image processing, etc.). A task resolving to a single model is not a provider-wide override. Do not convert a single profile Model into three tier overrides; that proposal was withdrawn. Trace assignment writes and reads before defining compatibility or migration behavior. Existing OpenAI and Anthropic override behavior was not thoroughly exercised and must not be treated as the intended contract solely because the code implements it.
+DeepInfra recommendations are Economy openai/gpt-oss-120b, Standard zai-org/GLM-5.3-Flash, and Premium zai-org/GLM-5.3. These are user-approved choices, not claims of measured reliability or benchmark leadership.
 
-Local/open recommendation resolution remains server-side. No local-runtime catalog defaults move into the configuration package.
+The old profile-wide Model/ModelPinned behavior is replaced outright, without migration into tier overrides or preservation of its precedence. This does not authorize removing credentials, authentication routes, endpoint configuration, or existing Primary/backup assignments.
 
-## Decisions
+Each cloud profile also has a dedicated image-model choice independent of its text levels. Reuse the existing image inspection pipeline and fail-closed model-capability evidence. No new shipped image recommendation was approved; do not invent one or substitute the chat model. Preserve the existing optional local vision slot and open-only embedding behavior.
 
-The user confirmed the layered model: each provider supplies its default or recommended model set, and users override choices within their profiles. Provider-wide defaults and profile-specific overrides are complementary, not alternative designs. This effort implements that confirmed behavior rather than reopening the scope of overrides.
+## Routing and failure invariants
 
-The user confirmed that hosted DeepInfra selection belongs inside its Cloud profile, not in Local Models and not in a shared cross-provider cloud browser.
+Provider failover within a destination and degradation across destinations are distinct policies. Do not build dispatch by forcing Primary to fail, swapping the active profile, or relabeling Primary's backup as Secondary. Provider wrappers must retain destination identity and the requested model quality while resolving the actual model against the selected backup profile. No originating vendor model ID may leak blindly into another vendor's request.
 
-The user confirmed GLM-5.3 for premium and GLM-5.3-Flash for standard. Keep gpt-oss-120b for economy for now. Premium therefore changes from the existing DeepSeek-V4-Pro recommendation.
+Automatic Secondary-to-Local fallback is prohibited. A Secondary request that cannot be served must not silently run on Local or Primary. Surface failure through the existing tool/error path after applicable retries and its optional backup are exhausted. Hard locality restrictions remain authoritative: open_only must make no cloud calls and cloud_only must make no Local calls. Existing non-dispatch co-processor and image routing policies remain the baseline unless adapting them is required to enforce these boundaries; do not accidentally send all RoleCoproc work to Secondary.
 
-No additional product-level alternatives are needed to record these settled decisions. Technical compatibility questions discovered while planning must be surfaced separately, not silently answered in implementation.
+Destinations must resolve profile identity separately from hardware placement. Do not equate a profile name or provider backend with a destination. Preserve access to local, remote OpenAI-compatible, and cloud providers and the existing explicit Local runtime selection. Do not introduce GPU hand-off or automatic local model eviction to make Secondary fit; GPU strategy remains outside this effort. Local embeddings remain separate.
 
-### New: Tier Override Schema and Task Assignments
+Use existing retry/error classification where it meets the continuity requirements. Busy, rate-limit, quota/allowance, authentication, cancellation, and partially streamed failures require focused probes. No promise of cross-provider seamless continuation justifies duplicate visible output or repeated side-effecting tool execution. Stop for review if the existing streaming/retry contract cannot satisfy those safety constraints without a new policy.
 
-The user approved the cloud profile override schema: profile-local sparse `tier_overrides: {economy: model_id, standard: model_id, premium: model_id}`. This structure allows users to override provider recommendations per tier without affecting other tiers.
+## Configuration, settings, and transport contract
 
-Task assignments continue using the existing config.Tier taxonomy:
-- most_capable -> premium
-- everyday -> standard  
-- fast_light and fast_light_text -> economy
+Reuse existing configuration persistence and profile identity. Existing active and backup cloud assignments retain their Primary meaning. Add independent Secondary and Secondary-backup bindings; no configuration migration may repurpose Primary's backup. Empty backup assignment means none. Validate references and prevent self-failover loops. Missing or removed bindings must not silently bind another destination.
 
-Vision model selection remains a separate undecided axis. Embedding models remain open-only.
+Keep sparse profile choices and saved task assignments server-owned. Settings must distinguish inherited values from explicit overrides. Profile Save applies the model-quality and image draft together; selecting or resetting a value only edits the draft. Discard abandons it, picker cancellation changes nothing, and leaving with unsaved edits prompts the user. Authentication, sign-in, and activation remain separate actions.
 
-This approval specifically does NOT resolve:
-- Task assignment schema details
-- Transport presence semantics  
-- Migration of legacy Model pins
-- Dispatch precedence rules
-- Vision model selection
+Reuse the existing mutation conventions: omitted changes preserve values, explicit set replaces them, and explicit clear removes the override or optional assignment. New fields need presence information sufficient to distinguish omission from clearing. Preserve unrelated profile fields, including route, region, and AWS profile. Do not build a general patch framework. Keep obsolete protobuf field numbers reserved or deprecated rather than reusing them for new semantics.
 
-The tier override schema is approved for implementation; remaining compatibility and migration questions require separate design review.
+Transport must carry all referenced destination profiles, optional backup identities, profile overrides, dedicated image choices, task assignments, and effective Local vision selection. Deduplicate profiles by identity when referenced more than once. Continue fetching credentials on demand through the existing profile-keyed mechanism; do not put new secrets in snapshots or settings responses. Host and worker must use the same resolution rules. Edits to any referenced preferred or backup profile must refresh future provider/snapshot state, not just edits to the active profile. Preserve the existing per-turn worker snapshot lifecycle rather than promising mid-turn rebinding.
 
-## Confirmed task-assignment semantics
+Inside Cloud settings, expose destination assignments and clearly distinguish Primary backup from Secondary and Secondary backup. Profile editors own model choices; task controls own destination/quality assignments. Reuse provider-specific discovery and preserve selected IDs absent from results. Display honest unknown pricing/context values.
 
-The user confirmed that tasks select tiers. Users override the models filling those tiers within provider profiles; task bindings do not contain model overrides. Changing a task's tier changes its requested capability level. Changing a profile's tier model affects every task using that profile and tier. Clearing a profile override restores its shipped recommendation. Backup resolution keeps the requested tier and resolves against the destination profile.
+Rename Models to Local Models and exclude hosted entries from browse/download/RAM estimation there. Preserve local runtime management, sparse overrides, source-qualified references, and server-side local recommendations. DeepInfra discovery belongs inside its Cloud profile and reuses the registered /models/list catalog, eligibility filters, bounded fetches, cache, and stale-on-error behavior. Do not create a second catalog implementation.
 
-This supersedes the earlier proposal for a profile-plus-tier task binding with an optional task model override. The existing per-invocation dispatch ModelOverride is a separate compatibility surface to inventory; its continued availability or removal is not decided by these settings semantics alone.
+## Source audit and verification limits
 
-General chat, sub-agent dispatch, and image processing must consume task-tier assignments consistently in host and worker paths. Image processing must not silently inherit the general chat model and must require a suitable model. Existing locus boundaries, including open-only prohibition on cloud calls, remain authoritative. This effort does not implement the larger Primary/Secondary/Local provider-routing redesign.
+Static inspection on 2026-09-10 found locus.TierLocal/TierCloud, inference.Tiers.Cloud/Open, and provider selection driven by Main/Coproc. Dispatch's model callback receives only isCloud and quality; it cannot identify Secondary. Host and worker main model resolution use Everyday rather than the approved Premium default. Omitted dispatch difficulty currently selects fast_light.
 
-## Confirmed dispatch precedence
+CloudProfileInfo and UpsertCloudProfileRequest expose one model field. GetCloudProvidersResponse and ConfigSnapshot expose the existing Primary active/backup assignments. Worker SnapshotConfig serializes those profiles individually. New bindings and selection fields must cross those interfaces explicitly. Existing local sparse mutation and profile Save machinery are reusable; the immediate existing-model save exception must be removed for the new editor.
 
-The saved dispatch task tier is a default, not a forced tier. Omitted per-call difficulty uses the saved tier, with `fast_light` as the initial default when no assignment is saved. An explicit `light`, `standard`, or `deep` request takes precedence and selects `fast_light`, `everyday`, or `most_capable`, respectively. This selects a tier only; profile model resolution and locus routing remain separate. Handling unrecognized difficulty values remains to be specified.
+Earlier audits found active-only provider refresh and preservation of legacy pins on empty model writes. Reproduce these before fixing them. Current cloud discovery support and model-metadata foundation must be rechecked in the implementation worktree: historical observations differ across commits. Reuse any already-landed functionality rather than rebuilding it or treating old observations as fresh failures.
 
-The saved-default versus explicit-difficulty design gate is resolved by user approval; references below to that gate describe the original review scope, not a pending choice.
+Image byte transport, stable-ID placeholders, conversation-scoped storage, inspection, caching, and confirmed model-capability gates already exist. Local vision selection was omitted from the inspected worker snapshot slot list. Cloud vision wiring used the chat/everyday choice. Reproduce selection/transport gaps; do not rewrite image storage, byte transport, or cache semantics. Evidence must cover each selected and backup image model, not merely transport-wide SupportsVision.
 
-## Planning gates
-
-The task-tier/profile-override separation is approved. Exact configuration and transport shape, handling existing profile-wide Model pins, interaction of a saved dispatch assignment with per-invocation difficulty, and cloud vision-slot capability handling still need concrete design review before affected implementation. These are not licenses to select a migration or schema silently. The execution plan begins with this review and must be revised and approved before production edits.
-
-## Current implementation observations
-
-The CLI config tab is currently labeled Models in source/clients/cli/internal/ui/config_tabs.go. The cloud model option helper in cloud_models.go preserves the current model even when it is absent from discovery results.
-
-The server ListCloudProfileModels endpoint currently accepts only messages-flavor profiles and fetches their /v1/models list. It rejects chat_completions profiles, so DeepInfra discovery must be integrated into that profile-specific workflow.
-
-Existing cloud resolution supports a profile-wide explicit model pin ahead of provider tier defaults. Separate per-tier profile overrides are an implementation gap, not a new product decision.
-
-Settings write-path trace: cloud_section.go exposes a single `model` field; cloud_commit.go sends it as CloudProfileInfo.Model through UpsertCloudProfile (immediately for existing profiles). The server saves it as CloudProfile.Model and marks nonempty values ModelPinned. The legacy UpdateConfig.CloudModel path also writes the active profile's Model. Neither request identifies a task. UpsertCloudProfile treats an empty Model as omission and preserves the previous value, so clearing cannot currently express restore-inheritance through that field. ResolveCloudModelForTier returns a nonempty profile Model before tier lookup, independently of ModelPinned.
-
-Local settings instead write runtime-qualified slots through UpdateConfig.ModelTierKey/ModelTierValue and ApplyModelTierPatch into Models.Open.Overrides. These are model taxonomy slots, not independent task-to-profile bindings; tasks choose their slots in code. Dispatch has a separate per-invocation ModelOverride that is not persisted by this settings path.
-
-Image task wiring is asymmetric: local uses the explicit vision slot; host cloud vision uses activeCloudModel(), and worker cloud vision resolves TierEveryday with legacy fallbacks. BuildVision accepts a nonempty resolved model and provider without a capability check at that selection boundary. Therefore a cloud text-model choice can also become the image task's model. These are static code observations, not a reproduced runtime failure. The implementation plan must keep provider overrides and task assignments distinct rather than treating existing profile Model as a proven task assignment.
+This planning work ran no builds, tests, inference, or user-setting mutations. Delegation, execution, worktree, and checkpoint tools were unavailable in the planning tool set; focused read tools were used. Documentation is not committed by this planning work.
 
 ## Non-goals
 
-Do not implement the larger Primary/Secondary/Local routing redesign, replace the cloud authentication system, introduce a shared cloud marketplace, or redesign local runtime tier configuration. Do not treat research findings as measured Cercano agent performance or run a broad benchmark suite as part of this UX change.
+No authentication replacement, cloud marketplace, new independent DeepInfra index, generic patch framework, legacy model-pin migration, image-cache redesign, GPU scheduling strategy, or automatic local fallback for Secondary. Do not change unrelated permission tiers, co-processor defaults, watchdog overrides, or local model defaults as collateral work. No paid inference or user credential modification is required for deterministic verification.
 
 ## Acceptance criteria
 
-A user can open a DeepInfra profile, see all three effective recommended models, search eligible DeepInfra models, override one tier, save and reload without changing another tier or profile, and restore inheritance for that tier. A later shipped recommendation update affects inherited choices but leaves explicit overrides unchanged.
+Primary chat and Secondary dispatch resolve their approved default and explicit quality choices on both host and worker. A four-profile fixture proves Primary preferred/backup and Secondary preferred/backup are independent, including either or both backups absent. Primary failover leaves Secondary unchanged. Secondary failover preserves destination and quality without invoking Local or Primary. Open-only/cloud-only restrictions hold.
 
-Hosted models never appear as local download candidates. Downloadable model browsing and source-qualified download/RAM-estimate behavior continue to work.
+Configuration save/reload, explicit clears, profile removal/reference validation, and worker transport preserve these assignments and sparse overrides. Authentication and route fields survive model edits. Context budgeting and usage attribution follow the actual selected provider/model, including failover. Cancellation and partial-stream paths do not duplicate output or tool effects.
 
-Tests cover profile isolation, override persistence and clearing, recommendation inheritance, existing pin compatibility, backup profile resolution, provider-scoped discovery, missing metadata, discovery failures, and hosted/local UI separation. Focused server/client integration tests cover any changed transport contract. No production settings or credentials are changed during verification.
+Profile Save/Discard, reset-to-inheritance, task defaults, dedicated image selection, same-vendor profile isolation, and selection preservation during discovery failure work through server/client interfaces. Image requests require confirmed selected-model evidence, including failover, and Local vision survives the worker round trip.
+
+Hosted models remain outside Local Models and cannot enter download or RAM-estimate paths. Focused unit, interface integration, and CLI smoke tests demonstrate the complete flow without paid inference. All results and unrun checks are reported honestly before completion.

@@ -418,3 +418,22 @@ func TestAutonomousCompletionDoesNotRequireDecisionReapproval(t *testing.T) {
 		}
 	}
 }
+
+// Lock the always-on threshold without weakening the plan approval gate.
+func TestPlanningModeTriggerDefaultsToDirectExecution(t *testing.T) {
+	p, _ := Get("planning-mode")
+	for _, want := range []string{
+		"Default to direct execution", "clear, bounded", "even across multiple files",
+		"File count or multiple steps alone", "substantial", "architecture",
+		"explicitly asks", "brief inspection or a focused question",
+	} {
+		if !strings.Contains(p.Trigger, want) {
+			t.Errorf("planning trigger missing %q", want)
+		}
+	}
+	for _, stale := range []string{"large, ambiguous, or multi-step enough", "the moment you conclude"} {
+		if strings.Contains(p.Trigger, stale) {
+			t.Errorf("overbroad planning trigger: %q", stale)
+		}
+	}
+}

@@ -35,7 +35,7 @@ func TestSuggestPlan_Execute_EntersPlanProfile(t *testing.T) {
 	svc := capabilities.Services{
 		EnterProfile: func(convID, name string) error { entered = name; return nil },
 	}
-	args, _ := json.Marshal(map[string]any{"reason": "spans 4 files; approach uncertain"})
+	args, _ := json.Marshal(map[string]any{"reason": "database migration requires compatibility and rollout decisions"})
 	call := &capabilities.Call{Args: args, Svc: svc}
 
 	res, err := SuggestPlan().Execute(context.Background(), call)
@@ -46,7 +46,7 @@ func TestSuggestPlan_Execute_EntersPlanProfile(t *testing.T) {
 		t.Fatalf("EnterProfile called with %q, want \"plan\"", entered)
 	}
 	// The reason is surfaced back to the model in the result text.
-	if !strings.Contains(res.Text, "spans 4 files") {
+	if !strings.Contains(res.Text, "database migration") {
 		t.Errorf("result should echo the reason; got %q", res.Text)
 	}
 }
@@ -70,5 +70,27 @@ func TestSuggestPlan_Execute_NoArgs(t *testing.T) {
 	}
 	if entered != "plan" {
 		t.Fatalf("entered = %q, want plan", entered)
+	}
+}
+
+func TestSuggestPlanDescriptionRequiresSignificantWork(t *testing.T) {
+	desc := SuggestPlan().Description()
+	for _, want := range []string{
+		"Default to direct execution", "clear, bounded", "even across multiple files",
+		"File count or multiple steps alone", "substantial", "architecture",
+		"explicitly asks", "brief inspection or a focused question",
+	} {
+		if !strings.Contains(desc, want) {
+			t.Errorf("suggest_plan description missing %q", want)
+		}
+	}
+	for _, stale := range []string{"work would span multiple files or phases", "small, clear, single-file changes"} {
+		if strings.Contains(desc, stale) {
+			t.Errorf("overbroad planning criterion: %q", stale)
+		}
+	}
+	schema := string(SuggestPlan().Schema())
+	if strings.Contains(schema, "spans 4 files") || !strings.Contains(schema, "migration") {
+		t.Fatal("reason example must describe consequential planning needs, not file count")
 	}
 }

@@ -643,7 +643,7 @@ Do not rewrite the spec yourself.
 		Name:        "planning-mode",
 		Description: "Explore read-only, then author an effort's spec and phased plan before touching anything.",
 		Domain:      DomainCore,
-		Trigger:     "When a request is large, ambiguous, or multi-step enough to warrant a written plan before any changes — or the moment you conclude you should write a spec or plan — you MUST call `suggest_plan` first. Do NOT author `spec.md`/`plan.md` yourself outside planning mode; deciding a plan is needed is itself the trigger to call `suggest_plan`. Once in planning mode, pull the `planning-mode` protocol and follow it.",
+		Trigger:     "Default to direct execution for clear, bounded requests: routine bug fixes, text/UI tweaks, straightforward features, mechanical edits, and their tests, even across multiple files. File count or multiple steps alone do not justify planning mode. Resolve narrow uncertainty with brief inspection or a focused question, not a planning proposal. Suggest planning only for substantial work where a reviewed design materially reduces risk, such as consequential architecture tradeoffs, migrations with rollout decisions, or complex cross-subsystem sequencing, or when the user explicitly asks for a formal plan. If a formal spec or plan is warranted and you are not already in planning mode, you MUST call `suggest_plan` first. Do NOT author `spec.md`/`plan.md` outside planning mode or bypass its approval gate. Once in planning mode, pull the `planning-mode` protocol and follow it.",
 		Body: `# Planning Mode Protocol
 
 ## When This Applies

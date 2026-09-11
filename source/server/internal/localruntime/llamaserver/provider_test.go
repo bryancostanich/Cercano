@@ -222,6 +222,9 @@ func findModelByID(models []localruntime.ModelRecord, id string) (localruntime.M
 
 func TestAdoptLiveSiblingReusesHealthyRegisteredServer(t *testing.T) {
 	health := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if capacityFixture(w, r) {
+			return
+		}
 		if r.URL.Path != "/health" {
 			t.Fatalf("unexpected health path %s", r.URL.Path)
 		}

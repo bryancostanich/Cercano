@@ -331,6 +331,7 @@ func (p *Provider) Start(ctx context.Context, req localruntime.StartRequest, sin
 		launchConfig: launchConfig, plannedContext: planned,
 		model: model,
 		record: localruntime.InstanceRecord{
+			Context:   localruntime.ContextCapacity{PlannedTokens: planned.Tokens, PlannedSource: planned.Source},
 			ID:        id,
 			Runtime:   runtimeName,
 			ModelID:   model.ID,
@@ -415,6 +416,9 @@ func (p *Provider) Start(ctx context.Context, req localruntime.StartRequest, sin
 	}
 
 	p.updateRecord(id, sink, func(record *localruntime.InstanceRecord) {
+		if record.State != localruntime.InstanceStarting || record.Context.ConfirmedTokens <= 0 {
+			return
+		}
 		record.State = localruntime.InstanceRunning
 		record.ReadyAt = time.Now()
 	})
@@ -459,6 +463,13 @@ func (p *Provider) adoptLiveSibling(ctx context.Context, model localruntime.Mode
 	}
 	p.running[id] = inst
 	p.mu.Unlock()
+	if err := p.confirmCapacity(ctx, id, endpoint); err != nil {
+		p.updateRecord(id, sink, func(r *localruntime.InstanceRecord) {
+			r.LastError = err.Error()
+			r.State = localruntime.InstanceFailed
+			invalidateCapacity(r)
+		})
+	}
 	msg := fmt.Sprintf("adopted llama-server sidecar pid %d from owner pid %d for %s", sibling.server.PID, sibling.owner.OwnerPID, model.DisplayName)
 	p.emit(sink, "info", id, model.ID, msg)
 	p.event(crashlog.EventAdopt, msg, crashlog.RuntimeInfo{
@@ -467,7 +478,9 @@ func (p *Provider) adoptLiveSibling(ctx context.Context, model localruntime.Mode
 		PID:        sibling.server.PID,
 		Port:       sibling.server.Port,
 	}, map[string]any{"previous_owner_pid": sibling.owner.OwnerPID})
+	p.mu.RLock()
 	out := inst.record
+	p.mu.RUnlock()
 	return &out, true
 }
 
@@ -482,6 +495,7 @@ func (p *Provider) Stop(_ context.Context, instanceID string) error {
 	cmd := instance.cmd
 	modelID := instance.record.ModelID
 	port := instance.record.Port
+	invalidateCapacity(&instance.record)
 	instance.record.State = localruntime.InstanceStopped
 	if instance.adopted {
 		ownerPID := instance.ownerPID
@@ -872,6 +886,7 @@ func (p *Provider) startProcess(instanceID, binary string, sink localruntime.Log
 	p.mu.Lock()
 	instance.cmd = cmd
 	instance.record.PID = cmd.Process.Pid
+	invalidateCapacity(&instance.record)
 	instance.record.State = localruntime.InstanceStarting
 	instance.record.StartedAt = time.Now()
 	instance.record.LastError = ""
@@ -955,7 +970,7 @@ func (p *Provider) waitReady(ctx context.Context, instanceID, endpoint string) e
 		if err == nil {
 			if resp.StatusCode == http.StatusOK {
 				resp.Body.Close()
-				return nil
+				return p.confirmCapacity(ctx, instanceID, endpoint)
 			}
 			lastErr = fmt.Errorf("health returned status %d", resp.StatusCode)
 			resp.Body.Close()
@@ -1123,7 +1138,9 @@ func (p *Provider) watch(instanceID, binary string, sink localruntime.LogSink) {
 			return
 		}
 		if instance.stopping {
+			invalidateCapacity(&instance.record)
 			instance.record.State = localruntime.InstanceStopped
+			invalidateCapacity(&instance.record)
 			instance.record.LastExitCode = exitCode
 			record := instance.record
 			p.mu.Unlock()
@@ -1136,6 +1153,7 @@ func (p *Provider) watch(instanceID, binary string, sink localruntime.LogSink) {
 		// here, mutually exclusive with ReloadConfig's write; snapshot()'s RLock
 		// under the held Lock would deadlock.
 		shouldRestart := p.cfg.Restart.Enabled && instance.record.RestartCount < p.cfg.Restart.MaxAttempts
+		invalidateCapacity(&instance.record)
 		instance.record.LastExitCode = exitCode
 		instance.record.LastError = errorString(err)
 		if shouldRestart {
@@ -1194,6 +1212,9 @@ func (p *Provider) updateRecord(instanceID string, sink localruntime.LogSink, fn
 		return
 	}
 	fn(&instance.record)
+	if instance.record.State != localruntime.InstanceRunning && instance.record.State != localruntime.InstanceHealthy {
+		invalidateCapacity(&instance.record)
+	}
 	record := instance.record
 	p.mu.Unlock()
 	p.updateSink(sink, record)

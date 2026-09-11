@@ -639,6 +639,10 @@ message RuntimeInstance {
   int32 last_exit_code = 12;
   string last_error = 13;
   string log_path = 14;
+  int64 planned_context_tokens = 15;
+  string planned_context_source = 16;
+  int64 confirmed_context_tokens = 17;
+  string context_confirmed_at = 18;
 }
 
 message RuntimeEndpoint {

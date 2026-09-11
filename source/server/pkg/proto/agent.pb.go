@@ -2562,23 +2562,27 @@ func (x *RuntimeModel) GetContextLength() int64 {
 }
 
 type RuntimeInstance struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Runtime       string                 `protobuf:"bytes,2,opt,name=runtime,proto3" json:"runtime,omitempty"`
-	ModelId       string                 `protobuf:"bytes,3,opt,name=model_id,json=modelId,proto3" json:"model_id,omitempty"`
-	State         string                 `protobuf:"bytes,4,opt,name=state,proto3" json:"state,omitempty"`
-	Pid           int32                  `protobuf:"varint,5,opt,name=pid,proto3" json:"pid,omitempty"`
-	Address       string                 `protobuf:"bytes,6,opt,name=address,proto3" json:"address,omitempty"`
-	Port          int32                  `protobuf:"varint,7,opt,name=port,proto3" json:"port,omitempty"`
-	Endpoint      string                 `protobuf:"bytes,8,opt,name=endpoint,proto3" json:"endpoint,omitempty"`
-	StartedAt     string                 `protobuf:"bytes,9,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
-	ReadyAt       string                 `protobuf:"bytes,10,opt,name=ready_at,json=readyAt,proto3" json:"ready_at,omitempty"`
-	RestartCount  int32                  `protobuf:"varint,11,opt,name=restart_count,json=restartCount,proto3" json:"restart_count,omitempty"`
-	LastExitCode  int32                  `protobuf:"varint,12,opt,name=last_exit_code,json=lastExitCode,proto3" json:"last_exit_code,omitempty"`
-	LastError     string                 `protobuf:"bytes,13,opt,name=last_error,json=lastError,proto3" json:"last_error,omitempty"`
-	LogPath       string                 `protobuf:"bytes,14,opt,name=log_path,json=logPath,proto3" json:"log_path,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                  protoimpl.MessageState `protogen:"open.v1"`
+	Id                     string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Runtime                string                 `protobuf:"bytes,2,opt,name=runtime,proto3" json:"runtime,omitempty"`
+	ModelId                string                 `protobuf:"bytes,3,opt,name=model_id,json=modelId,proto3" json:"model_id,omitempty"`
+	State                  string                 `protobuf:"bytes,4,opt,name=state,proto3" json:"state,omitempty"`
+	Pid                    int32                  `protobuf:"varint,5,opt,name=pid,proto3" json:"pid,omitempty"`
+	Address                string                 `protobuf:"bytes,6,opt,name=address,proto3" json:"address,omitempty"`
+	Port                   int32                  `protobuf:"varint,7,opt,name=port,proto3" json:"port,omitempty"`
+	Endpoint               string                 `protobuf:"bytes,8,opt,name=endpoint,proto3" json:"endpoint,omitempty"`
+	StartedAt              string                 `protobuf:"bytes,9,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
+	ReadyAt                string                 `protobuf:"bytes,10,opt,name=ready_at,json=readyAt,proto3" json:"ready_at,omitempty"`
+	RestartCount           int32                  `protobuf:"varint,11,opt,name=restart_count,json=restartCount,proto3" json:"restart_count,omitempty"`
+	LastExitCode           int32                  `protobuf:"varint,12,opt,name=last_exit_code,json=lastExitCode,proto3" json:"last_exit_code,omitempty"`
+	LastError              string                 `protobuf:"bytes,13,opt,name=last_error,json=lastError,proto3" json:"last_error,omitempty"`
+	LogPath                string                 `protobuf:"bytes,14,opt,name=log_path,json=logPath,proto3" json:"log_path,omitempty"`
+	PlannedContextTokens   int64                  `protobuf:"varint,15,opt,name=planned_context_tokens,json=plannedContextTokens,proto3" json:"planned_context_tokens,omitempty"`
+	PlannedContextSource   string                 `protobuf:"bytes,16,opt,name=planned_context_source,json=plannedContextSource,proto3" json:"planned_context_source,omitempty"`
+	ConfirmedContextTokens int64                  `protobuf:"varint,17,opt,name=confirmed_context_tokens,json=confirmedContextTokens,proto3" json:"confirmed_context_tokens,omitempty"`
+	ContextConfirmedAt     string                 `protobuf:"bytes,18,opt,name=context_confirmed_at,json=contextConfirmedAt,proto3" json:"context_confirmed_at,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *RuntimeInstance) Reset() {
@@ -2705,6 +2709,34 @@ func (x *RuntimeInstance) GetLastError() string {
 func (x *RuntimeInstance) GetLogPath() string {
 	if x != nil {
 		return x.LogPath
+	}
+	return ""
+}
+
+func (x *RuntimeInstance) GetPlannedContextTokens() int64 {
+	if x != nil {
+		return x.PlannedContextTokens
+	}
+	return 0
+}
+
+func (x *RuntimeInstance) GetPlannedContextSource() string {
+	if x != nil {
+		return x.PlannedContextSource
+	}
+	return ""
+}
+
+func (x *RuntimeInstance) GetConfirmedContextTokens() int64 {
+	if x != nil {
+		return x.ConfirmedContextTokens
+	}
+	return 0
+}
+
+func (x *RuntimeInstance) GetContextConfirmedAt() string {
+	if x != nil {
+		return x.ContextConfirmedAt
 	}
 	return ""
 }
@@ -14514,7 +14546,7 @@ const file_agent_proto_rawDesc = "" +
 	"replacedBy\x12\x19\n" +
 	"\bprice_in\x18\x1e \x01(\x03R\apriceIn\x12\x1b\n" +
 	"\tprice_out\x18\x1f \x01(\x03R\bpriceOut\x12%\n" +
-	"\x0econtext_length\x18  \x01(\x03R\rcontextLength\"\x87\x03\n" +
+	"\x0econtext_length\x18  \x01(\x03R\rcontextLength\"\xdf\x04\n" +
 	"\x0fRuntimeInstance\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x18\n" +
 	"\aruntime\x18\x02 \x01(\tR\aruntime\x12\x19\n" +
@@ -14532,7 +14564,11 @@ const file_agent_proto_rawDesc = "" +
 	"\x0elast_exit_code\x18\f \x01(\x05R\flastExitCode\x12\x1d\n" +
 	"\n" +
 	"last_error\x18\r \x01(\tR\tlastError\x12\x19\n" +
-	"\blog_path\x18\x0e \x01(\tR\alogPath\"\xdf\x02\n" +
+	"\blog_path\x18\x0e \x01(\tR\alogPath\x124\n" +
+	"\x16planned_context_tokens\x18\x0f \x01(\x03R\x14plannedContextTokens\x124\n" +
+	"\x16planned_context_source\x18\x10 \x01(\tR\x14plannedContextSource\x128\n" +
+	"\x18confirmed_context_tokens\x18\x11 \x01(\x03R\x16confirmedContextTokens\x120\n" +
+	"\x14context_confirmed_at\x18\x12 \x01(\tR\x12contextConfirmedAt\"\xdf\x02\n" +
 	"\x0fRuntimeEndpoint\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04kind\x18\x02 \x01(\tR\x04kind\x12!\n" +

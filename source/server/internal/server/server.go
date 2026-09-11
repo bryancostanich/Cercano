@@ -2772,20 +2772,24 @@ func mapRuntimeInstances(instances []localruntime.InstanceRecord) []*proto.Runti
 
 func mapRuntimeInstance(instance localruntime.InstanceRecord) *proto.RuntimeInstance {
 	return &proto.RuntimeInstance{
-		Id:           instance.ID,
-		Runtime:      instance.Runtime,
-		ModelId:      instance.ModelID,
-		State:        instance.State.String(),
-		Pid:          int32(instance.PID),
-		Address:      instance.Address,
-		Port:         int32(instance.Port),
-		Endpoint:     instance.Endpoint,
-		StartedAt:    formatRuntimeTime(instance.StartedAt),
-		ReadyAt:      formatRuntimeTime(instance.ReadyAt),
-		RestartCount: int32(instance.RestartCount),
-		LastExitCode: int32(instance.LastExitCode),
-		LastError:    instance.LastError,
-		LogPath:      instance.LogPath,
+		PlannedContextTokens:   int64(instance.Context.PlannedTokens),
+		PlannedContextSource:   instance.Context.PlannedSource,
+		ConfirmedContextTokens: int64(instance.Context.ConfirmedTokens),
+		ContextConfirmedAt:     formatRuntimeTime(instance.Context.ConfirmedAt),
+		Id:                     instance.ID,
+		Runtime:                instance.Runtime,
+		ModelId:                instance.ModelID,
+		State:                  instance.State.String(),
+		Pid:                    int32(instance.PID),
+		Address:                instance.Address,
+		Port:                   int32(instance.Port),
+		Endpoint:               instance.Endpoint,
+		StartedAt:              formatRuntimeTime(instance.StartedAt),
+		ReadyAt:                formatRuntimeTime(instance.ReadyAt),
+		RestartCount:           int32(instance.RestartCount),
+		LastExitCode:           int32(instance.LastExitCode),
+		LastError:              instance.LastError,
+		LogPath:                instance.LogPath,
 	}
 }
 

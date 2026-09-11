@@ -469,20 +469,24 @@ func (m RuntimeModel) Downloadable() bool {
 func (m RuntimeModel) Served() bool { return m.Acquisition == AcquisitionServe }
 
 type RuntimeInstance struct {
-	ID           string
-	Runtime      string
-	ModelID      string
-	State        string
-	PID          int
-	Address      string
-	Port         int
-	Endpoint     string
-	StartedAt    time.Time
-	ReadyAt      time.Time
-	RestartCount int
-	LastExitCode int
-	LastError    string
-	LogPath      string
+	PlannedContextTokens   int
+	PlannedContextSource   string
+	ConfirmedContextTokens int
+	ContextConfirmedAt     time.Time
+	ID                     string
+	Runtime                string
+	ModelID                string
+	State                  string
+	PID                    int
+	Address                string
+	Port                   int
+	Endpoint               string
+	StartedAt              time.Time
+	ReadyAt                time.Time
+	RestartCount           int
+	LastExitCode           int
+	LastError              string
+	LogPath                string
 }
 
 type RuntimeEndpoint struct {
@@ -1894,20 +1898,24 @@ func mapRuntimeInstance(instance *proto.RuntimeInstance) RuntimeInstance {
 		return RuntimeInstance{}
 	}
 	return RuntimeInstance{
-		ID:           instance.GetId(),
-		Runtime:      instance.GetRuntime(),
-		ModelID:      instance.GetModelId(),
-		State:        instance.GetState(),
-		PID:          int(instance.GetPid()),
-		Address:      instance.GetAddress(),
-		Port:         int(instance.GetPort()),
-		Endpoint:     instance.GetEndpoint(),
-		StartedAt:    parseRuntimeTime(instance.GetStartedAt()),
-		ReadyAt:      parseRuntimeTime(instance.GetReadyAt()),
-		RestartCount: int(instance.GetRestartCount()),
-		LastExitCode: int(instance.GetLastExitCode()),
-		LastError:    instance.GetLastError(),
-		LogPath:      instance.GetLogPath(),
+		PlannedContextTokens:   int(instance.GetPlannedContextTokens()),
+		PlannedContextSource:   instance.GetPlannedContextSource(),
+		ConfirmedContextTokens: int(instance.GetConfirmedContextTokens()),
+		ContextConfirmedAt:     parseRuntimeTime(instance.GetContextConfirmedAt()),
+		ID:                     instance.GetId(),
+		Runtime:                instance.GetRuntime(),
+		ModelID:                instance.GetModelId(),
+		State:                  instance.GetState(),
+		PID:                    int(instance.GetPid()),
+		Address:                instance.GetAddress(),
+		Port:                   int(instance.GetPort()),
+		Endpoint:               instance.GetEndpoint(),
+		StartedAt:              parseRuntimeTime(instance.GetStartedAt()),
+		ReadyAt:                parseRuntimeTime(instance.GetReadyAt()),
+		RestartCount:           int(instance.GetRestartCount()),
+		LastExitCode:           int(instance.GetLastExitCode()),
+		LastError:              instance.GetLastError(),
+		LogPath:                instance.GetLogPath(),
 	}
 }
 

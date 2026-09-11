@@ -102,8 +102,8 @@ func TestResolveCloudModelForTier(t *testing.T) {
 		{"table hit standard", anthro, TierEveryday, "claude-opus-5"},
 		{"tier slot unset -> empty", anthro, TierFastLight, ""},
 		{"embedding has no cost tier -> empty", anthro, TierEmbedding, ""},
-		{"profile pin overrides table", pinned, TierMostCapable, "claude-custom"},
-		{"inferred openai pinned model", openaiPinned, TierEveryday, "gpt-5.5"},
+		{"legacy pin ignored", pinned, TierMostCapable, "claude-fable-5"},
+		{"unknown vendor does not use legacy pin", openaiPinned, TierEveryday, ""},
 	}
 	for _, c := range cases {
 		if got := m.ResolveCloudModelForTier(c.prof, c.tier); got != c.want {
@@ -111,11 +111,10 @@ func TestResolveCloudModelForTier(t *testing.T) {
 		}
 	}
 
-	// No cost table at all: an explicit profile pin still yields its own model,
-	// never a foreign-vendor model.
+	// No cost table means unavailable, not a legacy pin or foreign-vendor model.
 	empty := ModelProfiles{}
-	if got := empty.ResolveCloudModelForTier(openaiPinned, TierMostCapable); got != "gpt-5.5" {
-		t.Errorf("empty table: got %q want gpt-5.5 (must never cross vendors)", got)
+	if got := empty.ResolveCloudModelForTier(openaiPinned, TierMostCapable); got != "" {
+		t.Errorf("empty table: got %q want empty (must never use legacy pin)", got)
 	}
 }
 
@@ -201,9 +200,6 @@ func TestRetiredOpenAIDefaultFollowsCatalog(t *testing.T) {
 			cfg.CloudProfiles = []CloudProfile{profile}
 			normalizeCloudModelDefaults(&cfg)
 			want := "gpt-6-astra"
-			if pinned {
-				want = "gpt-5.5"
-			}
 			if got := cfg.ModelProfiles.ResolveCloudModelForTier(cfg.CloudProfiles[0], TierEveryday); got != want {
 				t.Errorf("profile %+v: got %q, want %q", profile, got, want)
 			}

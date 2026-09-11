@@ -74,12 +74,14 @@ type CloudProfile struct {
 	// from Flavor/Backend at load (see inferProviderVendor).
 	Provider string `yaml:"provider,omitempty"`
 	BaseURL  string `yaml:"base_url"`
-	// Model is an explicit cloud model pin. Empty means "follow the baked-in
-	// vendor+tier catalog" so product default updates take effect on restart.
-	Model       string `yaml:"model,omitempty"`
-	ModelPinned bool   `yaml:"model_pinned,omitempty"`
-	Region      string `yaml:"region,omitempty"`      // bedrock: AWS region (required)
-	AWSProfile  string `yaml:"aws_profile,omitempty"` // bedrock: optional ~/.aws named profile
+	// Deprecated input fields: accepted for compatibility but never used by
+	// quality resolution or migrated into overrides. Save omits them.
+	Model         string              `yaml:"model,omitempty"`
+	ModelPinned   bool                `yaml:"model_pinned,omitempty"` // Deprecated: ignored by quality resolution.
+	TierOverrides map[CostTier]string `yaml:"tier_overrides,omitempty"`
+	ImageModel    string              `yaml:"image_model,omitempty"`
+	Region        string              `yaml:"region,omitempty"`      // bedrock: AWS region (required)
+	AWSProfile    string              `yaml:"aws_profile,omitempty"` // bedrock: optional ~/.aws named profile
 }
 
 // CostTier names a closed-cloud pricing class. Unlike the capability Tier
@@ -98,9 +100,8 @@ type CostTierModel struct {
 	Model string `yaml:"model"`
 }
 
-// VendorCostTiers is one vendor's three-tier cost table. Empty slots mean the
-// vendor doesn't distinguish that tier; resolution falls back to the active
-// profile's own Model.
+// VendorCostTiers is one vendor's recommendation table. Empty slots are
+// unavailable unless explicitly overridden on the profile.
 type VendorCostTiers struct {
 	Economy  CostTierModel `yaml:"economy"`
 	Standard CostTierModel `yaml:"standard"`
@@ -132,7 +133,7 @@ func (m ModelProfiles) IsZero() bool {
 
 // ResolveCloud returns the model configured for a vendor+cost-tier pair.
 // ok=false when the vendor is unknown or that tier's slot is empty — the
-// caller falls back to the active profile's own Model.
+// caller must treat an unresolved slot as unavailable.
 func (m ModelProfiles) ResolveCloud(vendor string, tier CostTier) (string, bool) {
 	if vendor == "" {
 		return "", false
@@ -169,10 +170,8 @@ func (m ModelProfiles) vendorHasModel(vendor, model string) bool {
 
 // ResolveCloudModelForTier picks the cloud model for a capability tier.
 //
-// Cloud differs from open/local model selection: unpinned cloud profiles follow
-// the baked-in vendor+tier catalog carried by the binary, so product default
-// updates automatically take effect for existing users. A profile Model is an
-// explicit pin/override and wins over the catalog for every tier.
+// Sparse profile quality overrides win over the shipped vendor recommendation.
+// Legacy Model/ModelPinned fields have no precedence. Vision is independent.
 func (m ModelProfiles) ResolveCloudModelForTier(prof CloudProfile, tier Tier) string {
 	baseVendor := prof.Provider
 	if baseVendor == "" {
@@ -185,9 +184,13 @@ func (m ModelProfiles) ResolveCloudModelForTier(prof CloudProfile, tier Tier) st
 	if prof.Provider == "" {
 		vendor = vendorForRoute(baseVendor, prof.Route)
 	}
-	if prof.Model != "" {
-		m.guardCloudModel(vendor, prof.Model, prof.Model)
-		return prof.Model
+	if tier == TierVision {
+		return prof.ImageModel
+	}
+	if ct, ok := CostTierForCapability(tier); ok {
+		if override := prof.TierOverrides[ct]; override != "" {
+			return override
+		}
 	}
 	var model string
 	if ct, ok := CostTierForCapability(tier); ok {
@@ -350,9 +353,12 @@ type Config struct {
 	// BackupCloudProfile names the profile that serves a request when the
 	// active profile's provider fails (see internal/llm/fallback for what
 	// counts as a failure worth failing over). Empty = no fallback.
-	BackupCloudProfile string `yaml:"backup_cloud_profile,omitempty"`
-	LocusMode          string `yaml:"locus_mode"` // cloud_only|cloud_primary|open_primary|open_only
-	Port               string `yaml:"port"`
+	BackupCloudProfile          string                  `yaml:"backup_cloud_profile,omitempty"`
+	SecondaryCloudProfile       string                  `yaml:"secondary_cloud_profile,omitempty"`
+	SecondaryBackupCloudProfile string                  `yaml:"secondary_backup_cloud_profile,omitempty"`
+	TaskAssignments             map[Task]TaskAssignment `yaml:"task_assignments,omitempty"`
+	LocusMode                   string                  `yaml:"locus_mode"` // cloud_only|cloud_primary|open_primary|open_only
+	Port                        string                  `yaml:"port"`
 	// ExecutionMode selects how a conversation's turns are executed:
 	//   "worker"     — each turn runs in a dedicated child process ("cercano
 	//                  worker") so a turn that panics/hangs/wedges takes down
@@ -647,16 +653,11 @@ func Defaults() Config {
 					// live /models/list index with the "tools" tag.
 					//
 					// Prices below are per million tokens (input/output) at
-					// the time of writing, for the record:
-					//   economy   gpt-oss-120b        $0.037 / $0.17
-					//   standard  GLM-5.3-Flash       $0.15  / $0.50
-					//   premium   DeepSeek-V4-Pro     $1.30  / $2.60
-					// The spread is the point: economy is ~35x cheaper than
-					// premium on input, so tier choice genuinely matters here.
+					// Approved profile quality recommendations; not measured reliability claims.
 					"deepinfra": {
 						Economy:  CostTierModel{Model: "openai/gpt-oss-120b"},
 						Standard: CostTierModel{Model: "zai-org/GLM-5.3-Flash"},
-						Premium:  CostTierModel{Model: "deepseek-ai/DeepSeek-V4-Pro"},
+						Premium:  CostTierModel{Model: "zai-org/GLM-5.3"},
 					},
 				},
 			},
@@ -865,23 +866,8 @@ func isLegacySubscriptionAlias(p CloudProfile) bool {
 func normalizeCloudModelDefaults(cfg *Config) {
 	applyBakedCloudCatalog(cfg)
 	for i := range cfg.CloudProfiles {
-		p := &cfg.CloudProfiles[i]
-		if p.Model == "" || p.ModelPinned {
-			continue
-		}
-		vendor := p.Provider
-		if vendor == "" {
-			vendor = inferProviderVendor(*p)
-		}
-		if isProductCloudDefaultModel(vendor, p.Model) {
-			// This model came from an old product default copied into the user's
-			// config. Clear it so the profile follows the baked catalog again.
-			p.Model = ""
-			continue
-		}
-		// A non-catalog model in an existing config is the closest thing we have
-		// to explicit user intent from the pre-pin era; preserve it as a pin.
-		p.ModelPinned = true
+		cfg.CloudProfiles[i].Model = ""
+		cfg.CloudProfiles[i].ModelPinned = false
 	}
 }
 
@@ -927,9 +913,8 @@ func retiredCloudDefaultModels() map[string][]string {
 
 func stripBakedCloudCatalogForSave(cfg *Config) {
 	for i := range cfg.CloudProfiles {
-		if !cfg.CloudProfiles[i].ModelPinned {
-			cfg.CloudProfiles[i].Model = ""
-		}
+		cfg.CloudProfiles[i].Model = ""
+		cfg.CloudProfiles[i].ModelPinned = false
 	}
 	providers := cfg.ModelProfiles.Cloud.Providers
 	if providers == nil {
@@ -1213,13 +1198,26 @@ func applyEnvOverrides(cfg *Config) {
 // mutations to the original or the clone cannot race through a shared backing
 // array.
 func (c Config) Clone() Config {
-	out := c // copy all scalar and nested-struct fields
+	out := c
+	if c.TaskAssignments != nil {
+		out.TaskAssignments = make(map[Task]TaskAssignment)
+		for k, v := range c.TaskAssignments {
+			out.TaskAssignments[k] = v
+		}
+	}
 
-	// CloudProfiles: independent slice + elements are all-scalar structs, so a
-	// slice copy suffices.
+	// CloudProfiles: independent slice and sparse per-profile maps.
 	if c.CloudProfiles != nil {
 		out.CloudProfiles = make([]CloudProfile, len(c.CloudProfiles))
 		copy(out.CloudProfiles, c.CloudProfiles)
+		for i := range out.CloudProfiles {
+			if c.CloudProfiles[i].TierOverrides != nil {
+				out.CloudProfiles[i].TierOverrides = make(map[CostTier]string)
+				for k, v := range c.CloudProfiles[i].TierOverrides {
+					out.CloudProfiles[i].TierOverrides[k] = v
+				}
+			}
+		}
 	}
 
 	// LlamaServer contains two slices.
@@ -1283,6 +1281,8 @@ func VenvPython() string {
 // split-state bug that motivated this refactor (cloud_model edited, profile
 // untouched, runtime still on the old model).
 func Save(cfg Config, path string) error {
+	// Stripping inherited and obsolete values must not mutate live snapshots.
+	cfg = cfg.Clone()
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("failed to create config directory %q: %w", dir, err)

@@ -7,6 +7,11 @@
 version: 1
 
 cloud:
+  deepinfra:
+    most_capable: [zai-org/GLM-5.3]
+    everyday: [zai-org/GLM-5.3-Flash]
+    fast_light: [openai/gpt-oss-120b]
+    fast_light_text: [openai/gpt-oss-120b]
   anthropic:
     most_capable: [claude-fable-5, claude-opus-5]
     everyday: [claude-opus-5]

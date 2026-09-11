@@ -61,3 +61,11 @@ Phase 1 remains incomplete: exact mutation/refresh and credential interfaces, om
 - Ran `go test ./internal/server ./internal/hostsvc/providers -run 'TestRoutingContract(Backup|Main)' -count=1 -v`: expected FAIL. Backup edit retains the same provider pointer; main and meter both resolve standard rather than premium. Synthetic secrets remain owned by the backup name. No inference was sent.
 - Ran `go test ./internal/inference/resilience -count=1`: PASS (0.278s), including the new authentication case (one primary call, one backup call, no retry sleep, destination-model re-resolution), existing HTTP 429 busy retry, quota/cooldown, cancellation, and partial-stream no-recovery cases. No new continuity/replay policy is required.
 - Cloud image selection gap remains established at the worker resolver source seam (Everyday plus legacy Model fallbacks); dedicated choice cannot be exercised until the config field exists. Capability gating is already separately covered. This limitation is retained rather than claiming an end-to-end image selection probe ran.
+
+## Shared configuration foundation
+
+Implemented typed destination/task assignments, independently validated Primary and Secondary bindings, sparse profile quality overrides and image selection, reference deduplication, transactional binding/task setters, and removal of legacy Model precedence. DeepInfra Premium is now the approved GLM-5.3 recommendation. Load/save discard obsolete model pins without migrating them. New tests cover same-vendor isolation, all backup-presence combinations, missing references, self-failover, explicit clears, image independence, changed inherited recommendations, and task difficulty precedence.
+
+A new persistence probe failed because Save stripped values through the caller's shared profile slice. Save now deep-clones before normalization, and profile override/task maps are independently cloned throughout config ownership. Host config removal clears matching bindings without substitution.
+
+Verification: `go test ./pkg/config ./internal/hostsvc/config -count=1` PASS (0.526s/0.394s), `go build ./...` from source/server PASS. Existing tests asserting legacy pin precedence were updated to the approved retirement contract. These results do not claim that provider routing, transport, or CLI integration is complete; their target regressions remain outstanding.

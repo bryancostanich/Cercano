@@ -116,16 +116,15 @@ func TestDeepInfraCostTable_ModelsAreToolCapable(t *testing.T) {
 	}
 }
 
-// TestDeepInfraProfile_PinnedModelWins confirms the table does not override an
+// TestDeepInfraProfile_QualityOverrideWins confirms the table does not override an
 // explicit user choice.
-func TestDeepInfraProfile_PinnedModelWins(t *testing.T) {
+func TestDeepInfraProfile_QualityOverrideWins(t *testing.T) {
 	cfg := Defaults()
 	p := deepInfraProfile()
-	p.Model = "some-org/some-pinned-model"
-	p.ModelPinned = true
+	p.TierOverrides = map[CostTier]string{CostPremium: "some-org/custom-model"}
 
-	if got := cfg.ModelProfiles.ResolveCloudModelForTier(p, TierMostCapable); got != p.Model {
-		t.Errorf("pinned model = %q, want %q", got, p.Model)
+	if got := cfg.ModelProfiles.ResolveCloudModelForTier(p, TierMostCapable); got != p.TierOverrides[CostPremium] {
+		t.Errorf("override model = %q, want %q", got, p.TierOverrides[CostPremium])
 	}
 }
 

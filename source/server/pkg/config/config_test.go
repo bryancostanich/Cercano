@@ -568,7 +568,7 @@ func TestSave_StripsLegacyCloudFieldsWhenProfilesPresent(t *testing.T) {
 		CloudModel:         "claude-stale-mirror",
 		CloudAPIKey:        "sk-leaky",
 		CloudBaseURL:       "http://127.0.0.1:3456",
-		CloudProfiles:      []CloudProfile{{Name: "default", Flavor: "messages", Model: "claude-real", ModelPinned: true}},
+		CloudProfiles:      []CloudProfile{{Name: "default", Flavor: "messages", Model: "obsolete", ModelPinned: true, TierOverrides: map[CostTier]string{CostPremium: "claude-real"}}},
 		ActiveCloudProfile: "default",
 	}
 	if err := Save(cfg, path); err != nil {
@@ -599,7 +599,7 @@ func TestSave_StripsLegacyCloudFieldsWhenProfilesPresent(t *testing.T) {
 	if reloaded.CloudModel != "" || reloaded.CloudProvider != "" || reloaded.CloudAPIKey != "" || reloaded.CloudBaseURL != "" {
 		t.Errorf("reloaded config has stale legacy fields: %+v", reloaded)
 	}
-	if len(reloaded.CloudProfiles) != 1 || reloaded.CloudProfiles[0].Model != "claude-real" {
+	if len(reloaded.CloudProfiles) != 1 || reloaded.CloudProfiles[0].TierOverrides[CostPremium] != "claude-real" {
 		t.Errorf("profile lost on round-trip: %+v", reloaded.CloudProfiles)
 	}
 }
@@ -844,8 +844,8 @@ func TestNormalizeCloudModelDefaultsClearsPersistedDefaults(t *testing.T) {
 	if got := cfg.CloudProfiles[0].Model; got != "" {
 		t.Fatalf("default-derived claude profile model should be cleared, got %q", got)
 	}
-	if got := cfg.CloudProfiles[1].Model; got != "claude-custom" || !cfg.CloudProfiles[1].ModelPinned {
-		t.Fatalf("custom model should become an explicit pin, got model=%q pinned=%v", got, cfg.CloudProfiles[1].ModelPinned)
+	if got := cfg.CloudProfiles[1].Model; got != "" || cfg.CloudProfiles[1].ModelPinned {
+		t.Fatalf("legacy model must be retired without migration, got model=%q pinned=%v", got, cfg.CloudProfiles[1].ModelPinned)
 	}
 	if got := cfg.ModelProfiles.Cloud.Providers["anthropic"].Standard.Model; got != "claude-opus-5" {
 		t.Fatalf("baked anthropic standard model = %q, want claude-opus-5", got)

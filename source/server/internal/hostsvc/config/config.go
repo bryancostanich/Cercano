@@ -35,6 +35,9 @@ type Service interface {
 	SetBackupProfile(name string) bool // false if name!="" and not found
 	ProfileInfo(name string) (exists bool, isActive bool)
 
+	SetDestinationProfiles(destination cfg.Destination, preferred, backup string) error
+	SetTaskAssignment(task cfg.Task, assignment *cfg.TaskAssignment) error
+
 	// Mutate applies fn to the live config under the write lock. It does NOT
 	// persist to disk and does NOT notify — use Persist() and/or Set()
 	// explicitly when those side-effects are needed. Intended for targeted
@@ -89,7 +92,7 @@ func (s *svc) ActiveProfile() (cfg.CloudProfile, bool) {
 	defer s.mu.RUnlock()
 	for _, p := range s.current.CloudProfiles {
 		if p.Name == s.current.ActiveCloudProfile {
-			return p, true
+			return p.Clone(), true
 		}
 	}
 	return cfg.CloudProfile{}, false
@@ -142,6 +145,7 @@ func (s *svc) UpsertProfile(p cfg.CloudProfile) (replaced bool, isActive bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	name := p.Name
+	p = p.Clone()
 	for i, existing := range s.current.CloudProfiles {
 		if existing.Name == name {
 			s.current.CloudProfiles[i] = p
@@ -169,6 +173,15 @@ func (s *svc) RemoveProfile(name string) (existed, wasActive bool) {
 	wasActive = s.current.ActiveCloudProfile == name
 	if wasActive {
 		s.current.ActiveCloudProfile = ""
+	}
+	if s.current.BackupCloudProfile == name {
+		s.current.BackupCloudProfile = ""
+	}
+	if s.current.SecondaryCloudProfile == name {
+		s.current.SecondaryCloudProfile = ""
+	}
+	if s.current.SecondaryBackupCloudProfile == name {
+		s.current.SecondaryBackupCloudProfile = ""
 	}
 	return true, wasActive
 }
@@ -217,8 +230,19 @@ func (s *svc) Persist() {
 func profileByName(profiles []cfg.CloudProfile, name string) (cfg.CloudProfile, bool) {
 	for _, p := range profiles {
 		if p.Name == name {
-			return p, true
+			return p.Clone(), true
 		}
 	}
 	return cfg.CloudProfile{}, false
+}
+
+func (s *svc) SetDestinationProfiles(destination cfg.Destination, preferred, backup string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.current.SetDestinationProfiles(destination, preferred, backup)
+}
+func (s *svc) SetTaskAssignment(task cfg.Task, assignment *cfg.TaskAssignment) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.current.SetTaskAssignment(task, assignment)
 }

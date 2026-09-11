@@ -20,13 +20,13 @@ Objective: confirm current interfaces and smallest failing cases before fixes. F
 
 Objective: represent independent destinations and profile choices without losing existing identity or credentials. Files: source/server/pkg/config/config.go, models.go, model_profiles_test.go, deepinfra_tier_test.go, tier_recommendations.yaml; internal/hostsvc/config/config.go and tests; shared resolution code alongside existing configuration/routing owners. Tests: sparse persistence, reference validation, defaults, independent bindings, task precedence, and legacy removal.
 
-- [ ] Retain active/backup cloud bindings as Primary preferred/optional backup. Add independent Secondary preferred/optional backup references using existing profile identities. Empty backup means none; validate missing references and self-failover loops without substituting another destination.
-- [ ] Implement profile-local sparse economy/standard/premium overrides and dedicated image selection. Resolve quality to override then shipped recommendation; no profile-wide Model/ModelPinned precedence or migration into overrides.
-- [ ] Implement saved task destination/quality assignments with Primary/Premium chat and Secondary/Premium dispatch defaults, not task-level model IDs. Keep existing quality enums and permission tiers distinct from execution destinations.
+- [x] Retain active/backup cloud bindings as Primary preferred/optional backup. Add independent Secondary preferred/optional backup references using existing profile identities. Empty backup means none; validate missing references and self-failover loops without substituting another destination.
+- [x] Implement profile-local sparse economy/standard/premium overrides and dedicated image selection. Resolve quality to override then shipped recommendation; no profile-wide Model/ModelPinned precedence or migration into overrides.
+- [x] Implement saved task destination/quality assignments with Primary/Premium chat and Secondary/Premium dispatch defaults, not task-level model IDs. Keep existing quality enums and permission tiers distinct from execution destinations.
 - [ ] Preserve invocation-specific ModelOverride semantics for existing tools and inventory their interaction with backup selection; never carry an incompatible vendor model blindly across profiles.
 - [ ] Use the same resolver for host, worker, task target budgeting, and execution. Preserve server-side Local runtime recommendations and existing embedding/vision slots.
 - [ ] Implement explicit clear as removal, not copying a recommendation. Preserve unrelated profile configuration and existing credential/route identity through load/save and legacy model-field retirement.
-- [ ] Set the approved DeepInfra recommendations: Economy openai/gpt-oss-120b, Standard zai-org/GLM-5.3-Flash, Premium zai-org/GLM-5.3. Do not invent image recommendations, prices, or model evidence.
+- [x] Set the approved DeepInfra recommendations: Economy openai/gpt-oss-120b, Standard zai-org/GLM-5.3-Flash, Premium zai-org/GLM-5.3. Do not invent image recommendations, prices, or model evidence.
 - [ ] Test two profiles of the same vendor, changed shipped defaults, all backup-presence combinations, dangling references, legacy single-model fixtures, and task default/explicit-difficulty precedence.
 - [ ] Run focused configuration and host configuration tests; checkpoint explicit paths.
 

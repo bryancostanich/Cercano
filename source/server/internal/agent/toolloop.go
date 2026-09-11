@@ -123,8 +123,9 @@ type ToolLoopInput struct {
 	// provider's default). Rides every ChatRequest as routing metadata so the
 	// cloud failover composite can re-resolve the tier in the backup vendor's
 	// namespace (dispatch sub-agents pin tier-resolved models).
-	Tier   string
-	System string
+	Tier         string
+	FallbackTier string
+	System       string
 
 	// PermissionRequester is the callback the loop uses to surface a
 	// confirm prompt to the active client. Nil means the loop cannot ask; any
@@ -217,6 +218,7 @@ type ToolLoopInput struct {
 }
 
 type ToolLoopResult struct {
+	Route        *llm.ServingRoute
 	FinalText    string
 	FinalBlocks  []llm.Block
 	Iterations   int
@@ -398,7 +400,16 @@ func fenceDenialMessage(profileName, toolName string, tier llm.Permission) strin
 	return fmt.Sprintf("blocked: the %q profile is read-only — the tool %q (%s) is unavailable. Only read and plan actions are permitted while planning.", profileName, toolName, tier)
 }
 
-func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) {
+func RunToolLoop(ctx context.Context, in ToolLoopInput) (returned ToolLoopResult, returnErr error) {
+	requestedModel := in.Model
+	var actualRoute *llm.ServingRoute
+	defer func() {
+		returned.Route = actualRoute
+		if actualRoute != nil && actualRoute.ContextWindowKnown {
+			returned.LastRequestBudget.Limit = actualRoute.ContextWindow
+		}
+	}()
+
 	ctx = agenttools.WithWorkDir(ctx, in.WorkDir)
 	ctx = agenttools.WithConversationID(ctx, in.ConversationID)
 	if !in.Provider.Capabilities().SupportsTools {
@@ -518,6 +529,13 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 	}
 
 	for iter := 0; unlimitedIters || iter < maxIters; iter++ {
+		target := inference.TargetForCall(in.Provider, inference.Call{Model: requestedModel, Tier: in.Tier, FallbackTier: in.FallbackTier})
+		if target.Profile != "" {
+			in.Model = target.Model
+			in.ContextWindow = target.ContextWindow
+			in.ContextWindowKnown = target.ContextWindowKnown
+		}
+
 		// Tool results can add image blocks after the initial user/history rewrite.
 		// Re-apply the vision-as-tool transform before every provider request so a
 		// screenshot returned by a tool cannot be replayed as raw base64 on the next
@@ -570,6 +588,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 		req := llm.ChatRequest{
 			Model:          in.Model,
 			Tier:           in.Tier,
+			FallbackTier:   in.FallbackTier,
 			System:         effectiveSystem,
 			Messages:       hist,
 			Tools:          catalog,
@@ -586,6 +605,11 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 		}
 		resp, err := collectStream(ctx, rdr, in.OnTextDelta, noticeSink(in))
 		rdr.Close()
+		if resp.Route != nil {
+			actualRoute = resp.Route
+			in.ContextWindow = resp.Route.ContextWindow
+			in.ContextWindowKnown = resp.Route.ContextWindowKnown
+		}
 		if err != nil {
 			providerInput := lastIn
 			if resp.InputTokens > 0 {
@@ -992,7 +1016,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 			"You've reached the %d-step tool limit for this turn. Stop calling tools and give your best answer now using what you've gathered.",
 			maxIters)}},
 	})
-	finalReq := llm.ChatRequest{Model: in.Model, Tier: in.Tier, System: in.System, Messages: hist, MaxTokens: maxTokens, Temperature: in.Temperature}
+	finalReq := llm.ChatRequest{Model: in.Model, Tier: in.Tier, FallbackTier: in.FallbackTier, System: in.System, Messages: hist, MaxTokens: maxTokens, Temperature: in.Temperature}
 	rdr, err := in.Provider.StreamChat(ctx, finalReq)
 	if err != nil {
 		finalBudget := EstimateRequestBudget(RequestBudgetInput{System: in.System, Messages: hist, MaxTokens: maxTokens, ContextWindow: in.ContextWindow})

@@ -419,7 +419,7 @@ message InlineImage {
 message UpdateConfigRequest {
   string open_model = 1;    // Open-weight model name (Ollama tag or managed runtime model id/path)
   string cloud_provider = 2; // Cloud provider name (e.g., "google", "anthropic")
-  string cloud_model = 3;    // Cloud model name (e.g., "gemini-1.5-flash", "claude-3-opus")
+  string cloud_model = 3 [deprecated = true];    // Cloud model name (e.g., "gemini-1.5-flash", "claude-3-opus")
   string cloud_api_key = 4;  // API key for the cloud provider
   string ollama_url = 5;     // Ollama endpoint URL (e.g., "http://mac-studio.local:11434")
   // Anthropic-compatible proxy URL (e.g., "http://127.0.0.1:3456" for Meridian).
@@ -1437,7 +1437,7 @@ message CloudProfileInfo {
   string name = 1;
   string flavor = 2;
   string base_url = 3;
-  string model = 4;
+  string model = 4 [deprecated = true];
   bool   has_key = 5; // a key exists in the keychain for this profile
   string backend = 6; // chat_completions quirks selector (openai|gemini|groq|…)
   string route = 7;   // direct (default) | meridian | ccr (future) — selects adapter-specific auth/header conventions
@@ -1496,14 +1496,15 @@ message UpsertCloudProfileRequest {
   string flavor = 2;
   string backend = 3;
   string base_url = 4;
-  string model = 5;
+  string model = 5 [deprecated = true];
   string route = 6; // direct (default) | meridian | ccr (future); empty preserves an existing profile's route
  ProfileModelChoices model_choices = 7;
  optional string provider = 8;
  optional string region = 9;
  optional string aws_profile = 10;
+ CloudProfileStructure structure = 11;
 }
-message UpsertCloudProfileResponse { bool ok = 1; string error = 2; }
+message UpsertCloudProfileResponse { bool ok = 1; string error = 2; string warning = 3; }
 message RemoveCloudProfileRequest  { string name = 1; }
 message RemoveCloudProfileResponse { bool ok = 1; string error = 2; }
 
@@ -1675,6 +1676,7 @@ message WorkerEvent {
   string sub_agent_kind      = 21;
   repeated string granted_tools = 22;
   repeated string ignored_tools = 23;
+ ServingRouteInfo route = 24;
 }
 
 // WorkerEventKind mirrors runner.EventKind.
@@ -1753,6 +1755,7 @@ message TurnDone {
   int64  input_tokens  = 4;
   int64  output_tokens = 5;
   string notice        = 6;
+ ServingRouteInfo route = 7;
 }
 
 // TurnError signals a failed turn.
@@ -1901,6 +1904,8 @@ message LLMChatRequest {
   // optional so pointer semantics survive the wire: absent = provider
   // default, present 0 = greedy decoding (the summarizer's requirement).
   optional double     temperature      = 8;
+ string tier = 9;
+ string fallback_tier = 10;
 }
 
 // LLMTool mirrors llm.Tool (the model-facing fields; Permission is agent-side).
@@ -1934,4 +1939,28 @@ message LLMStreamEvent {
   int64  input_tokens   = 9;
   int64  output_tokens  = 10;
   string err_text       = 11;
+ ServingRouteInfo route = 12;
+}
+
+// Per-attempt attribution and endpoint-scoped context evidence, without secrets.
+message ServingRouteInfo {
+ string provider = 1;
+ string profile = 2;
+ string destination = 3;
+ string model = 4;
+ int32 context_window = 5;
+ bool context_window_known = 6;
+ bool vision_known = 7;
+ bool supports_vision = 8;
+}
+
+// A complete structural draft, distinct from omission. No credentials.
+message CloudProfileStructure {
+ string flavor = 1;
+ string backend = 2;
+ string base_url = 3;
+ string route = 4;
+ string provider = 5;
+ string region = 6;
+ string aws_profile = 7;
 }

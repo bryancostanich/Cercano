@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"cercano/source/server/internal/visioninspect"
 	"context"
 	"fmt"
 	"log"
@@ -217,6 +218,7 @@ func (w *WorkerServer) RunTurn(stream proto.Worker_RunTurnServer) error {
 	}
 	_ = stream.Send(&proto.WorkerToHost{Msg: &proto.WorkerToHost_Done{Done: &proto.TurnDone{
 		FinalText:    result.FinalText,
+		Route:        marshalServingRoute(result.Route),
 		Model:        result.Model,
 		IsCloud:      result.IsCloud,
 		InputTokens:  int64(result.InputTokens),
@@ -237,10 +239,7 @@ func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, cr
 	// discovers models; an identity absent from this snapshot is UNKNOWN here,
 	// which blocks images and leaves the conventional context fallback in place.
 	evidence := UnmarshalModelMetadata(start.GetConfig().GetModelMetadata())
-	profileConfirmed := func(p pkgcfg.CloudProfile, model string) bool {
-		ev, _ := evidence.Lookup(modelmetadata.Identity{Provider: p.Provider, BaseURL: p.BaseURL, Route: p.Route, Model: model})
-		return ev.Vision == modelmetadata.VisionSupported
-	}
+
 	cloudEvidence := func(model string) modelmetadata.Evidence {
 		if model == "" {
 			return modelmetadata.Evidence{}
@@ -280,8 +279,9 @@ func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, cr
 		}
 	} else {
 		var err error
-		provSvc, err = buildWorkerProviders(ctx, cfg, credSource, openProxy, visionConfirmed, func(p pkgcfg.CloudProfile, model string) bool {
-			return profileConfirmed(p, model)
+		provSvc, err = buildWorkerProviders(ctx, cfg, credSource, openProxy, visionConfirmed, func(p pkgcfg.CloudProfile, model string) modelmetadata.Evidence {
+			ev, _ := evidence.Lookup(modelmetadata.Identity{Provider: p.Provider, BaseURL: p.BaseURL, Route: p.Route, Model: model})
+			return ev
 		})
 		if err != nil {
 			return runner.Deps{}, fmt.Errorf("build providers: %w", err)
@@ -343,15 +343,8 @@ func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, cr
 			return id, id != ""
 		},
 		CloudProvider: func() inference.Provider { return provSvc.Cloud() },
-		CloudVisionModel: func() (string, bool) {
-			p, ok := cfg.Profile(cfg.ActiveCloudProfile)
-			return p.ImageModel, ok && p.ImageModel != ""
-		},
-		CloudVisionConfirmed: func(model string) bool {
-			p, ok := cfg.Profile(cfg.ActiveCloudProfile)
-			return ok && profileConfirmed(p, model)
-		},
-		Mode: func() locus.Mode { m, _ := locus.ParseMode(cfg.LocusMode); return m },
+		CloudTarget:   func() (visioninspect.Resolved, bool) { return toolstack.ResolveCloudVision(provSvc.Cloud()) },
+		Mode:          func() locus.Mode { m, _ := locus.ParseMode(cfg.LocusMode); return m },
 	})
 
 	failureLog, err := failurelog.NewWriter("")
@@ -433,22 +426,28 @@ func profileByName(profiles []pkgcfg.CloudProfile, name string) (pkgcfg.CloudPro
 	return pkgcfg.CloudProfile{}, false
 }
 
-func buildWorkerProviders(ctx context.Context, cfg pkgcfg.Config, credSource credentialFetcher, openProxy *streamOpenProvider, modelSupportsVision func(string) bool, scoped ...func(pkgcfg.CloudProfile, string) bool) (providerssvc.Resolver, error) {
+func buildWorkerProviders(ctx context.Context, cfg pkgcfg.Config, credSource credentialFetcher, openProxy *streamOpenProvider, modelSupportsVision func(string) bool, scoped ...func(pkgcfg.CloudProfile, string) modelmetadata.Evidence) (providerssvc.Resolver, error) {
 	cfgService := cfgsvc.New("", cfg, secrets.NewMemory())
 	r := &workerResolver{cfgSvc: cfgService}
 
 	build := func(prof pkgcfg.CloudProfile) (inference.Provider, error) {
 		confirmed := modelSupportsVision
 		if len(scoped) > 0 {
-			confirmed = func(model string) bool { return scoped[0](prof, model) }
+			confirmed = func(model string) bool { return scoped[0](prof, model).Vision == modelmetadata.VisionSupported }
 		}
 		opts := cloudfactory.Options{ModelSupportsVision: confirmed}
+		metadataFor := func(model string) modelmetadata.Evidence {
+			if len(scoped) == 0 {
+				return modelmetadata.Evidence{}
+			}
+			return scoped[0](prof, model)
+		}
 		create := func() (inference.Provider, error) {
 			provider, err := cloudfactory.BuildCloudProvider(prof, "", opts)
 			if err != nil {
 				return nil, err
 			}
-			return profilechain.GuardVision(provider, confirmed), nil
+			return profilechain.GuardVision(provider, confirmed, metadataFor), nil
 		}
 		if prof.Flavor == cloudfactory.FlavorResponses && prof.Route == cloudfactory.RouteChatGPT {
 			opts.TokenSource = &streamTokenSource{creds: credSource, profileName: prof.Name}
@@ -469,10 +468,10 @@ func buildWorkerProviders(ctx context.Context, cfg pkgcfg.Config, credSource cre
 		if err != nil {
 			return nil, err
 		}
-		return profilechain.GuardVision(provider, confirmed), nil
+		return profilechain.GuardVision(provider, confirmed, metadataFor), nil
 	}
-	r.cloudProv, _ = profilechain.Build(cfg, pkgcfg.DestinationPrimary, build)
-	r.secondaryProv, _ = profilechain.Build(cfg, pkgcfg.DestinationSecondary, build)
+	r.cloudProv, _ = profilechain.Build(cfg, pkgcfg.DestinationPrimary, build, workerChainEvents(pkgcfg.DestinationPrimary))
+	r.secondaryProv, _ = profilechain.Build(cfg, pkgcfg.DestinationSecondary, build, workerChainEvents(pkgcfg.DestinationSecondary))
 
 	// Build the open provider, mirroring the host's openProviderFor: when the
 	// open runtime is llama-server the worker has no local access to it (the
@@ -516,133 +515,13 @@ func runtimeIsHostManaged(runtime string) bool {
 	}
 }
 
-// wrapWorkerResilience mirrors providers.wrapResilience but sources the
-// backup credential via the stream credential proxy instead of a local
-// keychain. The engine wraps the primary ALWAYS (busy retry + narration need
-// no backup); a distinct, authable, buildable backup profile adds the
-// failover leg. Every backup failure path degrades to a backup-less engine —
-// a broken backup must never take down a working primary.
-func wrapWorkerResilience(
-	ctx context.Context,
-	primary inference.Provider,
-	primaryName string,
-	cfg pkgcfg.Config,
-	credSource credentialFetcher,
-	modelSupportsVision func(string) bool,
-) inference.Provider {
-	primaryProf, _ := profileByName(cfg.CloudProfiles, primaryName)
-	profiles := cfg.ModelProfiles
-	opts := resilience.Options{
-		PrimaryModelFor: func(tier string) string {
-			if tier == "" {
-				return primaryProf.Model
-			}
-			if model := profiles.ResolveCloudModelForTier(primaryProf, pkgcfg.Tier(tier)); model != "" {
-				return model
-			}
-			return primaryProf.Model
-		},
-		OnEvent: func(ev resilience.Event) {
-			log.Printf("[worker] resilience %s (%s, %s): %s: %v", ev.Action, ev.Stage, ev.Class, ev.Notice(), ev.Err)
-		},
-	}
-	if backup, backupModelFor, ok := buildWorkerBackup(ctx, primaryName, cfg, credSource, modelSupportsVision); ok {
-		opts.Backup = backup
-		opts.BackupModelFor = backupModelFor
-	}
-	return resilience.New(primary, opts)
-}
-
-// buildWorkerBackup resolves and builds the backup profile's provider over
-// the stream credential proxy, plus its tier-resolving model rewrite. ok is
-// false when no distinct, authable, buildable backup exists.
-func buildWorkerBackup(
-	ctx context.Context,
-	primaryName string,
-	cfg pkgcfg.Config,
-	credSource credentialFetcher,
-	modelSupportsVision func(string) bool,
-) (inference.Provider, func(tier string) string, bool) {
-	name := cfg.BackupCloudProfile
-	if name == "" || name == primaryName {
-		return nil, nil, false
-	}
-	var bp pkgcfg.CloudProfile
-	found := false
-	for _, p := range cfg.CloudProfiles {
-		if p.Name == name {
-			bp = p
-			found = true
-			break
-		}
-	}
-	if !found {
-		log.Printf("[worker] backup profile %q not found; running without failover", name)
-		return nil, nil, false
-	}
-
-	// Fetch the backup's credential via the stream (mirrors wrapBackup's
-	// st.Get(bp.Name)) — for a ChatGPT-sub backup this is the access token, for
-	// a static route the API key. The eager fetch gates the carve-out below for
-	// ALL flavors, exactly like in-process; ChatGPT-sub still installs a lazy
-	// TokenSource for per-call refresh.
-	key := ""
-	if k, _, err := credSource.Fetch(ctx, bp.Name); err == nil {
-		key = k
-	}
-	// Same carve-out as in-process wrapBackup, applied to every flavor: no
-	// credential (e.g. a logged-out ChatGPT-sub backup) + no BaseURL (proxy) +
-	// not bedrock (AWS credential chain) → run without fallback rather than
-	// wrapping an unusable backup.
-	if key == "" && bp.BaseURL == "" && bp.Flavor != cloudfactory.FlavorBedrock {
-		log.Printf("[worker] backup profile %q has no credential; running without failover", name)
-		return nil, nil, false
-	}
-	opts := cloudfactory.Options{ModelSupportsVision: modelSupportsVision}
-	if bp.Flavor == cloudfactory.FlavorResponses && bp.Route == cloudfactory.RouteChatGPT {
-		// ChatGPT subscription: the host owns refresh/OAuth; the worker proxies
-		// the token via the stream per call, keyed by the backup profile name.
-		opts.TokenSource = &streamTokenSource{creds: credSource, profileName: bp.Name}
-	}
-	if bp.Flavor == cloudfactory.FlavorMessages && bp.Route == cloudfactory.RouteSubscription {
-		// Anthropic subscription uses the same stream credential proxy with the
-		// one-value bearer token source expected by the messages client.
-		opts.AnthropicTokenSource = &anthropicStreamTokenSource{creds: credSource, profileName: bp.Name}
-	}
-	backup, buildErr := cloudfactory.BuildCloudProvider(bp, key, opts)
-	if buildErr != nil {
-		log.Printf("[worker] backup profile %q unbuildable (%v); running without failover", name, buildErr)
-		return nil, nil, false
-	}
-	// Same experience-preserving rewrite as the in-process builder: tiered
-	// requests re-resolve the tier against the backup vendor's cost table
-	// (ModelProfiles rides the config snapshot); untiered get the backup default.
-	profiles := cfg.ModelProfiles
-	bpDefault := bp.Model
-	backupModelFor := func(tier string) string {
-		if tier == "" {
-			return bpDefault
-		}
-		// Re-resolve against the original profile shape. If bp.Model already holds
-		// the provider-construction default, ResolveCloudModelForTier treats it as a
-		// pin and masks the requested tier.
-		resolveProf := bp
-		resolveProf.Model = ""
-		if model := profiles.ResolveCloudModelForTier(resolveProf, pkgcfg.Tier(tier)); model != "" {
-			return model
-		}
-		return bpDefault
-	}
-	return backup, backupModelFor, true
-}
-
 func (r *workerResolver) Main() (inference.Provider, bool, bool, error) {
 	cfg := r.cfgSvc.Get()
 	mode, _ := locus.ParseMode(cfg.LocusMode)
 	// Open tier registers absent only when config can prove the effective model
 	// is unavailable; catalog IDs are left to runtime ensure/warm paths.
 	open := r.openProv
-	if !dispatch.OpenModelReadyFor(cfg, openTierModel(cfg, pkgcfg.TierEveryday)) {
+	if !dispatch.OpenModelReadyFor(cfg, r.MainModel(false)) {
 		open = nil
 	}
 	candidates := r.Candidates()
@@ -651,12 +530,12 @@ func (r *workerResolver) Main() (inference.Provider, bool, bool, error) {
 	if err != nil {
 		return nil, false, false, err
 	}
-	return sel.Provider, sel.IsCloud, sel.FellBack, nil
+	return inference.WithTaskAssignment(sel.Provider, pkgcfg.TaskChat, cfg.TaskAssignment(pkgcfg.TaskChat), r.MainModel(sel.IsCloud)), sel.IsCloud, sel.FellBack, nil
 }
 
 func (r *workerResolver) Candidates() inference.Tiers {
 	c := r.cfgSvc.Get()
-	return inference.Tiers{Cloud: r.cloudProv, Open: r.openProv, Destinations: map[pkgcfg.Destination]inference.Candidate{
+	return inference.Tiers{Cloud: r.cloudProv, Open: r.openProv, TaskFor: c.TaskAssignment, Destinations: map[pkgcfg.Destination]inference.Candidate{
 		pkgcfg.DestinationPrimary:   {Provider: r.cloudProv, Profile: c.ActiveCloudProfile, IsCloud: true},
 		pkgcfg.DestinationSecondary: {Provider: r.secondaryProv, Profile: c.SecondaryCloudProfile, IsCloud: true},
 	}}
@@ -684,10 +563,7 @@ func (r *workerResolver) InstallAbsentCloud(_ string) { r.cloudProv = nil }
 func (r *workerResolver) Cloud() inference.Provider   { return r.cloudProv }
 func (r *workerResolver) Open() inference.Provider    { return r.openProv }
 func (r *workerResolver) ActiveCloudModel() string {
-	if prof, ok := r.cfgSvc.ActiveProfile(); ok {
-		return prof.Model
-	}
-	return r.cfgSvc.Get().CloudModel
+	return r.MainModel(true)
 }
 func (r *workerResolver) LocusMode() string                                               { return r.cfgSvc.Get().LocusMode }
 func (r *workerResolver) Router() providerssvc.RouterCloudUpdater                         { return nil }
@@ -712,4 +588,11 @@ func (r *workerResolver) SetModelSupportsVision(_ func(model string) bool) {}
 // worker_dispatch.go) through the shared internal/toolstack builder — the same
 // assembly the host uses — so worker turns wire an identical Services.
 
-func (r *workerResolver) SetProfileSupportsVision(func(pkgcfg.CloudProfile, string) bool) {}
+func (r *workerResolver) SetProfileModelEvidence(func(pkgcfg.CloudProfile, string) modelmetadata.Evidence) {
+}
+
+func workerChainEvents(d pkgcfg.Destination) func(resilience.Event) {
+	return func(ev resilience.Event) {
+		log.Printf("[worker] %s resilience %s (%s, %s): %s: %v", d, ev.Action, ev.Stage, ev.Class, ev.Notice(), ev.Err)
+	}
+}

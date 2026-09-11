@@ -78,6 +78,7 @@ type Spec struct {
 	// MaxIterations caps the number of LLM round-trips in the loop.
 	// 0 means use the package default (agent.MaxToolLoopIterations = 50).
 	MaxIterations int
+	FallbackTier  config.Tier // per-invocation override fallback intent
 }
 
 // Result holds the outcome of a dispatched call.
@@ -112,8 +113,11 @@ type Result struct {
 	// error so the parent cannot treat fabricated write/execute completion as
 	// success; the fields remain populated for diagnostics. SuspicionReason is
 	// a human-readable explanation.
-	Suspicious      bool
-	SuspicionReason string
+	Suspicious           bool
+	SuspicionReason      string
+	Profile, Destination string
+	ContextWindow        int
+	ContextWindowKnown   bool
 }
 
 // Engine routes dispatch calls to the appropriate provider.
@@ -164,14 +168,16 @@ func (e *Engine) Target(spec Spec) (modelbudget.Target, error) {
 	if err != nil {
 		return modelbudget.Target{}, err
 	}
+	intent := tier
 	if spec.ModelOverride != "" {
 		tier = ""
 	}
+	route := inference.TargetForCall(sel.Provider, inference.Call{Model: model, Tier: string(tier), FallbackTier: string(intent)})
 	return modelbudget.Target{
-		Provider: providerName(sel),
-		Model:    model,
-		Tier:     string(tier),
-		IsCloud:  sel.IsCloud,
+		Provider: route.Provider, Profile: route.Profile, Destination: route.Destination, ContextWindow: route.ContextWindow, ContextWindowKnown: route.ContextWindowKnown,
+		Model:   route.Model,
+		Tier:    string(tier),
+		IsCloud: sel.IsCloud,
 	}, nil
 }
 
@@ -185,6 +191,7 @@ func (e *Engine) Dispatch(ctx context.Context, spec Spec) (Result, error) {
 	}
 	spec.Tier = tier
 	if spec.ModelOverride != "" {
+		spec.FallbackTier = tier
 		spec.Tier = ""
 	}
 
@@ -220,9 +227,10 @@ func (e *Engine) Dispatch(ctx context.Context, spec Spec) (Result, error) {
 
 	// 4. Build chat request.
 	req := llm.ChatRequest{
-		Model:  model,
-		Tier:   string(spec.Tier),
-		System: spec.System,
+		Model:        model,
+		Tier:         string(spec.EffectiveTier()),
+		FallbackTier: string(spec.FallbackTier),
+		System:       spec.System,
 		Messages: []llm.Message{
 			{
 				Role: llm.RoleUser,
@@ -239,10 +247,20 @@ func (e *Engine) Dispatch(ctx context.Context, spec Spec) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	servedModel := model
+	servedProvider := providerName(sel)
+	if resp.Model != "" {
+		servedModel = resp.Model
+	}
+	route := llm.ServingRoute{Provider: servedProvider, Model: servedModel, Profile: sel.Profile, Destination: string(sel.Destination)}
+	if resp.Route != nil {
+		route = *resp.Route
+		servedProvider = route.Provider
+	}
 	if spec.RecordUsage && e.usageSink != nil {
 		e.usageSink(usage.Usage{
-			Source:               spec.Source,
-			Model:                model,
+			Source: spec.Source,
+			Model:  servedModel, Provider: servedProvider,
 			IsCloud:              sel.IsCloud,
 			InputTokens:          resp.InputTokens,
 			OutputTokens:         resp.OutputTokens,
@@ -260,14 +278,10 @@ func (e *Engine) Dispatch(ctx context.Context, spec Spec) (Result, error) {
 	}
 
 	// 7. Return result.
-	servedModel := model
-	if resp.Model != "" {
-		servedModel = resp.Model
-	}
 	return Result{
-		Text:         text,
-		Model:        servedModel,
-		Provider:     providerName(sel),
+		Text:     text,
+		Model:    servedModel,
+		Provider: servedProvider, Profile: route.Profile, Destination: route.Destination, ContextWindow: route.ContextWindow, ContextWindowKnown: route.ContextWindowKnown,
 		Tier:         string(spec.Tier),
 		IsCloud:      sel.IsCloud,
 		Notice:       sel.Notice,
@@ -301,7 +315,9 @@ func (e *Engine) resolve(spec Spec, mode locus.Mode, candidates inference.Tiers)
 	tier := spec.Tier
 	if spec.RoutingTask != "" {
 		assignment := (config.Config{}).TaskAssignment(spec.RoutingTask)
-		if e.taskAssignment != nil {
+		if candidates.TaskFor != nil {
+			assignment = candidates.TaskFor(spec.RoutingTask)
+		} else if e.taskAssignment != nil {
 			assignment = e.taskAssignment(spec.RoutingTask)
 		}
 		if tier == "" {
@@ -331,8 +347,27 @@ func (e *Engine) resolve(spec Spec, mode locus.Mode, candidates inference.Tiers)
 	if spec.ModelOverride != "" {
 		model = spec.ModelOverride
 	}
+	if spec.RoutingTask != "" {
+		request := inference.Call{Model: model, Tier: string(tier)}
+		if spec.ModelOverride != "" {
+			request.Tier = ""
+			request.FallbackTier = string(tier)
+		}
+		target := inference.TargetForCall(sel.Provider, request)
+		model = target.Model
+		if target.Profile != "" {
+			sel.Profile = target.Profile
+		}
+	}
 	if spec.RoutingTask != "" && model == "" {
 		return sel, tier, "", errors.New("dispatch: selected task model unavailable")
 	}
 	return sel, tier, model, nil
+}
+
+func (s Spec) EffectiveTier() config.Tier {
+	if s.Tier != "" {
+		return s.Tier
+	}
+	return s.FallbackTier
 }

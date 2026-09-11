@@ -101,3 +101,10 @@ func nonemptyProfileField(value string) *string {
 	}
 	return &value
 }
+
+func profileStructureToProto(p CloudProfileInfo) *proto.CloudProfileStructure {
+	if !p.ReplaceStructure {
+		return nil
+	}
+	return &proto.CloudProfileStructure{Flavor: p.Flavor, Backend: p.Backend, BaseUrl: p.BaseURL, Route: p.Route, Provider: p.Provider, Region: p.Region, AwsProfile: p.AWSProfile}
+}

@@ -13,6 +13,7 @@ package runner
 // report.)
 
 import (
+	"cercano/source/server/internal/modelmetadata"
 	"context"
 	"encoding/json"
 	"errors"
@@ -825,4 +826,5 @@ func (c *fakeConfig) SetTaskAssignment(task config.Task, a *config.TaskAssignmen
 	return c.cfg.SetTaskAssignment(task, a)
 }
 
-func (f *fakeResolver) SetProfileSupportsVision(func(config.CloudProfile, string) bool) {}
+func (f *fakeResolver) SetProfileModelEvidence(func(config.CloudProfile, string) modelmetadata.Evidence) {
+}

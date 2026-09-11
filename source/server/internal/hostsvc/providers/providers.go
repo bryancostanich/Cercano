@@ -9,9 +9,12 @@
 package providers
 
 import (
+	"cercano/source/server/internal/modelmetadata"
 	"context"
 	"fmt"
 	"log"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"cercano/source/server/internal/agent"
@@ -120,11 +123,20 @@ type Resolver interface {
 	// reporting no vision support, which is the safe default: the transport can
 	// always carry an image, but only the model can read one.
 	SetModelSupportsVision(fn func(model string) bool)
-	SetProfileSupportsVision(fn func(cfg.CloudProfile, string) bool)
+	SetProfileModelEvidence(fn func(cfg.CloudProfile, string) modelmetadata.Evidence)
 }
 
 // service is the concrete Resolver implementation.
+type cloudRoutingState struct {
+	primary, secondary inference.Provider
+	config             cfg.Config
+}
+type providerSlot struct{ provider inference.Provider }
+
 type service struct {
+	rebuildMu            sync.Mutex
+	cloudState           atomic.Pointer[cloudRoutingState]
+	openState            atomic.Pointer[providerSlot]
 	cfgSvc               cfgsvc.Service
 	secondaryLLMProvider inference.Provider
 	cloudLLMProvider     inference.Provider
@@ -148,8 +160,8 @@ type service struct {
 	// modelSupportsVision reports confirmed image capability for a cloud model.
 	// Consulted when building OpenAI-compatible clients, whose transport can
 	// encode images for any model regardless of whether that model can read one.
-	modelSupportsVision   func(model string) bool
-	profileSupportsVision func(cfg.CloudProfile, string) bool
+	modelSupportsVision  func(model string) bool
+	profileModelEvidence func(cfg.CloudProfile, string) modelmetadata.Evidence
 }
 
 // New constructs a Resolver with the collaborators it needs.
@@ -184,16 +196,35 @@ func errorString(err error) string {
 
 // --- Resolver interface implementation ---
 
-func (p *service) Cloud() inference.Provider              { return p.cloudLLMProvider }
-func (p *service) Open() inference.Provider               { return p.openLLMProvider }
+func (p *service) Cloud() inference.Provider {
+	if state := p.cloudState.Load(); state != nil {
+		return state.primary
+	}
+	return p.cloudLLMProvider
+}
+func (p *service) Open() inference.Provider {
+	if state := p.openState.Load(); state != nil {
+		return state.provider
+	}
+	return p.openLLMProvider
+}
 func (p *service) Router() RouterCloudUpdater             { return p.router }
 func (p *service) Registry() *engine.EngineRegistry       { return p.registry }
 func (p *service) CatalogManager() *ollamacatalog.Manager { return p.catalogManager }
-func (p *service) CloudLLMProvider() inference.Provider   { return p.cloudLLMProvider }
-func (p *service) OpenLLMProvider() inference.Provider    { return p.openLLMProvider }
+func (p *service) CloudLLMProvider() inference.Provider   { return p.Cloud() }
+func (p *service) OpenLLMProvider() inference.Provider    { return p.Open() }
 
-func (p *service) SetCloudLLMProvider(prov inference.Provider) { p.cloudLLMProvider = prov }
-func (p *service) SetOpenLLMProvider(prov inference.Provider)  { p.openLLMProvider = prov }
+func (p *service) SetCloudLLMProvider(prov inference.Provider) {
+	state := &cloudRoutingState{primary: prov, config: p.cfgSvc.Get()}
+	if previous := p.cloudState.Load(); previous != nil {
+		state.config = previous.config
+		state.secondary = previous.secondary
+	}
+	p.cloudState.Store(state)
+}
+func (p *service) SetOpenLLMProvider(prov inference.Provider) {
+	p.openState.Store(&providerSlot{provider: prov})
+}
 func (p *service) SetCatalogManager(cm *ollamacatalog.Manager) { p.catalogManager = cm }
 func (p *service) SetUsageSink(fn func(usage.Usage))           { p.usageSink = fn }
 func (p *service) SetRoutingLog(w *routinglog.Writer)          { p.routingLog = w }
@@ -227,20 +258,31 @@ func (p *service) Main() (inference.Provider, bool, bool, error) {
 	// downloading after setup) so Select crosses to cloud — the "cloud covers
 	// the gap" routing contract. Otherwise the not-yet-present model gets
 	// picked and fails at load time instead of falling back.
-	open := p.openLLMProvider
-	if !dispatch.OpenModelReadyFor(c, p.openModels.ChatModel()) {
+	candidates := p.Candidates()
+	assignment := c.TaskAssignment(cfg.TaskChat)
+	if candidates.TaskFor != nil {
+		assignment = candidates.TaskFor(cfg.TaskChat)
+	}
+	open := candidates.Open
+	model := ""
+	if p.openModels != nil {
+		model = p.openModels.Model(assignment.Quality.CapabilityTier())
+	}
+	if !dispatch.OpenModelReadyFor(c, model) {
 		open = nil
 	}
-	candidates := p.Candidates()
 	candidates.Open = open
-	sel, err := inference.SelectDestination(mode, c.TaskAssignment(cfg.TaskChat).Destination, candidates)
+	sel, err := inference.SelectDestination(mode, assignment.Destination, candidates)
 	if err != nil {
 		return nil, false, false, err
 	}
 	// Wrap the selected provider for "main" token-usage recording at hand-off.
 	// The stored providers stay raw (the dispatch engine reads them raw and
 	// wraps per-dispatch with its own source), so there's no double-counting.
-	prov := usage.Wrap(sel.Provider, "main", sel.IsCloud, p.usageSink)
+	if sel.IsCloud {
+		model = inference.TargetForCall(sel.Provider, inference.Call{Tier: string(assignment.Quality.CapabilityTier())}).Model
+	}
+	prov := usage.Wrap(inference.WithTaskAssignment(sel.Provider, cfg.TaskChat, assignment, model), "main", sel.IsCloud, p.usageSink)
 	return prov, sel.IsCloud, sel.FellBack, nil
 }
 
@@ -303,21 +345,22 @@ func (p *service) installAbsentCloud(reason string) {
 // native cloud provider and installs the absent-cloud sentinel — the agent keeps
 // running with cloud absent.
 //
-// After the config-service extraction, rebuildCloud no longer holds cfgMu — it
-// reads a snapshot from cfgSvc. The split between config mutation and provider
-// reconfiguration is now sequential (config updates first via cfgSvc, then
-// rebuildCloud). A concurrent reader can momentarily observe new config with old
-// provider wiring; this window is the documented trade-off of the extraction.
+// A complete immutable cloud binding graph is published after both chains are
+// built. Serialized rebuilds cannot overwrite a newer configuration with an older one.
 func (p *service) rebuildCloud() error {
+	p.rebuildMu.Lock()
+	defer p.rebuildMu.Unlock()
 	c := p.cfgSvc.Get()
-	p.secondaryLLMProvider, _ = profilechain.Build(c, cfg.DestinationSecondary, p.buildProfile)
-	provider, err := profilechain.Build(c, cfg.DestinationPrimary, p.buildProfile)
+	secondary, _ := profilechain.Build(c, cfg.DestinationSecondary, p.buildProfile, p.chainEvents(c, cfg.DestinationSecondary))
+	provider, err := profilechain.Build(c, cfg.DestinationPrimary, p.buildProfile, p.chainEvents(c, cfg.DestinationPrimary))
+	p.cloudState.Store(&cloudRoutingState{primary: provider, secondary: secondary, config: c})
 	if err != nil {
 		p.installAbsentCloud(err.Error())
 		return err
 	}
-	p.SetCloudLLMProvider(provider)
-	model := p.MainModel(true)
+	// The legacy CloudModel remains bound to Primary; never pair it with a
+	// model from the independently selected Secondary profile.
+	model := inference.TargetForCall(provider, inference.Call{Tier: string(c.TaskAssignment(cfg.TaskChat).Quality.CapabilityTier())}).Model
 	mp := agent.InferenceTurnRunner(provider, model)
 	p.router.SetCloudProvider(mp)
 	if p.coordinator != nil {
@@ -337,8 +380,10 @@ func (p *service) buildProfile(prof cfg.CloudProfile) (inference.Provider, error
 		return nil, fmt.Errorf("no API key for profile %s", prof.Name)
 	}
 	confirmed := p.modelSupportsVision
-	if p.profileSupportsVision != nil {
-		confirmed = func(model string) bool { return p.profileSupportsVision(prof, model) }
+	if p.profileModelEvidence != nil {
+		confirmed = func(model string) bool {
+			return p.profileModelEvidence(prof, model).Vision == modelmetadata.VisionSupported
+		}
 	}
 	opts := cloudfactory.Options{ModelSupportsVision: confirmed}
 	if prof.Flavor == cloudfactory.FlavorResponses && prof.Route == cloudfactory.RouteChatGPT {
@@ -351,126 +396,27 @@ func (p *service) buildProfile(prof cfg.CloudProfile) (inference.Provider, error
 	if err != nil {
 		return nil, err
 	}
-	return profilechain.GuardVision(provider, confirmed), nil
+	return profilechain.GuardVision(provider, confirmed, func(model string) modelmetadata.Evidence {
+		if p.profileModelEvidence == nil {
+			return modelmetadata.Evidence{}
+		}
+		return p.profileModelEvidence(prof, model)
+	}), nil
 }
 
 func (p *service) Candidates() inference.Tiers {
 	c := p.cfgSvc.Get()
-	return inference.Tiers{Cloud: p.cloudLLMProvider, Open: p.openLLMProvider, Destinations: map[cfg.Destination]inference.Candidate{
-		cfg.DestinationPrimary:   {Provider: p.cloudLLMProvider, Profile: c.ActiveCloudProfile, IsCloud: true},
-		cfg.DestinationSecondary: {Provider: p.secondaryLLMProvider, Profile: c.SecondaryCloudProfile, IsCloud: true},
+	primary, secondary := p.cloudLLMProvider, p.secondaryLLMProvider
+	if state := p.cloudState.Load(); state != nil {
+		c = state.config
+		primary = state.primary
+		secondary = state.secondary
+	}
+	return inference.Tiers{Cloud: primary, Open: p.Open(), TaskFor: c.TaskAssignment, Destinations: map[cfg.Destination]inference.Candidate{
+		cfg.DestinationPrimary:   {Provider: primary, Profile: c.ActiveCloudProfile, IsCloud: true},
+		cfg.DestinationSecondary: {Provider: secondary, Profile: c.SecondaryCloudProfile, IsCloud: true},
 	}}
-}
 
-// wrapResilience wraps the freshly built active-profile provider in the
-// resilience engine — ALWAYS, so the class-driven busy retry and user
-// narration apply even without a backup. A configured, buildable backup
-// profile adds the failover leg. cfg is the config snapshot already held by
-// the caller (avoids a second Get()). A backup that can't be built is
-// reported and skipped — a broken backup must never take down a working
-// primary, so every backup failure path degrades to a backup-less engine.
-func (p *service) wrapResilience(primary inference.Provider, primaryName string, c cfg.Config) inference.Provider {
-	primaryProf, _ := profileByName(c.CloudProfiles, primaryName)
-	profiles := c.ModelProfiles
-	opts := resilience.Options{
-		PrimaryModelFor: func(tier string) string {
-			if tier == "" {
-				return primaryProf.Model
-			}
-			if model := profiles.ResolveCloudModelForTier(primaryProf, cfg.Tier(tier)); model != "" {
-				return model
-			}
-			return primaryProf.Model
-		},
-		OnEvent: func(ev resilience.Event) {
-			log.Printf("[cloud] resilience %s (%s, %s): %s: %v", ev.Action, ev.Stage, ev.Class, ev.Notice(), ev.Err)
-			if p.routingLog != nil {
-				p.routingLog.Log("cloud.resilience", routinglog.Event{
-					"primary_profile": primaryName,
-					"backup_profile":  c.BackupCloudProfile,
-					"action":          string(ev.Action),
-					"stage":           ev.Stage,
-					"error_class":     string(ev.Class),
-					"from_provider":   ev.From,
-					"to_provider":     ev.To,
-					"wait_ms":         ev.Wait.Milliseconds(),
-					"notice":          ev.Notice(),
-					"error":           errorString(ev.Err),
-				})
-			}
-		},
-	}
-	if backup, backupModelFor, ok := p.buildBackup(primaryName, c); ok {
-		opts.Backup = backup
-		opts.BackupModelFor = backupModelFor
-	}
-	return resilience.New(primary, opts)
-}
-
-// buildBackup resolves and builds the configured backup profile's provider
-// plus its tier-resolving model rewrite. ok is false when no distinct,
-// authable, buildable backup exists.
-func (p *service) buildBackup(primaryName string, c cfg.Config) (inference.Provider, func(tier string) string, bool) {
-	name := c.BackupCloudProfile
-	if name == "" || name == primaryName {
-		return nil, nil, false
-	}
-	bp, ok := profileByName(c.CloudProfiles, name)
-	if !ok {
-		log.Printf("[cloud] backup profile %q not found; running without failover", name)
-		return nil, nil, false
-	}
-	st := p.cfgSvc.Secrets()
-	key := ""
-	if st != nil {
-		if k, err := st.Get(bp.Name); err == nil {
-			key = k
-		}
-	}
-	// Same authentication carve-outs as the primary build in rebuildCloud:
-	// a proxy BaseURL (Meridian) authenticates with no key, and bedrock uses
-	// the AWS credential chain.
-	if key == "" && bp.BaseURL == "" && bp.Flavor != cloudfactory.FlavorBedrock {
-		log.Printf("[cloud] backup profile %q has no API key; running without failover", name)
-		return nil, nil, false
-	}
-	bpDefault := c.ModelProfiles.ResolveCloudModelForTier(bp, cfg.TierEveryday)
-	bp.Model = bpDefault
-	opts := cloudfactory.Options{ModelSupportsVision: p.modelSupportsVision}
-	if bp.Flavor == cloudfactory.FlavorResponses && bp.Route == cloudfactory.RouteChatGPT {
-		opts.TokenSource = chatgptauth.NewSource(st, bp.Name, chatgptauth.Flow{})
-	}
-	if bp.Flavor == cloudfactory.FlavorMessages && bp.Route == cloudfactory.RouteSubscription {
-		opts.AnthropicTokenSource = anthropicauth.NewSource(st, bp.Name, anthropicauth.Flow{})
-	}
-	backup, err := cloudfactory.BuildCloudProvider(bp, key, opts)
-	if err != nil {
-		log.Printf("[cloud] backup profile %q unbuildable (%v); running without failover", name, err)
-		return nil, nil, false
-	}
-	// Experience-preserving model rewrite: a tiered request re-resolves the
-	// SAME capability tier against the backup vendor's cost table, so e.g.
-	// economy-tier summarization fails over to the backup's economy model.
-	// Untiered requests (and unset slots) get the backup profile's default.
-	// The closure captures this rebuild's config snapshot — profile/table
-	// changes trigger another Rebuild, which builds a fresh closure.
-	profiles := c.ModelProfiles
-	backupModelFor := func(tier string) string {
-		if tier == "" {
-			return bpDefault
-		}
-		// Re-resolve against the original profile shape. bp.Model has been set to
-		// the backup default for provider construction; if we passed that mutated
-		// profile back into ResolveCloudModelForTier it would look like an explicit
-		// user pin and mask the requested tier.
-		resolveProf := bp
-		resolveProf.Model = ""
-		if model := profiles.ResolveCloudModelForTier(resolveProf, cfg.Tier(tier)); model != "" {
-			return model
-		}
-		return bpDefault
-	}
-	return backup, backupModelFor, true
 }
 
 // ReconfigureArgs carries the provider/runtime-facing arguments from an
@@ -527,7 +473,7 @@ func (p *service) Reconfigure(args ReconfigureArgs) {
 		// Rebuild the native open provider for the new runtime. Without this,
 		// the dispatch engine's open lane (watchdog, coproc caps) keeps talking
 		// to the previous runtime until the agent restarts.
-		p.openLLMProvider = p.openProviderFactory(args.MutatedConfig)
+		p.SetOpenLLMProvider(p.openProviderFactory(args.MutatedConfig))
 	}
 	if args.OpenRuntime != "" || args.OpenModel != "" {
 		model := args.ResolvedOpenModel
@@ -543,10 +489,10 @@ func (p *service) Reconfigure(args ReconfigureArgs) {
 // rebuild-on-switch replacement for the old mutable open-provider
 // SetEngine/SetModelName path.
 func (p *service) setOpenTurnRunner(model string) {
-	if p.openLLMProvider == nil || model == "" {
+	if p.Open() == nil || model == "" {
 		return
 	}
-	tr := agent.InferenceTurnRunner(p.openLLMProvider, model)
+	tr := agent.InferenceTurnRunner(p.Open(), model)
 	if p.router != nil {
 		p.router.SetOpenProvider(tr)
 	}
@@ -566,6 +512,16 @@ func profileByName(profiles []cfg.CloudProfile, name string) (cfg.CloudProfile, 
 	return cfg.CloudProfile{}, false
 }
 
-func (p *service) SetProfileSupportsVision(fn func(cfg.CloudProfile, string) bool) {
-	p.profileSupportsVision = fn
+func (p *service) SetProfileModelEvidence(fn func(cfg.CloudProfile, string) modelmetadata.Evidence) {
+	p.profileModelEvidence = fn
+}
+
+func (p *service) chainEvents(c cfg.Config, d cfg.Destination) func(resilience.Event) {
+	preferred, backup := c.DestinationProfiles(d)
+	return func(ev resilience.Event) {
+		log.Printf("[cloud] %s resilience %s (%s, %s): %s: %v", d, ev.Action, ev.Stage, ev.Class, ev.Notice(), ev.Err)
+		if p.routingLog != nil {
+			p.routingLog.Log("cloud.resilience", routinglog.Event{"destination": string(d), "primary_profile": preferred, "backup_profile": backup, "action": string(ev.Action), "stage": ev.Stage, "error_class": string(ev.Class), "from_provider": ev.From, "to_provider": ev.To, "wait_ms": ev.Wait.Milliseconds(), "notice": ev.Notice(), "error": errorString(ev.Err)})
+		}
+	}
 }

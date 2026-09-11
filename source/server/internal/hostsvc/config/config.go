@@ -126,16 +126,8 @@ func (s *svc) SetActiveProfile(name string) bool {
 	if _, ok := profileByName(s.current.CloudProfiles, name); !ok {
 		return false
 	}
-	previous := s.current.ActiveCloudProfile
-	if previous != "" && previous != name {
-		// Selecting a different primary should keep the previous primary as the
-		// automatic failover target. This also handles the common swap where the
-		// selected profile was already the backup: primary and backup trade places
-		// instead of leaving backup equal to primary.
-		s.current.BackupCloudProfile = previous
-	} else if s.current.BackupCloudProfile == name {
-		// Preserve the invariant that the primary profile is never also backup.
-		s.current.BackupCloudProfile = ""
+	if s.current.BackupCloudProfile == name {
+		return false
 	}
 	s.current.ActiveCloudProfile = name
 	return true

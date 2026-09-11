@@ -9,12 +9,13 @@ import (
 // It is intentionally prompt-free so callers can ask for budgeting metadata
 // before constructing large source-heavy prompts.
 type Target struct {
-	Provider           string
-	Model              string
-	Tier               string
-	IsCloud            bool
-	ContextWindow      int
-	ContextWindowKnown bool
+	Profile, Destination string
+	Provider             string
+	Model                string
+	Tier                 string
+	IsCloud              bool
+	ContextWindow        int
+	ContextWindowKnown   bool
 }
 
 // Budget is the usable input-token envelope for one model call after reserving

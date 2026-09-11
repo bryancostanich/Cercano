@@ -3,6 +3,7 @@ package profilechain
 import (
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
+	"cercano/source/server/internal/modelmetadata"
 	"cercano/source/server/pkg/config"
 	"context"
 	"errors"
@@ -35,9 +36,9 @@ func TestImageFailoverUsesIndependentChoice(t *testing.T) {
 			primary, backup := &capture{fail: true}, &capture{}
 			provider, err := Build(c, config.DestinationPrimary, func(p config.CloudProfile) (inference.Provider, error) {
 				if p.Name == "p" {
-					return primary, nil
+					return GuardVision(primary, func(string) bool { return true }), nil
 				}
-				return backup, nil
+				return GuardVision(backup, func(string) bool { return true }), nil
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -79,5 +80,83 @@ func TestUnknownBackupCannotBorrowPrimaryVisionEvidence(t *testing.T) {
 	}
 	if _, err := GuardVision(backup, nil).StreamChat(context.Background(), req); err == nil {
 		t.Fatal("stream accepted unconfirmed image")
+	}
+}
+
+func TestServingRouteUsesActualEndpointEvidence(t *testing.T) {
+	c := config.Config{ActiveCloudProfile: "p", BackupCloudProfile: "b", CloudProfiles: []config.CloudProfile{{Name: "p", TierOverrides: map[config.CostTier]string{config.CostPremium: "same-id"}}, {Name: "b", TierOverrides: map[config.CostTier]string{config.CostPremium: "same-id"}}}}
+	primary, backup := &capture{fail: true}, &capture{}
+	chain, err := Build(c, config.DestinationPrimary, func(p config.CloudProfile) (inference.Provider, error) {
+		raw := primary
+		window := 16384
+		if p.Name == "b" {
+			raw = backup
+			window = 65536
+		}
+		return GuardVision(raw, nil, func(string) modelmetadata.Evidence { return modelmetadata.Evidence{ContextWindow: window} }), nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := inference.Call{Model: "same-id", Tier: "most_capable"}
+	before := inference.TargetForCall(chain, req)
+	if before.Profile != "p" || before.ContextWindow != 16384 {
+		t.Fatalf("initial target: %+v", before)
+	}
+	response, err := chain.Chat(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Route == nil || response.Route.Profile != "b" || response.Route.ContextWindow != 65536 || response.Route.Destination != "primary" {
+		t.Fatalf("actual route: %+v", response.Route)
+	}
+	after := inference.TargetForCall(chain, req)
+	if after.Profile != "b" || after.ContextWindow != 65536 {
+		t.Fatalf("cooldown target: %+v", after)
+	}
+}
+
+func TestUnavailablePreferredUsesItsOwnConfiguredBackup(t *testing.T) {
+	c := config.Config{SecondaryCloudProfile: "s", SecondaryBackupCloudProfile: "sb", CloudProfiles: []config.CloudProfile{{Name: "s", TierOverrides: map[config.CostTier]string{config.CostPremium: "preferred"}}, {Name: "sb", TierOverrides: map[config.CostTier]string{config.CostPremium: "backup"}}}}
+	backup := &capture{}
+	chain, err := Build(c, config.DestinationSecondary, func(p config.CloudProfile) (inference.Provider, error) {
+		if p.Name == "s" {
+			return nil, errors.New("fixture missing credential")
+		}
+		return backup, nil
+	})
+	if err != nil {
+		t.Fatalf("usable configured backup discarded: %v", err)
+	}
+	target := inference.TargetForCall(chain, inference.Call{Model: "foreign-override", FallbackTier: "most_capable"})
+	if target.Profile != "sb" || target.Model != "backup" {
+		t.Fatalf("startup target=%+v", target)
+	}
+	response, err := chain.Chat(context.Background(), inference.Call{Model: "foreign-override", FallbackTier: "most_capable"})
+	if err != nil || len(backup.calls) != 1 || backup.calls[0].Model != "backup" || response.Route.Profile != "sb" {
+		t.Fatalf("startup backup: %+v err=%v", response, err)
+	}
+}
+
+func TestMissingPrimaryQualityDoesNotLeakForeignModel(t *testing.T) {
+	c := config.Config{ActiveCloudProfile: "p", BackupCloudProfile: "b", CloudProfiles: []config.CloudProfile{{Name: "p"}, {Name: "b", TierOverrides: map[config.CostTier]string{config.CostPremium: "backup"}}}}
+	primary, backup := &capture{}, &capture{}
+	chain, err := Build(c, config.DestinationPrimary, func(p config.CloudProfile) (inference.Provider, error) {
+		if p.Name == "p" {
+			return primary, nil
+		}
+		return backup, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := inference.Call{Model: "foreign", Tier: "most_capable"}
+	target := inference.TargetForCall(chain, request)
+	if target.Profile != "b" || target.Model != "backup" {
+		t.Fatalf("missing slot target=%+v", target)
+	}
+	_, err = chain.Chat(context.Background(), request)
+	if err != nil || len(primary.calls) != 0 || len(backup.calls) != 1 || backup.calls[0].Model != "backup" {
+		t.Fatalf("calls primary=%v backup=%v err=%v", primary.calls, backup.calls, err)
 	}
 }

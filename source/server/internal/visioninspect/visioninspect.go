@@ -167,10 +167,17 @@ func (in *Inspector) Inspect(ctx context.Context, convID, imageID, question stri
 	}
 
 	source := r.Provider.Name()
-	if source != "" && r.Model != "" {
-		source = source + ":" + r.Model
-	} else if r.Model != "" {
-		source = r.Model
+	model := r.Model
+	if res.Model != "" {
+		model = res.Model
+	}
+	if res.Route != nil {
+		source = res.Route.Provider + "[" + res.Route.Profile + "]"
+	}
+	if source != "" && model != "" {
+		source += ":" + model
+	} else if model != "" {
+		source = model
 	}
 	return capabilities.VisionAnswer{
 		Answer: strings.TrimSpace(answer),

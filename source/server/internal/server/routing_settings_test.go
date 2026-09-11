@@ -44,3 +44,16 @@ func TestRoutingSettingsAtomicPresence(t *testing.T) {
 		t.Fatal("cleared task did not inherit Premium")
 	}
 }
+
+func TestProfileSaveReportsAvailabilityAsWarning(t *testing.T) {
+	s, _ := newTestServer()
+	c := config.Defaults()
+	c.ActiveCloudProfile = "no-key"
+	c.CloudProfiles = []config.CloudProfile{{Name: "no-key", Flavor: "messages"}}
+	s.cfgSvc.Set(c)
+	response, err := s.UpsertCloudProfile(context.Background(), &proto.UpsertCloudProfileRequest{Name: "no-key", ModelChoices: &proto.ProfileModelChoices{TierOverrides: map[string]string{"premium": "custom"}}})
+	saved := s.cfgSvc.Get().CloudProfiles[0].TierOverrides[config.CostPremium]
+	if err != nil || !response.Ok || saved != "custom" {
+		t.Fatalf("saved choice=%q but response=%+v err=%v", saved, response, err)
+	}
+}

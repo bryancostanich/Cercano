@@ -59,6 +59,7 @@ type Request struct {
 
 // Result is the turn's outcome.
 type Result struct {
+	Route        *llm.ServingRoute
 	FinalText    string
 	Model        string
 	IsCloud      bool

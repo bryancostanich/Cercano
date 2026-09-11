@@ -104,8 +104,8 @@ func TestWorkerBackupFailover_WrapsCompositeAndFailsOver(t *testing.T) {
 	}
 
 	// Structural parity: the resolved provider must be the resilience engine.
-	if _, ok := prov.(*resilience.Provider); !ok {
-		t.Fatalf("resolved provider is %T, want *resilience.Provider (worker did not wrap active+backup)", prov)
+	if _, ok := resolver.Candidates().Cloud.(*resilience.Provider); !ok {
+		t.Fatalf("raw cloud provider is %T, want *resilience.Provider (worker did not wrap active+backup)", resolver.Candidates().Cloud)
 	}
 
 	// Both credentials must have been fetched via the proxy (active during the
@@ -162,8 +162,8 @@ func TestWorkerBackupFailover_NoBackupIsBareProvider(t *testing.T) {
 	}
 	// The engine wraps even without a backup — retry policy and narration are
 	// not conditional on failover being available.
-	if _, ok := prov.(*resilience.Provider); !ok {
-		t.Fatalf("resolved provider is %T, want *resilience.Provider even without a backup", prov)
+	if _, ok := resolver.Candidates().Cloud.(*resilience.Provider); !ok {
+		t.Fatalf("raw cloud provider is %T, want *resilience.Provider even without a backup", resolver.Candidates().Cloud)
 	}
 	if creds.sawFetch("backup") {
 		t.Error("backup credential fetched but no backup configured")

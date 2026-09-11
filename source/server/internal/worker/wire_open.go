@@ -29,7 +29,8 @@ func MarshalChatRequest(req llm.ChatRequest) (*proto.LLMChatRequest, error) {
 		tools = append(tools, MarshalTool(t))
 	}
 	return &proto.LLMChatRequest{
-		Model:          req.Model,
+		Model: req.Model,
+		Tier:  req.Tier, FallbackTier: req.FallbackTier,
 		System:         req.System,
 		Messages:       msgs,
 		Tools:          tools,
@@ -58,7 +59,8 @@ func UnmarshalChatRequest(p *proto.LLMChatRequest) (llm.ChatRequest, error) {
 		tools = append(tools, UnmarshalTool(pt))
 	}
 	return llm.ChatRequest{
-		Model:    p.GetModel(),
+		Model: p.GetModel(),
+		Tier:  p.GetTier(), FallbackTier: p.GetFallbackTier(),
 		System:   p.GetSystem(),
 		Messages: msgs,
 		Tools:    tools,
@@ -100,6 +102,7 @@ func UnmarshalTool(p *proto.LLMTool) llm.Tool {
 // MarshalStreamEvent converts an llm.StreamEvent to its proto wire form.
 func MarshalStreamEvent(e llm.StreamEvent) *proto.LLMStreamEvent {
 	return &proto.LLMStreamEvent{
+		Route:         marshalServingRoute(e.Route),
 		Type:          string(e.Type),
 		TextDelta:     e.TextDelta,
 		ToolUseId:     e.ToolUseID,
@@ -124,6 +127,7 @@ func UnmarshalStreamEvent(p *proto.LLMStreamEvent) llm.StreamEvent {
 		raw = json.RawMessage(r)
 	}
 	return llm.StreamEvent{
+		Route:         unmarshalServingRoute(p.GetRoute()),
 		Type:          llm.StreamEventType(p.GetType()),
 		TextDelta:     p.GetTextDelta(),
 		ToolUseID:     p.GetToolUseId(),

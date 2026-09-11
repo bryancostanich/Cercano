@@ -552,10 +552,14 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 		contextWindow = x.contextWindowFor(model, sel.IsCloud)
 	}
 	contextWindowKnown := contextWindow > 0
+	if route := inference.TargetForCall(sel.Provider, inference.Call{Model: model, Tier: string(spec.Tier), FallbackTier: string(spec.FallbackTier)}); route.Profile != "" {
+		contextWindow, contextWindowKnown = route.ContextWindow, route.ContextWindowKnown
+	}
 	res, err := agent.RunToolLoop(ctx, agent.ToolLoopInput{
 		Provider:           sel.Provider,
 		Model:              model,
 		Tier:               string(spec.Tier),
+		FallbackTier:       string(spec.FallbackTier),
 		System:             system,
 		ContextWindow:      contextWindow,
 		ContextWindowKnown: contextWindowKnown,
@@ -598,6 +602,11 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 	if sel.IsCloud {
 		location = "cloud"
 	}
+	if res.Route != nil {
+		model = res.Route.Model
+		provider = res.Route.Provider
+	}
+
 	if err != nil {
 		log.Printf("[dispatch] subagent done: conv=%s err=%v", subConvID, err)
 		extra := failurelog.Event{}
@@ -679,10 +688,14 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 		})
 	}
 
+	route := llm.ServingRoute{Profile: sel.Profile, Destination: string(sel.Destination), ContextWindow: contextWindow, ContextWindowKnown: contextWindowKnown}
+	if res.Route != nil {
+		route = *res.Route
+	}
 	return dispatch.Result{
-		Text:              text,
-		Model:             model,
-		Provider:          provider,
+		Text:     text,
+		Model:    model,
+		Provider: provider, Profile: route.Profile, Destination: route.Destination, ContextWindow: route.ContextWindow, ContextWindowKnown: route.ContextWindowKnown,
 		Tier:              string(spec.Tier),
 		IsCloud:           sel.IsCloud,
 		InputTokens:       res.InputTokens,

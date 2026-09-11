@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"cercano/source/server/internal/llm"
 	"context"
 	"fmt"
 	"os"
@@ -689,4 +690,27 @@ func (a *Agent) ProcessRequestStream(ctx context.Context, req *Request, progress
 	progress(fmt.Sprintf("Generating Response (%s)... Done.", provider.Name()))
 	a.storeConversationTurn(ctx, req.ConversationID, originalInput, augmentedInput, res)
 	return res, nil
+}
+
+// RecordContextUsageForRoute uses the actual attempt's evidence, never a
+// model-only lookup that could resolve the same ID on another endpoint.
+func (a *Agent) RecordContextUsageForRoute(convID, model string, inputTokens, outputTokens int, route *llm.ServingRoute) {
+	if route == nil {
+		a.RecordContextUsage(convID, model, inputTokens, outputTokens)
+		return
+	}
+	if a == nil || a.meter == nil || convID == "" || inputTokens <= 0 {
+		return
+	}
+	if route.Model != "" {
+		model = route.Model
+	}
+	window := contextmeter.ModelWindowFor("").Tokens
+	if route.ContextWindowKnown && route.ContextWindow > 0 {
+		window = route.ContextWindow
+	}
+	c := a.meter.Get(convID, model)
+	c.SetMax(window)
+	c.Reset()
+	c.AddCount(inputTokens + outputTokens)
 }

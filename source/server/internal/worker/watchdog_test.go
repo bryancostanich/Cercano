@@ -1,6 +1,7 @@
 package worker_test
 
 import (
+	"cercano/source/server/internal/modelmetadata"
 	"context"
 	"encoding/json"
 	"testing"
@@ -160,4 +161,5 @@ func TestBuildWorkerWatchdog_EnabledAllowsWhenNoViolation(t *testing.T) {
 
 func (r *openResolver) Candidates() inference.Tiers { return inference.Tiers{} }
 
-func (r *openResolver) SetProfileSupportsVision(func(config.CloudProfile, string) bool) {}
+func (r *openResolver) SetProfileModelEvidence(func(config.CloudProfile, string) modelmetadata.Evidence) {
+}

@@ -17,6 +17,7 @@ const (
 
 // Tiers holds the candidate inference providers; either may be nil/absent.
 type Tiers struct {
+	TaskFor      func(config.Task) config.TaskAssignment
 	Cloud        Provider
 	Open         Provider
 	Destinations map[config.Destination]Candidate

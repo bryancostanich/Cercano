@@ -10,6 +10,7 @@ package worker_test
 //     host_integration_test.go (//go:build integration).
 
 import (
+	"cercano/source/server/internal/modelmetadata"
 	"context"
 	"encoding/json"
 	"errors"
@@ -402,4 +403,5 @@ func TestWorkerRunner_ContextCancel(t *testing.T) {
 
 func (f *echoResolver) Candidates() inference.Tiers { return inference.Tiers{} }
 
-func (f *echoResolver) SetProfileSupportsVision(func(config.CloudProfile, string) bool) {}
+func (f *echoResolver) SetProfileModelEvidence(func(config.CloudProfile, string) modelmetadata.Evidence) {
+}

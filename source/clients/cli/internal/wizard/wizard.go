@@ -51,11 +51,13 @@ func ModeUsesOpen(mode string) bool {
 // persisted after every transition so quitting mid-wizard resumes in place;
 // a completed run clears the file.
 type State struct {
-	Step          Step              `yaml:"step"`
-	LocusMode     string            `yaml:"locus_mode,omitempty"`     // locus.Mode string value (the organizing answer)
-	CloudProvider string            `yaml:"cloud_provider,omitempty"` // cloud preset ID
-	AuthMethod    string            `yaml:"auth_method,omitempty"`    // meridian | chatgpt | device_code | api_key
-	TierPicks     map[string]string `yaml:"tier_picks,omitempty"`     // "<tier>.<side>" → model id
+	// Explicit edits are separate from automatically displayed recommendations.
+	CloudPicksEdited map[string]bool   `yaml:"cloud_picks_edited,omitempty" json:"cloud_picks_edited,omitempty"`
+	Step             Step              `yaml:"step"`
+	LocusMode        string            `yaml:"locus_mode,omitempty"`     // locus.Mode string value (the organizing answer)
+	CloudProvider    string            `yaml:"cloud_provider,omitempty"` // cloud preset ID
+	AuthMethod       string            `yaml:"auth_method,omitempty"`    // meridian | chatgpt | device_code | api_key
+	TierPicks        map[string]string `yaml:"tier_picks,omitempty"`     // "<tier>.<side>" → model id
 	// Baseline is the cloud-profile configuration captured when the run
 	// started, before any eager commits. Abandoning the wizard restores it.
 	// Persisted with the run so a resumed (or crashed) run can still be
@@ -75,12 +77,18 @@ type Baseline struct {
 // start. Field set mirrors agentclient.CloudProfileInfo minus HasKey (keys
 // are not snapshottable, by design).
 type ProfileSnapshot struct {
-	Name    string `yaml:"name"`
-	Flavor  string `yaml:"flavor"`
-	Backend string `yaml:"backend,omitempty"`
-	BaseURL string `yaml:"base_url,omitempty"`
-	Model   string `yaml:"model,omitempty"`
-	Route   string `yaml:"route,omitempty"`
+	DetailsCaptured bool              `yaml:"details_captured,omitempty"`
+	Provider        string            `yaml:"provider,omitempty"`
+	Region          string            `yaml:"region,omitempty"`
+	AWSProfile      string            `yaml:"aws_profile,omitempty"`
+	TierOverrides   map[string]string `yaml:"tier_overrides,omitempty"`
+	ImageModel      string            `yaml:"image_model,omitempty"`
+	Name            string            `yaml:"name"`
+	Flavor          string            `yaml:"flavor"`
+	Backend         string            `yaml:"backend,omitempty"`
+	BaseURL         string            `yaml:"base_url,omitempty"`
+	Model           string            `yaml:"model,omitempty"`
+	Route           string            `yaml:"route,omitempty"`
 }
 
 // New returns a fresh run positioned at the first step (locus).

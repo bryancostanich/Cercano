@@ -116,6 +116,12 @@ func Dial(ctx context.Context, addr string) (*Client, error) {
 	return c, nil
 }
 
+// DialExisting connects only to the supplied running server. It never launches
+// or respawns a process; the caller owns connection lifetime and retry policy.
+func DialExisting(ctx context.Context, addr string) (*Client, error) {
+	return connect(ctx, addr, 600*time.Millisecond)
+}
+
 func connect(ctx context.Context, addr string, timeout time.Duration) (*Client, error) {
 	dialCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -2445,6 +2451,7 @@ func (c *Client) ListCloudProfileModels(ctx context.Context, profileName string)
 
 // CloudProfileInfo is a point-in-time view of one cloud profile.
 type CloudProfileInfo struct {
+	ReplaceStructure             bool // Send a complete structural draft, including explicit clears.
 	Choices                      *CloudModelChoices
 	EffectiveQualityModels       map[string]string
 	RecommendedQualityModels     map[string]string
@@ -2497,18 +2504,20 @@ func (c *Client) SetCloudProfileKey(ctx context.Context, name, key string) error
 }
 
 // UpsertCloudProfile creates or updates a cloud profile's metadata.
-func (c *Client) UpsertCloudProfile(ctx context.Context, p CloudProfileInfo) error {
+func (c *Client) UpsertCloudProfile(ctx context.Context,p CloudProfileInfo)error {_,err:=c.SaveCloudProfile(ctx,p);return err}
+
+func (c *Client) SaveCloudProfile(ctx context.Context, p CloudProfileInfo) (string,error) {
 	resp, err := c.agent.UpsertCloudProfile(ctx, &proto.UpsertCloudProfileRequest{
 		Name: p.Name, Flavor: p.Flavor, Backend: p.Backend, BaseUrl: p.BaseURL, Route: p.Route,
-		ModelChoices: choicesToProto(p.Choices), Provider: nonemptyProfileField(p.Provider), Region: nonemptyProfileField(p.Region), AwsProfile: nonemptyProfileField(p.AWSProfile),
+		ModelChoices: choicesToProto(p.Choices), Structure: profileStructureToProto(p), Provider: nonemptyProfileField(p.Provider), Region: nonemptyProfileField(p.Region), AwsProfile: nonemptyProfileField(p.AWSProfile),
 	})
 	if err != nil {
-		return err
+		return "",err
 	}
 	if !resp.GetOk() {
-		return fmt.Errorf("%s", resp.GetError())
+		return "",fmt.Errorf("%s", resp.GetError())
 	}
-	return nil
+	return resp.GetWarning(),nil
 }
 
 // RemoveCloudProfile deletes a cloud profile and its keychain key.

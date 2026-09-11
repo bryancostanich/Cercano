@@ -148,8 +148,8 @@ func (sp *settingsPage) commitCloud(ca cloudCommitAction) (string, tea.Cmd, erro
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		d := sp.cloudDraft
-		err := sp.agent.UpsertCloudProfile(ctx, agentclient.CloudProfileInfo{
-			Name: d.Name, Flavor: d.Flavor, Backend: d.Backend, Route: d.Route, BaseURL: d.BaseURL, Choices: d.Choices, Provider: d.Provider, Region: d.Region, AWSProfile: d.AWSProfile,
+		warning,err := sp.agent.SaveCloudProfile(ctx, agentclient.CloudProfileInfo{
+			ReplaceStructure: true, Name: d.Name, Flavor: d.Flavor, Backend: d.Backend, Route: d.Route, BaseURL: d.BaseURL, Choices: d.Choices, Provider: d.Provider, Region: d.Region, AWSProfile: d.AWSProfile,
 		})
 		if err != nil {
 			return "", nil, err
@@ -158,6 +158,7 @@ func (sp *settingsPage) commitCloud(ca cloudCommitAction) (string, tea.Cmd, erro
 		sp.cloudSelected = "profile:" + d.Name
 		sp.cloudDraftNew = false
 		sp.cloudDirty = false
+ if warning!="" {return "saved "+d.Name+"; provider unavailable: "+warning,nil,nil}
 		return "saved " + d.Name, nil, nil
 	case cloudCommitActivate:
 		if sp.agent == nil {

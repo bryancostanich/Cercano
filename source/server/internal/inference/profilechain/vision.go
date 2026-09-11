@@ -3,19 +3,25 @@ package profilechain
 import (
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
+	"cercano/source/server/internal/modelmetadata"
 	"context"
 	"fmt"
 )
 
 // GuardVision binds confirmation to one profile/endpoint before it enters a
 // destination chain. Even fixed-capability transports cannot bypass evidence.
-func GuardVision(provider inference.Provider, confirmed func(string) bool) inference.Provider {
-	return &visionGuard{Provider: provider, confirmed: confirmed}
+func GuardVision(provider inference.Provider, confirmed func(string) bool, evidence ...func(string) modelmetadata.Evidence) inference.Provider {
+	p := &visionGuard{Provider: provider, confirmed: confirmed}
+	if len(evidence) > 0 {
+		p.evidence = evidence[0]
+	}
+	return p
 }
 
 type visionGuard struct {
 	inference.Provider
 	confirmed func(string) bool
+	evidence  func(string) modelmetadata.Evidence
 }
 
 func (p *visionGuard) check(req inference.Call) error {
@@ -39,4 +45,14 @@ func (p *visionGuard) StreamChat(ctx context.Context, req inference.Call) (infer
 		return nil, err
 	}
 	return p.Provider.StreamChat(ctx, req)
+}
+
+func (p *visionGuard) ModelEvidence(model string) modelmetadata.Evidence {
+	if p.evidence == nil {
+		if p.confirmed != nil && p.confirmed(model) {
+			return modelmetadata.Evidence{Vision: modelmetadata.VisionSupported}
+		}
+		return modelmetadata.Evidence{}
+	}
+	return p.evidence(model)
 }

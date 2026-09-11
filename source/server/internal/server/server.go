@@ -66,6 +66,7 @@ import (
 	"cercano/source/server/internal/toolstack"
 	"cercano/source/server/internal/usage"
 	"cercano/source/server/internal/visionattach"
+	"cercano/source/server/internal/visioninspect"
 	"cercano/source/server/internal/watchdog"
 	"cercano/source/server/internal/worker"
 	"cercano/source/server/pkg/config"
@@ -771,6 +772,9 @@ func (s *Server) SetActiveCloudProfile(ctx context.Context, req *proto.SetActive
 	defer func() {
 		log.Printf("[cloud] SetActiveCloudProfile(%q) took %v", req.GetName(), time.Since(start).Round(time.Millisecond))
 	}()
+	if req.GetName() != "" && s.cfgSvc.Get().BackupCloudProfile == req.GetName() {
+		return &proto.SetActiveCloudProfileResponse{Error: "profile is already Primary backup; edit routing assignments to change both"}, nil
+	}
 	if !s.cfgSvc.SetActiveProfile(req.GetName()) {
 		return &proto.SetActiveCloudProfileResponse{Ok: false, Error: fmt.Sprintf("no profile %q", req.GetName())}, nil
 	}
@@ -804,7 +808,7 @@ func (s *Server) SetCloudProfileKey(ctx context.Context, req *proto.SetCloudProf
 	if st == nil {
 		return &proto.SetCloudProfileKeyResponse{Ok: false, Error: "keychain unavailable"}, nil
 	}
-	exists, isActive := s.cfgSvc.ProfileInfo(req.GetName())
+	exists, _ := s.cfgSvc.ProfileInfo(req.GetName())
 	if !exists {
 		return &proto.SetCloudProfileKeyResponse{Ok: false, Error: fmt.Sprintf("no profile %q", req.GetName())}, nil
 	}
@@ -812,7 +816,7 @@ func (s *Server) SetCloudProfileKey(ctx context.Context, req *proto.SetCloudProf
 		return &proto.SetCloudProfileKeyResponse{Ok: false, Error: err.Error()}, nil
 	}
 	// If the key belongs to the active profile, rebuild so it takes effect now.
-	if isActive {
+	if s.cfgSvc.Get().ReferencesProfile(req.GetName()) {
 		_ = s.rebuildCloud()
 	}
 	return &proto.SetCloudProfileKeyResponse{Ok: true}, nil
@@ -839,32 +843,42 @@ func (s *Server) UpsertCloudProfile(ctx context.Context, req *proto.UpsertCloudP
 	c := s.cfgSvc.Get()
 	np, _ := c.Profile(name)
 	np.Name = name
-	if req.GetFlavor() != "" {
-		np.Flavor = req.GetFlavor()
-	}
-	if req.GetBackend() != "" {
-		np.Backend = req.GetBackend()
-	}
-	if req.GetBaseUrl() != "" {
-		np.BaseURL = req.GetBaseUrl()
+	if structure := req.GetStructure(); structure != nil {
+		np.Flavor = structure.Flavor
+		np.Backend = structure.Backend
+		np.BaseURL = structure.BaseUrl
+		np.Route = structure.Route
+		np.Provider = structure.Provider
+		np.Region = structure.Region
+		np.AWSProfile = structure.AwsProfile
+	} else {
+		if req.GetFlavor() != "" {
+			np.Flavor = req.GetFlavor()
+		}
+		if req.GetBackend() != "" {
+			np.Backend = req.GetBackend()
+		}
+		if req.GetBaseUrl() != "" {
+			np.BaseURL = req.GetBaseUrl()
+		}
+		if req.GetRoute() != "" {
+			np.Route = req.GetRoute()
+		}
+		if req.Provider != nil {
+			np.Provider = req.GetProvider()
+		}
+		if req.Region != nil {
+			np.Region = req.GetRegion()
+		}
+		if req.AwsProfile != nil {
+			np.AWSProfile = req.GetAwsProfile()
+		}
 	}
 	if !knownFlavor(np.Flavor) {
 		return &proto.UpsertCloudProfileResponse{Error: fmt.Sprintf("unknown flavor %q", np.Flavor)}, nil
 	}
 	if np.Flavor == cloudfactory.FlavorChatCompletions && strings.TrimSpace(np.BaseURL) == "" {
 		return &proto.UpsertCloudProfileResponse{Error: "base_url is required for chat_completions"}, nil
-	}
-	if req.GetRoute() != "" {
-		np.Route = req.GetRoute()
-	}
-	if req.Provider != nil {
-		np.Provider = req.GetProvider()
-	}
-	if req.Region != nil {
-		np.Region = req.GetRegion()
-	}
-	if req.AwsProfile != nil {
-		np.AWSProfile = req.GetAwsProfile()
 	}
 	np.Model = ""
 	np.ModelPinned = false
@@ -876,7 +890,7 @@ func (s *Server) UpsertCloudProfile(ctx context.Context, req *proto.UpsertCloudP
 		if err := s.rebuildCloud(); err != nil {
 			// active is set, but the provider couldn't be built — report it, keep going.
 			s.persistConfig()
-			return &proto.UpsertCloudProfileResponse{Ok: false, Error: err.Error()}, nil
+			return &proto.UpsertCloudProfileResponse{Ok: true, Warning: err.Error()}, nil
 		}
 		s.broadcastConfigChanged("cloud_model", s.activeCloudModel())
 	}
@@ -888,7 +902,8 @@ func (s *Server) UpsertCloudProfile(ctx context.Context, req *proto.UpsertCloudP
 // keychain key. Clears the active profile (→ absent cloud) if it was active.
 func (s *Server) RemoveCloudProfile(ctx context.Context, req *proto.RemoveCloudProfileRequest) (*proto.RemoveCloudProfileResponse, error) {
 	name := req.GetName()
-	existed, wasActive := s.cfgSvc.RemoveProfile(name)
+	referenced := s.cfgSvc.Get().ReferencesProfile(name)
+	existed, _ := s.cfgSvc.RemoveProfile(name)
 	if !existed {
 		return &proto.RemoveCloudProfileResponse{Ok: false, Error: fmt.Sprintf("no profile %q", name)}, nil
 	}
@@ -896,8 +911,8 @@ func (s *Server) RemoveCloudProfile(ctx context.Context, req *proto.RemoveCloudP
 	if st := s.cfgSvc.Secrets(); st != nil {
 		_ = st.Delete(name) // best-effort; missing key is not an error
 	}
-	if wasActive {
-		s.installAbsentCloud("active cloud profile removed")
+	if referenced {
+		_ = s.rebuildCloud()
 	}
 	s.persistConfig()
 	return &proto.RemoveCloudProfileResponse{Ok: true}, nil
@@ -992,9 +1007,7 @@ func NewServer(a *agent.Agent, router RouterCloudUpdater, coordinator *loop.ADKC
 	// protocol, so their vision capability must come from the model, not the
 	// transport. Anthropic/Bedrock clients keep their fixed answer.
 	s.providerSvc.SetModelSupportsVision(s.cloudModelSupportsVision)
-	s.providerSvc.SetProfileSupportsVision(func(p config.CloudProfile, model string) bool {
-		return s.profileModelEvidence(p, model).Vision == modelmetadata.VisionSupported
-	})
+	s.providerSvc.SetProfileModelEvidence(s.profileModelEvidence)
 	// The live meter denominator must track the same capacity the turn used.
 	s.agent.SetContextWindowResolver(s.cloudContextWindow)
 	// Build the shared vision-as-tool store and service. Cloud vision is preferred
@@ -1007,15 +1020,8 @@ func NewServer(a *agent.Agent, router RouterCloudUpdater, coordinator *loop.ADKC
 		OpenProvider:    func() inference.Provider { return s.providerSvc.Open() },
 		OpenVisionModel: openModelsResolver.VisionModel,
 		CloudProvider:   func() inference.Provider { return s.providerSvc.Cloud() },
-		CloudVisionModel: func() (string, bool) {
-			p, ok := s.cfgSvc.ActiveProfile()
-			return p.ImageModel, ok && p.ImageModel != ""
-		},
-		CloudVisionConfirmed: func(model string) bool {
-			p, ok := s.cfgSvc.ActiveProfile()
-			return ok && s.profileModelEvidence(p, model).Vision == modelmetadata.VisionSupported
-		},
-		Mode: func() locus.Mode { m, _ := locus.ParseMode(s.providerSvc.LocusMode()); return m },
+		CloudTarget:     func() (visioninspect.Resolved, bool) { return toolstack.ResolveCloudVision(s.providerSvc.Cloud()) },
+		Mode:            func() locus.Mode { m, _ := locus.ParseMode(s.providerSvc.LocusMode()); return m },
 	})
 	// Construct the persistence service. It wraps the agent for store access;
 	// the agent itself is NOT owned by this service. The func-value collaborators
@@ -3369,17 +3375,24 @@ func (s *Server) workerPostTurn(convID string, res runnersvc.Result) {
 	if s.providerSvc != nil {
 		model = s.providerSvc.MainModel(res.IsCloud)
 	}
-	s.agent.RecordContextUsage(convID, model, res.InputTokens, res.OutputTokens)
+	if res.Route != nil {
+		model = res.Route.Model
+	}
+	s.agent.RecordContextUsageForRoute(convID, model, res.InputTokens, res.OutputTokens, res.Route)
 	s.agent.ScheduleRecap(convID)
 	s.agent.ScheduleCompaction(convID)
 	// Usage telemetry: one aggregate event for the whole worker turn — the host
 	// only has turn totals (the child provider is unwrapped), whereas in-process
 	// emits per model call via usage.Wrap. Approximate, but keeps cost/usage
 	// stats from silently zeroing out under worker mode.
+	provider := ""
+	if res.Route != nil {
+		provider = res.Route.Provider
+	}
 	if s.usageSink != nil {
 		s.usageSink(usage.Usage{
-			Source:       "main",
-			Model:        model,
+			Source: "main",
+			Model:  model, Provider: provider,
 			IsCloud:      res.IsCloud,
 			InputTokens:  res.InputTokens,
 			OutputTokens: res.OutputTokens,

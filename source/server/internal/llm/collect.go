@@ -136,6 +136,10 @@ func CollectStream(ctx context.Context, rdr StreamReader, onText func(string), o
 				ReasoningData: ev.ReasoningData,
 			})
 		case EventMessageStart:
+			if ev.Route != nil {
+				out.Route = ev.Route
+				out.Model = ev.Route.Model
+			}
 			if started {
 				// One response == one message. A second message_start means the
 				// stream restarted under us — keep only the newest message.

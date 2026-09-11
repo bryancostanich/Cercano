@@ -10,7 +10,7 @@ import (
 
 type Builder func(config.CloudProfile) (inference.Provider, error)
 
-func Build(c config.Config, d config.Destination, build Builder) (inference.Provider, error) {
+func Build(c config.Config, d config.Destination, build Builder, events ...func(resilience.Event)) (inference.Provider, error) {
 	preferred, backup := c.DestinationProfiles(d)
 	p, ok := c.Profile(preferred)
 	if !ok {
@@ -31,22 +31,30 @@ func Build(c config.Config, d config.Destination, build Builder) (inference.Prov
 		}
 	}
 	p.Model = modelFor(p)("")
-	primary, err := build(p)
-	if err != nil {
-		return nil, err
-	}
-	if primary == nil {
-		return nil, fmt.Errorf("%s provider unavailable", d)
+	primary, primaryErr := build(p)
+	if primary == nil && primaryErr == nil {
+		primaryErr = fmt.Errorf("%s provider unavailable", d)
 	}
 	options := resilience.Options{PrimaryModelFor: modelFor(p)}
+	if len(events) > 0 {
+		options.OnEvent = events[0]
+	}
 	if backup != "" && backup != preferred {
 		if b, ok := c.Profile(backup); ok {
 			b.Model = modelFor(b)("")
 			if provider, err := build(b); err == nil && provider != nil {
-				options.Backup = provider
+				options.Backup = &routeProvider{Provider: provider, profile: b.Name, destination: string(d)}
 				options.BackupModelFor = modelFor(b)
 			}
 		}
 	}
+	if primaryErr != nil {
+		if options.Backup == nil {
+			return nil, primaryErr
+		}
+		primary = &unavailableProvider{err: primaryErr}
+		options.PrimaryUnavailable = true
+	}
+	primary = &routeProvider{Provider: primary, profile: p.Name, destination: string(d)}
 	return resilience.New(primary, options), nil
 }

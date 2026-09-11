@@ -12,7 +12,6 @@ import (
 	"cercano/source/clients/cli/internal/theme"
 	"cercano/source/clients/cli/internal/wizard"
 	"cercano/source/server/pkg/agentclient"
-	"cercano/source/server/pkg/config"
 )
 
 func newTestWizardPage(t *testing.T) *wizardPage {
@@ -318,30 +317,27 @@ func TestWizardKeyEntryEscReturnsToAuthPick(t *testing.T) {
 	}
 }
 
-func TestWizardProfileModelFromRecs(t *testing.T) {
-	recs := config.TierRecommendations{
-		Version: 1,
-		Cloud: map[string]config.TierCandidates{
-			"anthropic": {
-				config.TierEveryday: {"claude-opus-5", "claude-sonnet-4-6"},
-			},
-		},
+func TestWizardCloudChoicesKeepRecommendationsInherited(t *testing.T) {
+	state := wizard.State{LocusMode: "cloud_primary", TierPicks: map[string]string{"most_capable.cloud": "recommended", "everyday.cloud": "custom"}}
+	before := &agentclient.CloudModelChoices{ImageModel: "image", TierOverrides: map[string]string{"economy": "existing"}}
+	if choices, err := wizardCloudChoices(state, before); err != nil || choices != nil {
+		t.Fatal("autofill became overrides")
 	}
-	// The profile model is the everyday-tier pick: "the default workhorse
-	// for main chat" is exactly what profile.Model serves at request time.
-	if got := wizardProfileModel(recs, "anthropic"); got != "claude-opus-5" {
-		t.Fatalf("want everyday-tier first candidate, got %q", got)
+	state.CloudPicksEdited = map[string]bool{"everyday.cloud": true}
+	choices, err := wizardCloudChoices(state, before)
+	if err != nil {
+		t.Fatal(err)
 	}
-	// Unknown provider → no recommendation; caller leaves the model unset.
-	if got := wizardProfileModel(recs, "nope"); got != "" {
-		t.Fatalf("unknown provider: want empty, got %q", got)
+	if choices.TierOverrides["standard"] != "custom" || choices.TierOverrides["premium"] != "" || choices.TierOverrides["economy"] != "existing" || choices.ImageModel != "image" {
+		t.Fatalf("quality mapping lost choices: %+v", choices)
+	}
+	if len(before.TierOverrides) != 1 {
+		t.Fatal("wizard modified loaded profile")
 	}
 }
 
-func TestWizardFinishUpdateCarriesCloudModel(t *testing.T) {
-	// Cloud path: the everyday-cloud tier pick must land on the active
-	// profile (via UpdateConfig's CloudModel → active-profile rebuild path),
-	// or the profile serves requests with whatever model it was seeded with.
+func TestWizardFinishUpdateKeepsCloudChoicesSeparate(t *testing.T) {
+	// Cloud quality choices use the profile mutation, not the general config patch.
 	u := wizardFinishUpdate(wizard.State{
 		CloudProvider: "anthropic",
 		LocusMode:     "cloud_primary",
@@ -350,8 +346,8 @@ func TestWizardFinishUpdateCarriesCloudModel(t *testing.T) {
 	if u.LocusMode != "cloud_primary" {
 		t.Fatalf("locus patch wrong: %+v", u)
 	}
-	if u.CloudModel != "claude-opus-5" {
-		t.Fatalf("want everyday.cloud pick as CloudModel, got %q", u.CloudModel)
+	if u.CloudModel != "" {
+		t.Fatalf("finish must not write retired CloudModel, got %q", u.CloudModel)
 	}
 	// Open path: no cloud provider configured → no CloudModel patch (the
 	// wantCloudRebuild branch errors without an active profile).
@@ -586,4 +582,11 @@ func TestWrapWords(t *testing.T) {
 func firstWordFits(line string, width int) bool {
 	fields := strings.Fields(line)
 	return len(fields) > 0 && len([]rune(fields[0])) <= width
+}
+
+func TestWizardFinishDoesNotWriteRetiredCloudModel(t *testing.T) {
+	update := wizardFinishUpdate(wizard.State{LocusMode: "cloud_only", CloudProvider: "openai", TierPicks: map[string]string{"everyday.cloud": "selected"}})
+	if update.CloudModel != "" {
+		t.Fatalf("wizard still writes retired cloud_model=%q", update.CloudModel)
+	}
 }

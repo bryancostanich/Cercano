@@ -108,7 +108,6 @@ func TestAdvanceRejectsMissingAnswers(t *testing.T) {
 	}
 }
 
-
 func TestResumeRoundTrip(t *testing.T) {
 	useTempState(t)
 	if _, ok := Load(); ok {
@@ -119,12 +118,17 @@ func TestResumeRoundTrip(t *testing.T) {
 	if err := s.Advance(); err != nil {
 		t.Fatalf("advance: %v", err)
 	}
+	s.TierPicks = map[string]string{"everyday.cloud": "custom"}
+	s.CloudPicksEdited = map[string]bool{"everyday.cloud": true}
 	if err := Save(s); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 	got, ok := Load()
 	if !ok {
 		t.Fatal("want resumable state")
+	}
+	if !got.CloudPicksEdited["everyday.cloud"] || got.TierPicks["everyday.cloud"] != "custom" {
+		t.Fatal("explicit cloud choice marker lost on resume")
 	}
 	if got.Step != StepCloud || got.LocusMode != "cloud_primary" {
 		t.Errorf("resume: want step=%s mode=cloud_primary, got step=%s mode=%s", StepCloud, got.Step, got.LocusMode)

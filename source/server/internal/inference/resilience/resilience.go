@@ -95,6 +95,9 @@ func (e Event) Notice() string {
 // Options configures the engine. Zero values give: no backup, silent events,
 // 500ms default retry wait, 2s cap, 1h quota cooldown.
 type Options struct {
+	// PrimaryUnavailable is immutable construction-time availability; rebuilding
+	// after credential/profile edits restores the preferred attempt.
+	PrimaryUnavailable bool
 	// PrimaryModelFor maps a capability-tier name to the primary vendor's model
 	// for that tier. When set, tiered requests are normalized before the first
 	// primary attempt, so a stale or foreign request Model cannot leak across
@@ -131,14 +134,15 @@ const (
 // Provider is the engine. It impersonates the primary everywhere except the
 // moment of a decision, which is narrated via EventNotice / OnEvent.
 type Provider struct {
-	primary         inference.Provider
-	primaryModelFor func(tier string) string
-	backup          inference.Provider
-	backupModelFor  func(tier string) string
-	onEvent         func(Event)
-	retryWait       time.Duration
-	retryWaitCap    time.Duration
-	quotaCooldown   time.Duration
+	primaryUnavailable bool
+	primary            inference.Provider
+	primaryModelFor    func(tier string) string
+	backup             inference.Provider
+	backupModelFor     func(tier string) string
+	onEvent            func(Event)
+	retryWait          time.Duration
+	retryWaitCap       time.Duration
+	quotaCooldown      time.Duration
 	// sleep and now are injection seams for tests; production uses ctx-aware
 	// sleep and the wall clock.
 	sleep func(ctx context.Context, d time.Duration) bool
@@ -151,16 +155,17 @@ type Provider struct {
 // New builds the engine around primary.
 func New(primary inference.Provider, opts Options) *Provider {
 	p := &Provider{
-		primary:         primary,
-		primaryModelFor: opts.PrimaryModelFor,
-		backup:          opts.Backup,
-		backupModelFor:  opts.BackupModelFor,
-		onEvent:         opts.OnEvent,
-		retryWait:       opts.RetryWait,
-		retryWaitCap:    opts.RetryWaitCap,
-		quotaCooldown:   opts.QuotaCooldown,
-		sleep:           ctxSleep,
-		now:             time.Now,
+		primary:            primary,
+		primaryUnavailable: opts.PrimaryUnavailable,
+		primaryModelFor:    opts.PrimaryModelFor,
+		backup:             opts.Backup,
+		backupModelFor:     opts.BackupModelFor,
+		onEvent:            opts.OnEvent,
+		retryWait:          opts.RetryWait,
+		retryWaitCap:       opts.RetryWaitCap,
+		quotaCooldown:      opts.QuotaCooldown,
+		sleep:              ctxSleep,
+		now:                time.Now,
 	}
 	if p.retryWait <= 0 {
 		p.retryWait = defaultRetryWait
@@ -185,9 +190,19 @@ func ctxSleep(ctx context.Context, d time.Duration) bool {
 	}
 }
 
-func (p *Provider) Name() string { return p.primary.Name() }
+func (p *Provider) Name() string {
+	if p.primaryUnavailable && p.backup != nil {
+		return p.backup.Name()
+	}
+	return p.primary.Name()
+}
 
-func (p *Provider) Capabilities() inference.Capabilities { return p.primary.Capabilities() }
+func (p *Provider) Capabilities() inference.Capabilities {
+	if p.primaryUnavailable && p.backup != nil {
+		return p.backup.Capabilities()
+	}
+	return p.primary.Capabilities()
+}
 
 func (p *Provider) emit(ev Event) {
 	if p.onEvent != nil {
@@ -259,6 +274,10 @@ func (p *Provider) primaryRequest(req inference.Call) inference.Call {
 // backupRequest rewrites the request into the backup provider's model
 // namespace, preserving the request's capability tier when it carries one.
 func (p *Provider) backupRequest(req inference.Call) inference.Call {
+	if req.FallbackTier != "" {
+		req.Tier = req.FallbackTier
+		req.FallbackTier = ""
+	}
 	if p.backupModelFor == nil {
 		return req
 	}
@@ -272,8 +291,11 @@ func (p *Provider) backupRequest(req inference.Call) inference.Call {
 // there is no user-visible stream on this path.
 func (p *Provider) Chat(ctx context.Context, req inference.Call) (inference.Result, error) {
 	req = p.primaryRequest(req)
-	if p.quotaCoolingDown() {
+	if p.useBackup(req) {
 		return p.backupChat(ctx, req)
+	}
+	if req.Tier != "" && p.primaryModelFor != nil && req.Model == "" {
+		return inference.Result{}, fmt.Errorf("primary model unavailable for tier %q", req.Tier)
 	}
 	resp, err := p.primary.Chat(ctx, req)
 	if err == nil || ctx.Err() != nil {
@@ -311,8 +333,11 @@ func (p *Provider) Chat(ctx context.Context, req inference.Call) (inference.Resu
 // waits, not after.
 func (p *Provider) StreamChat(ctx context.Context, req inference.Call) (inference.Stream, error) {
 	req = p.primaryRequest(req)
-	if p.quotaCoolingDown() {
+	if p.useBackup(req) {
 		return p.backupStream(ctx, req)
+	}
+	if req.Tier != "" && p.primaryModelFor != nil && req.Model == "" {
+		return nil, fmt.Errorf("primary model unavailable for tier %q", req.Tier)
 	}
 	r := &reader{ctx: ctx, p: p, req: req}
 	inner, err := p.primary.StreamChat(ctx, req)
@@ -455,8 +480,17 @@ func (r *reader) Close() error {
 // A configured resolver returning empty means this backup cannot satisfy the
 // requested intent. Never reuse the originating profile's model in that case.
 func (p *Provider) backupUnavailable(req inference.Call) error {
+	if req.FallbackTier != "" {
+		req.Tier = req.FallbackTier
+	}
 	if p.backupModelFor != nil && p.backupModelFor(req.Tier) == "" {
 		return fmt.Errorf("backup model unavailable for requested tier %q", req.Tier)
+	}
+	if req.Tier == "vision" {
+		target := inference.TargetForCall(p.backup, p.backupRequest(req))
+		if target.Profile != "" && (!target.VisionKnown || !target.SupportsVision) {
+			return fmt.Errorf("backup image capability is unconfirmed")
+		}
 	}
 	return nil
 }
@@ -471,4 +505,34 @@ func (p *Provider) backupStream(ctx context.Context, req inference.Call) (infere
 		return nil, err
 	}
 	return p.backup.StreamChat(ctx, p.backupRequest(req))
+}
+
+func (p *Provider) TargetFor(model, tier string) llm.ServingRoute {
+	return p.TargetForCall(inference.Call{Model: model, Tier: tier})
+}
+func (p *Provider) useBackup(req inference.Call) bool {
+	if p.backup == nil {
+		return false
+	}
+	if p.primaryUnavailable || p.quotaCoolingDown() || (req.Tier != "" && p.primaryModelFor != nil && p.primaryModelFor(req.Tier) == "") {
+		return true
+	}
+	if req.Tier == "vision" {
+		target := inference.TargetForCall(p.primary, p.primaryRequest(req))
+		if target.Profile != "" && (!target.VisionKnown || !target.SupportsVision) {
+			return true
+		}
+	}
+	return false
+}
+
+func (p *Provider) TargetForCall(req inference.Call) llm.ServingRoute {
+	if p.useBackup(req) {
+		if p.backupUnavailable(req) != nil {
+			req.Model = ""
+			return inference.TargetForCall(p.backup, req)
+		}
+		return inference.TargetForCall(p.backup, p.backupRequest(req))
+	}
+	return inference.TargetForCall(p.primary, p.primaryRequest(req))
 }

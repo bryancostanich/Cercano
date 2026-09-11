@@ -493,6 +493,7 @@ func (w *workerRunner) RunTurn(
 			d := m.Done
 			result = runner.Result{
 				FinalText:    d.GetFinalText(),
+				Route:        unmarshalServingRoute(d.GetRoute()),
 				Model:        d.GetModel(),
 				IsCloud:      d.GetIsCloud(),
 				InputTokens:  int(d.GetInputTokens()),

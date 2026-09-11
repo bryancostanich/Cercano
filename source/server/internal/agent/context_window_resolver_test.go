@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"cercano/source/server/internal/contextmeter"
+	"cercano/source/server/internal/llm"
 )
 
 // The live meter denominator must track the capacity the turn actually used,
@@ -41,5 +42,20 @@ func TestRecordContextUsage_NilResolverKeepsPreviousBehavior(t *testing.T) {
 	_, max := a.GetContextUsage(nil, "conv")
 	if max != contextmeter.ModelMax("claude-sonnet-4-6") {
 		t.Fatalf("meter max = %d, want conventional window", max)
+	}
+}
+
+func TestRecordContextUsageForRouteDoesNotBorrowOtherEndpoint(t *testing.T) {
+	a := &Agent{meter: contextmeter.NewRegistry()}
+	a.SetContextWindowResolver(func(string) (int, bool) { return 999999, true })
+	a.RecordContextUsageForRoute("conv", "same-id", 10, 5, &llm.ServingRoute{Profile: "backup", Model: "same-id", ContextWindow: 32768, ContextWindowKnown: true})
+	used, window := a.GetContextUsage(nil, "conv")
+	if used != 15 || window != 32768 {
+		t.Fatalf("actual endpoint meter=%d/%d", used, window)
+	}
+	a.RecordContextUsageForRoute("conv", "same-id", 10, 5, &llm.ServingRoute{Profile: "unknown", Model: "same-id"})
+	_, window = a.GetContextUsage(nil, "conv")
+	if window == 999999 || window == 32768 {
+		t.Fatalf("unknown endpoint inherited another endpoint's evidence: %d", window)
 	}
 }

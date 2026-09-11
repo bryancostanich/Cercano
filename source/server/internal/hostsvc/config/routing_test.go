@@ -67,3 +67,12 @@ func TestTaskAssignmentClearRestoresDefaults(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+func TestActivationPreservesIndependentBackup(t *testing.T) {
+	for _, backup := range []string{"", "b"} {
+		s := New("", cfg.Config{ActiveCloudProfile: "p", BackupCloudProfile: backup, CloudProfiles: []cfg.CloudProfile{{Name: "p"}, {Name: "b"}, {Name: "new"}}}, nil)
+		if !s.SetActiveProfile("new") || s.Get().BackupCloudProfile != backup {
+			t.Fatalf("activation changed backup %q to %q", backup, s.Get().BackupCloudProfile)
+		}
+	}
+}

@@ -21,7 +21,8 @@ const (
 )
 
 type StreamEvent struct {
-	Type StreamEventType
+	Route *ServingRoute
+	Type  StreamEventType
 
 	TextDelta string
 

@@ -6,6 +6,7 @@ import (
 	"cercano/source/server/internal/locus"
 	"cercano/source/server/internal/visionattach"
 	"cercano/source/server/internal/visioninspect"
+	"cercano/source/server/pkg/config"
 )
 
 // VisionDeps are the narrow seams BuildVision needs to assemble the live
@@ -14,6 +15,8 @@ import (
 // function is read live at call time, so a runtime config or provider swap is
 // honored without rebuilding the inspector.
 type VisionDeps struct {
+	// CloudTarget resolves one atomic, evidence-confirmed preferred/backup target.
+	CloudTarget func() (visioninspect.Resolved, bool)
 	// OpenProvider yields the local/open inference provider that serves the
 	// vision GGUF (the llama-server engine warms the vision model — with its
 	// mmproj — on demand from the model id). May return nil (no open provider).
@@ -85,7 +88,9 @@ func BuildVision(d VisionDeps) (*visionattach.Store, capabilities.VisionService)
 	local := visioninspect.New(store, localResolver)
 
 	var cloud capabilities.VisionService
-	if d.CloudProvider != nil && d.CloudVisionModel != nil {
+	if d.CloudTarget != nil {
+		cloud = visioninspect.New(store, d.CloudTarget)
+	} else if d.CloudProvider != nil && d.CloudVisionModel != nil {
 		cloudResolver := func() (visioninspect.Resolved, bool) {
 			id, ok := d.CloudVisionModel()
 			if !ok || id == "" {
@@ -114,4 +119,18 @@ func BuildVision(d VisionDeps) (*visionattach.Store, capabilities.VisionService)
 	}
 	svc := visioninspect.NewCaching(visioninspect.NewLocus(local, cloud, mode))
 	return store, svc
+}
+
+// ResolveCloudVision uses the same intent-aware chain target as the request.
+// It can select a configured, confirmed backup without first sending an image
+// to an unavailable or unconfirmed preferred model.
+func ResolveCloudVision(provider inference.Provider) (visioninspect.Resolved, bool) {
+	if provider == nil {
+		return visioninspect.Resolved{}, false
+	}
+	target := inference.TargetForCall(provider, inference.Call{Tier: string(config.TierVision)})
+	if target.Model == "" || !target.VisionKnown || !target.SupportsVision {
+		return visioninspect.Resolved{}, false
+	}
+	return visioninspect.Resolved{Provider: provider, Model: target.Model}, true
 }

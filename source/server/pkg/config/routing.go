@@ -57,19 +57,26 @@ func (q CostTier) CapabilityTier() Tier {
 
 // ResolveTask applies only explicit dispatch difficulty to the saved assignment.
 // Unknown difficulty preserves the historical Economy behavior.
+func DispatchDifficultyTier(difficulty string) Tier {
+	switch strings.ToLower(strings.TrimSpace(difficulty)) {
+	case "":
+		return ""
+	case "standard":
+		return TierEveryday
+	case "deep":
+		return TierMostCapable
+	default:
+		return TierFastLight
+	}
+}
 func (c Config) ResolveTask(task Task, difficulty string) TaskAssignment {
-	a := c.TaskAssignment(task)
-	if task == TaskDispatch && difficulty != "" {
-		switch strings.ToLower(difficulty) {
-		case "standard":
-			a.Quality = CostStandard
-		case "deep":
-			a.Quality = CostPremium
-		default:
-			a.Quality = CostEconomy
+	assignment := c.TaskAssignment(task)
+	if task == TaskDispatch {
+		if tier := DispatchDifficultyTier(difficulty); tier != "" {
+			assignment.Quality, _ = CostTierForCapability(tier)
 		}
 	}
-	return a
+	return assignment
 }
 
 func (c Config) DestinationProfiles(d Destination) (preferred, backup string) {

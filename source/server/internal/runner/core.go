@@ -151,11 +151,15 @@ func (c *Core) knownContextWindowFor(isCloud bool, model string) (int, bool) {
 	return mw.Tokens, mw.Known
 }
 
-func (c *Core) assembleAttemptHistory(ctx context.Context, req Request, attempt string, provider inference.Provider, model string, isCloud bool, tightContext bool) ([]llm.Message, requestassembly.Accounting) {
+func (c *Core) assembleAttemptHistory(ctx context.Context, req Request, attempt string, provider inference.Provider, model string, tier config.Tier, isCloud bool, tightContext bool) ([]llm.Message, requestassembly.Accounting) {
 	if c.d.Persist == nil || req.ConversationID == "" {
 		return nil, requestassembly.Accounting{}
 	}
 	contextWindow, contextWindowKnown := c.knownContextWindowFor(isCloud, model)
+	if route := inference.TargetFor(provider, model, string(tier)); route.Profile != "" {
+		contextWindow, contextWindowKnown = route.ContextWindow, route.ContextWindowKnown
+		model = route.Model
+	}
 	target := requestassembly.Target{
 		RouteLabel:         attempt,
 		Provider:           providerName(provider),
@@ -279,7 +283,16 @@ func (c *Core) RunTurn(
 		// result so the host can send a terminal FinalResponse.
 		return Result{FinalText: "Locus: " + err.Error()}, nil
 	}
+	if chosen, ok := inference.TaskAssignmentFor(provider, config.TaskChat); ok {
+		assignment = chosen
+	}
 	selectedModel := c.d.Providers.MainModel(isCloud)
+	if bound, ok := inference.TaskModelFor(provider); ok {
+		selectedModel = bound
+	}
+	if target := inference.TargetForCall(provider, inference.Call{Model: selectedModel, Tier: string(assignment.Quality.CapabilityTier())}); target.Profile != "" {
+		selectedModel = target.Model
+	}
 	c.logRoute("turn.selected", routinglog.Event{
 		"conversation_id": req.ConversationID,
 		"provider":        providerName(provider),
@@ -307,7 +320,7 @@ func (c *Core) RunTurn(
 	// after PersistTurn below, the current user turn is duplicated in the model
 	// request. Prepare the primary history now and prepare a potential cross-tier
 	// fallback history for the concrete fallback target as well.
-	convHistory, attemptAccounting := c.assembleAttemptHistory(ctx, req, "primary", provider, selectedModel, isCloud, false)
+	convHistory, attemptAccounting := c.assembleAttemptHistory(ctx, req, "primary", provider, selectedModel, assignment.Quality.CapabilityTier(), isCloud, false)
 	fallbackHistory := []llm.Message(nil)
 	fallbackAccounting := requestassembly.Accounting{}
 	fallbackPrepared := false
@@ -327,7 +340,7 @@ func (c *Core) RunTurn(
 	fallbackModel := c.d.Providers.MainModel(fbCloud)
 	if fbProv != nil {
 		fallbackPrepared = true
-		fallbackHistory, fallbackAccounting = c.assembleAttemptHistory(ctx, req, "cross_tier_fallback", fbProv, fallbackModel, fbCloud, !fbCloud)
+		fallbackHistory, fallbackAccounting = c.assembleAttemptHistory(ctx, req, "cross_tier_fallback", fbProv, fallbackModel, assignment.Quality.CapabilityTier(), fbCloud, !fbCloud)
 	}
 
 	// 3. Crash-resilient persistence: persist the USER turn up front (before
@@ -592,12 +605,16 @@ func (c *Core) RunTurn(
 		c.d.Agent.ScheduleRecap(req.ConversationID)
 		c.d.Agent.ScheduleCompaction(req.ConversationID)
 	}
-	c.d.Agent.RecordContextUsage(req.ConversationID, selectedModel,
-		result.InputTokens, result.OutputTokens)
+	c.d.Agent.RecordContextUsageForRoute(req.ConversationID, selectedModel, result.InputTokens, result.OutputTokens, result.Route)
 
+	reportedProvider := provider.Name()
+	if result.Route != nil {
+		reportedProvider = result.Route.Provider
+	}
 	return Result{
 		FinalText:    result.FinalText,
-		Model:        provider.Name(),
+		Route:        result.Route,
+		Model:        reportedProvider,
 		IsCloud:      isCloud,
 		InputTokens:  result.InputTokens,
 		OutputTokens: result.OutputTokens,
@@ -633,6 +650,9 @@ func (c *Core) runLoop(
 		cfgSnap := c.d.Config.Get()
 		maxIterations = cfgSnap.ToolLoop.MaxIterations
 		contextWindow, contextWindowKnown = c.knownContextWindowFor(isCloud, model)
+		if route := inference.TargetForCall(provider, inference.Call{Model: model, Tier: tier}); route.Profile != "" {
+			contextWindow, contextWindowKnown = route.ContextWindow, route.ContextWindowKnown
+		}
 		if contextWindow == 0 {
 			contextWindow = c.contextWindowFor(isCloud, model)
 		}

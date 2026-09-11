@@ -1,11 +1,12 @@
 package providers
 
 import (
+	"cercano/source/server/internal/inference/profilechain"
 	"context"
+	"fmt"
 	"testing"
 
 	"cercano/source/server/internal/agent"
-	cfgsvc "cercano/source/server/internal/hostsvc/config"
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/pkg/config"
@@ -50,25 +51,34 @@ func (s staticSecretStore) List() ([]string, error) {
 	return out, nil
 }
 
-func TestBuildBackupResolvesUnpinnedCloudProfileModel(t *testing.T) {
-	cfg := config.Defaults()
-	cfg.ActiveCloudProfile = "primary"
-	cfg.BackupCloudProfile = "backup"
-	cfg.CloudProfiles = []config.CloudProfile{
-		{Name: "primary", Provider: "anthropic", Flavor: "messages", Model: "primary-model", ModelPinned: true},
-		{Name: "backup", Provider: "anthropic", Flavor: "messages"},
-	}
-	svc := &service{cfgSvc: cfgsvc.New("", cfg, staticSecretStore{keys: map[string]string{"backup": "sk-test"}})}
+type quotaLabelProvider struct{ labelProvider }
 
-	_, backupModelFor, ok := svc.buildBackup("primary", cfg)
-	if !ok {
-		t.Fatalf("buildBackup should build backup profile")
-	}
-	if got := backupModelFor(""); got != "claude-opus-5" {
-		t.Fatalf("untiered backup model = %q, want claude-opus-5", got)
-	}
-	if got := backupModelFor(string(config.TierEveryday)); got != "claude-opus-5" {
-		t.Fatalf("everyday backup model = %q, want claude-opus-5", got)
+func (*quotaLabelProvider) Chat(context.Context, inference.Call) (inference.Result, error) {
+	return inference.Result{}, &llm.Error{Class: llm.ErrQuota, Err: fmt.Errorf("fixture quota")}
+}
+func TestBackupResolvesInheritedRequestedQuality(t *testing.T) {
+	c := config.Defaults()
+	c.ActiveCloudProfile = "primary"
+	c.BackupCloudProfile = "backup"
+	c.CloudProfiles = []config.CloudProfile{{Name: "primary", Provider: "anthropic", Flavor: "messages"}, {Name: "backup", Provider: "anthropic", Flavor: "messages"}}
+	for _, tier := range []config.Tier{"", config.TierEveryday} {
+		chain, err := profilechain.Build(c, config.DestinationPrimary, func(p config.CloudProfile) (inference.Provider, error) {
+			if p.Name == "primary" {
+				return &quotaLabelProvider{}, nil
+			}
+			return &labelProvider{label: "backup"}, nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, err := chain.Chat(context.Background(), inference.Call{Model: "primary", Tier: string(tier)})
+		if tier == "" {
+			tier = config.TierMostCapable
+		}
+		want := "backup:" + c.ModelProfiles.ResolveCloudModelForTier(c.CloudProfiles[1], tier)
+		if err != nil || result.Model != want {
+			t.Fatalf("inherited backup model=%q want=%q err=%v", result.Model, want, err)
+		}
 	}
 }
 

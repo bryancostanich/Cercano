@@ -190,6 +190,8 @@ Cercano is local-first — cloud providers are only used for escalation when loc
 
 ### Configuration
 
+For the standalone agent's Primary/Secondary/Local destinations, independent optional backups, quality/image model choices, and Cloud settings Save/Discard behavior, see [Cloud profile routing](docs/cloud-routing.md).
+
 The following settings are available under `cercano.*` in VS Code Settings:
 
 | Setting | Default | Description |

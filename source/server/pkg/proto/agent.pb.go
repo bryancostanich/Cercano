@@ -1403,9 +1403,10 @@ type UpdateConfigRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	OpenModel     string                 `protobuf:"bytes,1,opt,name=open_model,json=openModel,proto3" json:"open_model,omitempty"`             // Open-weight model name (Ollama tag or managed runtime model id/path)
 	CloudProvider string                 `protobuf:"bytes,2,opt,name=cloud_provider,json=cloudProvider,proto3" json:"cloud_provider,omitempty"` // Cloud provider name (e.g., "google", "anthropic")
-	CloudModel    string                 `protobuf:"bytes,3,opt,name=cloud_model,json=cloudModel,proto3" json:"cloud_model,omitempty"`          // Cloud model name (e.g., "gemini-1.5-flash", "claude-3-opus")
-	CloudApiKey   string                 `protobuf:"bytes,4,opt,name=cloud_api_key,json=cloudApiKey,proto3" json:"cloud_api_key,omitempty"`     // API key for the cloud provider
-	OllamaUrl     string                 `protobuf:"bytes,5,opt,name=ollama_url,json=ollamaUrl,proto3" json:"ollama_url,omitempty"`             // Ollama endpoint URL (e.g., "http://mac-studio.local:11434")
+	// Deprecated: Marked as deprecated in agent.proto.
+	CloudModel  string `protobuf:"bytes,3,opt,name=cloud_model,json=cloudModel,proto3" json:"cloud_model,omitempty"`      // Cloud model name (e.g., "gemini-1.5-flash", "claude-3-opus")
+	CloudApiKey string `protobuf:"bytes,4,opt,name=cloud_api_key,json=cloudApiKey,proto3" json:"cloud_api_key,omitempty"` // API key for the cloud provider
+	OllamaUrl   string `protobuf:"bytes,5,opt,name=ollama_url,json=ollamaUrl,proto3" json:"ollama_url,omitempty"`         // Ollama endpoint URL (e.g., "http://mac-studio.local:11434")
 	// Anthropic-compatible proxy URL (e.g., "http://127.0.0.1:3456" for Meridian).
 	// When set, used as the baseURL for the anthropic client; api_key may be empty
 	// because the proxy handles auth (Claude Max OAuth in Meridian's case).
@@ -1508,6 +1509,7 @@ func (x *UpdateConfigRequest) GetCloudProvider() string {
 	return ""
 }
 
+// Deprecated: Marked as deprecated in agent.proto.
 func (x *UpdateConfigRequest) GetCloudModel() string {
 	if x != nil {
 		return x.CloudModel
@@ -10728,20 +10730,21 @@ func (x *RoutingSnapshot) GetProfiles() []*CloudProfileInfo {
 }
 
 type CloudProfileInfo struct {
-	state                    protoimpl.MessageState `protogen:"open.v1"`
-	Name                     string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	Flavor                   string                 `protobuf:"bytes,2,opt,name=flavor,proto3" json:"flavor,omitempty"`
-	BaseUrl                  string                 `protobuf:"bytes,3,opt,name=base_url,json=baseUrl,proto3" json:"base_url,omitempty"`
-	Model                    string                 `protobuf:"bytes,4,opt,name=model,proto3" json:"model,omitempty"`
-	HasKey                   bool                   `protobuf:"varint,5,opt,name=has_key,json=hasKey,proto3" json:"has_key,omitempty"` // a key exists in the keychain for this profile
-	Backend                  string                 `protobuf:"bytes,6,opt,name=backend,proto3" json:"backend,omitempty"`              // chat_completions quirks selector (openai|gemini|groq|…)
-	Route                    string                 `protobuf:"bytes,7,opt,name=route,proto3" json:"route,omitempty"`                  // direct (default) | meridian | ccr (future) — selects adapter-specific auth/header conventions
-	ModelChoices             *ProfileModelChoices   `protobuf:"bytes,8,opt,name=model_choices,json=modelChoices,proto3" json:"model_choices,omitempty"`
-	EffectiveQualityModels   map[string]string      `protobuf:"bytes,9,rep,name=effective_quality_models,json=effectiveQualityModels,proto3" json:"effective_quality_models,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	Provider                 string                 `protobuf:"bytes,10,opt,name=provider,proto3" json:"provider,omitempty"`
-	Region                   string                 `protobuf:"bytes,11,opt,name=region,proto3" json:"region,omitempty"`
-	AwsProfile               string                 `protobuf:"bytes,12,opt,name=aws_profile,json=awsProfile,proto3" json:"aws_profile,omitempty"`
-	RecommendedQualityModels map[string]string      `protobuf:"bytes,13,rep,name=recommended_quality_models,json=recommendedQualityModels,proto3" json:"recommended_quality_models,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Name    string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Flavor  string                 `protobuf:"bytes,2,opt,name=flavor,proto3" json:"flavor,omitempty"`
+	BaseUrl string                 `protobuf:"bytes,3,opt,name=base_url,json=baseUrl,proto3" json:"base_url,omitempty"`
+	// Deprecated: Marked as deprecated in agent.proto.
+	Model                    string               `protobuf:"bytes,4,opt,name=model,proto3" json:"model,omitempty"`
+	HasKey                   bool                 `protobuf:"varint,5,opt,name=has_key,json=hasKey,proto3" json:"has_key,omitempty"` // a key exists in the keychain for this profile
+	Backend                  string               `protobuf:"bytes,6,opt,name=backend,proto3" json:"backend,omitempty"`              // chat_completions quirks selector (openai|gemini|groq|…)
+	Route                    string               `protobuf:"bytes,7,opt,name=route,proto3" json:"route,omitempty"`                  // direct (default) | meridian | ccr (future) — selects adapter-specific auth/header conventions
+	ModelChoices             *ProfileModelChoices `protobuf:"bytes,8,opt,name=model_choices,json=modelChoices,proto3" json:"model_choices,omitempty"`
+	EffectiveQualityModels   map[string]string    `protobuf:"bytes,9,rep,name=effective_quality_models,json=effectiveQualityModels,proto3" json:"effective_quality_models,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Provider                 string               `protobuf:"bytes,10,opt,name=provider,proto3" json:"provider,omitempty"`
+	Region                   string               `protobuf:"bytes,11,opt,name=region,proto3" json:"region,omitempty"`
+	AwsProfile               string               `protobuf:"bytes,12,opt,name=aws_profile,json=awsProfile,proto3" json:"aws_profile,omitempty"`
+	RecommendedQualityModels map[string]string    `protobuf:"bytes,13,rep,name=recommended_quality_models,json=recommendedQualityModels,proto3" json:"recommended_quality_models,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields            protoimpl.UnknownFields
 	sizeCache                protoimpl.SizeCache
 }
@@ -10797,6 +10800,7 @@ func (x *CloudProfileInfo) GetBaseUrl() string {
 	return ""
 }
 
+// Deprecated: Marked as deprecated in agent.proto.
 func (x *CloudProfileInfo) GetModel() string {
 	if x != nil {
 		return x.Model
@@ -11586,17 +11590,19 @@ func (x *SetCloudProfileKeyResponse) GetError() string {
 }
 
 type UpsertCloudProfileRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	Flavor        string                 `protobuf:"bytes,2,opt,name=flavor,proto3" json:"flavor,omitempty"`
-	Backend       string                 `protobuf:"bytes,3,opt,name=backend,proto3" json:"backend,omitempty"`
-	BaseUrl       string                 `protobuf:"bytes,4,opt,name=base_url,json=baseUrl,proto3" json:"base_url,omitempty"`
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Name    string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Flavor  string                 `protobuf:"bytes,2,opt,name=flavor,proto3" json:"flavor,omitempty"`
+	Backend string                 `protobuf:"bytes,3,opt,name=backend,proto3" json:"backend,omitempty"`
+	BaseUrl string                 `protobuf:"bytes,4,opt,name=base_url,json=baseUrl,proto3" json:"base_url,omitempty"`
+	// Deprecated: Marked as deprecated in agent.proto.
 	Model         string                 `protobuf:"bytes,5,opt,name=model,proto3" json:"model,omitempty"`
 	Route         string                 `protobuf:"bytes,6,opt,name=route,proto3" json:"route,omitempty"` // direct (default) | meridian | ccr (future); empty preserves an existing profile's route
 	ModelChoices  *ProfileModelChoices   `protobuf:"bytes,7,opt,name=model_choices,json=modelChoices,proto3" json:"model_choices,omitempty"`
 	Provider      *string                `protobuf:"bytes,8,opt,name=provider,proto3,oneof" json:"provider,omitempty"`
 	Region        *string                `protobuf:"bytes,9,opt,name=region,proto3,oneof" json:"region,omitempty"`
 	AwsProfile    *string                `protobuf:"bytes,10,opt,name=aws_profile,json=awsProfile,proto3,oneof" json:"aws_profile,omitempty"`
+	Structure     *CloudProfileStructure `protobuf:"bytes,11,opt,name=structure,proto3" json:"structure,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -11659,6 +11665,7 @@ func (x *UpsertCloudProfileRequest) GetBaseUrl() string {
 	return ""
 }
 
+// Deprecated: Marked as deprecated in agent.proto.
 func (x *UpsertCloudProfileRequest) GetModel() string {
 	if x != nil {
 		return x.Model
@@ -11701,10 +11708,18 @@ func (x *UpsertCloudProfileRequest) GetAwsProfile() string {
 	return ""
 }
 
+func (x *UpsertCloudProfileRequest) GetStructure() *CloudProfileStructure {
+	if x != nil {
+		return x.Structure
+	}
+	return nil
+}
+
 type UpsertCloudProfileResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Ok            bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
 	Error         string                 `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
+	Warning       string                 `protobuf:"bytes,3,opt,name=warning,proto3" json:"warning,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -11749,6 +11764,13 @@ func (x *UpsertCloudProfileResponse) GetOk() bool {
 func (x *UpsertCloudProfileResponse) GetError() string {
 	if x != nil {
 		return x.Error
+	}
+	return ""
+}
+
+func (x *UpsertCloudProfileResponse) GetWarning() string {
+	if x != nil {
+		return x.Warning
 	}
 	return ""
 }
@@ -12887,12 +12909,13 @@ type WorkerEvent struct {
 	// EventDone / EventRouteSelected — notice (e.g. fallback note).
 	Notice string `protobuf:"bytes,17,opt,name=notice,proto3" json:"notice,omitempty"`
 	// EventSubAgent — child-agent lifecycle/transcript payload.
-	SubAgentId       string   `protobuf:"bytes,18,opt,name=sub_agent_id,json=subAgentId,proto3" json:"sub_agent_id,omitempty"`
-	SubAgentParentId string   `protobuf:"bytes,19,opt,name=sub_agent_parent_id,json=subAgentParentId,proto3" json:"sub_agent_parent_id,omitempty"`
-	SubAgentTitle    string   `protobuf:"bytes,20,opt,name=sub_agent_title,json=subAgentTitle,proto3" json:"sub_agent_title,omitempty"`
-	SubAgentKind     string   `protobuf:"bytes,21,opt,name=sub_agent_kind,json=subAgentKind,proto3" json:"sub_agent_kind,omitempty"`
-	GrantedTools     []string `protobuf:"bytes,22,rep,name=granted_tools,json=grantedTools,proto3" json:"granted_tools,omitempty"`
-	IgnoredTools     []string `protobuf:"bytes,23,rep,name=ignored_tools,json=ignoredTools,proto3" json:"ignored_tools,omitempty"`
+	SubAgentId       string            `protobuf:"bytes,18,opt,name=sub_agent_id,json=subAgentId,proto3" json:"sub_agent_id,omitempty"`
+	SubAgentParentId string            `protobuf:"bytes,19,opt,name=sub_agent_parent_id,json=subAgentParentId,proto3" json:"sub_agent_parent_id,omitempty"`
+	SubAgentTitle    string            `protobuf:"bytes,20,opt,name=sub_agent_title,json=subAgentTitle,proto3" json:"sub_agent_title,omitempty"`
+	SubAgentKind     string            `protobuf:"bytes,21,opt,name=sub_agent_kind,json=subAgentKind,proto3" json:"sub_agent_kind,omitempty"`
+	GrantedTools     []string          `protobuf:"bytes,22,rep,name=granted_tools,json=grantedTools,proto3" json:"granted_tools,omitempty"`
+	IgnoredTools     []string          `protobuf:"bytes,23,rep,name=ignored_tools,json=ignoredTools,proto3" json:"ignored_tools,omitempty"`
+	Route            *ServingRouteInfo `protobuf:"bytes,24,opt,name=route,proto3" json:"route,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -13084,6 +13107,13 @@ func (x *WorkerEvent) GetGrantedTools() []string {
 func (x *WorkerEvent) GetIgnoredTools() []string {
 	if x != nil {
 		return x.IgnoredTools
+	}
+	return nil
+}
+
+func (x *WorkerEvent) GetRoute() *ServingRouteInfo {
+	if x != nil {
+		return x.Route
 	}
 	return nil
 }
@@ -13523,6 +13553,7 @@ type TurnDone struct {
 	InputTokens   int64                  `protobuf:"varint,4,opt,name=input_tokens,json=inputTokens,proto3" json:"input_tokens,omitempty"`
 	OutputTokens  int64                  `protobuf:"varint,5,opt,name=output_tokens,json=outputTokens,proto3" json:"output_tokens,omitempty"`
 	Notice        string                 `protobuf:"bytes,6,opt,name=notice,proto3" json:"notice,omitempty"`
+	Route         *ServingRouteInfo      `protobuf:"bytes,7,opt,name=route,proto3" json:"route,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -13597,6 +13628,13 @@ func (x *TurnDone) GetNotice() string {
 		return x.Notice
 	}
 	return ""
+}
+
+func (x *TurnDone) GetRoute() *ServingRouteInfo {
+	if x != nil {
+		return x.Route
+	}
+	return nil
 }
 
 // TurnError signals a failed turn.
@@ -14361,6 +14399,8 @@ type LLMChatRequest struct {
 	// optional so pointer semantics survive the wire: absent = provider
 	// default, present 0 = greedy decoding (the summarizer's requirement).
 	Temperature   *float64 `protobuf:"fixed64,8,opt,name=temperature,proto3,oneof" json:"temperature,omitempty"`
+	Tier          string   `protobuf:"bytes,9,opt,name=tier,proto3" json:"tier,omitempty"`
+	FallbackTier  string   `protobuf:"bytes,10,opt,name=fallback_tier,json=fallbackTier,proto3" json:"fallback_tier,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -14449,6 +14489,20 @@ func (x *LLMChatRequest) GetTemperature() float64 {
 		return *x.Temperature
 	}
 	return 0
+}
+
+func (x *LLMChatRequest) GetTier() string {
+	if x != nil {
+		return x.Tier
+	}
+	return ""
+}
+
+func (x *LLMChatRequest) GetFallbackTier() string {
+	if x != nil {
+		return x.FallbackTier
+	}
+	return ""
 }
 
 // LLMTool mirrors llm.Tool (the model-facing fields; Permission is agent-side).
@@ -14634,6 +14688,7 @@ type LLMStreamEvent struct {
 	InputTokens   int64                  `protobuf:"varint,9,opt,name=input_tokens,json=inputTokens,proto3" json:"input_tokens,omitempty"`
 	OutputTokens  int64                  `protobuf:"varint,10,opt,name=output_tokens,json=outputTokens,proto3" json:"output_tokens,omitempty"`
 	ErrText       string                 `protobuf:"bytes,11,opt,name=err_text,json=errText,proto3" json:"err_text,omitempty"`
+	Route         *ServingRouteInfo      `protobuf:"bytes,12,opt,name=route,proto3" json:"route,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -14745,6 +14800,207 @@ func (x *LLMStreamEvent) GetErrText() string {
 	return ""
 }
 
+func (x *LLMStreamEvent) GetRoute() *ServingRouteInfo {
+	if x != nil {
+		return x.Route
+	}
+	return nil
+}
+
+// Per-attempt attribution and endpoint-scoped context evidence, without secrets.
+type ServingRouteInfo struct {
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	Provider           string                 `protobuf:"bytes,1,opt,name=provider,proto3" json:"provider,omitempty"`
+	Profile            string                 `protobuf:"bytes,2,opt,name=profile,proto3" json:"profile,omitempty"`
+	Destination        string                 `protobuf:"bytes,3,opt,name=destination,proto3" json:"destination,omitempty"`
+	Model              string                 `protobuf:"bytes,4,opt,name=model,proto3" json:"model,omitempty"`
+	ContextWindow      int32                  `protobuf:"varint,5,opt,name=context_window,json=contextWindow,proto3" json:"context_window,omitempty"`
+	ContextWindowKnown bool                   `protobuf:"varint,6,opt,name=context_window_known,json=contextWindowKnown,proto3" json:"context_window_known,omitempty"`
+	VisionKnown        bool                   `protobuf:"varint,7,opt,name=vision_known,json=visionKnown,proto3" json:"vision_known,omitempty"`
+	SupportsVision     bool                   `protobuf:"varint,8,opt,name=supports_vision,json=supportsVision,proto3" json:"supports_vision,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *ServingRouteInfo) Reset() {
+	*x = ServingRouteInfo{}
+	mi := &file_agent_proto_msgTypes[206]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ServingRouteInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ServingRouteInfo) ProtoMessage() {}
+
+func (x *ServingRouteInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_proto_msgTypes[206]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ServingRouteInfo.ProtoReflect.Descriptor instead.
+func (*ServingRouteInfo) Descriptor() ([]byte, []int) {
+	return file_agent_proto_rawDescGZIP(), []int{206}
+}
+
+func (x *ServingRouteInfo) GetProvider() string {
+	if x != nil {
+		return x.Provider
+	}
+	return ""
+}
+
+func (x *ServingRouteInfo) GetProfile() string {
+	if x != nil {
+		return x.Profile
+	}
+	return ""
+}
+
+func (x *ServingRouteInfo) GetDestination() string {
+	if x != nil {
+		return x.Destination
+	}
+	return ""
+}
+
+func (x *ServingRouteInfo) GetModel() string {
+	if x != nil {
+		return x.Model
+	}
+	return ""
+}
+
+func (x *ServingRouteInfo) GetContextWindow() int32 {
+	if x != nil {
+		return x.ContextWindow
+	}
+	return 0
+}
+
+func (x *ServingRouteInfo) GetContextWindowKnown() bool {
+	if x != nil {
+		return x.ContextWindowKnown
+	}
+	return false
+}
+
+func (x *ServingRouteInfo) GetVisionKnown() bool {
+	if x != nil {
+		return x.VisionKnown
+	}
+	return false
+}
+
+func (x *ServingRouteInfo) GetSupportsVision() bool {
+	if x != nil {
+		return x.SupportsVision
+	}
+	return false
+}
+
+// A complete structural draft, distinct from omission. No credentials.
+type CloudProfileStructure struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Flavor        string                 `protobuf:"bytes,1,opt,name=flavor,proto3" json:"flavor,omitempty"`
+	Backend       string                 `protobuf:"bytes,2,opt,name=backend,proto3" json:"backend,omitempty"`
+	BaseUrl       string                 `protobuf:"bytes,3,opt,name=base_url,json=baseUrl,proto3" json:"base_url,omitempty"`
+	Route         string                 `protobuf:"bytes,4,opt,name=route,proto3" json:"route,omitempty"`
+	Provider      string                 `protobuf:"bytes,5,opt,name=provider,proto3" json:"provider,omitempty"`
+	Region        string                 `protobuf:"bytes,6,opt,name=region,proto3" json:"region,omitempty"`
+	AwsProfile    string                 `protobuf:"bytes,7,opt,name=aws_profile,json=awsProfile,proto3" json:"aws_profile,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CloudProfileStructure) Reset() {
+	*x = CloudProfileStructure{}
+	mi := &file_agent_proto_msgTypes[207]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CloudProfileStructure) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CloudProfileStructure) ProtoMessage() {}
+
+func (x *CloudProfileStructure) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_proto_msgTypes[207]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CloudProfileStructure.ProtoReflect.Descriptor instead.
+func (*CloudProfileStructure) Descriptor() ([]byte, []int) {
+	return file_agent_proto_rawDescGZIP(), []int{207}
+}
+
+func (x *CloudProfileStructure) GetFlavor() string {
+	if x != nil {
+		return x.Flavor
+	}
+	return ""
+}
+
+func (x *CloudProfileStructure) GetBackend() string {
+	if x != nil {
+		return x.Backend
+	}
+	return ""
+}
+
+func (x *CloudProfileStructure) GetBaseUrl() string {
+	if x != nil {
+		return x.BaseUrl
+	}
+	return ""
+}
+
+func (x *CloudProfileStructure) GetRoute() string {
+	if x != nil {
+		return x.Route
+	}
+	return ""
+}
+
+func (x *CloudProfileStructure) GetProvider() string {
+	if x != nil {
+		return x.Provider
+	}
+	return ""
+}
+
+func (x *CloudProfileStructure) GetRegion() string {
+	if x != nil {
+		return x.Region
+	}
+	return ""
+}
+
+func (x *CloudProfileStructure) GetAwsProfile() string {
+	if x != nil {
+		return x.AwsProfile
+	}
+	return ""
+}
+
 var File_agent_proto protoreflect.FileDescriptor
 
 const file_agent_proto_rawDesc = "" +
@@ -14839,13 +15095,13 @@ const file_agent_proto_rawDesc = "" +
 	"\x05index\x18\x01 \x01(\x05R\x05index\x12\x12\n" +
 	"\x04data\x18\x02 \x01(\fR\x04data\x12\x1d\n" +
 	"\n" +
-	"media_type\x18\x03 \x01(\tR\tmediaType\"\x85\n" +
+	"media_type\x18\x03 \x01(\tR\tmediaType\"\x89\n" +
 	"\n" +
 	"\x13UpdateConfigRequest\x12\x1d\n" +
 	"\n" +
 	"open_model\x18\x01 \x01(\tR\topenModel\x12%\n" +
-	"\x0ecloud_provider\x18\x02 \x01(\tR\rcloudProvider\x12\x1f\n" +
-	"\vcloud_model\x18\x03 \x01(\tR\n" +
+	"\x0ecloud_provider\x18\x02 \x01(\tR\rcloudProvider\x12#\n" +
+	"\vcloud_model\x18\x03 \x01(\tB\x02\x18\x01R\n" +
 	"cloudModel\x12\"\n" +
 	"\rcloud_api_key\x18\x04 \x01(\tR\vcloudApiKey\x12\x1d\n" +
 	"\n" +
@@ -15564,12 +15820,12 @@ const file_agent_proto_rawDesc = "" +
 	"\x05value\x18\x02 \x01(\v2\x1a.agent.TaskModelAssignmentR\x05value:\x028\x01\"\x83\x01\n" +
 	"\x0fRoutingSnapshot\x12;\n" +
 	"\vassignments\x18\x01 \x01(\v2\x19.agent.RoutingAssignmentsR\vassignments\x123\n" +
-	"\bprofiles\x18\x02 \x03(\v2\x17.agent.CloudProfileInfoR\bprofiles\"\xca\x05\n" +
+	"\bprofiles\x18\x02 \x03(\v2\x17.agent.CloudProfileInfoR\bprofiles\"\xce\x05\n" +
 	"\x10CloudProfileInfo\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
 	"\x06flavor\x18\x02 \x01(\tR\x06flavor\x12\x19\n" +
-	"\bbase_url\x18\x03 \x01(\tR\abaseUrl\x12\x14\n" +
-	"\x05model\x18\x04 \x01(\tR\x05model\x12\x17\n" +
+	"\bbase_url\x18\x03 \x01(\tR\abaseUrl\x12\x18\n" +
+	"\x05model\x18\x04 \x01(\tB\x02\x18\x01R\x05model\x12\x17\n" +
 	"\ahas_key\x18\x05 \x01(\bR\x06hasKey\x12\x18\n" +
 	"\abackend\x18\x06 \x01(\tR\abackend\x12\x14\n" +
 	"\x05route\x18\a \x01(\tR\x05route\x12?\n" +
@@ -15629,26 +15885,28 @@ const file_agent_proto_rawDesc = "" +
 	"\aapi_key\x18\x02 \x01(\tR\x06apiKey\"B\n" +
 	"\x1aSetCloudProfileKeyResponse\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\"\xf5\x02\n" +
+	"\x05error\x18\x02 \x01(\tR\x05error\"\xb5\x03\n" +
 	"\x19UpsertCloudProfileRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
 	"\x06flavor\x18\x02 \x01(\tR\x06flavor\x12\x18\n" +
 	"\abackend\x18\x03 \x01(\tR\abackend\x12\x19\n" +
-	"\bbase_url\x18\x04 \x01(\tR\abaseUrl\x12\x14\n" +
-	"\x05model\x18\x05 \x01(\tR\x05model\x12\x14\n" +
+	"\bbase_url\x18\x04 \x01(\tR\abaseUrl\x12\x18\n" +
+	"\x05model\x18\x05 \x01(\tB\x02\x18\x01R\x05model\x12\x14\n" +
 	"\x05route\x18\x06 \x01(\tR\x05route\x12?\n" +
 	"\rmodel_choices\x18\a \x01(\v2\x1a.agent.ProfileModelChoicesR\fmodelChoices\x12\x1f\n" +
 	"\bprovider\x18\b \x01(\tH\x00R\bprovider\x88\x01\x01\x12\x1b\n" +
 	"\x06region\x18\t \x01(\tH\x01R\x06region\x88\x01\x01\x12$\n" +
 	"\vaws_profile\x18\n" +
 	" \x01(\tH\x02R\n" +
-	"awsProfile\x88\x01\x01B\v\n" +
+	"awsProfile\x88\x01\x01\x12:\n" +
+	"\tstructure\x18\v \x01(\v2\x1c.agent.CloudProfileStructureR\tstructureB\v\n" +
 	"\t_providerB\t\n" +
 	"\a_regionB\x0e\n" +
-	"\f_aws_profile\"B\n" +
+	"\f_aws_profile\"\\\n" +
 	"\x1aUpsertCloudProfileResponse\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\"/\n" +
+	"\x05error\x18\x02 \x01(\tR\x05error\x12\x18\n" +
+	"\awarning\x18\x03 \x01(\tR\awarning\"/\n" +
 	"\x19RemoveCloudProfileRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\"B\n" +
 	"\x1aRemoveCloudProfileResponse\x12\x0e\n" +
@@ -15724,7 +15982,7 @@ const file_agent_proto_rawDesc = "" +
 	"\x04role\x18\x01 \x01(\tR\x04role\x12\x1f\n" +
 	"\vblocks_json\x18\x02 \x01(\fR\n" +
 	"blocksJson\x12\x18\n" +
-	"\acontent\x18\x03 \x01(\tR\acontent\"\xef\x05\n" +
+	"\acontent\x18\x03 \x01(\tR\acontent\"\x9e\x06\n" +
 	"\vWorkerEvent\x12*\n" +
 	"\x04kind\x18\x01 \x01(\x0e2\x16.agent.WorkerEventKindR\x04kind\x12\x12\n" +
 	"\x04text\x18\x02 \x01(\tR\x04text\x12\x14\n" +
@@ -15752,7 +16010,8 @@ const file_agent_proto_rawDesc = "" +
 	"\x0fsub_agent_title\x18\x14 \x01(\tR\rsubAgentTitle\x12$\n" +
 	"\x0esub_agent_kind\x18\x15 \x01(\tR\fsubAgentKind\x12#\n" +
 	"\rgranted_tools\x18\x16 \x03(\tR\fgrantedTools\x12#\n" +
-	"\rignored_tools\x18\x17 \x03(\tR\fignoredTools\"\xaa\x01\n" +
+	"\rignored_tools\x18\x17 \x03(\tR\fignoredTools\x12-\n" +
+	"\x05route\x18\x18 \x01(\v2\x17.agent.ServingRouteInfoR\x05route\"\xaa\x01\n" +
 	"\x11PermissionRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\x04R\x02id\x12\x1e\n" +
 	"\vtool_use_id\x18\x02 \x01(\tR\ttoolUseId\x12\x12\n" +
@@ -15784,7 +16043,7 @@ const file_agent_proto_rawDesc = "" +
 	"projectDir\x12\x14\n" +
 	"\x05model\x18\x04 \x01(\tR\x05model\x12#\n" +
 	"\rgranted_tools\x18\x05 \x03(\tR\fgrantedTools\x12\x10\n" +
-	"\x03gen\x18\x06 \x01(\x04R\x03gen\"\xba\x01\n" +
+	"\x03gen\x18\x06 \x01(\x04R\x03gen\"\xe9\x01\n" +
 	"\bTurnDone\x12\x1d\n" +
 	"\n" +
 	"final_text\x18\x01 \x01(\tR\tfinalText\x12\x14\n" +
@@ -15792,7 +16051,8 @@ const file_agent_proto_rawDesc = "" +
 	"\bis_cloud\x18\x03 \x01(\bR\aisCloud\x12!\n" +
 	"\finput_tokens\x18\x04 \x01(\x03R\vinputTokens\x12#\n" +
 	"\routput_tokens\x18\x05 \x01(\x03R\foutputTokens\x12\x16\n" +
-	"\x06notice\x18\x06 \x01(\tR\x06notice\"%\n" +
+	"\x06notice\x18\x06 \x01(\tR\x06notice\x12-\n" +
+	"\x05route\x18\a \x01(\v2\x17.agent.ServingRouteInfoR\x05route\"%\n" +
 	"\tTurnError\x12\x18\n" +
 	"\amessage\x18\x01 \x01(\tR\amessage\"\b\n" +
 	"\x06Cancel\"\xd4\x10\n" +
@@ -15866,7 +16126,7 @@ const file_agent_proto_rawDesc = "" +
 	"\aaccount\x18\x04 \x01(\tR\aaccount\"W\n" +
 	"\x14OpenInferenceRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\x04R\x02id\x12/\n" +
-	"\arequest\x18\x02 \x01(\v2\x15.agent.LLMChatRequestR\arequest\"\xbd\x02\n" +
+	"\arequest\x18\x02 \x01(\v2\x15.agent.LLMChatRequestR\arequest\"\xf6\x02\n" +
 	"\x0eLLMChatRequest\x12\x14\n" +
 	"\x05model\x18\x01 \x01(\tR\x05model\x12\x16\n" +
 	"\x06system\x18\x02 \x01(\tR\x06system\x12-\n" +
@@ -15876,7 +16136,10 @@ const file_agent_proto_rawDesc = "" +
 	"\x10tool_choice_name\x18\x06 \x01(\tR\x0etoolChoiceName\x12\x1d\n" +
 	"\n" +
 	"max_tokens\x18\a \x01(\x05R\tmaxTokens\x12%\n" +
-	"\vtemperature\x18\b \x01(\x01H\x00R\vtemperature\x88\x01\x01B\x0e\n" +
+	"\vtemperature\x18\b \x01(\x01H\x00R\vtemperature\x88\x01\x01\x12\x12\n" +
+	"\x04tier\x18\t \x01(\tR\x04tier\x12#\n" +
+	"\rfallback_tier\x18\n" +
+	" \x01(\tR\ffallbackTierB\x0e\n" +
 	"\f_temperature\"W\n" +
 	"\aLLMTool\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
@@ -15887,7 +16150,7 @@ const file_agent_proto_rawDesc = "" +
 	"\x05event\x18\x02 \x01(\v2\x15.agent.LLMStreamEventH\x00R\x05event\x12\x16\n" +
 	"\x05error\x18\x03 \x01(\tH\x00R\x05error\x12\x14\n" +
 	"\x04done\x18\x04 \x01(\bH\x00R\x04doneB\x06\n" +
-	"\x04kind\"\xf4\x02\n" +
+	"\x04kind\"\xa3\x03\n" +
 	"\x0eLLMStreamEvent\x12\x12\n" +
 	"\x04type\x18\x01 \x01(\tR\x04type\x12\x1d\n" +
 	"\n" +
@@ -15902,7 +16165,26 @@ const file_agent_proto_rawDesc = "" +
 	"\finput_tokens\x18\t \x01(\x03R\vinputTokens\x12#\n" +
 	"\routput_tokens\x18\n" +
 	" \x01(\x03R\foutputTokens\x12\x19\n" +
-	"\berr_text\x18\v \x01(\tR\aerrText*0\n" +
+	"\berr_text\x18\v \x01(\tR\aerrText\x12-\n" +
+	"\x05route\x18\f \x01(\v2\x17.agent.ServingRouteInfoR\x05route\"\xa5\x02\n" +
+	"\x10ServingRouteInfo\x12\x1a\n" +
+	"\bprovider\x18\x01 \x01(\tR\bprovider\x12\x18\n" +
+	"\aprofile\x18\x02 \x01(\tR\aprofile\x12 \n" +
+	"\vdestination\x18\x03 \x01(\tR\vdestination\x12\x14\n" +
+	"\x05model\x18\x04 \x01(\tR\x05model\x12%\n" +
+	"\x0econtext_window\x18\x05 \x01(\x05R\rcontextWindow\x120\n" +
+	"\x14context_window_known\x18\x06 \x01(\bR\x12contextWindowKnown\x12!\n" +
+	"\fvision_known\x18\a \x01(\bR\vvisionKnown\x12'\n" +
+	"\x0fsupports_vision\x18\b \x01(\bR\x0esupportsVision\"\xcf\x01\n" +
+	"\x15CloudProfileStructure\x12\x16\n" +
+	"\x06flavor\x18\x01 \x01(\tR\x06flavor\x12\x18\n" +
+	"\abackend\x18\x02 \x01(\tR\abackend\x12\x19\n" +
+	"\bbase_url\x18\x03 \x01(\tR\abaseUrl\x12\x14\n" +
+	"\x05route\x18\x04 \x01(\tR\x05route\x12\x1a\n" +
+	"\bprovider\x18\x05 \x01(\tR\bprovider\x12\x16\n" +
+	"\x06region\x18\x06 \x01(\tR\x06region\x12\x1f\n" +
+	"\vaws_profile\x18\a \x01(\tR\n" +
+	"awsProfile*0\n" +
 	"\n" +
 	"FileAction\x12\n" +
 	"\n" +
@@ -16016,7 +16298,7 @@ func file_agent_proto_rawDescGZIP() []byte {
 }
 
 var file_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
-var file_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 214)
+var file_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 216)
 var file_agent_proto_goTypes = []any{
 	(FileAction)(0),      // 0: agent.FileAction
 	(WorkerEventKind)(0), // 1: agent.WorkerEventKind
@@ -16228,14 +16510,16 @@ var file_agent_proto_goTypes = []any{
 	(*LLMTool)(nil),                                // 207: agent.LLMTool
 	(*OpenInferenceEvent)(nil),                     // 208: agent.OpenInferenceEvent
 	(*LLMStreamEvent)(nil),                         // 209: agent.LLMStreamEvent
-	nil,                                            // 210: agent.ListRuntimeModelsResponse.RecommendedOpenModelsEntry
-	nil,                                            // 211: agent.GetConfigResponse.ModelTiersEntry
-	nil,                                            // 212: agent.McpServerInfo.EnvEntry
-	nil,                                            // 213: agent.AddMcpServerRequest.EnvEntry
-	nil,                                            // 214: agent.ProfileModelChoices.TierOverridesEntry
-	nil,                                            // 215: agent.RoutingAssignments.TasksEntry
-	nil,                                            // 216: agent.CloudProfileInfo.EffectiveQualityModelsEntry
-	nil,                                            // 217: agent.CloudProfileInfo.RecommendedQualityModelsEntry
+	(*ServingRouteInfo)(nil),                       // 210: agent.ServingRouteInfo
+	(*CloudProfileStructure)(nil),                  // 211: agent.CloudProfileStructure
+	nil,                                            // 212: agent.ListRuntimeModelsResponse.RecommendedOpenModelsEntry
+	nil,                                            // 213: agent.GetConfigResponse.ModelTiersEntry
+	nil,                                            // 214: agent.McpServerInfo.EnvEntry
+	nil,                                            // 215: agent.AddMcpServerRequest.EnvEntry
+	nil,                                            // 216: agent.ProfileModelChoices.TierOverridesEntry
+	nil,                                            // 217: agent.RoutingAssignments.TasksEntry
+	nil,                                            // 218: agent.CloudProfileInfo.EffectiveQualityModelsEntry
+	nil,                                            // 219: agent.CloudProfileInfo.RecommendedQualityModelsEntry
 }
 var file_agent_proto_depIdxs = []int32{
 	13,  // 0: agent.StreamProcessResponse.progress:type_name -> agent.ProgressUpdate
@@ -16263,7 +16547,7 @@ var file_agent_proto_depIdxs = []int32{
 	29,  // 22: agent.GetRuntimeStatusResponse.endpoints:type_name -> agent.RuntimeEndpoint
 	30,  // 23: agent.GetRuntimeStatusResponse.logs:type_name -> agent.RuntimeLogEntry
 	27,  // 24: agent.ListRuntimeModelsResponse.models:type_name -> agent.RuntimeModel
-	210, // 25: agent.ListRuntimeModelsResponse.recommended_open_models:type_name -> agent.ListRuntimeModelsResponse.RecommendedOpenModelsEntry
+	212, // 25: agent.ListRuntimeModelsResponse.recommended_open_models:type_name -> agent.ListRuntimeModelsResponse.RecommendedOpenModelsEntry
 	29,  // 26: agent.ListRuntimeEndpointsResponse.endpoints:type_name -> agent.RuntimeEndpoint
 	28,  // 27: agent.StartRuntimeModelResponse.instance:type_name -> agent.RuntimeInstance
 	28,  // 28: agent.RestartRuntimeResponse.instance:type_name -> agent.RuntimeInstance
@@ -16281,7 +16565,7 @@ var file_agent_proto_depIdxs = []int32{
 	87,  // 40: agent.ExportTrajectoryEvent.failed:type_name -> agent.ExportTrajectoryFailed
 	93,  // 41: agent.GetConversationTurnsResponse.turns:type_name -> agent.ContextTurn
 	98,  // 42: agent.ListToolsResponse.tools:type_name -> agent.BuiltinTool
-	211, // 43: agent.GetConfigResponse.model_tiers:type_name -> agent.GetConfigResponse.ModelTiersEntry
+	213, // 43: agent.GetConfigResponse.model_tiers:type_name -> agent.GetConfigResponse.ModelTiersEntry
 	108, // 44: agent.ListSkillsResponse.skills:type_name -> agent.SkillInfo
 	122, // 45: agent.ClientEvent.permission_mode_changed:type_name -> agent.PermissionModeChanged
 	124, // 46: agent.ClientEvent.config_changed:type_name -> agent.ConfigChanged
@@ -16289,16 +16573,16 @@ var file_agent_proto_depIdxs = []int32{
 	123, // 48: agent.ClientEvent.session_profile_changed:type_name -> agent.SessionProfileChanged
 	125, // 49: agent.OpenRuntimeStatusChanged.status:type_name -> agent.OpenRuntimeStatus
 	125, // 50: agent.GetOpenRuntimeStatusResponse.status:type_name -> agent.OpenRuntimeStatus
-	212, // 51: agent.McpServerInfo.env:type_name -> agent.McpServerInfo.EnvEntry
+	214, // 51: agent.McpServerInfo.env:type_name -> agent.McpServerInfo.EnvEntry
 	148, // 52: agent.ListMcpServersResponse.servers:type_name -> agent.McpServerInfo
-	213, // 53: agent.AddMcpServerRequest.env:type_name -> agent.AddMcpServerRequest.EnvEntry
-	214, // 54: agent.ProfileModelChoices.tier_overrides:type_name -> agent.ProfileModelChoices.TierOverridesEntry
-	215, // 55: agent.RoutingAssignments.tasks:type_name -> agent.RoutingAssignments.TasksEntry
+	215, // 53: agent.AddMcpServerRequest.env:type_name -> agent.AddMcpServerRequest.EnvEntry
+	216, // 54: agent.ProfileModelChoices.tier_overrides:type_name -> agent.ProfileModelChoices.TierOverridesEntry
+	217, // 55: agent.RoutingAssignments.tasks:type_name -> agent.RoutingAssignments.TasksEntry
 	159, // 56: agent.RoutingSnapshot.assignments:type_name -> agent.RoutingAssignments
 	161, // 57: agent.RoutingSnapshot.profiles:type_name -> agent.CloudProfileInfo
 	157, // 58: agent.CloudProfileInfo.model_choices:type_name -> agent.ProfileModelChoices
-	216, // 59: agent.CloudProfileInfo.effective_quality_models:type_name -> agent.CloudProfileInfo.EffectiveQualityModelsEntry
-	217, // 60: agent.CloudProfileInfo.recommended_quality_models:type_name -> agent.CloudProfileInfo.RecommendedQualityModelsEntry
+	218, // 59: agent.CloudProfileInfo.effective_quality_models:type_name -> agent.CloudProfileInfo.EffectiveQualityModelsEntry
+	219, // 60: agent.CloudProfileInfo.recommended_quality_models:type_name -> agent.CloudProfileInfo.RecommendedQualityModelsEntry
 	161, // 61: agent.GetCloudProfilesResponse.profiles:type_name -> agent.CloudProfileInfo
 	161, // 62: agent.CloudProvider.profiles:type_name -> agent.CloudProfileInfo
 	164, // 63: agent.GetCloudProvidersResponse.providers:type_name -> agent.CloudProvider
@@ -16306,186 +16590,190 @@ var file_agent_proto_depIdxs = []int32{
 	159, // 65: agent.GetCloudProvidersResponse.assignments:type_name -> agent.RoutingAssignments
 	159, // 66: agent.UpdateRoutingAssignmentsRequest.assignments:type_name -> agent.RoutingAssignments
 	157, // 67: agent.UpsertCloudProfileRequest.model_choices:type_name -> agent.ProfileModelChoices
-	179, // 68: agent.ListCloudProfileModelsResponse.models:type_name -> agent.CloudModelInfo
-	189, // 69: agent.HostToWorker.start:type_name -> agent.StartTurn
-	193, // 70: agent.HostToWorker.perm_response:type_name -> agent.PermissionResponse
-	200, // 71: agent.HostToWorker.cancel:type_name -> agent.Cancel
-	204, // 72: agent.HostToWorker.cred_response:type_name -> agent.CredentialResponse
-	208, // 73: agent.HostToWorker.open_event:type_name -> agent.OpenInferenceEvent
-	195, // 74: agent.HostToWorker.profile_response:type_name -> agent.SessionProfileResponse
-	191, // 75: agent.WorkerToHost.event:type_name -> agent.WorkerEvent
-	192, // 76: agent.WorkerToHost.perm_request:type_name -> agent.PermissionRequest
-	196, // 77: agent.WorkerToHost.persist:type_name -> agent.PersistTurn
-	198, // 78: agent.WorkerToHost.done:type_name -> agent.TurnDone
-	199, // 79: agent.WorkerToHost.error:type_name -> agent.TurnError
-	203, // 80: agent.WorkerToHost.cred_request:type_name -> agent.CredentialRequest
-	197, // 81: agent.WorkerToHost.ensure_subagent:type_name -> agent.EnsureSubagentConversation
-	205, // 82: agent.WorkerToHost.open_request:type_name -> agent.OpenInferenceRequest
-	194, // 83: agent.WorkerToHost.profile_request:type_name -> agent.SessionProfileRequest
-	16,  // 84: agent.StartTurn.images:type_name -> agent.InlineImage
-	201, // 85: agent.StartTurn.config:type_name -> agent.ConfigSnapshot
-	190, // 86: agent.StartTurn.history:type_name -> agent.LLMMessage
-	1,   // 87: agent.WorkerEvent.kind:type_name -> agent.WorkerEventKind
-	190, // 88: agent.PersistTurn.message:type_name -> agent.LLMMessage
-	202, // 89: agent.ConfigSnapshot.model_metadata:type_name -> agent.ModelMetadataEntry
-	160, // 90: agent.ConfigSnapshot.routing:type_name -> agent.RoutingSnapshot
-	3,   // 91: agent.ModelMetadataEntry.vision:type_name -> agent.ModelMetadataEntry.Vision
-	206, // 92: agent.OpenInferenceRequest.request:type_name -> agent.LLMChatRequest
-	190, // 93: agent.LLMChatRequest.messages:type_name -> agent.LLMMessage
-	207, // 94: agent.LLMChatRequest.tools:type_name -> agent.LLMTool
-	209, // 95: agent.OpenInferenceEvent.event:type_name -> agent.LLMStreamEvent
-	158, // 96: agent.RoutingAssignments.TasksEntry.value:type_name -> agent.TaskModelAssignment
-	15,  // 97: agent.Agent.ProcessRequest:input_type -> agent.ProcessRequestRequest
-	15,  // 98: agent.Agent.StreamProcessRequest:input_type -> agent.ProcessRequestRequest
-	186, // 99: agent.Agent.AttachConversation:input_type -> agent.AttachConversationRequest
-	17,  // 100: agent.Agent.UpdateConfig:input_type -> agent.UpdateConfigRequest
-	19,  // 101: agent.Agent.ShutdownAgent:input_type -> agent.ShutdownAgentRequest
-	105, // 102: agent.Agent.GetConfig:input_type -> agent.GetConfigRequest
-	56,  // 103: agent.Agent.ListConversations:input_type -> agent.ListConversationsRequest
-	58,  // 104: agent.Agent.ResumeConversation:input_type -> agent.ResumeConversationRequest
-	58,  // 105: agent.Agent.StreamResumeConversation:input_type -> agent.ResumeConversationRequest
-	61,  // 106: agent.Agent.StreamResumeConversationViewportFirst:input_type -> agent.ResumeConversationViewportFirstRequest
-	63,  // 107: agent.Agent.DeleteConversation:input_type -> agent.DeleteConversationRequest
-	65,  // 108: agent.Agent.RenameConversation:input_type -> agent.RenameConversationRequest
-	67,  // 109: agent.Agent.GetConversation:input_type -> agent.GetConversationRequest
-	68,  // 110: agent.Agent.ListSubAgents:input_type -> agent.ListSubAgentsRequest
-	70,  // 111: agent.Agent.DismissSubAgent:input_type -> agent.DismissSubAgentRequest
-	73,  // 112: agent.Agent.GetContextUsage:input_type -> agent.GetContextUsageRequest
-	77,  // 113: agent.Agent.GetCompactionState:input_type -> agent.GetCompactionStateRequest
-	79,  // 114: agent.Agent.ElideContext:input_type -> agent.ElideContextRequest
-	75,  // 115: agent.Agent.SuggestNextPrompt:input_type -> agent.SuggestNextPromptRequest
-	127, // 116: agent.Agent.GetOpenRuntimeStatus:input_type -> agent.GetOpenRuntimeStatusRequest
-	129, // 117: agent.Agent.InstallOpenRuntime:input_type -> agent.InstallOpenRuntimeRequest
-	131, // 118: agent.Agent.RegenerateContext:input_type -> agent.RegenerateContextRequest
-	81,  // 119: agent.Agent.ExportContext:input_type -> agent.ExportContextRequest
-	83,  // 120: agent.Agent.ExportTrajectory:input_type -> agent.ExportTrajectoryRequest
-	89,  // 121: agent.Agent.GetConversationTurns:input_type -> agent.GetConversationTurnsRequest
-	91,  // 122: agent.Agent.GetToolCall:input_type -> agent.GetToolCallRequest
-	99,  // 123: agent.Agent.ListTools:input_type -> agent.ListToolsRequest
-	101, // 124: agent.Agent.InvokeTool:input_type -> agent.InvokeToolRequest
-	103, // 125: agent.Agent.InvokeCapability:input_type -> agent.InvokeCapabilityRequest
-	24,  // 126: agent.Agent.ListModels:input_type -> agent.ListModelsRequest
-	31,  // 127: agent.Agent.GetRuntimeStatus:input_type -> agent.GetRuntimeStatusRequest
-	33,  // 128: agent.Agent.ListRuntimeModels:input_type -> agent.ListRuntimeModelsRequest
-	39,  // 129: agent.Agent.ListRuntimeEndpoints:input_type -> agent.ListRuntimeEndpointsRequest
-	41,  // 130: agent.Agent.StartRuntimeModel:input_type -> agent.StartRuntimeModelRequest
-	43,  // 131: agent.Agent.StopRuntimeModel:input_type -> agent.StopRuntimeModelRequest
-	45,  // 132: agent.Agent.RestartRuntime:input_type -> agent.RestartRuntimeRequest
-	47,  // 133: agent.Agent.DownloadRuntimeModel:input_type -> agent.DownloadRuntimeModelRequest
-	49,  // 134: agent.Agent.CancelRuntimeModelDownload:input_type -> agent.CancelRuntimeModelDownloadRequest
-	51,  // 135: agent.Agent.DeleteRuntimeModel:input_type -> agent.DeleteRuntimeModelRequest
-	37,  // 136: agent.Agent.RefreshOnlineCatalog:input_type -> agent.RefreshOnlineCatalogRequest
-	35,  // 137: agent.Agent.GetModelRAMEstimate:input_type -> agent.GetModelRAMEstimateRequest
-	53,  // 138: agent.Agent.StreamRuntimeLogs:input_type -> agent.StreamRuntimeLogsRequest
-	107, // 139: agent.Agent.ListSkills:input_type -> agent.ListSkillsRequest
-	110, // 140: agent.Agent.GetSkill:input_type -> agent.GetSkillRequest
-	112, // 141: agent.Agent.SetPermissionMode:input_type -> agent.SetPermissionModeRequest
-	114, // 142: agent.Agent.GetPermissionMode:input_type -> agent.GetPermissionModeRequest
-	116, // 143: agent.Agent.SetSessionProfile:input_type -> agent.SetSessionProfileRequest
-	118, // 144: agent.Agent.GetSessionProfile:input_type -> agent.GetSessionProfileRequest
-	120, // 145: agent.Agent.SubscribeEvents:input_type -> agent.SubscribeEventsRequest
-	133, // 146: agent.Agent.AllowToolCall:input_type -> agent.AllowToolCallRequest
-	135, // 147: agent.Agent.DenyToolCall:input_type -> agent.DenyToolCallRequest
-	137, // 148: agent.Agent.AcceptRollover:input_type -> agent.AcceptRolloverRequest
-	139, // 149: agent.Agent.DeclineRollover:input_type -> agent.DeclineRolloverRequest
-	141, // 150: agent.Agent.GetProviderCapabilities:input_type -> agent.GetProviderCapabilitiesRequest
-	94,  // 151: agent.Agent.ProposeContextEdit:input_type -> agent.ProposeContextEditRequest
-	96,  // 152: agent.Agent.DeleteConversationTurns:input_type -> agent.DeleteConversationTurnsRequest
-	149, // 153: agent.Agent.ListMcpServers:input_type -> agent.ListMcpServersRequest
-	151, // 154: agent.Agent.AddMcpServer:input_type -> agent.AddMcpServerRequest
-	153, // 155: agent.Agent.RemoveMcpServer:input_type -> agent.RemoveMcpServerRequest
-	155, // 156: agent.Agent.RestartMcpServer:input_type -> agent.RestartMcpServerRequest
-	162, // 157: agent.Agent.GetCloudProfiles:input_type -> agent.GetCloudProfilesRequest
-	165, // 158: agent.Agent.GetCloudProviders:input_type -> agent.GetCloudProvidersRequest
-	167, // 159: agent.Agent.UpdateRoutingAssignments:input_type -> agent.UpdateRoutingAssignmentsRequest
-	169, // 160: agent.Agent.SetActiveCloudProfile:input_type -> agent.SetActiveCloudProfileRequest
-	171, // 161: agent.Agent.SetBackupCloudProfile:input_type -> agent.SetBackupCloudProfileRequest
-	173, // 162: agent.Agent.SetCloudProfileKey:input_type -> agent.SetCloudProfileKeyRequest
-	175, // 163: agent.Agent.UpsertCloudProfile:input_type -> agent.UpsertCloudProfileRequest
-	177, // 164: agent.Agent.RemoveCloudProfile:input_type -> agent.RemoveCloudProfileRequest
-	180, // 165: agent.Agent.ListCloudProfileModels:input_type -> agent.ListCloudProfileModelsRequest
-	182, // 166: agent.Agent.StartChatGPTLogin:input_type -> agent.StartChatGPTLoginRequest
-	184, // 167: agent.Agent.StartClaudeLogin:input_type -> agent.StartClaudeLoginRequest
-	4,   // 168: agent.Agent.ExportImage:input_type -> agent.ExportImageRequest
-	187, // 169: agent.Worker.RunTurn:input_type -> agent.HostToWorker
-	21,  // 170: agent.Agent.ProcessRequest:output_type -> agent.ProcessRequestResponse
-	7,   // 171: agent.Agent.StreamProcessRequest:output_type -> agent.StreamProcessResponse
-	7,   // 172: agent.Agent.AttachConversation:output_type -> agent.StreamProcessResponse
-	18,  // 173: agent.Agent.UpdateConfig:output_type -> agent.UpdateConfigResponse
-	20,  // 174: agent.Agent.ShutdownAgent:output_type -> agent.ShutdownAgentResponse
-	106, // 175: agent.Agent.GetConfig:output_type -> agent.GetConfigResponse
-	57,  // 176: agent.Agent.ListConversations:output_type -> agent.ListConversationsResponse
-	59,  // 177: agent.Agent.ResumeConversation:output_type -> agent.ResumeConversationResponse
-	60,  // 178: agent.Agent.StreamResumeConversation:output_type -> agent.ResumeConversationChunk
-	62,  // 179: agent.Agent.StreamResumeConversationViewportFirst:output_type -> agent.ResumeConversationViewportFirstEvent
-	64,  // 180: agent.Agent.DeleteConversation:output_type -> agent.DeleteConversationResponse
-	66,  // 181: agent.Agent.RenameConversation:output_type -> agent.RenameConversationResponse
-	54,  // 182: agent.Agent.GetConversation:output_type -> agent.Conversation
-	69,  // 183: agent.Agent.ListSubAgents:output_type -> agent.ListSubAgentsResponse
-	71,  // 184: agent.Agent.DismissSubAgent:output_type -> agent.DismissSubAgentResponse
-	74,  // 185: agent.Agent.GetContextUsage:output_type -> agent.GetContextUsageResponse
-	78,  // 186: agent.Agent.GetCompactionState:output_type -> agent.GetCompactionStateResponse
-	80,  // 187: agent.Agent.ElideContext:output_type -> agent.ElideContextResponse
-	76,  // 188: agent.Agent.SuggestNextPrompt:output_type -> agent.SuggestNextPromptResponse
-	128, // 189: agent.Agent.GetOpenRuntimeStatus:output_type -> agent.GetOpenRuntimeStatusResponse
-	130, // 190: agent.Agent.InstallOpenRuntime:output_type -> agent.InstallProgress
-	132, // 191: agent.Agent.RegenerateContext:output_type -> agent.RegenerateContextProgress
-	82,  // 192: agent.Agent.ExportContext:output_type -> agent.ExportContextResponse
-	88,  // 193: agent.Agent.ExportTrajectory:output_type -> agent.ExportTrajectoryEvent
-	90,  // 194: agent.Agent.GetConversationTurns:output_type -> agent.GetConversationTurnsResponse
-	92,  // 195: agent.Agent.GetToolCall:output_type -> agent.GetToolCallResponse
-	100, // 196: agent.Agent.ListTools:output_type -> agent.ListToolsResponse
-	102, // 197: agent.Agent.InvokeTool:output_type -> agent.InvokeToolResponse
-	104, // 198: agent.Agent.InvokeCapability:output_type -> agent.InvokeCapabilityResponse
-	26,  // 199: agent.Agent.ListModels:output_type -> agent.ListModelsResponse
-	32,  // 200: agent.Agent.GetRuntimeStatus:output_type -> agent.GetRuntimeStatusResponse
-	34,  // 201: agent.Agent.ListRuntimeModels:output_type -> agent.ListRuntimeModelsResponse
-	40,  // 202: agent.Agent.ListRuntimeEndpoints:output_type -> agent.ListRuntimeEndpointsResponse
-	42,  // 203: agent.Agent.StartRuntimeModel:output_type -> agent.StartRuntimeModelResponse
-	44,  // 204: agent.Agent.StopRuntimeModel:output_type -> agent.StopRuntimeModelResponse
-	46,  // 205: agent.Agent.RestartRuntime:output_type -> agent.RestartRuntimeResponse
-	48,  // 206: agent.Agent.DownloadRuntimeModel:output_type -> agent.DownloadRuntimeModelResponse
-	50,  // 207: agent.Agent.CancelRuntimeModelDownload:output_type -> agent.CancelRuntimeModelDownloadResponse
-	52,  // 208: agent.Agent.DeleteRuntimeModel:output_type -> agent.DeleteRuntimeModelResponse
-	38,  // 209: agent.Agent.RefreshOnlineCatalog:output_type -> agent.RefreshOnlineCatalogResponse
-	36,  // 210: agent.Agent.GetModelRAMEstimate:output_type -> agent.GetModelRAMEstimateResponse
-	30,  // 211: agent.Agent.StreamRuntimeLogs:output_type -> agent.RuntimeLogEntry
-	109, // 212: agent.Agent.ListSkills:output_type -> agent.ListSkillsResponse
-	111, // 213: agent.Agent.GetSkill:output_type -> agent.GetSkillResponse
-	113, // 214: agent.Agent.SetPermissionMode:output_type -> agent.SetPermissionModeResponse
-	115, // 215: agent.Agent.GetPermissionMode:output_type -> agent.GetPermissionModeResponse
-	117, // 216: agent.Agent.SetSessionProfile:output_type -> agent.SetSessionProfileResponse
-	119, // 217: agent.Agent.GetSessionProfile:output_type -> agent.GetSessionProfileResponse
-	121, // 218: agent.Agent.SubscribeEvents:output_type -> agent.ClientEvent
-	134, // 219: agent.Agent.AllowToolCall:output_type -> agent.AllowToolCallResponse
-	136, // 220: agent.Agent.DenyToolCall:output_type -> agent.DenyToolCallResponse
-	138, // 221: agent.Agent.AcceptRollover:output_type -> agent.AcceptRolloverResponse
-	140, // 222: agent.Agent.DeclineRollover:output_type -> agent.DeclineRolloverResponse
-	142, // 223: agent.Agent.GetProviderCapabilities:output_type -> agent.GetProviderCapabilitiesResponse
-	95,  // 224: agent.Agent.ProposeContextEdit:output_type -> agent.ProposeContextEditResponse
-	97,  // 225: agent.Agent.DeleteConversationTurns:output_type -> agent.DeleteConversationTurnsResponse
-	150, // 226: agent.Agent.ListMcpServers:output_type -> agent.ListMcpServersResponse
-	152, // 227: agent.Agent.AddMcpServer:output_type -> agent.AddMcpServerResponse
-	154, // 228: agent.Agent.RemoveMcpServer:output_type -> agent.RemoveMcpServerResponse
-	156, // 229: agent.Agent.RestartMcpServer:output_type -> agent.RestartMcpServerResponse
-	163, // 230: agent.Agent.GetCloudProfiles:output_type -> agent.GetCloudProfilesResponse
-	166, // 231: agent.Agent.GetCloudProviders:output_type -> agent.GetCloudProvidersResponse
-	168, // 232: agent.Agent.UpdateRoutingAssignments:output_type -> agent.UpdateRoutingAssignmentsResponse
-	170, // 233: agent.Agent.SetActiveCloudProfile:output_type -> agent.SetActiveCloudProfileResponse
-	172, // 234: agent.Agent.SetBackupCloudProfile:output_type -> agent.SetBackupCloudProfileResponse
-	174, // 235: agent.Agent.SetCloudProfileKey:output_type -> agent.SetCloudProfileKeyResponse
-	176, // 236: agent.Agent.UpsertCloudProfile:output_type -> agent.UpsertCloudProfileResponse
-	178, // 237: agent.Agent.RemoveCloudProfile:output_type -> agent.RemoveCloudProfileResponse
-	181, // 238: agent.Agent.ListCloudProfileModels:output_type -> agent.ListCloudProfileModelsResponse
-	183, // 239: agent.Agent.StartChatGPTLogin:output_type -> agent.StartChatGPTLoginEvent
-	185, // 240: agent.Agent.StartClaudeLogin:output_type -> agent.StartClaudeLoginEvent
-	5,   // 241: agent.Agent.ExportImage:output_type -> agent.ExportImageResponse
-	188, // 242: agent.Worker.RunTurn:output_type -> agent.WorkerToHost
-	170, // [170:243] is the sub-list for method output_type
-	97,  // [97:170] is the sub-list for method input_type
-	97,  // [97:97] is the sub-list for extension type_name
-	97,  // [97:97] is the sub-list for extension extendee
-	0,   // [0:97] is the sub-list for field type_name
+	211, // 68: agent.UpsertCloudProfileRequest.structure:type_name -> agent.CloudProfileStructure
+	179, // 69: agent.ListCloudProfileModelsResponse.models:type_name -> agent.CloudModelInfo
+	189, // 70: agent.HostToWorker.start:type_name -> agent.StartTurn
+	193, // 71: agent.HostToWorker.perm_response:type_name -> agent.PermissionResponse
+	200, // 72: agent.HostToWorker.cancel:type_name -> agent.Cancel
+	204, // 73: agent.HostToWorker.cred_response:type_name -> agent.CredentialResponse
+	208, // 74: agent.HostToWorker.open_event:type_name -> agent.OpenInferenceEvent
+	195, // 75: agent.HostToWorker.profile_response:type_name -> agent.SessionProfileResponse
+	191, // 76: agent.WorkerToHost.event:type_name -> agent.WorkerEvent
+	192, // 77: agent.WorkerToHost.perm_request:type_name -> agent.PermissionRequest
+	196, // 78: agent.WorkerToHost.persist:type_name -> agent.PersistTurn
+	198, // 79: agent.WorkerToHost.done:type_name -> agent.TurnDone
+	199, // 80: agent.WorkerToHost.error:type_name -> agent.TurnError
+	203, // 81: agent.WorkerToHost.cred_request:type_name -> agent.CredentialRequest
+	197, // 82: agent.WorkerToHost.ensure_subagent:type_name -> agent.EnsureSubagentConversation
+	205, // 83: agent.WorkerToHost.open_request:type_name -> agent.OpenInferenceRequest
+	194, // 84: agent.WorkerToHost.profile_request:type_name -> agent.SessionProfileRequest
+	16,  // 85: agent.StartTurn.images:type_name -> agent.InlineImage
+	201, // 86: agent.StartTurn.config:type_name -> agent.ConfigSnapshot
+	190, // 87: agent.StartTurn.history:type_name -> agent.LLMMessage
+	1,   // 88: agent.WorkerEvent.kind:type_name -> agent.WorkerEventKind
+	210, // 89: agent.WorkerEvent.route:type_name -> agent.ServingRouteInfo
+	190, // 90: agent.PersistTurn.message:type_name -> agent.LLMMessage
+	210, // 91: agent.TurnDone.route:type_name -> agent.ServingRouteInfo
+	202, // 92: agent.ConfigSnapshot.model_metadata:type_name -> agent.ModelMetadataEntry
+	160, // 93: agent.ConfigSnapshot.routing:type_name -> agent.RoutingSnapshot
+	3,   // 94: agent.ModelMetadataEntry.vision:type_name -> agent.ModelMetadataEntry.Vision
+	206, // 95: agent.OpenInferenceRequest.request:type_name -> agent.LLMChatRequest
+	190, // 96: agent.LLMChatRequest.messages:type_name -> agent.LLMMessage
+	207, // 97: agent.LLMChatRequest.tools:type_name -> agent.LLMTool
+	209, // 98: agent.OpenInferenceEvent.event:type_name -> agent.LLMStreamEvent
+	210, // 99: agent.LLMStreamEvent.route:type_name -> agent.ServingRouteInfo
+	158, // 100: agent.RoutingAssignments.TasksEntry.value:type_name -> agent.TaskModelAssignment
+	15,  // 101: agent.Agent.ProcessRequest:input_type -> agent.ProcessRequestRequest
+	15,  // 102: agent.Agent.StreamProcessRequest:input_type -> agent.ProcessRequestRequest
+	186, // 103: agent.Agent.AttachConversation:input_type -> agent.AttachConversationRequest
+	17,  // 104: agent.Agent.UpdateConfig:input_type -> agent.UpdateConfigRequest
+	19,  // 105: agent.Agent.ShutdownAgent:input_type -> agent.ShutdownAgentRequest
+	105, // 106: agent.Agent.GetConfig:input_type -> agent.GetConfigRequest
+	56,  // 107: agent.Agent.ListConversations:input_type -> agent.ListConversationsRequest
+	58,  // 108: agent.Agent.ResumeConversation:input_type -> agent.ResumeConversationRequest
+	58,  // 109: agent.Agent.StreamResumeConversation:input_type -> agent.ResumeConversationRequest
+	61,  // 110: agent.Agent.StreamResumeConversationViewportFirst:input_type -> agent.ResumeConversationViewportFirstRequest
+	63,  // 111: agent.Agent.DeleteConversation:input_type -> agent.DeleteConversationRequest
+	65,  // 112: agent.Agent.RenameConversation:input_type -> agent.RenameConversationRequest
+	67,  // 113: agent.Agent.GetConversation:input_type -> agent.GetConversationRequest
+	68,  // 114: agent.Agent.ListSubAgents:input_type -> agent.ListSubAgentsRequest
+	70,  // 115: agent.Agent.DismissSubAgent:input_type -> agent.DismissSubAgentRequest
+	73,  // 116: agent.Agent.GetContextUsage:input_type -> agent.GetContextUsageRequest
+	77,  // 117: agent.Agent.GetCompactionState:input_type -> agent.GetCompactionStateRequest
+	79,  // 118: agent.Agent.ElideContext:input_type -> agent.ElideContextRequest
+	75,  // 119: agent.Agent.SuggestNextPrompt:input_type -> agent.SuggestNextPromptRequest
+	127, // 120: agent.Agent.GetOpenRuntimeStatus:input_type -> agent.GetOpenRuntimeStatusRequest
+	129, // 121: agent.Agent.InstallOpenRuntime:input_type -> agent.InstallOpenRuntimeRequest
+	131, // 122: agent.Agent.RegenerateContext:input_type -> agent.RegenerateContextRequest
+	81,  // 123: agent.Agent.ExportContext:input_type -> agent.ExportContextRequest
+	83,  // 124: agent.Agent.ExportTrajectory:input_type -> agent.ExportTrajectoryRequest
+	89,  // 125: agent.Agent.GetConversationTurns:input_type -> agent.GetConversationTurnsRequest
+	91,  // 126: agent.Agent.GetToolCall:input_type -> agent.GetToolCallRequest
+	99,  // 127: agent.Agent.ListTools:input_type -> agent.ListToolsRequest
+	101, // 128: agent.Agent.InvokeTool:input_type -> agent.InvokeToolRequest
+	103, // 129: agent.Agent.InvokeCapability:input_type -> agent.InvokeCapabilityRequest
+	24,  // 130: agent.Agent.ListModels:input_type -> agent.ListModelsRequest
+	31,  // 131: agent.Agent.GetRuntimeStatus:input_type -> agent.GetRuntimeStatusRequest
+	33,  // 132: agent.Agent.ListRuntimeModels:input_type -> agent.ListRuntimeModelsRequest
+	39,  // 133: agent.Agent.ListRuntimeEndpoints:input_type -> agent.ListRuntimeEndpointsRequest
+	41,  // 134: agent.Agent.StartRuntimeModel:input_type -> agent.StartRuntimeModelRequest
+	43,  // 135: agent.Agent.StopRuntimeModel:input_type -> agent.StopRuntimeModelRequest
+	45,  // 136: agent.Agent.RestartRuntime:input_type -> agent.RestartRuntimeRequest
+	47,  // 137: agent.Agent.DownloadRuntimeModel:input_type -> agent.DownloadRuntimeModelRequest
+	49,  // 138: agent.Agent.CancelRuntimeModelDownload:input_type -> agent.CancelRuntimeModelDownloadRequest
+	51,  // 139: agent.Agent.DeleteRuntimeModel:input_type -> agent.DeleteRuntimeModelRequest
+	37,  // 140: agent.Agent.RefreshOnlineCatalog:input_type -> agent.RefreshOnlineCatalogRequest
+	35,  // 141: agent.Agent.GetModelRAMEstimate:input_type -> agent.GetModelRAMEstimateRequest
+	53,  // 142: agent.Agent.StreamRuntimeLogs:input_type -> agent.StreamRuntimeLogsRequest
+	107, // 143: agent.Agent.ListSkills:input_type -> agent.ListSkillsRequest
+	110, // 144: agent.Agent.GetSkill:input_type -> agent.GetSkillRequest
+	112, // 145: agent.Agent.SetPermissionMode:input_type -> agent.SetPermissionModeRequest
+	114, // 146: agent.Agent.GetPermissionMode:input_type -> agent.GetPermissionModeRequest
+	116, // 147: agent.Agent.SetSessionProfile:input_type -> agent.SetSessionProfileRequest
+	118, // 148: agent.Agent.GetSessionProfile:input_type -> agent.GetSessionProfileRequest
+	120, // 149: agent.Agent.SubscribeEvents:input_type -> agent.SubscribeEventsRequest
+	133, // 150: agent.Agent.AllowToolCall:input_type -> agent.AllowToolCallRequest
+	135, // 151: agent.Agent.DenyToolCall:input_type -> agent.DenyToolCallRequest
+	137, // 152: agent.Agent.AcceptRollover:input_type -> agent.AcceptRolloverRequest
+	139, // 153: agent.Agent.DeclineRollover:input_type -> agent.DeclineRolloverRequest
+	141, // 154: agent.Agent.GetProviderCapabilities:input_type -> agent.GetProviderCapabilitiesRequest
+	94,  // 155: agent.Agent.ProposeContextEdit:input_type -> agent.ProposeContextEditRequest
+	96,  // 156: agent.Agent.DeleteConversationTurns:input_type -> agent.DeleteConversationTurnsRequest
+	149, // 157: agent.Agent.ListMcpServers:input_type -> agent.ListMcpServersRequest
+	151, // 158: agent.Agent.AddMcpServer:input_type -> agent.AddMcpServerRequest
+	153, // 159: agent.Agent.RemoveMcpServer:input_type -> agent.RemoveMcpServerRequest
+	155, // 160: agent.Agent.RestartMcpServer:input_type -> agent.RestartMcpServerRequest
+	162, // 161: agent.Agent.GetCloudProfiles:input_type -> agent.GetCloudProfilesRequest
+	165, // 162: agent.Agent.GetCloudProviders:input_type -> agent.GetCloudProvidersRequest
+	167, // 163: agent.Agent.UpdateRoutingAssignments:input_type -> agent.UpdateRoutingAssignmentsRequest
+	169, // 164: agent.Agent.SetActiveCloudProfile:input_type -> agent.SetActiveCloudProfileRequest
+	171, // 165: agent.Agent.SetBackupCloudProfile:input_type -> agent.SetBackupCloudProfileRequest
+	173, // 166: agent.Agent.SetCloudProfileKey:input_type -> agent.SetCloudProfileKeyRequest
+	175, // 167: agent.Agent.UpsertCloudProfile:input_type -> agent.UpsertCloudProfileRequest
+	177, // 168: agent.Agent.RemoveCloudProfile:input_type -> agent.RemoveCloudProfileRequest
+	180, // 169: agent.Agent.ListCloudProfileModels:input_type -> agent.ListCloudProfileModelsRequest
+	182, // 170: agent.Agent.StartChatGPTLogin:input_type -> agent.StartChatGPTLoginRequest
+	184, // 171: agent.Agent.StartClaudeLogin:input_type -> agent.StartClaudeLoginRequest
+	4,   // 172: agent.Agent.ExportImage:input_type -> agent.ExportImageRequest
+	187, // 173: agent.Worker.RunTurn:input_type -> agent.HostToWorker
+	21,  // 174: agent.Agent.ProcessRequest:output_type -> agent.ProcessRequestResponse
+	7,   // 175: agent.Agent.StreamProcessRequest:output_type -> agent.StreamProcessResponse
+	7,   // 176: agent.Agent.AttachConversation:output_type -> agent.StreamProcessResponse
+	18,  // 177: agent.Agent.UpdateConfig:output_type -> agent.UpdateConfigResponse
+	20,  // 178: agent.Agent.ShutdownAgent:output_type -> agent.ShutdownAgentResponse
+	106, // 179: agent.Agent.GetConfig:output_type -> agent.GetConfigResponse
+	57,  // 180: agent.Agent.ListConversations:output_type -> agent.ListConversationsResponse
+	59,  // 181: agent.Agent.ResumeConversation:output_type -> agent.ResumeConversationResponse
+	60,  // 182: agent.Agent.StreamResumeConversation:output_type -> agent.ResumeConversationChunk
+	62,  // 183: agent.Agent.StreamResumeConversationViewportFirst:output_type -> agent.ResumeConversationViewportFirstEvent
+	64,  // 184: agent.Agent.DeleteConversation:output_type -> agent.DeleteConversationResponse
+	66,  // 185: agent.Agent.RenameConversation:output_type -> agent.RenameConversationResponse
+	54,  // 186: agent.Agent.GetConversation:output_type -> agent.Conversation
+	69,  // 187: agent.Agent.ListSubAgents:output_type -> agent.ListSubAgentsResponse
+	71,  // 188: agent.Agent.DismissSubAgent:output_type -> agent.DismissSubAgentResponse
+	74,  // 189: agent.Agent.GetContextUsage:output_type -> agent.GetContextUsageResponse
+	78,  // 190: agent.Agent.GetCompactionState:output_type -> agent.GetCompactionStateResponse
+	80,  // 191: agent.Agent.ElideContext:output_type -> agent.ElideContextResponse
+	76,  // 192: agent.Agent.SuggestNextPrompt:output_type -> agent.SuggestNextPromptResponse
+	128, // 193: agent.Agent.GetOpenRuntimeStatus:output_type -> agent.GetOpenRuntimeStatusResponse
+	130, // 194: agent.Agent.InstallOpenRuntime:output_type -> agent.InstallProgress
+	132, // 195: agent.Agent.RegenerateContext:output_type -> agent.RegenerateContextProgress
+	82,  // 196: agent.Agent.ExportContext:output_type -> agent.ExportContextResponse
+	88,  // 197: agent.Agent.ExportTrajectory:output_type -> agent.ExportTrajectoryEvent
+	90,  // 198: agent.Agent.GetConversationTurns:output_type -> agent.GetConversationTurnsResponse
+	92,  // 199: agent.Agent.GetToolCall:output_type -> agent.GetToolCallResponse
+	100, // 200: agent.Agent.ListTools:output_type -> agent.ListToolsResponse
+	102, // 201: agent.Agent.InvokeTool:output_type -> agent.InvokeToolResponse
+	104, // 202: agent.Agent.InvokeCapability:output_type -> agent.InvokeCapabilityResponse
+	26,  // 203: agent.Agent.ListModels:output_type -> agent.ListModelsResponse
+	32,  // 204: agent.Agent.GetRuntimeStatus:output_type -> agent.GetRuntimeStatusResponse
+	34,  // 205: agent.Agent.ListRuntimeModels:output_type -> agent.ListRuntimeModelsResponse
+	40,  // 206: agent.Agent.ListRuntimeEndpoints:output_type -> agent.ListRuntimeEndpointsResponse
+	42,  // 207: agent.Agent.StartRuntimeModel:output_type -> agent.StartRuntimeModelResponse
+	44,  // 208: agent.Agent.StopRuntimeModel:output_type -> agent.StopRuntimeModelResponse
+	46,  // 209: agent.Agent.RestartRuntime:output_type -> agent.RestartRuntimeResponse
+	48,  // 210: agent.Agent.DownloadRuntimeModel:output_type -> agent.DownloadRuntimeModelResponse
+	50,  // 211: agent.Agent.CancelRuntimeModelDownload:output_type -> agent.CancelRuntimeModelDownloadResponse
+	52,  // 212: agent.Agent.DeleteRuntimeModel:output_type -> agent.DeleteRuntimeModelResponse
+	38,  // 213: agent.Agent.RefreshOnlineCatalog:output_type -> agent.RefreshOnlineCatalogResponse
+	36,  // 214: agent.Agent.GetModelRAMEstimate:output_type -> agent.GetModelRAMEstimateResponse
+	30,  // 215: agent.Agent.StreamRuntimeLogs:output_type -> agent.RuntimeLogEntry
+	109, // 216: agent.Agent.ListSkills:output_type -> agent.ListSkillsResponse
+	111, // 217: agent.Agent.GetSkill:output_type -> agent.GetSkillResponse
+	113, // 218: agent.Agent.SetPermissionMode:output_type -> agent.SetPermissionModeResponse
+	115, // 219: agent.Agent.GetPermissionMode:output_type -> agent.GetPermissionModeResponse
+	117, // 220: agent.Agent.SetSessionProfile:output_type -> agent.SetSessionProfileResponse
+	119, // 221: agent.Agent.GetSessionProfile:output_type -> agent.GetSessionProfileResponse
+	121, // 222: agent.Agent.SubscribeEvents:output_type -> agent.ClientEvent
+	134, // 223: agent.Agent.AllowToolCall:output_type -> agent.AllowToolCallResponse
+	136, // 224: agent.Agent.DenyToolCall:output_type -> agent.DenyToolCallResponse
+	138, // 225: agent.Agent.AcceptRollover:output_type -> agent.AcceptRolloverResponse
+	140, // 226: agent.Agent.DeclineRollover:output_type -> agent.DeclineRolloverResponse
+	142, // 227: agent.Agent.GetProviderCapabilities:output_type -> agent.GetProviderCapabilitiesResponse
+	95,  // 228: agent.Agent.ProposeContextEdit:output_type -> agent.ProposeContextEditResponse
+	97,  // 229: agent.Agent.DeleteConversationTurns:output_type -> agent.DeleteConversationTurnsResponse
+	150, // 230: agent.Agent.ListMcpServers:output_type -> agent.ListMcpServersResponse
+	152, // 231: agent.Agent.AddMcpServer:output_type -> agent.AddMcpServerResponse
+	154, // 232: agent.Agent.RemoveMcpServer:output_type -> agent.RemoveMcpServerResponse
+	156, // 233: agent.Agent.RestartMcpServer:output_type -> agent.RestartMcpServerResponse
+	163, // 234: agent.Agent.GetCloudProfiles:output_type -> agent.GetCloudProfilesResponse
+	166, // 235: agent.Agent.GetCloudProviders:output_type -> agent.GetCloudProvidersResponse
+	168, // 236: agent.Agent.UpdateRoutingAssignments:output_type -> agent.UpdateRoutingAssignmentsResponse
+	170, // 237: agent.Agent.SetActiveCloudProfile:output_type -> agent.SetActiveCloudProfileResponse
+	172, // 238: agent.Agent.SetBackupCloudProfile:output_type -> agent.SetBackupCloudProfileResponse
+	174, // 239: agent.Agent.SetCloudProfileKey:output_type -> agent.SetCloudProfileKeyResponse
+	176, // 240: agent.Agent.UpsertCloudProfile:output_type -> agent.UpsertCloudProfileResponse
+	178, // 241: agent.Agent.RemoveCloudProfile:output_type -> agent.RemoveCloudProfileResponse
+	181, // 242: agent.Agent.ListCloudProfileModels:output_type -> agent.ListCloudProfileModelsResponse
+	183, // 243: agent.Agent.StartChatGPTLogin:output_type -> agent.StartChatGPTLoginEvent
+	185, // 244: agent.Agent.StartClaudeLogin:output_type -> agent.StartClaudeLoginEvent
+	5,   // 245: agent.Agent.ExportImage:output_type -> agent.ExportImageResponse
+	188, // 246: agent.Worker.RunTurn:output_type -> agent.WorkerToHost
+	174, // [174:247] is the sub-list for method output_type
+	101, // [101:174] is the sub-list for method input_type
+	101, // [101:101] is the sub-list for extension type_name
+	101, // [101:101] is the sub-list for extension extendee
+	0,   // [0:101] is the sub-list for field type_name
 }
 
 func init() { file_agent_proto_init() }
@@ -16552,7 +16840,7 @@ func file_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agent_proto_rawDesc), len(file_agent_proto_rawDesc)),
 			NumEnums:      4,
-			NumMessages:   214,
+			NumMessages:   216,
 			NumExtensions: 0,
 			NumServices:   2,
 		},

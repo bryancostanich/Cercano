@@ -30,7 +30,7 @@ func (f *splitFetcher) Fetch(_ context.Context, name string) (string, string, er
 	return "", "", errors.New("no credential for " + name)
 }
 
-func TestBuildWorkerProviders_PrimaryFetchFail_NoNilFallbackPanic(t *testing.T) {
+func TestBuildWorkerProviders_PrimaryFetchFail_UsesConfiguredBackupWithoutNilPanic(t *testing.T) {
 	cfg := pkgcfg.Config{
 		LocusMode:          "cloud_primary",
 		OllamaURL:          "http://localhost:11434", // open exists for graceful degradation
@@ -40,10 +40,10 @@ func TestBuildWorkerProviders_PrimaryFetchFail_NoNilFallbackPanic(t *testing.T) 
 			// Primary: no BaseURL, no key -> unauthable -> cloud must be left unset.
 			{Name: "primary", Flavor: "messages", Route: "direct"},
 			// Backup: static key + BaseURL -> builds without network.
-			{Name: "bkp", Flavor: "messages", Route: "direct", BaseURL: "http://127.0.0.1:9999"},
+			{Name: "bkp", Flavor: "messages", Route: "direct", BaseURL: "http://127.0.0.1:9999", TierOverrides: map[pkgcfg.CostTier]string{pkgcfg.CostPremium: "backup-model"}},
 		},
 		OpenRuntime: "ollama",
-		Models:      workerTestModels("ollama", map[pkgcfg.Tier]string{pkgcfg.TierEveryday: "qwen"}),
+		Models:      workerTestModels("ollama", map[pkgcfg.Tier]string{pkgcfg.TierMostCapable: "qwen"}),
 	}
 
 	r, err := buildWorkerProviders(context.Background(), cfg, &splitFetcher{backupName: "bkp"}, nil, nil)
@@ -51,9 +51,7 @@ func TestBuildWorkerProviders_PrimaryFetchFail_NoNilFallbackPanic(t *testing.T) 
 		t.Fatalf("buildWorkerProviders: %v", err)
 	}
 
-	// Pre-fix: r.cloudProv is a fallback wrapping a NIL primary; Main() ->
-	// dispatch.Select -> p.Cloud.Name() panics. Post-fix: cloud is unset and Main
-	// gracefully degrades to the open provider.
+	// A failed preferred construction must not wrap nil or discard its usable backup.
 	prov, isCloud, _, err := r.Main()
 	if err != nil {
 		t.Fatalf("Main returned error: %v", err)
@@ -62,7 +60,16 @@ func TestBuildWorkerProviders_PrimaryFetchFail_NoNilFallbackPanic(t *testing.T) 
 		t.Fatal("Main returned nil provider")
 	}
 	_ = prov.Name() // must not panic
-	if isCloud {
-		t.Errorf("expected degrade to open (isCloud=false) when the primary is unauthable, got a cloud provider")
+	if !isCloud {
+		t.Fatal("configured backup was bypassed for Local")
+	}
+	cfg.BackupCloudProfile = ""
+	r, err = buildWorkerProviders(context.Background(), cfg, &splitFetcher{backupName: "bkp"}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prov, isCloud, _, err = r.Main()
+	if err != nil || prov == nil || isCloud {
+		t.Fatalf("without a backup Primary should retain allowed Local fallback: %v", err)
 	}
 }

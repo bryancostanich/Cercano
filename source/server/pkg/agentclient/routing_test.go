@@ -60,3 +60,22 @@ func TestClientChoicesAndRoutingPresence(t *testing.T) {
 		t.Fatal("draft aliases loaded assignments")
 	}
 }
+
+func TestCompleteStructurePresence(t *testing.T) {
+	stub := &routingClientStub{}
+	client := &Client{agent: stub}
+	p := CloudProfileInfo{Name: "p", Flavor: "messages", ReplaceStructure: true}
+	if err := client.UpsertCloudProfile(context.Background(), p); err != nil {
+		t.Fatal(err)
+	}
+	if stub.profile.Structure == nil || stub.profile.Structure.BaseUrl != "" {
+		t.Fatal("explicit structural clear lost")
+	}
+	p.ReplaceStructure = false
+	if err := client.UpsertCloudProfile(context.Background(), p); err != nil {
+		t.Fatal(err)
+	}
+	if stub.profile.Structure != nil || stub.profile.Region != nil || stub.profile.AwsProfile != nil {
+		t.Fatal("omitted structure/metadata sent as clears")
+	}
+}

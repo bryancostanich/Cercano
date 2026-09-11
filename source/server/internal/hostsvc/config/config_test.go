@@ -211,38 +211,25 @@ func TestServiceSetCloudModel(t *testing.T) {
 	}
 }
 
-func TestServiceSetActiveProfilePromotesPreviousPrimaryToBackup(t *testing.T) {
-	svc := cfgsvc.New("", cfg.Config{
-		ActiveCloudProfile: "a",
-		BackupCloudProfile: "b",
-		CloudProfiles:      []cfg.CloudProfile{{Name: "a"}, {Name: "b"}},
-	}, nil)
-	if !svc.SetActiveProfile("b") {
-		t.Fatal("SetActiveProfile should return true for existing profile")
+func TestServiceSetActiveProfileRejectsBackupCollision(t *testing.T) {
+	svc := cfgsvc.New("", cfg.Config{ActiveCloudProfile: "a", BackupCloudProfile: "b", CloudProfiles: []cfg.CloudProfile{{Name: "a"}, {Name: "b"}}}, nil)
+	if svc.SetActiveProfile("b") {
+		t.Fatal("activation silently rewired the backup")
 	}
 	c := svc.Get()
-	if c.ActiveCloudProfile != "b" {
-		t.Fatalf("ActiveCloudProfile=%q, want %q", c.ActiveCloudProfile, "b")
-	}
-	if c.BackupCloudProfile != "a" {
-		t.Fatalf("BackupCloudProfile=%q, want previous primary %q", c.BackupCloudProfile, "a")
+	if c.ActiveCloudProfile != "a" || c.BackupCloudProfile != "b" {
+		t.Fatal("rejected activation mutated bindings")
 	}
 }
 
-func TestServiceSetActiveProfileClearsSelfBackup(t *testing.T) {
-	svc := cfgsvc.New("", cfg.Config{
-		BackupCloudProfile: "b",
-		CloudProfiles:      []cfg.CloudProfile{{Name: "a"}, {Name: "b"}},
-	}, nil)
-	if !svc.SetActiveProfile("b") {
-		t.Fatal("SetActiveProfile should return true for existing profile")
+func TestServiceSetActiveProfileRejectsSelfBackup(t *testing.T) {
+	svc := cfgsvc.New("", cfg.Config{BackupCloudProfile: "b", CloudProfiles: []cfg.CloudProfile{{Name: "a"}, {Name: "b"}}}, nil)
+	if svc.SetActiveProfile("b") {
+		t.Fatal("activation accepted a self-backup")
 	}
 	c := svc.Get()
-	if c.ActiveCloudProfile != "b" {
-		t.Fatalf("ActiveCloudProfile=%q, want %q", c.ActiveCloudProfile, "b")
-	}
-	if c.BackupCloudProfile != "" {
-		t.Fatalf("BackupCloudProfile=%q, want cleared", c.BackupCloudProfile)
+	if c.ActiveCloudProfile != "" || c.BackupCloudProfile != "b" {
+		t.Fatal("rejection mutated bindings")
 	}
 }
 

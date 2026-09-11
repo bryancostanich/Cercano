@@ -34,7 +34,7 @@ func (dispatchCap) Schema() capabilities.Schema {
 		"properties": {
 			"task":            {"type": "string", "description": "Open-ended instruction for the sub-agent tool loop."},
 			"tools":           {"type": "array", "items": {"type": "string"}, "description": "Tool or capability names to grant, using the plain registered names (e.g. \"Read\", \"Glob\", \"Grep\", \"Bash\") — no host or MCP prefix. Omit to default to read-only tools."},
-			"tier":            {"type": "string", "enum": ["light", "standard", "deep"], "description": "How much reasoning the task needs — NOT where it runs (locus config decides that). \"light\" (default): recon/tracing/extraction the co-processor tier handles well. \"standard\": everyday coding judgment. \"deep\": hard reasoning that warrants the most capable model. Prefer \"light\" for delegated grunt work so it offloads off the frontier tier."},
+			"tier":            {"type": "string", "enum": ["light", "standard", "deep"], "description": "Omit to use the saved dispatch quality (Premium by default). Explicit light selects Economy, standard selects Standard, and deep selects Premium. The saved dispatch destination controls placement, subject to locality policy. Prefer explicit light for routine recon/tracing/extraction."},
 			"cwd":             {"type": "string", "description": "Optional absolute project working directory for the sub-agent. Use this for git/GitHub workflows so scoped tools run in the intended repository."},
 			"path":            {"type": "string", "description": "Alias for cwd."},
 			"intent":          {"type": "string", "description": "Optional concise human-facing reason for the delegation, shown in permission prompts."},
@@ -56,19 +56,10 @@ type dispatchArgs struct {
 // tierForDispatch maps the model-facing "how much brain" knob onto a taxonomy
 // tier. It expresses reasoning demand only — never location. Where the tier
 // resolves (open vs cloud) is decided downstream by the user's locus mode via
-// RoleCoproc, not here. Unknown/empty defaults to the lightest tier so that
-// delegated grunt work offloads off the frontier tier by default.
+// the saved dispatch assignment, not here. Omission leaves quality unset for
+// the engine; unknown explicit values retain the historical Economy mapping.
 func tierForDispatch(s string) config.Tier {
-	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "":
-		return "" // The engine resolves the saved task quality.
-	case "deep":
-		return config.TierMostCapable
-	case "standard":
-		return config.TierEveryday
-	default: // "light" and anything unrecognized
-		return config.TierFastLight
-	}
+	return config.DispatchDifficultyTier(s)
 }
 
 func (dispatchCap) Execute(ctx context.Context, call *capabilities.Call) (*capabilities.Result, error) {

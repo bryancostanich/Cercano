@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"cercano/source/server/internal/agent"
@@ -79,7 +80,7 @@ func TestSetActiveCloudProfileCancelsInFlightTurns(t *testing.T) {
 	s, _ := newTestServer()
 	s.cfgSvc.Set(config.Config{
 		ActiveCloudProfile: "claude",
-		BackupCloudProfile: "openai-responses",
+		BackupCloudProfile: "",
 		CloudProfiles: []config.CloudProfile{
 			{Name: "claude", Flavor: "messages", Route: "subscription", Model: "claude-opus-5", ModelPinned: true},
 			{Name: "openai-responses", Flavor: "responses", Route: "chatgpt", Model: "gpt-5.5", ModelPinned: true},
@@ -111,33 +112,16 @@ func TestSetActiveCloudProfileCancelsInFlightTurns(t *testing.T) {
 	}
 }
 
-func TestSetActiveCloudProfileSwapsCurrentBackupToPreviousActive(t *testing.T) {
+func TestSetActiveCloudProfileRejectsImplicitBackupSwap(t *testing.T) {
 	s, _ := newTestServer()
-	s.cfgSvc.Set(config.Config{
-		ActiveCloudProfile: "openai-responses",
-		BackupCloudProfile: "claude",
-		CloudProfiles: []config.CloudProfile{
-			{Name: "openai-responses", Flavor: "responses", Route: "chatgpt", Model: "gpt-5.5", ModelPinned: true},
-			{Name: "claude", Flavor: "messages", Route: "subscription", Model: "claude-opus-5", ModelPinned: true},
-		},
-	})
-	if err := s.cfgSvc.Secrets().Set("claude", "sk-test"); err != nil {
-		t.Fatal(err)
+	s.cfgSvc.Set(config.Config{ActiveCloudProfile: "a", BackupCloudProfile: "b", CloudProfiles: []config.CloudProfile{{Name: "a", Flavor: "messages"}, {Name: "b", Flavor: "messages"}}})
+	response, err := s.SetActiveCloudProfile(context.Background(), &proto.SetActiveCloudProfileRequest{Name: "b"})
+	if err != nil || response.Ok || !strings.Contains(response.Error, "Primary backup") {
+		t.Fatalf("collision response: %+v %v", response, err)
 	}
-
-	resp, err := s.SetActiveCloudProfile(context.Background(), &proto.SetActiveCloudProfileRequest{Name: "claude"})
-	if err != nil {
-		t.Fatalf("SetActiveCloudProfile: %v", err)
-	}
-	if !resp.Ok {
-		t.Fatalf("want Ok=true, got false: %s", resp.Error)
-	}
-	cfg := s.cfgSvc.Get()
-	if cfg.ActiveCloudProfile != "claude" {
-		t.Fatalf("active = %q, want claude", cfg.ActiveCloudProfile)
-	}
-	if cfg.BackupCloudProfile != "openai-responses" {
-		t.Fatalf("backup = %q, want previous active openai-responses", cfg.BackupCloudProfile)
+	c := s.cfgSvc.Get()
+	if c.ActiveCloudProfile != "a" || c.BackupCloudProfile != "b" {
+		t.Fatal("rejection mutated bindings")
 	}
 }
 

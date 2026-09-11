@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -140,10 +141,7 @@ func (wp *wizardPage) captureBaseline() {
 	}
 	b := &wizard.Baseline{ActiveProfile: active}
 	for _, p := range profiles {
-		b.Profiles = append(b.Profiles, wizard.ProfileSnapshot{
-			Name: p.Name, Flavor: p.Flavor, Backend: p.Backend,
-			BaseURL: p.BaseURL, Model: p.Model, Route: p.Route,
-		})
+		b.Profiles = append(b.Profiles, wizardSnapshotProfile(p))
 	}
 	wp.state.Baseline = b
 }
@@ -184,14 +182,11 @@ func (wp *wizardPage) rollbackBaseline() error {
 	}
 	for _, b := range base.Profiles {
 		c, ok := curByName[b.Name]
-		if ok && c.Flavor == b.Flavor && c.Backend == b.Backend &&
-			c.BaseURL == b.BaseURL && c.Model == b.Model && c.Route == b.Route {
-			continue // untouched by the wizard
+		restored := wizardRestoreProfile(b)
+		if ok && c.Flavor == b.Flavor && c.Backend == b.Backend && c.BaseURL == b.BaseURL && c.Route == b.Route && (!b.DetailsCaptured || (c.Provider == b.Provider && c.Region == b.Region && c.AWSProfile == b.AWSProfile && reflect.DeepEqual(c.Choices.Clone(), restored.Choices.Clone()))) {
+			continue
 		}
-		if err := wp.agent.UpsertCloudProfile(ctx, agentclient.CloudProfileInfo{
-			Name: b.Name, Flavor: b.Flavor, Backend: b.Backend,
-			BaseURL: b.BaseURL, Model: b.Model, Route: b.Route,
-		}); err != nil {
+		if err := wp.agent.UpsertCloudProfile(ctx, restored); err != nil {
 			return fmt.Errorf("restore %s: %w", b.Name, err)
 		}
 	}
@@ -232,16 +227,6 @@ func (wp *wizardPage) wizardPreset(id string) (cloudPreset, bool) {
 	return cloudPreset{}, false
 }
 
-// wizardProfileModel picks the model to seed a wizard-created profile with:
-// the provider's everyday-tier recommendation ("the default workhorse for
-// main chat" — exactly what profile.Model serves at request time). Empty when
-// the provider has no recommendations; the finish step's everyday-cloud tier
-// pick still lands on the profile via applyConfig.
-func wizardProfileModel(recs config.TierRecommendations, provider string) string {
-	m, _ := config.PickFirst(recs.Candidates(config.ProviderCloud, provider, config.TierEveryday), nil)
-	return m
-}
-
 // commitAPIKey creates the provider's profile from its preset, stores the
 // key, and activates the profile — all immediately, so credentials live
 // where they always do (agent-side) and never in wizard state.
@@ -257,7 +242,6 @@ func (wp *wizardPage) commitAPIKey(key string) error {
 	defer cancel()
 	if err := wp.agent.UpsertCloudProfile(ctx, agentclient.CloudProfileInfo{
 		Name: preset.ID, Flavor: preset.Flavor, Backend: preset.Backend, BaseURL: preset.BaseURL,
-		Model: wizardProfileModel(wp.recs, preset.ID),
 	}); err != nil {
 		return err
 	}
@@ -279,19 +263,13 @@ func (wp *wizardPage) startKeyEntry() tea.Cmd {
 	return cmd
 }
 
-// wizardFinishUpdate builds the finish step's first config patch: locus mode,
-// and — on the cloud path — the everyday-cloud tier pick as CloudModel, which
-// UpdateConfig writes into the active profile and rebuilds. The profile model
-// is what actually serves main-chat requests, so the "everyday workhorse"
-// answer must land there, not only in the tier taxonomy.
+// wizardFinishUpdate updates locus/runtime only. Cloud quality choices are
+// saved on the active profile, never through the retired CloudModel mutation.
 func wizardOpenTierKey(t config.Tier) string { return "llama_server." + string(t) }
 
 func wizardFinishUpdate(st wizard.State) agentclient.ConfigUpdate {
 	u := agentclient.ConfigUpdate{
 		LocusMode: st.LocusMode,
-	}
-	if st.CloudProvider != "" {
-		u.CloudModel = st.TierPicks["everyday."+wizard.SideCloud]
 	}
 	if wizard.ModeUsesOpen(st.LocusMode) {
 		// The wizard fills the open tiers from the llama-server catalog and
@@ -317,10 +295,12 @@ func (wp *wizardPage) applyConfig() error {
 	if _, err := wp.agent.UpdateConfig(ctx, wizardFinishUpdate(wp.state)); err != nil {
 		return err
 	}
+	if err := wp.applyCloudChoices(ctx); err != nil {
+		return err
+	}
 	keys := make([]string, 0, len(wp.state.TierPicks))
 	for k := range wp.state.TierPicks {
-		// Cloud picks are internal to the wizard and applied through CloudModel
-		// in wizardFinishUpdate, not as model-tier sparse patches.
+		// Cloud choices use the profile mutation, not Local runtime patches.
 		if strings.HasSuffix(k, "."+wizard.SideCloud) {
 			continue
 		}
@@ -665,6 +645,9 @@ func (wp *wizardPage) selectRow() (tea.Cmd, bool) {
 	switch wp.state.Step {
 	case wizard.StepCloud:
 		if !wp.authPick {
+			if wp.state.CloudProvider != row.Key {
+				wp.state.CloudPicksEdited = nil
+			}
 			wp.state.CloudProvider = row.Key
 			wp.authPick = true
 			wp.cursor = 0
@@ -885,6 +868,12 @@ func (wp *wizardPage) openTierPicker(slotKey string) {
 				delete(wp.state.TierPicks, slotKey)
 			} else {
 				wp.state.TierPicks[slotKey] = row.Key
+				if strings.HasSuffix(slotKey, "."+wizard.SideCloud) {
+					if wp.state.CloudPicksEdited == nil {
+						wp.state.CloudPicksEdited = map[string]bool{}
+					}
+					wp.state.CloudPicksEdited[slotKey] = true
+				}
 			}
 			wp.persist()
 			return "", true, nil

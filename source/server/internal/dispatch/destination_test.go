@@ -100,3 +100,17 @@ func TestSecondaryCannotFallbackAndLegacyCoprocUnchanged(t *testing.T) {
 		t.Fatal("legacy coproc redirected")
 	}
 }
+
+func TestInvocationOverridePreservesFallbackQuality(t *testing.T) {
+	primary, backup := &destinationProvider{name: "s", fail: true}, &destinationProvider{name: "sb"}
+	chain := resilience.New(primary, resilience.Options{Backup: backup, BackupModelFor: func(tier string) string { return "backup-" + tier }})
+	e := NewEngine(provs(Providers{Destinations: map[config.Destination]inference.Candidate{config.DestinationSecondary: {Provider: chain, Profile: "s", IsCloud: true}}}), func() locus.Mode { return locus.CloudOnly }, nil)
+	e.SetDestinationModelFor(func(inference.Selection, config.Tier) string { return "default" })
+	_, err := e.Dispatch(context.Background(), Spec{RoutingTask: config.TaskDispatch, Tier: config.TierFastLight, ModelOverride: "custom"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if primary.calls[0].Model != "custom" || backup.calls[0].Model != "backup-fast_light" {
+		t.Fatalf("override/fallback: %q -> %q", primary.calls[0].Model, backup.calls[0].Model)
+	}
+}

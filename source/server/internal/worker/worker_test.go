@@ -1,6 +1,7 @@
 package worker_test
 
 import (
+	"cercano/source/server/internal/modelmetadata"
 	"context"
 	"net"
 	"testing"
@@ -281,4 +282,5 @@ func TestWorkerServer_RunTurn_NoHalfCloseNoDeadlock(t *testing.T) {
 
 func (f *fakeResolver) Candidates() inference.Tiers { return inference.Tiers{} }
 
-func (f *fakeResolver) SetProfileSupportsVision(func(config.CloudProfile, string) bool) {}
+func (f *fakeResolver) SetProfileModelEvidence(func(config.CloudProfile, string) modelmetadata.Evidence) {
+}

@@ -33,9 +33,20 @@ type ChatRequest struct {
 	// failover; see docs/agent/cloud-failover-audit.md). Empty means "the
 	// provider's default model" and needs no translation.
 	Tier string
+	// FallbackTier retains quality when an invocation override deliberately clears Tier.
+	FallbackTier string
+}
+
+// ServingRoute is per-request attribution, never shared mutable provider state.
+type ServingRoute struct {
+	VisionKnown, SupportsVision           bool
+	Provider, Profile, Destination, Model string
+	ContextWindow                         int
+	ContextWindowKnown                    bool
 }
 
 type ChatResponse struct {
+	Route        *ServingRoute
 	Blocks       []Block
 	StopReason   string
 	InputTokens  int

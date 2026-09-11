@@ -13,6 +13,7 @@ import (
 
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
+	"cercano/source/server/pkg/config"
 )
 
 // Usage is one recorded model call.
@@ -54,7 +55,11 @@ func (r *recordingProvider) Chat(ctx context.Context, req llm.ChatRequest) (llm.
 	start := time.Now()
 	resp, err := r.inner.Chat(ctx, req)
 	if err == nil {
-		r.report(req.Model, resp.InputTokens, resp.OutputTokens, time.Since(start))
+		model := resp.Model
+		if model == "" {
+			model = req.Model
+		}
+		r.report(model, resp.InputTokens, resp.OutputTokens, time.Since(start), resp.Route)
 	}
 	return resp, err
 }
@@ -70,14 +75,21 @@ func (r *recordingProvider) StreamChat(ctx context.Context, req llm.ChatRequest)
 	return &recordingReader{inner: inner, model: req.Model, rp: r, start: start}, nil
 }
 
-func (r *recordingProvider) report(model string, in, out int, d time.Duration) {
+func (r *recordingProvider) report(model string, in, out int, d time.Duration, route *llm.ServingRoute) {
 	if r.sink == nil {
 		return
+	}
+	provider := r.inner.Name()
+	if route != nil {
+		provider = route.Provider
+		if route.Model != "" {
+			model = route.Model
+		}
 	}
 	r.sink(Usage{
 		Source:       r.source,
 		Model:        model,
-		Provider:     r.inner.Name(),
+		Provider:     provider,
 		IsCloud:      r.isCloud,
 		InputTokens:  in,
 		OutputTokens: out,
@@ -93,12 +105,16 @@ type recordingReader struct {
 	rp       *recordingProvider
 	in, out  int
 	reported bool
+	route    *llm.ServingRoute
 	start    time.Time
 }
 
 func (rr *recordingReader) Next() (llm.StreamEvent, bool, error) {
 	ev, ok, err := rr.inner.Next()
 	if ok {
+		if ev.Route != nil {
+			rr.route = ev.Route
+		}
 		if ev.InputTokens > 0 {
 			rr.in = ev.InputTokens
 		}
@@ -122,5 +138,18 @@ func (rr *recordingReader) flush() {
 		return
 	}
 	rr.reported = true
-	rr.rp.report(rr.model, rr.in, rr.out, time.Since(rr.start))
+	rr.rp.report(rr.model, rr.in, rr.out, time.Since(rr.start), rr.route)
 }
+
+func (r *recordingProvider) TargetFor(model, tier string) llm.ServingRoute {
+	return inference.TargetFor(r.inner, model, tier)
+}
+func (r *recordingProvider) TargetForCall(req inference.Call) llm.ServingRoute {
+	return inference.TargetForCall(r.inner, req)
+}
+
+func (r *recordingProvider) TaskAssignmentFor(task config.Task) (config.TaskAssignment, bool) {
+	return inference.TaskAssignmentFor(r.inner, task)
+}
+
+func (r *recordingProvider) TaskModelFor() (string, bool) { return inference.TaskModelFor(r.inner) }

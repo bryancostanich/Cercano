@@ -97,6 +97,7 @@ func MarshalEvent(ev runner.Event) *proto.WorkerEvent {
 	}
 	// For EventDone, inline the Result fields.
 	if ev.Kind == runner.EventDone {
+		p.Route = marshalServingRoute(ev.Result.Route)
 		p.FinalText = ev.Result.FinalText
 		p.Model = ev.Result.Model
 		p.IsCloud = ev.Result.IsCloud
@@ -139,6 +140,7 @@ func UnmarshalEvent(p *proto.WorkerEvent) runner.Event {
 	if kind == runner.EventDone {
 		ev.Result = runner.Result{
 			FinalText:    p.FinalText,
+			Route:        unmarshalServingRoute(p.Route),
 			Model:        p.Model,
 			IsCloud:      p.IsCloud,
 			InputTokens:  int(p.InputTokens),

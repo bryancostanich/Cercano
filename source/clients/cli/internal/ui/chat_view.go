@@ -40,9 +40,10 @@ type turnStatus struct {
 // surface, and all entry rendering. Model delegates to it for everything that
 // was previously handled via m.viewport, m.viewportPlainLines, and m.md.
 type chatView struct {
-	styles  theme.Styles
-	palette theme.Palette
-	md      *render.Markdown
+	toolClock func() time.Time // nil uses the real clock; deterministic tool-lifecycle fixtures can inject one.
+	styles    theme.Styles
+	palette   theme.Palette
+	md        *render.Markdown
 
 	// entries is the authoritative slice of scrollback entries. All host
 	// append/read operations go through the mutation methods below.
@@ -655,7 +656,7 @@ func (c *chatView) Apply(msg tea.Msg) tea.Cmd {
 		// measured duration covers execution, not arg streaming.
 		if t := c.findToolEntry(m.id); t != nil {
 			t.Status = ToolStatusInProgress
-			t.StartedAt = time.Now()
+			t.StartedAt = c.toolNow()
 		}
 
 	case toolEntryExecCompleteMsg:
@@ -667,7 +668,7 @@ func (c *chatView) Apply(msg tea.Msg) tea.Cmd {
 			} else {
 				t.Status = ToolStatusComplete
 			}
-			dur := time.Since(t.StartedAt)
+			dur := c.toolNow().Sub(t.StartedAt)
 			t.Duration = dur
 			t.ResultSummary = humanizeResult(m.detail, m.summary, m.isError, dur)
 			t.StartLine = m.startLine
@@ -2002,4 +2003,11 @@ func (c *chatView) HandleSelectionKey(msg tea.KeyPressMsg) (tea.Cmd, bool, bool)
 		c.ClearSelection()
 	}
 	return nil, false, false
+}
+
+func (c *chatView) toolNow() time.Time {
+	if c.toolClock != nil {
+		return c.toolClock()
+	}
+	return time.Now()
 }

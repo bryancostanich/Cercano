@@ -46,6 +46,7 @@ func newScriptedModel() Model {
 	m.mainChat().AppendEntry(&Entry{Role: RoleUser, Content: "list the files"})
 	m.mainChat().AppendEntry(&Entry{Role: RoleAssistant, Content: "", Streaming: true})
 	m.turnStart = frozenTurnStart
+	m.mainChat().toolClock = func() time.Time { return frozenTurnStart }
 	return m
 }
 
@@ -84,6 +85,6 @@ func TestScriptedTurnTranscript(t *testing.T) {
 		t.Fatalf("read golden %s: %v (set UPDATE_SCRIPTED_GOLDEN=1 once to create)", path, err)
 	}
 	if got != string(want) {
-		t.Errorf("scripted transcript mismatch vs %s", path)
+		t.Errorf("scripted transcript mismatch vs %s\n got: %q\nwant: %q", path, got, string(want))
 	}
 }

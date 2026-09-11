@@ -9,11 +9,11 @@ Objective: confirm current interfaces and smallest failing cases before fixes. F
 - [x] After approval, pull executing-plans, ask for execution style through the available approval tool, and obtain the required worktree/dispatch/checkpoint tools. If unavailable, report the blocker rather than running inline git plumbing or editing the shared checkout.
 - [x] Delegate repository state inspection and create an isolated worktree for substantial work. Record branch and SHA, preserve existing uncommitted work, and confirm which catalog/model-evidence changes are already present. Do not assume the metadata worktree has been integrated.
 - [x] Inspect the exact config, profile mutation, provider construction, worker credential, stream retry, and CLI draft interfaces in this baseline. Inventory all routing consumers, distinguishing explicit dispatch from other RoleCoproc work.
-- [~] Probe profile-wide Model precedence, empty-model upsert behavior, omitted versus explicit dispatch difficulty, main chat/context-meter Everyday selection, and inability to select Secondary directly. Capture actual values before changing behavior.
+- [x] Probe profile-wide Model precedence, empty-model upsert behavior, omitted versus explicit dispatch difficulty, main chat/context-meter Everyday selection, and inability to select Secondary directly. Capture actual values before changing behavior.
 - [ ] Probe Local vision snapshot omission and cloud image reuse of chat, retaining already-working model capability gates.
-- [ ] Probe backup-profile edit refresh and profile field preservation, including route, region, AWS profile, and key ownership.
-- [ ] Establish fake-provider busy/rate-limit/quota/authentication/cancellation/partial-stream cases against existing retry classification. Identify unsupported continuity cases explicitly; obtain review before any new replay or degradation policy.
-- [ ] Add red regression tests for the approved target behavior and run existing focused baseline tests. Failures must identify observed causes, not assumed missing foundations.
+- [x] Probe backup-profile edit refresh and profile field preservation, including route, region, AWS profile, and key ownership.
+- [x] Establish fake-provider busy/rate-limit/quota/authentication/cancellation/partial-stream cases against existing retry classification. Identify unsupported continuity cases explicitly; obtain review before any new replay or degradation policy.
+- [x] Add red regression tests for the approved target behavior and run existing focused baseline tests. Failures must identify observed causes, not assumed missing foundations.
 - [ ] Checkpoint the reproduction unit with explicit paths and a conventional subject/body.
 
 ## Phase 2 — Configuration and shared resolution contract

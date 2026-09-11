@@ -40,3 +40,32 @@ func TestRoutingBaselineEmptyModelPreservesPin(t *testing.T) {
 		t.Fatalf("baseline changed: %+v", got)
 	}
 }
+
+// The provider chain captures a config snapshot. Editing a referenced backup
+// must rebuild that chain even when the active profile itself is untouched.
+func TestRoutingContractBackupEditRefreshesProviders(t *testing.T) {
+	s, _ := newTestServer()
+	c := config.Defaults()
+	c.ActiveCloudProfile, c.BackupCloudProfile = "primary", "backup"
+	c.CloudProfiles = []config.CloudProfile{{Name: "primary", Flavor: "messages"}, {Name: "backup", Flavor: "messages"}}
+	s.cfgSvc.Set(c)
+	s.cfgSvc.Secrets().Set("primary", "fixture-key")
+	s.cfgSvc.Secrets().Set("backup", "fixture-key")
+	if err := s.providerSvc.Rebuild(); err != nil {
+		t.Fatal(err)
+	}
+	before := s.providerSvc.CloudLLMProvider()
+	resp, err := s.UpsertCloudProfile(context.Background(), &proto.UpsertCloudProfileRequest{Name: "backup", Flavor: "messages", BaseUrl: "https://example.invalid"})
+	if err != nil || !resp.GetOk() {
+		t.Fatalf("upsert: %v, %v", resp, err)
+	}
+	after := s.providerSvc.CloudLLMProvider()
+	t.Logf("chain before=%p after=%p", before, after)
+	if before == after {
+		t.Error("backup edit retained stale provider chain")
+	}
+	key, err := s.cfgSvc.Secrets().Get("backup")
+	if err != nil || key != "fixture-key" {
+		t.Fatal("backup credential identity changed")
+	}
+}

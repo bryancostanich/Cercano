@@ -78,6 +78,8 @@ type Entry struct {
 
 // Model is the Bubble Tea root model.
 type Model struct {
+	search        *conversationSearch
+	searchShown   bool
 	width, height int
 
 	// scrollbarTop is the absolute screen row of the viewport's first line,
@@ -984,6 +986,10 @@ func waitProgressiveResumeCmd(ch <-chan resumeViewportStreamMsg) tea.Cmd {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	start := time.Now()
 	defer func() { m.logSlowUpdate(start, msg) }()
+
+	if next, cmd, handled := m.handleConversationSearch(msg); handled {
+		return next, cmd
+	}
 
 	switch msg := msg.(type) {
 
@@ -2674,6 +2680,9 @@ func (m Model) submit(text string, images []agentclient.InlineImage) (tea.Model,
 	// the store, and the provider (see docs/bugs/2026-07-04-user-message-tear.md).
 	text = strings.ReplaceAll(text, "\r\n", "\n")
 	text = strings.ReplaceAll(text, "\r", "\n")
+	if fields := strings.Fields(text); len(fields) > 0 && fields[0] == "/search" {
+		return m.runSlash(text)
+	}
 	if m.resumeHydrating {
 		m.errMsg = "rehydrating conversation — please wait before sending"
 		return m, nil
@@ -2883,6 +2892,10 @@ func (m *Model) clearTurnAnimationState() {
 }
 
 func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
+	if fields := strings.Fields(line); len(fields) > 0 && fields[0] == "/search" {
+		m.openConversationSearch(strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "/search")))
+		return m, nil
+	}
 	if strings.HasPrefix(strings.TrimSpace(line), "/debug") {
 		args := strings.Fields(strings.TrimSpace(line))
 		if len(args) > 0 {
@@ -2894,6 +2907,9 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 	}
 	res, _ := m.registry.Dispatch(line)
 	switch res.Kind {
+	case slash.ResultSearchConversation:
+		m.openConversationSearch(res.Text)
+		return m, nil
 	case slash.ResultQuit:
 		return m, tea.Quit
 	case slash.ResultClearConversation:
@@ -3139,6 +3155,7 @@ func (m Model) promptLayoutSignature() promptLayoutSignature {
 }
 
 func (m *Model) relayout() {
+	m.searchShown = m.searchVisible()
 	contentW := m.width
 	if paneW := m.taskPaneWidth(); paneW > 0 {
 		contentW -= paneW
@@ -3154,6 +3171,12 @@ func (m *Model) relayout() {
 	// Viewport's first screen row = header (1) + divider (1) + splash height,
 	// plus the ephemeral chat tab row when sub-agent tabs are visible.
 	m.scrollbarTop = 2 + splashH
+	searchH := 0
+	if m.searchVisible() {
+		searchH = 1
+		m.scrollbarTop++
+		m.sizeSearchInput()
+	}
 	if m.hasSubAgentTabs() && !m.contentPageActive() {
 		m.scrollbarTop += 2 // chat tab strip row + its underline rule
 	}
@@ -3180,7 +3203,7 @@ func (m *Model) relayout() {
 	// this width; the body claims whatever rows are left.
 	m.input.SetWidth(contentW - 4)
 	inputH := m.input.Height()
-	bodyH := m.height - chromeNoInput - inputH - splashH - suggestH - recapH - queuedH
+	bodyH := m.height - chromeNoInput - inputH - splashH - suggestH - recapH - queuedH - searchH
 	if m.hasSubAgentTabs() && !m.contentPageActive() {
 		bodyH -= 2 // chat tab strip row + its underline rule
 	}
@@ -3336,6 +3359,10 @@ func (m Model) splashEffective() bool {
 // entries at the current width. Syncs turn telemetry first so the render
 // has current state, then delegates to chatView.rebuild().
 func (m *Model) refreshViewport() {
+	if m.searchShown != m.searchVisible() {
+		m.relayout()
+		return
+	}
 	start := time.Now()
 	defer func() { m.logSlowRefreshViewport(start) }()
 
@@ -3351,9 +3378,14 @@ func (m *Model) refreshViewport() {
 	m.chatDirty = false // any full rebuild flushes pending coalesced repaints
 	m.syncMainTurnStatus()
 	m.activeChat().rebuild()
+	m.updateConversationSearch()
 }
 
 func (m *Model) refreshVisibleDynamicViewport() {
+	if m.searchVisible() {
+		m.refreshViewport()
+		return
+	}
 	// Same strip-drift guard as refreshViewport: a visible-tab topology change is
 	// structural, so fall back to the full layout pass that recalculates bodyH and
 	// scrollbarTop. Ordinary token deltas keep the existing layout and repaint only
@@ -3370,6 +3402,7 @@ func (m *Model) refreshVisibleDynamicViewport() {
 		return
 	}
 	chat.RefreshVisibleDynamicUnits()
+	m.updateConversationSearch()
 }
 
 func (m *Model) syncMainTurnStatus() {
@@ -5190,6 +5223,9 @@ func indentBlock(pad, s string) string {
 // inserted above the prompt when the content does not fill the terminal.
 func (m Model) composeFrame() (parts []string, inputIdx int) {
 	parts = append(parts, m.renderHeader())
+	if m.searchVisible() {
+		parts = append(parts, m.renderConversationSearch())
+	}
 	parts = append(parts, m.styles.BorderDim.Render(strings.Repeat("─", m.width)))
 	if m.splashEffective() {
 		parts = append(parts, m.splash.View())
@@ -5335,7 +5371,12 @@ func (m Model) View() tea.View {
 	v.MouseMode = tea.MouseModeCellMotion
 	// Drive the real terminal cursor to the input caret position. Only
 	// when the chat input owns focus (no overlay, no pending confirm).
-	if !m.contentPageActive() && m.pendingConfirm == nil {
+	if m.searchVisible() && m.searchCanOwnInput() {
+		if c := m.search.input.Cursor(); c != nil {
+			c.Y++
+			v.Cursor = c
+		}
+	} else if !m.contentPageActive() && m.pendingConfirm == nil {
 		if c := m.input.Cursor(); c != nil {
 			c.Y += inputCursorRow(parts, inputIdx)
 			v.Cursor = c

@@ -40,6 +40,7 @@ type turnStatus struct {
 // surface, and all entry rendering. Model delegates to it for everything that
 // was previously handled via m.viewport, m.viewportPlainLines, and m.md.
 type chatView struct {
+	search  *conversationSearch
 	styles  theme.Styles
 	palette theme.Palette
 	md      *render.Markdown
@@ -1247,6 +1248,7 @@ func (c *chatView) View() string {
 			line = lines[i]
 		}
 		contentLine := viewportTop + i
+		line = c.renderSearchOnLine(line, contentLine)
 		line = c.renderSelectionOnLine(line, contentLine)
 		// Clamp to the viewport width so an over-wide content line (Glamour
 		// pads prose a few columns past the wrap width) can't push the

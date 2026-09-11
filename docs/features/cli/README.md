@@ -215,3 +215,28 @@ Still open:
 - Whether to add `SwitchProject`/`GetProjectContext`/`GetUsage` as first-class RPCs or fold into existing handlers.
 
 **V1 acceptance criteria (all 9 must pass):** fresh `cercano` to working REPL <2 s with splash+shimmer; multi-turn streaming chat with live meter; boxed diff confirm writes to disk; mid-stream resize re-flows cleanly; `/font` applies live or prints snippet; `/bypass on` runs an agentic loop without per-call prompts; quit/relaunch/`/resume` continues; `/mcp add` tools appear in `/tools` and dispatch without an LLM tool-pick call; wide markdown table renders readable, never scrambled.
+
+### Search the current conversation
+
+Use **Ctrl+F** or **`/search [text]`** to open a search field immediately beneath
+the conversation title bar. Search is local, case-insensitive, and covers readable
+user and assistant messages (including code) throughout the loaded conversation,
+not merely the viewport. Tool calls, tool output, status notices, and Markdown
+formatting syntax are excluded. A folded superseded reply becomes searchable when
+expanded; search does not reveal it automatically.
+
+- Type to update matches. Matches are underlined; the active match uses the theme's
+  selection highlight.
+- **Enter** jumps to the next match; **Shift+Enter** goes to the previous match.
+  Navigation wraps at the ends.
+- **Escape** closes search, preserving the composer draft and the viewed location.
+- **Loading history…** indicates that older messages are still arriving. Available
+  messages remain searchable and the results update as loading proceeds. Very
+  narrow terminals abbreviate the indicator to **Loading…**.
+- Mouse selection, release-to-copy, wheel scrolling, and scrollbar dragging stay
+  available. While search has focus, `y/n/c/d` are search text, not approval
+  responses; close search to return to a pending approval.
+
+Ctrl+F is search in the conversation view; Page Down remains available for paging.
+Other content pages keep their own bindings. Command-F remains the terminal
+emulator's Find shortcut. Search state is not carried to a different conversation.

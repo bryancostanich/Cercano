@@ -120,6 +120,7 @@ type Resolver interface {
 	// reporting no vision support, which is the safe default: the transport can
 	// always carry an image, but only the model can read one.
 	SetModelSupportsVision(fn func(model string) bool)
+	SetProfileSupportsVision(fn func(cfg.CloudProfile, string) bool)
 }
 
 // service is the concrete Resolver implementation.
@@ -147,7 +148,8 @@ type service struct {
 	// modelSupportsVision reports confirmed image capability for a cloud model.
 	// Consulted when building OpenAI-compatible clients, whose transport can
 	// encode images for any model regardless of whether that model can read one.
-	modelSupportsVision func(model string) bool
+	modelSupportsVision   func(model string) bool
+	profileSupportsVision func(cfg.CloudProfile, string) bool
 }
 
 // New constructs a Resolver with the collaborators it needs.
@@ -334,14 +336,22 @@ func (p *service) buildProfile(prof cfg.CloudProfile) (inference.Provider, error
 	if key == "" && prof.BaseURL == "" && prof.Flavor != cloudfactory.FlavorBedrock {
 		return nil, fmt.Errorf("no API key for profile %s", prof.Name)
 	}
-	opts := cloudfactory.Options{ModelSupportsVision: p.modelSupportsVision}
+	confirmed := p.modelSupportsVision
+	if p.profileSupportsVision != nil {
+		confirmed = func(model string) bool { return p.profileSupportsVision(prof, model) }
+	}
+	opts := cloudfactory.Options{ModelSupportsVision: confirmed}
 	if prof.Flavor == cloudfactory.FlavorResponses && prof.Route == cloudfactory.RouteChatGPT {
 		opts.TokenSource = chatgptauth.NewSource(st, prof.Name, chatgptauth.Flow{})
 	}
 	if prof.Flavor == cloudfactory.FlavorMessages && prof.Route == cloudfactory.RouteSubscription {
 		opts.AnthropicTokenSource = anthropicauth.NewSource(st, prof.Name, anthropicauth.Flow{})
 	}
-	return cloudfactory.BuildCloudProvider(prof, key, opts)
+	provider, err := cloudfactory.BuildCloudProvider(prof, key, opts)
+	if err != nil {
+		return nil, err
+	}
+	return profilechain.GuardVision(provider, confirmed), nil
 }
 
 func (p *service) Candidates() inference.Tiers {
@@ -554,4 +564,8 @@ func profileByName(profiles []cfg.CloudProfile, name string) (cfg.CloudProfile, 
 		}
 	}
 	return cfg.CloudProfile{}, false
+}
+
+func (p *service) SetProfileSupportsVision(fn func(cfg.CloudProfile, string) bool) {
+	p.profileSupportsVision = fn
 }

@@ -237,6 +237,10 @@ func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, cr
 	// discovers models; an identity absent from this snapshot is UNKNOWN here,
 	// which blocks images and leaves the conventional context fallback in place.
 	evidence := UnmarshalModelMetadata(start.GetConfig().GetModelMetadata())
+	profileConfirmed := func(p pkgcfg.CloudProfile, model string) bool {
+		ev, _ := evidence.Lookup(modelmetadata.Identity{Provider: p.Provider, BaseURL: p.BaseURL, Route: p.Route, Model: model})
+		return ev.Vision == modelmetadata.VisionSupported
+	}
 	cloudEvidence := func(model string) modelmetadata.Evidence {
 		if model == "" {
 			return modelmetadata.Evidence{}
@@ -276,7 +280,9 @@ func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, cr
 		}
 	} else {
 		var err error
-		provSvc, err = buildWorkerProviders(ctx, cfg, credSource, openProxy, visionConfirmed)
+		provSvc, err = buildWorkerProviders(ctx, cfg, credSource, openProxy, visionConfirmed, func(p pkgcfg.CloudProfile, model string) bool {
+			return profileConfirmed(p, model)
+		})
 		if err != nil {
 			return runner.Deps{}, fmt.Errorf("build providers: %w", err)
 		}
@@ -338,19 +344,12 @@ func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, cr
 		},
 		CloudProvider: func() inference.Provider { return provSvc.Cloud() },
 		CloudVisionModel: func() (string, bool) {
-			if prof, ok := profileByName(cfg.CloudProfiles, cfg.ActiveCloudProfile); ok {
-				if id := cfg.ModelProfiles.ResolveCloudModelForTier(prof, pkgcfg.TierEveryday); id != "" {
-					return id, true
-				}
-				return prof.Model, prof.Model != ""
-			}
-			return cfg.CloudModel, cfg.CloudModel != ""
+			p, ok := cfg.Profile(cfg.ActiveCloudProfile)
+			return p.ImageModel, ok && p.ImageModel != ""
 		},
-		// Same confirmed-capability gate as the host, over host-resolved
-		// evidence: transport support is not model capability, and unknown is
-		// not permission.
 		CloudVisionConfirmed: func(model string) bool {
-			return cloudEvidence(model).Vision == modelmetadata.VisionSupported
+			p, ok := cfg.Profile(cfg.ActiveCloudProfile)
+			return ok && profileConfirmed(p, model)
 		},
 		Mode: func() locus.Mode { m, _ := locus.ParseMode(cfg.LocusMode); return m },
 	})
@@ -434,19 +433,30 @@ func profileByName(profiles []pkgcfg.CloudProfile, name string) (pkgcfg.CloudPro
 	return pkgcfg.CloudProfile{}, false
 }
 
-func buildWorkerProviders(ctx context.Context, cfg pkgcfg.Config, credSource credentialFetcher, openProxy *streamOpenProvider, modelSupportsVision func(string) bool) (providerssvc.Resolver, error) {
+func buildWorkerProviders(ctx context.Context, cfg pkgcfg.Config, credSource credentialFetcher, openProxy *streamOpenProvider, modelSupportsVision func(string) bool, scoped ...func(pkgcfg.CloudProfile, string) bool) (providerssvc.Resolver, error) {
 	cfgService := cfgsvc.New("", cfg, secrets.NewMemory())
 	r := &workerResolver{cfgSvc: cfgService}
 
 	build := func(prof pkgcfg.CloudProfile) (inference.Provider, error) {
-		opts := cloudfactory.Options{ModelSupportsVision: modelSupportsVision}
+		confirmed := modelSupportsVision
+		if len(scoped) > 0 {
+			confirmed = func(model string) bool { return scoped[0](prof, model) }
+		}
+		opts := cloudfactory.Options{ModelSupportsVision: confirmed}
+		create := func() (inference.Provider, error) {
+			provider, err := cloudfactory.BuildCloudProvider(prof, "", opts)
+			if err != nil {
+				return nil, err
+			}
+			return profilechain.GuardVision(provider, confirmed), nil
+		}
 		if prof.Flavor == cloudfactory.FlavorResponses && prof.Route == cloudfactory.RouteChatGPT {
 			opts.TokenSource = &streamTokenSource{creds: credSource, profileName: prof.Name}
-			return cloudfactory.BuildCloudProvider(prof, "", opts)
+			return create()
 		}
 		if prof.Flavor == cloudfactory.FlavorMessages && prof.Route == cloudfactory.RouteSubscription {
 			opts.AnthropicTokenSource = &anthropicStreamTokenSource{creds: credSource, profileName: prof.Name}
-			return cloudfactory.BuildCloudProvider(prof, "", opts)
+			return create()
 		}
 		key := ""
 		if credSource != nil {
@@ -455,7 +465,11 @@ func buildWorkerProviders(ctx context.Context, cfg pkgcfg.Config, credSource cre
 		if key == "" && prof.BaseURL == "" && prof.Flavor != cloudfactory.FlavorBedrock {
 			return nil, fmt.Errorf("no credential for profile %q", prof.Name)
 		}
-		return cloudfactory.BuildCloudProvider(prof, key, opts)
+		provider, err := cloudfactory.BuildCloudProvider(prof, key, opts)
+		if err != nil {
+			return nil, err
+		}
+		return profilechain.GuardVision(provider, confirmed), nil
 	}
 	r.cloudProv, _ = profilechain.Build(cfg, pkgcfg.DestinationPrimary, build)
 	r.secondaryProv, _ = profilechain.Build(cfg, pkgcfg.DestinationSecondary, build)
@@ -697,3 +711,5 @@ func (r *workerResolver) SetModelSupportsVision(_ func(model string) bool) {}
 // The worker's capability/tool stack is assembled by buildWorkerToolSvc (see
 // worker_dispatch.go) through the shared internal/toolstack builder — the same
 // assembly the host uses — so worker turns wire an identical Services.
+
+func (r *workerResolver) SetProfileSupportsVision(func(pkgcfg.CloudProfile, string) bool) {}

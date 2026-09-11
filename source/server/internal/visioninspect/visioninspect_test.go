@@ -123,6 +123,9 @@ func TestInspect_ToollessRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The vision call must expose NO tools — it is a leaf, not an agentic loop.
+	if p.lastReq.Tier != "vision" {
+		t.Fatalf("lost image intent: %q", p.lastReq.Tier)
+	}
 	if len(p.lastReq.Tools) != 0 {
 		t.Fatalf("vision request must carry no tools, got %d", len(p.lastReq.Tools))
 	}

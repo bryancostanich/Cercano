@@ -660,8 +660,9 @@ func (s *Server) turnModelEvidence(ctx context.Context, cfg config.Config) model
 			}
 		}
 	}
-	addProfile(cfg.ActiveCloudProfile)
-	addProfile(cfg.BackupCloudProfile)
+	for _, p := range cfg.ReferencedProfiles() {
+		addProfile(p.Name)
+	}
 	return s.modelEvidence().Snapshot(ctx, ids)
 }
 
@@ -991,6 +992,9 @@ func NewServer(a *agent.Agent, router RouterCloudUpdater, coordinator *loop.ADKC
 	// protocol, so their vision capability must come from the model, not the
 	// transport. Anthropic/Bedrock clients keep their fixed answer.
 	s.providerSvc.SetModelSupportsVision(s.cloudModelSupportsVision)
+	s.providerSvc.SetProfileSupportsVision(func(p config.CloudProfile, model string) bool {
+		return s.profileModelEvidence(p, model).Vision == modelmetadata.VisionSupported
+	})
 	// The live meter denominator must track the same capacity the turn used.
 	s.agent.SetContextWindowResolver(s.cloudContextWindow)
 	// Build the shared vision-as-tool store and service. Cloud vision is preferred
@@ -1004,11 +1008,14 @@ func NewServer(a *agent.Agent, router RouterCloudUpdater, coordinator *loop.ADKC
 		OpenVisionModel: openModelsResolver.VisionModel,
 		CloudProvider:   func() inference.Provider { return s.providerSvc.Cloud() },
 		CloudVisionModel: func() (string, bool) {
-			id := s.activeCloudModel()
-			return id, id != ""
+			p, ok := s.cfgSvc.ActiveProfile()
+			return p.ImageModel, ok && p.ImageModel != ""
 		},
-		CloudVisionConfirmed: s.cloudModelSupportsVision,
-		Mode:                 func() locus.Mode { m, _ := locus.ParseMode(s.providerSvc.LocusMode()); return m },
+		CloudVisionConfirmed: func(model string) bool {
+			p, ok := s.cfgSvc.ActiveProfile()
+			return ok && s.profileModelEvidence(p, model).Vision == modelmetadata.VisionSupported
+		},
+		Mode: func() locus.Mode { m, _ := locus.ParseMode(s.providerSvc.LocusMode()); return m },
 	})
 	// Construct the persistence service. It wraps the agent for store access;
 	// the agent itself is NOT owned by this service. The func-value collaborators
@@ -3952,4 +3959,13 @@ func (s *Server) mapResponse(response *agent.Response) *proto.ProcessRequestResp
 	protoRes.OutputTokens = int32(response.OutputTokens)
 
 	return protoRes
+}
+
+func (s *Server) profileModelEvidence(p config.CloudProfile, model string) modelmetadata.Evidence {
+	if model == "" {
+		return modelmetadata.Evidence{}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), cloudEvidenceTimeout)
+	defer cancel()
+	return s.modelEvidence().Resolve(ctx, modelevidence.IdentityFor(p, model))
 }

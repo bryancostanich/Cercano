@@ -159,3 +159,5 @@ func TestBuildWorkerWatchdog_EnabledAllowsWhenNoViolation(t *testing.T) {
 }
 
 func (r *openResolver) Candidates() inference.Tiers { return inference.Tiers{} }
+
+func (r *openResolver) SetProfileSupportsVision(func(config.CloudProfile, string) bool) {}

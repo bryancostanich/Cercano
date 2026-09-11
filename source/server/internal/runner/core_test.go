@@ -824,3 +824,5 @@ func (c *fakeConfig) SetDestinationProfiles(d config.Destination, preferred, bac
 func (c *fakeConfig) SetTaskAssignment(task config.Task, a *config.TaskAssignment) error {
 	return c.cfg.SetTaskAssignment(task, a)
 }
+
+func (f *fakeResolver) SetProfileSupportsVision(func(config.CloudProfile, string) bool) {}

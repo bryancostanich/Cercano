@@ -64,8 +64,8 @@ Objective: ensure actual inference, budgeting, and image inspection use the same
 
 - [ ] Route chat through Primary's saved quality assignment in both host and worker, including context meter, request assembly, and compaction/budget consumers. Remove stale Everyday/global model fallbacks only where superseded by the new contract.
 - [ ] Ensure failover updates actual profile/model attribution and context capacity without assuming the backup has the original provider's window. Verify existing evidence foundation rather than replacing it.
-- [ ] Resolve cloud image calls from the dedicated selected profile choice, never implicitly from chat. Preserve inspection as a separate tool-free request, stable-ID store, byte transport, and existing cache semantics.
-- [ ] Retain dedicated image intent through any applicable within-destination backup resolution and require confirmed capability for each selected model. Unknown/text-only models receive no image request; missing image choices remain honestly unavailable rather than gaining an invented recommendation.
+- [x] Resolve cloud image calls from the dedicated selected profile choice, never implicitly from chat. Preserve inspection as a separate tool-free request, stable-ID store, byte transport, and existing cache semantics.
+- [x] Retain dedicated image intent through any applicable within-destination backup resolution and require confirmed capability for each selected model. Unknown/text-only models receive no image request; missing image choices remain honestly unavailable rather than gaining an invented recommendation.
 - [ ] Wire the transported Local vision slot and preserve open-only embedding behavior and hard locality restrictions. Keep existing image mixed-mode policy unless necessary to enforce the no-Secondary-to-Local invariant.
 - [ ] Test host/worker parity for chat, dispatch Target versus execution, Primary/Secondary backup capacity, unknown image evidence, distinct chat/image selections, and image-only backup intent.
 - [ ] Run focused runner, requestassembly, persistence, toolstack, vision, and worker integration tests; checkpoint the execution unit.

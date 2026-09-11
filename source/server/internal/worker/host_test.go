@@ -401,3 +401,5 @@ func TestWorkerRunner_ContextCancel(t *testing.T) {
 }
 
 func (f *echoResolver) Candidates() inference.Tiers { return inference.Tiers{} }
+
+func (f *echoResolver) SetProfileSupportsVision(func(config.CloudProfile, string) bool) {}

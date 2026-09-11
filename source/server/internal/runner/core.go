@@ -257,6 +257,10 @@ func (c *Core) RunTurn(
 		addCloudProfileFields(startFields, "backup", cfgSnap, cfgSnap.BackupCloudProfile)
 	}
 	c.logRoute("turn.start", startFields)
+	assignment := (config.Config{}).TaskAssignment(config.TaskChat)
+	if c.d.Config != nil {
+		assignment = c.d.Config.Get().TaskAssignment(config.TaskChat)
+	}
 
 	// 1. Resolve the provider per the active Locus Mode.
 	provider, isCloud, fellBack, err := c.d.Providers.Main()
@@ -316,6 +320,9 @@ func (c *Core) RunTurn(
 	fbCloud := true
 	if res.Fallback == locus.TierLocal {
 		fbProv, fbCloud = c.d.Providers.Open(), false
+	}
+	if assignment.Destination != config.DestinationPrimary {
+		fbProv = nil
 	}
 	fallbackModel := c.d.Providers.MainModel(fbCloud)
 	if fbProv != nil {
@@ -446,7 +453,7 @@ func (c *Core) RunTurn(
 		"model":           selectedModel,
 		"is_cloud":        isCloud,
 	})
-	result, loopErr := c.runLoop(ctx, req, provider, selectedModel, isCloud,
+	result, loopErr := c.runLoop(ctx, req, provider, selectedModel, string(assignment.Quality.CapabilityTier()), isCloud,
 		loopSink, requester, convHistory, onTextDelta, onTurn, wdGate, wdTurnEnd, gateRegistry, permStore, profile, false)
 	c.logRoute("loop.result", routinglog.Event{
 		"conversation_id": req.ConversationID,
@@ -481,7 +488,7 @@ func (c *Core) RunTurn(
 			"error_class":     errClassString(loopErr),
 		})
 		sink.Emit(Event{Kind: EventProgress, Text: notice})
-		result, loopErr = c.runLoop(ctx, req, provider, selectedModel, isCloud,
+		result, loopErr = c.runLoop(ctx, req, provider, selectedModel, string(assignment.Quality.CapabilityTier()), isCloud,
 			loopSink, requester, convHistory, onTextDelta, onTurn, wdGate, wdTurnEnd, gateRegistry, permStore, profile, false)
 		c.logRoute("loop.result", routinglog.Event{
 			"conversation_id": req.ConversationID,
@@ -552,7 +559,7 @@ func (c *Core) RunTurn(
 			})
 			convHistory = fallbackHistory
 			attemptAccounting = fallbackAccounting
-			result, loopErr = c.runLoop(ctx, req, fbProv, fallbackModel, fbCloud,
+			result, loopErr = c.runLoop(ctx, req, fbProv, fallbackModel, string(assignment.Quality.CapabilityTier()), fbCloud,
 				loopSink, requester, convHistory, onTextDelta, onTurn, wdGate, wdTurnEnd, gateRegistry, permStore, profile, tightContextFallback)
 			c.logRoute("loop.result", routinglog.Event{
 				"conversation_id": req.ConversationID,
@@ -605,6 +612,7 @@ func (c *Core) runLoop(
 	req Request,
 	provider inference.Provider,
 	model string,
+	tier string,
 	isCloud bool,
 	loopSink func(agent.LoopEvent),
 	requester PermissionRequester,
@@ -638,6 +646,7 @@ func (c *Core) runLoop(
 		UserInput:            req.Input,
 		Images:               req.Images,
 		Model:                model,
+		Tier:                 tier,
 		System:               BuildSystemPrompt(c.d, req.WorkDir, profile),
 		WorkDir:              req.WorkDir,
 		ConversationID:       req.ConversationID,

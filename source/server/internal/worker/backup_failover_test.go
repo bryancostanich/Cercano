@@ -84,8 +84,8 @@ func TestWorkerBackupFailover_WrapsCompositeAndFailsOver(t *testing.T) {
 		ActiveCloudProfile: "primary",
 		BackupCloudProfile: "backup",
 		CloudProfiles: []pkgcfg.CloudProfile{
-			{Name: "primary", Flavor: cloudfactory.FlavorChatCompletions, Backend: "openai", BaseURL: primarySrv.URL, Model: "primary-model"},
-			{Name: "backup", Flavor: cloudfactory.FlavorChatCompletions, Backend: "openai", BaseURL: backupSrv.URL, Model: "backup-model"},
+			{Name: "primary", Flavor: cloudfactory.FlavorChatCompletions, Backend: "openai", BaseURL: primarySrv.URL, TierOverrides: map[pkgcfg.CostTier]string{pkgcfg.CostPremium: "primary-model"}},
+			{Name: "backup", Flavor: cloudfactory.FlavorChatCompletions, Backend: "openai", BaseURL: backupSrv.URL, TierOverrides: map[pkgcfg.CostTier]string{pkgcfg.CostPremium: "backup-model"}},
 		},
 	}
 	creds := &fakeCredFetcher{tokens: map[string]string{"primary": "key-primary", "backup": "key-backup"}}
@@ -147,7 +147,7 @@ func TestWorkerBackupFailover_NoBackupIsBareProvider(t *testing.T) {
 		ActiveCloudProfile: "primary",
 		// No BackupCloudProfile.
 		CloudProfiles: []pkgcfg.CloudProfile{
-			{Name: "primary", Flavor: cloudfactory.FlavorChatCompletions, Backend: "openai", BaseURL: primarySrv.URL, Model: "primary-model"},
+			{Name: "primary", Flavor: cloudfactory.FlavorChatCompletions, Backend: "openai", BaseURL: primarySrv.URL, TierOverrides: map[pkgcfg.CostTier]string{pkgcfg.CostPremium: "primary-model"}},
 		},
 	}
 	creds := &fakeCredFetcher{tokens: map[string]string{"primary": "key-primary"}}

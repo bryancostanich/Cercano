@@ -155,12 +155,12 @@ func New(primary inference.Provider, opts Options) *Provider {
 		primaryModelFor: opts.PrimaryModelFor,
 		backup:          opts.Backup,
 		backupModelFor:  opts.BackupModelFor,
-		onEvent:        opts.OnEvent,
-		retryWait:      opts.RetryWait,
-		retryWaitCap:   opts.RetryWaitCap,
-		quotaCooldown:  opts.QuotaCooldown,
-		sleep:          ctxSleep,
-		now:            time.Now,
+		onEvent:         opts.OnEvent,
+		retryWait:       opts.RetryWait,
+		retryWaitCap:    opts.RetryWaitCap,
+		quotaCooldown:   opts.QuotaCooldown,
+		sleep:           ctxSleep,
+		now:             time.Now,
 	}
 	if p.retryWait <= 0 {
 		p.retryWait = defaultRetryWait
@@ -273,7 +273,7 @@ func (p *Provider) backupRequest(req inference.Call) inference.Call {
 func (p *Provider) Chat(ctx context.Context, req inference.Call) (inference.Result, error) {
 	req = p.primaryRequest(req)
 	if p.quotaCoolingDown() {
-		return p.backup.Chat(ctx, p.backupRequest(req))
+		return p.backupChat(ctx, req)
 	}
 	resp, err := p.primary.Chat(ctx, req)
 	if err == nil || ctx.Err() != nil {
@@ -302,7 +302,7 @@ func (p *Provider) Chat(ctx context.Context, req inference.Call) (inference.Resu
 	}
 	p.emit(Event{Action: ActionFailover, Stage: "chat", Class: class,
 		From: eventFrom(p.primary.Name(), err), To: p.backup.Name(), Err: err})
-	return p.backup.Chat(ctx, p.backupRequest(req))
+	return p.backupChat(ctx, req)
 }
 
 // StreamChat runs the streaming policy. Decisions are narrated in-band: the
@@ -312,7 +312,7 @@ func (p *Provider) Chat(ctx context.Context, req inference.Call) (inference.Resu
 func (p *Provider) StreamChat(ctx context.Context, req inference.Call) (inference.Stream, error) {
 	req = p.primaryRequest(req)
 	if p.quotaCoolingDown() {
-		return p.backup.StreamChat(ctx, p.backupRequest(req))
+		return p.backupStream(ctx, req)
 	}
 	r := &reader{ctx: ctx, p: p, req: req}
 	inner, err := p.primary.StreamChat(ctx, req)
@@ -436,7 +436,7 @@ func (r *reader) decide(stage string, err error) bool {
 		p.emit(ev)
 		r.queue = append(r.queue, llm.StreamEvent{Type: llm.EventNotice, Notice: ev.Notice()})
 		r.attempt = func() (llm.StreamReader, error) {
-			return p.backup.StreamChat(r.ctx, p.backupRequest(r.req))
+			return p.backupStream(r.ctx, r.req)
 		}
 		return true
 	}
@@ -450,4 +450,25 @@ func (r *reader) Close() error {
 		return r.inner.Close()
 	}
 	return nil
+}
+
+// A configured resolver returning empty means this backup cannot satisfy the
+// requested intent. Never reuse the originating profile's model in that case.
+func (p *Provider) backupUnavailable(req inference.Call) error {
+	if p.backupModelFor != nil && p.backupModelFor(req.Tier) == "" {
+		return fmt.Errorf("backup model unavailable for requested tier %q", req.Tier)
+	}
+	return nil
+}
+func (p *Provider) backupChat(ctx context.Context, req inference.Call) (inference.Result, error) {
+	if err := p.backupUnavailable(req); err != nil {
+		return inference.Result{}, err
+	}
+	return p.backup.Chat(ctx, p.backupRequest(req))
+}
+func (p *Provider) backupStream(ctx context.Context, req inference.Call) (inference.Stream, error) {
+	if err := p.backupUnavailable(req); err != nil {
+		return nil, err
+	}
+	return p.backup.StreamChat(ctx, p.backupRequest(req))
 }

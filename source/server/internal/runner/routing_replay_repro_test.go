@@ -121,3 +121,15 @@ func TestRoutingContractVisibleOutputBlocksCrossDestinationFallback(t *testing.T
 		t.Fatalf("err=%v primary calls=%d fallback calls=%d", err, p.calls, len(backup.requests))
 	}
 }
+
+func TestRoutingContractSecondaryChatCannotFallBackToLocal(t *testing.T) {
+	primary := &busyProvider{}
+	local := &spyProvider{}
+	deps := buildDeps(primary)
+	deps.Config = &fakeConfig{cfg: config.Config{LocusMode: "cloud_primary", TaskAssignments: map[config.Task]config.TaskAssignment{config.TaskChat: {Destination: config.DestinationSecondary}}}}
+	deps.Providers = &fakeResolver{prov: primary, cloud: primary, open: local, isCloud: true, isCloudSet: true}
+	_, err := New(deps).RunTurn(context.Background(), Request{Input: "fixture", ConversationID: "secondary", WorkDir: t.TempDir()}, &captureSink{}, nil, nil)
+	if err == nil || len(local.requests) != 0 {
+		t.Fatalf("Secondary escaped: err=%v Local calls=%d", err, len(local.requests))
+	}
+}

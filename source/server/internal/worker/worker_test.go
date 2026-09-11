@@ -280,3 +280,5 @@ func TestWorkerServer_RunTurn_NoHalfCloseNoDeadlock(t *testing.T) {
 }
 
 func (f *fakeResolver) Candidates() inference.Tiers { return inference.Tiers{} }
+
+func (f *fakeResolver) SetProfileSupportsVision(func(config.CloudProfile, string) bool) {}

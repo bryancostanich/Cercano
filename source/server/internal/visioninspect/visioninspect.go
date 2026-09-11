@@ -29,6 +29,7 @@ import (
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/visionattach"
+	"cercano/source/server/pkg/config"
 )
 
 // errNoInner is returned when a wrapper has no underlying vision service.
@@ -135,6 +136,7 @@ func (in *Inspector) Inspect(ctx context.Context, convID, imageID, question stri
 
 	req := inference.Call{
 		Model:     r.Model,
+		Tier:      string(config.TierVision),
 		System:    in.sysPromt,
 		MaxTokens: in.maxToks,
 		// No Tools: the vision model gets a single question, not an agentic loop.

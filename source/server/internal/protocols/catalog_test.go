@@ -94,8 +94,8 @@ func TestDesignDecisionsRequiresMarkdownRollupWithTitlesInHeader(t *testing.T) {
 		"Do not hide the titles in a separate legend",
 		"do not hand-draw ASCII/grid tables",
 		"Markdown tables exist so the renderer can wrap cells",
-		"| Axis | Disable by default | Disable one check | Tune checks now |",
-		"| Cost | Low: config/default tests | Low: one check list | Medium: prompt + gate work |",
+		"| Axis | Disable by default | Keep enabled by default |",
+		"| Cost | Change default and its tests | No default change |",
 		"State the decision above the table",
 		"`Decision: <question being decided>`",
 		"Decision: should the noisy watchdog check stay on by default?",
@@ -387,6 +387,25 @@ func TestAutonomousRunProtocolDoesNotAskForEveryDecision(t *testing.T) {
 	} {
 		if !strings.Contains(p.Body, want) {
 			t.Fatalf("autonomous-run protocol must keep the stop threshold high; missing %q", want)
+		}
+	}
+}
+
+func TestDesignDecisionsQuestionFirstWithoutOptionQuota(t *testing.T) {
+	p, _ := Get("design-decisions")
+	for label, text := range map[string]string{"trigger": p.Trigger, "body": p.Body} {
+		if !strings.Contains(text, "first line") || !strings.Contains(text, "Decision: <question>?") {
+			t.Errorf("%s must require the decision question as the first line", label)
+		}
+	}
+	for _, want := range []string{"There is no target option count", "do not produce a matrix", "drop it from the matrix"} {
+		if !strings.Contains(p.Body, want) {
+			t.Errorf("missing viable-option requirement %q", want)
+		}
+	}
+	for _, unwanted := range []string{"Usually that's two or three", "If you can think of more than one way", "| Disable one check |"} {
+		if strings.Contains(p.Body, unwanted) {
+			t.Errorf("retains option-padding incentive %q", unwanted)
 		}
 	}
 }

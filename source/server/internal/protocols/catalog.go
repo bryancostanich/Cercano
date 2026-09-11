@@ -5,22 +5,22 @@ var builtinProtocols = []Protocol{
 		Name:        "design-decisions",
 		Description: "Stop and weigh real options before coding a structural decision.",
 		Domain:      DomainCore,
-		Trigger:     "Facing a real decision with more than one viable approach → stop, state the decision question on its own line, enumerate the real options in a Markdown pipe table (decision axes as rows, the actual option titles across the header row) with their trade-offs in plain English, and get human approval before writing code.",
+		Trigger:     "Facing a real decision with multiple genuinely viable approaches → stop. The first line of the decision presentation must be Decision: <question>? Compare only viable options in a Markdown pipe table (decision axes as rows, actual option titles across the header row); never pad with hacks or strawmen to reach an option count. With only one viable approach, explain it without a matrix. Get human approval for a real choice before writing code.",
 		Body: `# Design Decision Protocol
 
 ## When This Applies
 
-Any time there are multiple viable implementation approaches — data modeling, encoding choices, interface changes, module boundaries, state machine structure, anything structural. If you can think of more than one way to do it, this protocol is mandatory.
+Any time there are multiple viable implementation approaches — data modeling, encoding choices, interface changes, module boundaries, state machine structure, anything structural. A real choice requires multiple genuinely viable approaches with meaningful trade-offs, not merely multiple imaginable ways to do it.
 
 ## The Rule
 
-**STOP. Do not write code.** Present options to the human first.
+**STOP. Do not write code when a real choice needs approval.** The first line of the decision presentation must be Decision: <question>? State the question before any option list, comparison, or recommendation; do not make the reader infer it from candidate answers.
 
 ## Steps
 
-1. **Identify the decision point.** State what needs to be decided and why.
+1. **State the question first.** Begin with Decision: <question>? on its own line, then explain why the choice matters.
 
-2. **Enumerate the real options — every genuinely viable one, and only those.** Not strawmen, and not padded to a number. Usually that's two or three; sometimes it's one. If only one approach is genuinely viable, say so and explain why the obvious alternatives don't survive scrutiny — do not invent weak options to fill a quota. A manufactured option corrupts the honest-enumeration this protocol depends on (and makes step 5 theater). When there is genuinely only one real option, the trade-off table and the argue-against-yourself step collapse to "why the alternatives were ruled out."
+2. **Enumerate only genuinely viable options.** There is no target option count. Exclude strawmen, unjustified hacks, and approaches that fail the requirements before presenting the comparison. A workaround belongs only if a concrete constraint makes it defensible; label its limitations honestly. If only one approach survives, explain the recommendation and briefly why alternatives were ruled out; do not produce a matrix or manufacture an approval fork. Do not add weak alternatives merely to make a table. This does not waive other permission or approval requirements.
 
 3. **For each option, quantify these four dimensions:**
 
@@ -31,28 +31,28 @@ Any time there are multiple viable implementation approaches — data modeling, 
 
    **Symmetric quantification rule**: every dimension or concern you raise for *one* option must be evaluated for *every* option on that dimension, even if the answer is "same" or "n/a." Asymmetric framing — tagging "stability concerns" on Option C without checking whether Option B has the same concern, or calling B "simpler" without counting B's actual moving parts — is where confirmation bias hides. If a concern applies to multiple options, that concern is not a differentiator and shouldn't be presented as one.
 
-   **Required rollup table**: after identifying the options, present the comparison as a normal Markdown pipe table with **decision axes as rows** and the **actual option titles in the top row**. Do not hide the titles in a separate legend with A/B/C-only columns, and do not hand-draw ASCII/grid tables. Markdown tables exist so the renderer can wrap cells and keep the table readable.
+   **Required rollup table for multiple viable options**: after identifying the options, present the comparison as a normal Markdown pipe table with **decision axes as rows** and the **actual option titles in the top row**. Do not hide the titles in a separate legend with A/B/C-only columns, and do not hand-draw ASCII/grid tables. Markdown tables exist so the renderer can wrap cells and keep the table readable.
 
    **State the decision above the table**: immediately before the table, write one line naming the question being decided, in the form ` + "`Decision: <question being decided>`" + `. The table shows only candidate answers, so without that line the reader sees options with no stated question. Do not rely on surrounding prose to imply the question, and do not jump straight from the options list into the table.
 
-   Use this shape:
+   Example with two viable options; this is a format example, not an option-count target:
 
    Decision: should the noisy watchdog check stay on by default?
 
-   | Axis | Disable by default | Disable one check | Tune checks now |
-   |---|---|---|---|
-   | Cost | Low: config/default tests | Low: one check list | Medium: prompt + gate work |
-   | Risk | Low: opt-in only | Medium: partial fix | Medium: may miss cases |
-   | Reward | Stops surprise interrupts | Keeps some coverage | Preserves feature |
-   | Side effects | Less automatic enforcement | Other checks still run | More tuning work |
-   | Best reason | Safest user default | Narrowest behavior change | Addresses root cause |
-   | Main drawback | Less watchdog coverage | Doesn't fix all noise | More work now |
+   | Axis | Disable by default | Keep enabled by default |
+   |---|---|---|
+   | Cost | Change default and its tests | No default change |
+   | Risk | Users may miss warnings unless they opt in | Users continue receiving noisy warnings |
+   | Reward | Quiet by default | Automatic warning coverage |
+   | Side effects | Requires explicit opt-in | Requires explicit opt-out |
+   | Best reason | Avoid interruptions | Catch problems without setup |
+   | Main drawback | Less automatic coverage | More interruptions |
 
    Table rules: the decision question goes on its own line above the table; option titles belong in the header row; cells may be short phrases and may wrap. Keep wording concise, but do not destroy clarity just to avoid wrapping. Put longer nuance below the table in prose bullets.
 
 4. **Explicitly flag hacks.** If an option conflates unrelated concerns, overloads a field for a dual purpose, or works "because there happen to be unused slots," call it a hack. Do not dress it up.
 
-5. **Argue against your own recommendation.** Before locking a recommendation in step 6, write down the strongest case *for each non-recommended option*. If you can't make a substantive case for the alternatives, your analysis is thin — go back to step 3 and look for what you missed. If the counter-cases are genuinely weak after honest effort, the recommendation is sound. This step exists because the protocol relies on honest enumeration in step 3, and confirmation bias can quietly stack the framing toward a preferred option without anyone noticing until the wrong choice ships. (If step 2 found only one genuinely viable option, this step is instead the case *for* each ruled-out alternative — the same discipline, aimed at catching an option you dismissed too fast.)
+5. **Argue against your own recommendation.** State the strongest substantive case for each other viable option. Recheck any alternative whose case seems weak: if it still lacks a defensible benefit under the actual constraints, drop it from the matrix rather than inventing a justification. If that leaves only one viable approach, use the no-matrix explanation from step 2. Briefly explaining why a candidate was rejected does not make it a competing option.
 
 6. **Recommend the cleanest option**, even if it's more work. Bias toward semantic correctness and clean architecture over implementation convenience.
 

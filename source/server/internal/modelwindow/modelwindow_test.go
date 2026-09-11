@@ -90,3 +90,12 @@ func TestMeterWindowLocalFallsBackWhenConfigEmpty(t *testing.T) {
 }
 
 func contextOverridePtr(n int) *int { return &n }
+
+func TestOtherRuntimeRetainsLegacyExplicitWindowPolicy(t *testing.T) {
+	c := config.Config{OpenRuntime: "ollama"}
+	c.LlamaServer.ContextSize = contextOverridePtr(16384)
+	c.MistralRS.MaxSeqLen = 8192
+	if n := LocalRuntimeWindow(c, "model"); n != 16384 {
+		t.Fatalf("changed other-runtime legacy policy: got %d want 16384", n)
+	}
+}

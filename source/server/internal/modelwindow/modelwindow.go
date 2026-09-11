@@ -36,6 +36,11 @@ func LocalRuntimeWindow(cfg config.Config, model string) int {
 		// Configuration/catalog policy is not a serving-capacity observation.
 		return 0
 	default:
+		// Preserve the legacy policy of other backends. This branch never
+		// supplies capacity for the managed llama-server case above.
+		if cfg.LlamaServer.ContextOverride() > 0 {
+			return cfg.LlamaServer.ContextOverride()
+		}
 		return cfg.MistralRS.MaxSeqLen
 	}
 }

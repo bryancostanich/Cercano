@@ -1263,8 +1263,10 @@ type ProcessRequestRequest struct {
 	Coproc               bool           `protobuf:"varint,8,opt,name=coproc,proto3" json:"coproc,omitempty"`                                      // Route per Locus Mode's co-processor tier (local/cloud)
 	Images               []*InlineImage `protobuf:"bytes,9,rep,name=images,proto3" json:"images,omitempty"`                                       // user-attached images, spliced in at "[image N]" markers in input
 	SupportsAuthRecovery bool           `protobuf:"varint,10,opt,name=supports_auth_recovery,json=supportsAuthRecovery,proto3" json:"supports_auth_recovery,omitempty"`
-	unknownFields        protoimpl.UnknownFields
-	sizeCache            protoimpl.SizeCache
+	// One-shot co-processor policy; false preserves the model default.
+	DisableThinking bool `protobuf:"varint,11,opt,name=disable_thinking,json=disableThinking,proto3" json:"disable_thinking,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *ProcessRequestRequest) Reset() {
@@ -1356,6 +1358,13 @@ func (x *ProcessRequestRequest) GetImages() []*InlineImage {
 func (x *ProcessRequestRequest) GetSupportsAuthRecovery() bool {
 	if x != nil {
 		return x.SupportsAuthRecovery
+	}
+	return false
+}
+
+func (x *ProcessRequestRequest) GetDisableThinking() bool {
+	if x != nil {
+		return x.DisableThinking
 	}
 	return false
 }
@@ -14063,9 +14072,10 @@ type LLMChatRequest struct {
 	MaxTokens      int32                  `protobuf:"varint,7,opt,name=max_tokens,json=maxTokens,proto3" json:"max_tokens,omitempty"`
 	// optional so pointer semantics survive the wire: absent = provider
 	// default, present 0 = greedy decoding (the summarizer's requirement).
-	Temperature   *float64 `protobuf:"fixed64,8,opt,name=temperature,proto3,oneof" json:"temperature,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Temperature     *float64 `protobuf:"fixed64,8,opt,name=temperature,proto3,oneof" json:"temperature,omitempty"`
+	DisableThinking bool     `protobuf:"varint,9,opt,name=disable_thinking,json=disableThinking,proto3" json:"disable_thinking,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *LLMChatRequest) Reset() {
@@ -14152,6 +14162,13 @@ func (x *LLMChatRequest) GetTemperature() float64 {
 		return *x.Temperature
 	}
 	return 0
+}
+
+func (x *LLMChatRequest) GetDisableThinking() bool {
+	if x != nil {
+		return x.DisableThinking
+	}
+	return false
 }
 
 // LLMTool mirrors llm.Tool (the model-facing fields; Permission is agent-side).
@@ -15207,7 +15224,7 @@ const file_agent_proto_rawDesc = "" +
 	"\x06detail\x18\v \x01(\tR\x06detail\x12\x1d\n" +
 	"\n" +
 	"start_line\x18\f \x01(\x05R\tstartLine\x12\x19\n" +
-	"\bis_error\x18\r \x01(\bR\aisError\"\xd0\x02\n" +
+	"\bis_error\x18\r \x01(\bR\aisError\"\xfb\x02\n" +
 	"\x15ProcessRequestRequest\x12\x14\n" +
 	"\x05input\x18\x01 \x01(\tR\x05input\x12\x19\n" +
 	"\bwork_dir\x18\x03 \x01(\tR\aworkDir\x12\x1b\n" +
@@ -15219,7 +15236,8 @@ const file_agent_proto_rawDesc = "" +
 	"\x06coproc\x18\b \x01(\bR\x06coproc\x12*\n" +
 	"\x06images\x18\t \x03(\v2\x12.agent.InlineImageR\x06images\x124\n" +
 	"\x16supports_auth_recovery\x18\n" +
-	" \x01(\bR\x14supportsAuthRecovery\"V\n" +
+	" \x01(\bR\x14supportsAuthRecovery\x12)\n" +
+	"\x10disable_thinking\x18\v \x01(\bR\x0fdisableThinking\"V\n" +
 	"\vInlineImage\x12\x14\n" +
 	"\x05index\x18\x01 \x01(\x05R\x05index\x12\x12\n" +
 	"\x04data\x18\x02 \x01(\fR\x04data\x12\x1d\n" +
@@ -16209,7 +16227,7 @@ const file_agent_proto_rawDesc = "" +
 	"\fcontext_only\x18\x03 \x01(\bR\vcontextOnly\x12'\n" +
 	"\x0fprepare_context\x18\x04 \x01(\bR\x0eprepareContext\x120\n" +
 	"\x14expected_instance_id\x18\x05 \x01(\tR\x12expectedInstanceId\x126\n" +
-	"\x17expected_context_tokens\x18\x06 \x01(\x03R\x15expectedContextTokens\"\xbd\x02\n" +
+	"\x17expected_context_tokens\x18\x06 \x01(\x03R\x15expectedContextTokens\"\xe8\x02\n" +
 	"\x0eLLMChatRequest\x12\x14\n" +
 	"\x05model\x18\x01 \x01(\tR\x05model\x12\x16\n" +
 	"\x06system\x18\x02 \x01(\tR\x06system\x12-\n" +
@@ -16219,7 +16237,8 @@ const file_agent_proto_rawDesc = "" +
 	"\x10tool_choice_name\x18\x06 \x01(\tR\x0etoolChoiceName\x12\x1d\n" +
 	"\n" +
 	"max_tokens\x18\a \x01(\x05R\tmaxTokens\x12%\n" +
-	"\vtemperature\x18\b \x01(\x01H\x00R\vtemperature\x88\x01\x01B\x0e\n" +
+	"\vtemperature\x18\b \x01(\x01H\x00R\vtemperature\x88\x01\x01\x12)\n" +
+	"\x10disable_thinking\x18\t \x01(\bR\x0fdisableThinkingB\x0e\n" +
 	"\f_temperature\"W\n" +
 	"\aLLMTool\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +

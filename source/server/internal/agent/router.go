@@ -82,8 +82,9 @@ type Request struct {
 	Tier string
 	// MaxTokens overrides the output budget for one-shot Process calls. 0 keeps
 	// the provider default.
-	MaxTokens int
-	Coproc    bool // Route per Locus Mode's co-processor tier (local/cloud)
+	MaxTokens       int
+	Coproc          bool // Route per Locus Mode's co-processor tier (local/cloud)
+	DisableThinking bool // One-shot local generation policy; default unchanged.
 	// Images are user-attached images; buildUserBlocks splices them into the
 	// user message at "[image N]" markers in Input.
 	Images []InlineImage

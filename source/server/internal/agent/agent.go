@@ -537,12 +537,13 @@ func (a *Agent) processCoproc(ctx context.Context, req *Request) (*Response, err
 		return nil, fmt.Errorf("co-processor dispatch engine not configured")
 	}
 	res, err := a.engine.Dispatch(ctx, dispatch.Spec{
-		Mode:           dispatch.OneShot,
-		Role:           dispatch.RoleCoproc,
-		Prompt:         augmentedInput,
-		ModelOverride:  req.ModelOverride,
-		Source:         "coproc",
-		ConversationID: req.ConversationID,
+		DisableThinking: req.DisableThinking,
+		Mode:            dispatch.OneShot,
+		Role:            dispatch.RoleCoproc,
+		Prompt:          augmentedInput,
+		ModelOverride:   req.ModelOverride,
+		Source:          "coproc",
+		ConversationID:  req.ConversationID,
 		// WantsProjectContext intentionally false: loadHistory already prepended context.
 	})
 	if err != nil {

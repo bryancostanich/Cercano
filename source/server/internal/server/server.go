@@ -3629,14 +3629,15 @@ func mapInlineImages(in []*proto.InlineImage) []agent.InlineImage {
 
 func (s *Server) mapRequest(req *proto.ProcessRequestRequest) *agent.Request {
 	return &agent.Request{
-		Input:          req.Input,
-		WorkDir:        req.WorkDir,
-		FileName:       req.FileName,
-		ConversationID: req.ConversationId,
-		DirectOpen:     req.DirectOpen,
-		ModelOverride:  req.ModelOverride,
-		Coproc:         req.Coproc,
-		Images:         mapInlineImages(req.GetImages()),
+		Input:           req.Input,
+		WorkDir:         req.WorkDir,
+		FileName:        req.FileName,
+		ConversationID:  req.ConversationId,
+		DirectOpen:      req.DirectOpen,
+		ModelOverride:   req.ModelOverride,
+		Coproc:          req.Coproc,
+		DisableThinking: req.GetDisableThinking(),
+		Images:          mapInlineImages(req.GetImages()),
 	}
 }
 

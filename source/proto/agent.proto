@@ -412,6 +412,8 @@ message ProcessRequestRequest {
   bool coproc = 8; // Route per Locus Mode's co-processor tier (local/cloud)
   repeated InlineImage images = 9; // user-attached images, spliced in at "[image N]" markers in input
   bool supports_auth_recovery = 10;
+  // One-shot co-processor policy; false preserves the model default.
+  bool disable_thinking = 11;
 }
 
 // InlineImage is one user-attached image. Index matches the "[image <Index>]"
@@ -1888,6 +1890,7 @@ message LLMChatRequest {
   // optional so pointer semantics survive the wire: absent = provider
   // default, present 0 = greedy decoding (the summarizer's requirement).
   optional double     temperature      = 8;
+  bool                disable_thinking = 9;
 }
 
 // LLMTool mirrors llm.Tool (the model-facing fields; Permission is agent-side).

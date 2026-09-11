@@ -43,6 +43,8 @@ type Spec struct {
 	ConversationID      string
 	Source              string
 	ModelOverride       string // advisory model name within locus bounds
+	// DisableThinking is a one-shot generation policy, not a global setting.
+	DisableThinking bool
 
 	// Tier names the model-taxonomy tier this dispatch runs on. Empty
 	// defaults by role: RoleMain → everyday, RoleCoproc → fast_light_text.
@@ -276,9 +278,10 @@ func (e *Engine) Dispatch(ctx context.Context, spec Spec) (Result, error) {
 
 	// 4. Build chat request.
 	req := llm.ChatRequest{
-		Model:  model,
-		Tier:   string(spec.Tier),
-		System: spec.System,
+		DisableThinking: spec.DisableThinking,
+		Model:           model,
+		Tier:            string(spec.Tier),
+		System:          spec.System,
 		Messages: []llm.Message{
 			{
 				Role: llm.RoleUser,

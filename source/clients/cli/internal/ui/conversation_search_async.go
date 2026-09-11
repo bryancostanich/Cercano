@@ -2,6 +2,7 @@ package ui
 
 import (
 	"slices"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -9,16 +10,23 @@ import (
 // At most one worker belongs to each search session. Typing and history updates
 // coalesce while it runs; closing/reopening search invalidates the owner token.
 type conversationSearchResultMsg struct {
-	owner    *conversationSearch
-	revision uint64
-	query    string
-	matches  []conversationMatch
-	cache    map[*Entry]searchProjection
-	starts   map[*Entry]int
+	completedAt time.Time
+	trace       searchTraceContext
+	owner       *conversationSearch
+	revision    uint64
+	query       string
+	matches     []conversationMatch
+	cache       map[*Entry]searchProjection
+	starts      map[*Entry]int
 }
 
 func (s *conversationSearch) invalidate(jump bool) {
 	s.revision++
+	reason := "layout"
+	if jump {
+		reason = "input"
+	}
+	s.traceContext().record("invalidate", 0, searchTraceDetails{Status: reason})
 	s.dirty = true
 	s.jumpWhenReady = s.jumpWhenReady || jump
 	if s.query != s.input.Value() {
@@ -40,12 +48,15 @@ func (m *Model) conversationSearchCmd() tea.Cmd {
 	if s == nil || !m.searchVisible() || !s.dirty || s.working {
 		return nil
 	}
+	trace := s.traceContext()
+	defer trace.span("snapshot")()
 	s.working = true
 	s.dirty = false
 	query, revision := s.input.Value(), s.revision
 	// Entry values and line slices are copied before crossing the goroutine
 	// boundary. Workers never read live entries, layouts, editors, or cache maps.
 	chat := &chatView{}
+	chat.layout.totalLines = s.chat.layout.totalLines
 	chat.entries = make([]*Entry, len(s.chat.entries))
 	originals := make(map[*Entry]*Entry, len(chat.entries))
 	cache := make(map[*Entry]searchProjection, len(s.cache))
@@ -69,10 +80,13 @@ func (m *Model) conversationSearchCmd() tea.Cmd {
 		chat.layout.units = append(chat.layout.units, unit)
 		starts[s.chat.entries[unit.startEntry]] = unit.startLine
 	}
+	scheduledAt := time.Now()
 	return func() tea.Msg {
+		trace.record("worker.queue", time.Since(scheduledAt), searchTraceDetails{})
+		defer trace.span("worker")()
 		input := newPromptInput()
 		input.SetValue(query)
-		worker := conversationSearch{input: input, chat: chat, cache: cache}
+		worker := conversationSearch{input: input, chat: chat, cache: cache, traceID: trace.Session, revision: revision}
 		worker.rebuild()
 		result := conversationSearchResultMsg{owner: s, revision: revision, query: query, matches: worker.matches, cache: make(map[*Entry]searchProjection, len(worker.cache)), starts: starts}
 		for i := range result.matches {
@@ -81,13 +95,22 @@ func (m *Model) conversationSearchCmd() tea.Cmd {
 		for entry, cached := range worker.cache {
 			result.cache[originals[entry]] = cached
 		}
+		result.completedAt = time.Now()
+		result.trace = trace
+		trace.record("worker.results", 0, searchTraceDetails{Matches: len(result.matches), Count: len(result.cache)})
 		return result
 	}
 }
 
 func (m *Model) applyConversationSearchResult(result conversationSearchResultMsg) {
+	trace := result.trace
+	defer trace.span("apply")()
+	if !result.completedAt.IsZero() {
+		trace.record("result.queue", time.Since(result.completedAt), searchTraceDetails{})
+	}
 	s := m.search
 	if s == nil || s != result.owner {
+		trace.record("result.discard", 0, searchTraceDetails{Status: "closed_or_replaced"})
 		return
 	}
 	s.working = false
@@ -95,6 +118,7 @@ func (m *Model) applyConversationSearchResult(result conversationSearchResultMsg
 	// are checked against rendered lines before reuse by the next worker.
 	s.cache = result.cache
 	if result.query != s.input.Value() {
+		trace.record("result.discard", 0, searchTraceDetails{Status: "superseded_query"})
 		return
 	}
 	old := conversationMatch{}
@@ -144,6 +168,7 @@ func (m *Model) applyConversationSearchResult(result conversationSearchResultMsg
 		s.dirty = true
 	}
 	m.sizeSearchInput()
+	trace.record("result.applied", 0, searchTraceDetails{Matches: len(s.matches)})
 }
 
 // Keep invalidation proportional to message metadata, without allocating or

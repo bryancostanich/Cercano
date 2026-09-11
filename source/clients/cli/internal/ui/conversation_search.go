@@ -10,6 +10,7 @@ import (
 	"html"
 	"slices"
 	"strings"
+	"time"
 	"unicode"
 
 	tea "charm.land/bubbletea/v2"
@@ -43,6 +44,7 @@ type searchPaint struct {
 }
 
 type conversationSearch struct {
+	traceID                       uint64
 	observed                      []searchObservedMessage
 	dirty, working, jumpWhenReady bool
 	revision                      uint64
@@ -151,6 +153,15 @@ func findSearchSpans(glyphs []searchGlyph, query string) [][]searchSpan {
 }
 
 func (s *conversationSearch) rebuild() {
+	trace := s.traceContext()
+	defer trace.span("index")()
+	var projectionTime, matchingTime time.Duration
+	var hits, projected int
+	defer func() {
+		trace.record("projection.total", projectionTime, searchTraceDetails{CacheHits: hits, Projected: projected})
+		trace.record("matching.total", matchingTime, searchTraceDetails{Matches: len(s.matches)})
+	}()
+
 	old := conversationMatch{}
 	if s.active >= 0 && s.active < len(s.matches) {
 		old = s.matches[s.active]
@@ -176,11 +187,36 @@ func (s *conversationSearch) rebuild() {
 		}
 		cached, ok := s.cache[entry]
 		if !ok || !slices.Equal(cached.lines, unit.lines) {
+			var started time.Time
+			if trace.Session != 0 {
+				started = time.Now()
+			}
 			cached = searchProjection{lines: slices.Clone(unit.lines), glyphs: projectMessageSearch(unit.lines, entry)}
+			projected++
+			if !started.IsZero() {
+				elapsed := time.Since(started)
+				projectionTime += elapsed
+				if elapsed >= 20*time.Millisecond {
+					trace.record("projection.slow_entry", elapsed, searchTraceDetails{Count: unit.startEntry, SourceBytes: len(entry.Content)})
+				}
+			}
+		} else {
+			hits++
 		}
 		if cached.query != query {
 			cached.query = query
+			var started time.Time
+			if trace.Session != 0 {
+				started = time.Now()
+			}
 			cached.spans = findSearchSpans(cached.glyphs, query)
+			if !started.IsZero() {
+				elapsed := time.Since(started)
+				matchingTime += elapsed
+				if elapsed >= 20*time.Millisecond {
+					trace.record("matching.slow_entry", elapsed, searchTraceDetails{Count: unit.startEntry, Matches: len(cached.spans), SourceBytes: len(entry.Content)})
+				}
+			}
 		}
 		nextCache[entry] = cached
 		for occurrence, localSpans := range cached.spans {

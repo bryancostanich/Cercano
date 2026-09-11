@@ -984,6 +984,12 @@ func waitProgressiveResumeCmd(ch <-chan resumeViewportStreamMsg) tea.Cmd {
 
 // Update is the Bubble Tea reducer.
 func (m Model) Update(msg tea.Msg) (nextModel tea.Model, nextCmd tea.Cmd) {
+	if trace := m.search.traceContext(); trace.Session != 0 {
+		defer trace.span("update." + fmt.Sprintf("%T", msg))()
+		if _, key := msg.(tea.KeyPressMsg); key {
+			trace.record("input.state", 0, searchTraceDetails{Status: fmt.Sprintf("visible=%t owns_input=%t dirty=%t working=%t", m.searchVisible(), m.searchCanOwnInput(), m.search.dirty, m.search.working)})
+		}
+	}
 	// Search commands work on immutable snapshots, never on live UI state.
 	// Schedule after the reducer so background transcript updates are coalesced.
 	defer func() {
@@ -5302,6 +5308,9 @@ func (m Model) composeFrame() (parts []string, inputIdx int) {
 }
 
 func (m Model) View() tea.View {
+	if trace := m.search.traceContext(); trace.Session != 0 {
+		defer trace.span("view")()
+	}
 	start := time.Now()
 	defer func() { m.logSlowView(start) }()
 

@@ -140,15 +140,15 @@ type Model struct {
 	// path that invokes m.cancelStream — the NEW turn's cancel func.
 	turnGen int
 
-	tokOut                  int
-	cumIn, cumOut           int
-	ctxRaw                  int
-	ctxMessageTokens        int
-	ctxSystemTokens         int
-	ctxToolSchemaTokens     int
-	ctxOutputReserveTokens  int
-	ctxEstimatedRequest     int
-	ctxWindowKnown          bool
+	tokOut                 int
+	cumIn, cumOut          int
+	ctxRaw                 int
+	ctxMessageTokens       int
+	ctxSystemTokens        int
+	ctxToolSchemaTokens    int
+	ctxOutputReserveTokens int
+	ctxEstimatedRequest    int
+	ctxWindowKnown         bool
 	// ctxUsageSource is the provenance of the meter reading ("live",
 	// "snapshot", "raw_estimate", "none", or "" before the first poll).
 	// ctxUsageStale marks a reading that is a lower bound: either the agent
@@ -189,7 +189,6 @@ type Model struct {
 	turnCloud       bool      // true when the turn routed to a cloud engine
 	turnToolStarted int       // tool calls started in this turn, for long-turn progress visibility
 	turnToolDone    int       // tool executions completed in this turn, for long-turn progress visibility
-
 
 	content contentPage
 
@@ -4266,7 +4265,7 @@ func confirmPromptDetails(p *pendingToolCall) []string {
 		}
 		if summary := oneLine(stringArg(obj, "summary")); summary != "" {
 			label := "Plan: "
-			if p.Name == "request_autonomous_exit" || p.Name == "complete_autonomous_review" {
+			if p.Name == "request_autonomous_exit" {
 				label = "Summary: "
 			}
 			details = append(details, label+truncateArgs(summary, 200))
@@ -4339,7 +4338,7 @@ func isDispatchTool(name string) bool {
 // instead of the raw "name arg=val" dump.
 func isSessionControlTool(name string) bool {
 	switch name {
-	case "suggest_plan", "request_plan_approval", "plan_exit", "suggest_autonomous", "request_autonomous_execution", "request_autonomous_exit", "complete_autonomous_review", "auto_exit":
+	case "suggest_plan", "request_plan_approval", "plan_exit", "suggest_autonomous", "request_autonomous_execution", "request_autonomous_exit", "auto_exit":
 		return true
 	}
 	return false
@@ -4362,9 +4361,7 @@ func sessionControlToolRowLabel(name string) string {
 	case "request_autonomous_execution":
 		return "Autonomous execution"
 	case "request_autonomous_exit":
-		return "Autonomous final review"
-	case "complete_autonomous_review":
-		return "Autonomous review complete"
+		return "Autonomous completion"
 	case "auto_exit":
 		return "Leave autonomous mode"
 	}
@@ -4388,9 +4385,7 @@ func sessionControlPromptTitle(p *pendingToolCall) string {
 	case "request_autonomous_execution":
 		return "Plan approved. Execute it autonomously with this run brief?"
 	case "request_autonomous_exit":
-		return "Autonomous run complete — review completion details?"
-	case "complete_autonomous_review":
-		return "Final autonomous review accepted — exit autonomous mode?"
+		return "Autonomous run complete — exit autonomous mode?"
 	case "auto_exit":
 		return "Leave autonomous mode?"
 	}

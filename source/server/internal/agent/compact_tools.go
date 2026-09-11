@@ -34,7 +34,7 @@ var compactFallbackTools = map[string]bool{
 	// require even in a narrowed catalog.
 	"suggest_plan": true, "request_plan_approval": true, "plan_exit": true,
 	"plan_set_status": true, "suggest_autonomous": true, "capture_decision": true,
-	"request_autonomous_exit": true, "complete_autonomous_review": true, "auto_exit": true,
+	"request_autonomous_exit": true, "auto_exit": true,
 }
 
 func compactFallbackAllows(_ llm.Permission, name string) bool {

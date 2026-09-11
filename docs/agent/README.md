@@ -260,6 +260,21 @@ Bounded autonomous loop. Per iteration:
 6. Execute the allowed tools. Each result becomes a `tool_result` block, fed back as a user message.
 7. Track guards: 3 consecutive iterations of all-errored calls aborts; `MaxToolLoopIterations = 10` caps total round-trips; user denial of any confirm is a hard turn-end.
 
+### Autonomous run completion
+
+Autonomous mode records meaningful decisions as an audit trail, not a queue for
+retroactive approval. When the approved brief is satisfied, the agent presents
+results, verification, and remaining limitations, then calls
+`request_autonomous_exit`. One confirmation marks the run completed and leaves
+autonomous mode; declining leaves it active. Settled decisions are not replayed.
+New high-risk choices and unresolved blockers must be raised when they arise.
+
+The former `complete_autonomous_review` tool is retired. New runs transition
+straight from `running` to `completed`; persisted `review_pending` runs from older
+versions can finish through the same completion action. Their decision history
+is preserved. Completion-record writes precede the profile change, with rollback
+of the record if the profile change fails.
+
 ### Built-in tools (`internal/agenttools/`)
 
 Names match Claude's training (Read, Write, Edit, LS, Glob, Grep, Bash) to keep Claude's internal planning concise:

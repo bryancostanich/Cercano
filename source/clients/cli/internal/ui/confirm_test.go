@@ -196,7 +196,7 @@ func TestRenderConfirmPrompt_RequestAutonomousExit_ShowsCompletionDetailsAsBlock
 		Args:       `{"summary":"done","verification":"targeted tests passed"}`,
 		Permission: "X",
 	}))
-	for _, want := range []string{"Autonomous run complete — review completion details?", "Summary\n    done", "Verification\n    targeted tests passed"} {
+	for _, want := range []string{"Autonomous run complete — exit autonomous mode?", "Summary\n    done", "Verification\n    targeted tests passed"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("request_autonomous_exit prompt missing %q: %q", want, s)
 		}
@@ -229,23 +229,6 @@ func TestRenderConfirmPrompt_RequestAutonomousExit_WrapsLongPayloadsWithoutEllip
 	}
 	if strings.Contains(s, "…") {
 		t.Errorf("request_autonomous_exit summary and verification should wrap instead of truncate: %q", s)
-	}
-}
-
-func TestRenderConfirmPrompt_CompleteAutonomousReview_AsksToExit(t *testing.T) {
-	m := minimalModel()
-	s := stripAnsiCSI(m.renderConfirmPrompt(&pendingToolCall{
-		Name:       "complete_autonomous_review",
-		Args:       `{"summary":"decisions accepted"}`,
-		Permission: "X",
-	}))
-	for _, want := range []string{"Final autonomous review accepted", "Summary: decisions accepted"} {
-		if !strings.Contains(s, want) {
-			t.Errorf("complete_autonomous_review prompt missing %q: %q", want, s)
-		}
-	}
-	if strings.Contains(s, "DESTRUCTIVE") || strings.Contains(s, "⚠") {
-		t.Errorf("complete_autonomous_review must not be DESTRUCTIVE/⚠: %q", s)
 	}
 }
 

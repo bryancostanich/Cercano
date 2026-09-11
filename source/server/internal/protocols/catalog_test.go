@@ -366,8 +366,8 @@ func TestAutonomousRunProtocolLocksDecisionDisciplineAndReview(t *testing.T) {
 		"effectively irreversible",
 		"invalidate most downstream work",
 		"request_autonomous_exit",
-		"complete_autonomous_review",
-		"walking through the captured",
+		"One approval completes the run",
+		"Do not replay settled decisions",
 		"Do not push or merge",
 	} {
 		if !strings.Contains(p.Body, want) {
@@ -406,6 +406,15 @@ func TestDesignDecisionsQuestionFirstWithoutOptionQuota(t *testing.T) {
 	for _, unwanted := range []string{"Usually that's two or three", "If you can think of more than one way", "| Disable one check |"} {
 		if strings.Contains(p.Body, unwanted) {
 			t.Errorf("retains option-padding incentive %q", unwanted)
+		}
+	}
+}
+
+func TestAutonomousCompletionDoesNotRequireDecisionReapproval(t *testing.T) {
+	p, _ := Get("autonomous-run")
+	for _, stale := range []string{"complete_autonomous_review", "decisions one by one", "After all decisions are accepted"} {
+		if strings.Contains(p.Body, stale) {
+			t.Fatalf("obsolete completion instruction: %s", stale)
 		}
 	}
 }

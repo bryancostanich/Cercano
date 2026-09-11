@@ -49,7 +49,7 @@ func (requestAutonomousExecutionCap) Schema() capabilities.Schema {
 			"goal":{"type":"string","description":"One concise goal for the autonomous run."},
 			"done_when":{"type":"array","items":{"type":"string"},"description":"Short checklist of completion criteria."},
 			"constraints":{"type":"array","items":{"type":"string"},"description":"Boundaries the agent must honor."},
-			"review_points":{"type":"array","items":{"type":"string"},"description":"Decision or risk areas to capture for final review."}
+			"review_points":{"type":"array","items":{"type":"string"},"description":"Decision or risk areas to track during execution; escalate unresolved issues when they arise."}
 		},
 		"required":["goal"]
 	}`)

@@ -44,7 +44,7 @@ func (suggestAutonomousCap) Schema() capabilities.Schema {
 			"goal":{"type":"string","description":"One concise goal for the autonomous run."},
 			"done_when":{"type":"array","items":{"type":"string"},"description":"Short checklist of completion criteria."},
 			"constraints":{"type":"array","items":{"type":"string"},"description":"Boundaries the agent must honor."},
-			"review_points":{"type":"array","items":{"type":"string"},"description":"Decision or risk areas to capture for final review."},
+			"review_points":{"type":"array","items":{"type":"string"},"description":"Decision or risk areas to track during execution; escalate unresolved issues when they arise."},
 			"source_plan_path":{"type":"string","description":"Optional plan.md path when deriving from planning mode."},
 			"source_spec_path":{"type":"string","description":"Optional spec.md path when deriving from planning mode."}
 		},
@@ -210,95 +210,74 @@ func (autoExitCap) Execute(ctx context.Context, call *capabilities.Call) (*capab
 
 type requestAutonomousExitCap struct{}
 
-// RequestAutonomousExit asks the user to begin final decision review and leave
-// autonomous mode after successful completion.
+// RequestAutonomousExit completes an approved run and leaves autonomous mode.
+// Permission gating happens before Execute, so declining leaves the run untouched.
 func RequestAutonomousExit() capabilities.Capability { return requestAutonomousExitCap{} }
 
-func (requestAutonomousExitCap) Name() string                   { return "request_autonomous_exit" }
 func (requestAutonomousExitCap) Tier() capabilities.Tier        { return capabilities.TierX }
 func (requestAutonomousExitCap) Surfaces() capabilities.Surface { return capabilities.SurfaceAgent }
+
+func (requestAutonomousExitCap) Name() string { return "request_autonomous_exit" }
 func (requestAutonomousExitCap) Description() string {
-	return "Request final decision review after the approved autonomous run brief is satisfied. The user is shown a y/n/d/c prompt; on approval the ledger enters review_pending and autonomous mode stays active while you walk the user through captured decisions one by one. After review is accepted, call complete_autonomous_review to mark the run completed and leave autonomous mode."
+	return "Complete the autonomous run and exit autonomous mode through one confirmation. Before calling, present results, verification, and remaining limitations. Approval marks the run completed and leaves autonomous mode; rejection leaves it active. Captured decisions are an audit trail: do not replay them or ask for renewed acceptance. Raise unresolved blockers and new high-risk choices when they arise, not at completion."
 }
 func (requestAutonomousExitCap) Schema() capabilities.Schema {
 	return capabilities.Schema(`{
-		"type":"object",
-		"properties":{
-			"summary":{"type":"string","description":"Concise summary of completed autonomous work."},
-			"verification":{"type":"string","description":"Checks or verification completed before requesting exit."}
-		}
-	}`)
+		"type":"object","properties":{
+			"summary":{"type":"string","description":"Completed work and any remaining limitations."},
+			"verification":{"type":"string","description":"Checks performed and their results."}
+		},"required":["summary","verification"]}`)
 }
 func (requestAutonomousExitCap) Execute(ctx context.Context, call *capabilities.Call) (*capabilities.Result, error) {
-	var a struct {
+	var args struct {
 		Summary      string `json:"summary"`
 		Verification string `json:"verification"`
 	}
-	if len(call.Args) > 0 {
-		if err := json.Unmarshal(call.Args, &a); err != nil {
-			return nil, fmt.Errorf("request_autonomous_exit: parse args: %w", err)
-		}
+	if err := json.Unmarshal(call.Args, &args); err != nil {
+		return nil, fmt.Errorf("request_autonomous_exit: parse args: %w", err)
 	}
-	run, decisions, err := updateAutonomyRunReviewPending(ctx, call, a.Summary, a.Verification)
-	if err != nil {
-		return nil, fmt.Errorf("request_autonomous_exit: update autonomy ledger: %w", err)
-	}
-	parts := []string{"Autonomous run is ready for final review. Autonomous mode remains active until review is complete."}
-	if s := strings.TrimSpace(a.Summary); s != "" {
-		parts = append(parts, "Summary: "+s)
-	}
-	if v := strings.TrimSpace(a.Verification); v != "" {
-		parts = append(parts, "Verification: "+v)
-	}
-	if run.ConversationID != "" {
-		parts = append(parts, formatAutonomousDecisionReview(decisions))
-	}
-	return &capabilities.Result{Type: capabilities.ResultText, Text: strings.Join(parts, "\n")}, nil
-}
-
-type completeAutonomousReviewCap struct{}
-
-// CompleteAutonomousReview marks final decision review accepted and leaves
-// autonomous mode.
-func CompleteAutonomousReview() capabilities.Capability { return completeAutonomousReviewCap{} }
-
-func (completeAutonomousReviewCap) Name() string                   { return "complete_autonomous_review" }
-func (completeAutonomousReviewCap) Tier() capabilities.Tier        { return capabilities.TierX }
-func (completeAutonomousReviewCap) Surfaces() capabilities.Surface { return capabilities.SurfaceAgent }
-func (completeAutonomousReviewCap) Description() string {
-	return "Complete final autonomous decision review after the user has accepted the captured decisions. Marks the run completed and exits autonomous mode. Do not call this before walking the user through the decisions returned by request_autonomous_exit."
-}
-func (completeAutonomousReviewCap) Schema() capabilities.Schema {
-	return capabilities.Schema(`{
-		"type":"object",
-		"properties":{
-			"summary":{"type":"string","description":"Short note that final autonomous decision review was accepted."}
-		}
-	}`)
-}
-func (completeAutonomousReviewCap) Execute(ctx context.Context, call *capabilities.Call) (*capabilities.Result, error) {
-	var a struct {
-		Summary string `json:"summary"`
-	}
-	if len(call.Args) > 0 {
-		if err := json.Unmarshal(call.Args, &a); err != nil {
-			return nil, fmt.Errorf("complete_autonomous_review: parse args: %w", err)
-		}
-	}
-	if err := updateAutonomyRunCompleted(ctx, call, a.Summary); err != nil {
-		return nil, fmt.Errorf("complete_autonomous_review: update autonomy ledger: %w", err)
+	if strings.TrimSpace(args.Summary) == "" || strings.TrimSpace(args.Verification) == "" {
+		return nil, fmt.Errorf("request_autonomous_exit: summary and verification are required")
 	}
 	if call.Svc.EnterProfile == nil {
-		return nil, fmt.Errorf("complete_autonomous_review: autonomous mode is not available (no profile broker wired)")
+		return nil, fmt.Errorf("request_autonomous_exit: autonomous mode is not available (no profile broker wired)")
+	}
+	// review_pending is accepted only to recover runs saved by older versions.
+	store, run, err := requireActiveAutonomyRun(ctx, call, "request_autonomous_exit", "running", "review_pending")
+	if err != nil {
+		return nil, err
+	}
+	previous := run
+	review := map[string]any{}
+	if strings.TrimSpace(run.ReviewJSON) != "" {
+		if err := json.Unmarshal([]byte(run.ReviewJSON), &review); err != nil {
+			return nil, fmt.Errorf("request_autonomous_exit: decode completion record: %w", err)
+		}
+	}
+	if review == nil {
+		review = map[string]any{}
+	}
+	review["summary"] = args.Summary
+	review["verification"] = args.Verification
+	review["completed_at"] = time.Now().UTC().Format(time.RFC3339Nano)
+	data, err := json.Marshal(review)
+	if err != nil {
+		return nil, err
+	}
+	run.State = "completed"
+	run.UpdatedAt = time.Now()
+	run.ReviewJSON = string(data)
+	if err := store.UpdateAutonomyRun(ctx, run); err != nil {
+		return nil, fmt.Errorf("request_autonomous_exit: save completion: %w", err)
 	}
 	if err := call.Svc.EnterProfile(call.ConversationID, "default"); err != nil {
-		return nil, fmt.Errorf("complete_autonomous_review: leaving autonomous mode: %w", err)
+		// Restore the active record so a failed profile transition can be retried.
+		if rollbackErr := store.UpdateAutonomyRun(context.WithoutCancel(ctx), previous); rollbackErr != nil {
+			return nil, fmt.Errorf("request_autonomous_exit: leaving autonomous mode: %v; restoring active ledger failed: %w", err, rollbackErr)
+		}
+		return nil, fmt.Errorf("request_autonomous_exit: leaving autonomous mode: %w", err)
 	}
-	msg := "Autonomous decision review complete; exited autonomous mode."
-	if s := strings.TrimSpace(a.Summary); s != "" {
-		msg += "\nSummary: " + s
-	}
-	return &capabilities.Result{Type: capabilities.ResultText, Text: msg}, nil
+	return &capabilities.Result{Type: capabilities.ResultText, Text: "Autonomous run completed. Left autonomous mode."}, nil
 }
 
 func compactStrings(in []string) []string {
@@ -360,58 +339,6 @@ func markAutonomyRunAbandoned(ctx context.Context, store conversation.Store, run
 	_ = store.UpdateAutonomyRun(ctx, run)
 }
 
-func updateAutonomyRunReviewPending(ctx context.Context, call *capabilities.Call, summary, verification string) (conversation.AutonomyRun, []conversation.AutonomyDecision, error) {
-	store, run, err := requireActiveAutonomyRun(ctx, call, "request_autonomous_exit", "running")
-	if err != nil {
-		return conversation.AutonomyRun{}, nil, err
-	}
-	decisions, err := decodeAutonomyDecisions(run.DecisionsJSON)
-	if err != nil {
-		return conversation.AutonomyRun{}, nil, err
-	}
-	reviewJSON, err := json.Marshal(map[string]any{
-		"summary":      strings.TrimSpace(summary),
-		"verification": strings.TrimSpace(verification),
-		"started_at":   time.Now(),
-	})
-	if err != nil {
-		return conversation.AutonomyRun{}, nil, err
-	}
-	run.State = "review_pending"
-	run.ReviewJSON = string(reviewJSON)
-	run.UpdatedAt = time.Now()
-	if err := store.UpdateAutonomyRun(ctx, run); err != nil {
-		return conversation.AutonomyRun{}, nil, err
-	}
-	return run, decisions, nil
-}
-
-func updateAutonomyRunCompleted(ctx context.Context, call *capabilities.Call, summary string) error {
-	store, run, err := requireActiveAutonomyRun(ctx, call, "complete_autonomous_review", "review_pending")
-	if err != nil {
-		return err
-	}
-	var review map[string]any
-	if strings.TrimSpace(run.ReviewJSON) != "" {
-		_ = json.Unmarshal([]byte(run.ReviewJSON), &review)
-	}
-	if review == nil {
-		review = map[string]any{}
-	}
-	review["completed_at"] = time.Now()
-	if s := strings.TrimSpace(summary); s != "" {
-		review["completion_summary"] = s
-	}
-	reviewJSON, err := json.Marshal(review)
-	if err != nil {
-		return err
-	}
-	run.State = "completed"
-	run.ReviewJSON = string(reviewJSON)
-	run.UpdatedAt = time.Now()
-	return store.UpdateAutonomyRun(ctx, run)
-}
-
 func decodeAutonomyDecisions(raw string) ([]conversation.AutonomyDecision, error) {
 	if strings.TrimSpace(raw) == "" {
 		return nil, nil
@@ -421,23 +348,4 @@ func decodeAutonomyDecisions(raw string) ([]conversation.AutonomyDecision, error
 		return nil, err
 	}
 	return decisions, nil
-}
-
-func formatAutonomousDecisionReview(decisions []conversation.AutonomyDecision) string {
-	if len(decisions) == 0 {
-		return "No captured autonomous decisions were recorded. Ask the user to confirm there are no decisions to review, then call complete_autonomous_review if accepted."
-	}
-	lines := []string{"Captured decisions to review:"}
-	for _, d := range decisions {
-		line := fmt.Sprintf("%d. %s — chose %s", d.Sequence, d.DecisionPoint, d.ChosenPath)
-		if d.WhyCleanest != "" {
-			line += " (" + d.WhyCleanest + ")"
-		}
-		if d.Reversibility != "" {
-			line += " [reversibility: " + d.Reversibility + "]"
-		}
-		lines = append(lines, line)
-	}
-	lines = append(lines, "Walk through these decisions with the user one by one. If accepted, call complete_autonomous_review; if any decision changes, keep autonomous mode active and revise the work.")
-	return strings.Join(lines, "\n")
 }

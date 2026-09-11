@@ -436,14 +436,14 @@ sub-agent that might fail before pushing.
 	},
 	{
 		Name:        "autonomous-run",
-		Description: "Run against an approved autonomous brief, logging decisions and reviewing them before exit.",
+		Description: "Run against an approved autonomous brief, recording decisions and completing with one confirmation.",
 		Domain:      DomainCore,
 		Trigger:     "When autonomous mode is active, after `suggest_autonomous` is approved, or before completing an autonomous run → pull the `autonomous-run` protocol and follow it.",
 		Body: `# Autonomous Run Protocol
 
 Autonomous mode is not permission to be sloppy. It is permission to keep moving
 inside an approved lightweight run brief while recording the important choices
-for later review.
+as an audit trail.
 
 ## Active Contract
 
@@ -480,9 +480,9 @@ points, treat it as a brief revision. Do not silently reinterpret the run.
    messages. A checkpoint boundary is not a pause boundary: after checkpointing,
    immediately continue to the next unsatisfied ` + "`done_when`" + ` item or next necessary
    implementation slice. Never push or merge unless explicitly authorized.
-10. **Request final review.** When the brief is satisfied, call
-   ` + "`request_autonomous_exit`" + ` to enter decision review. Walk the user through
-   decisions one by one; only after acceptance call ` + "`complete_autonomous_review`" + `.
+10. **Complete the run.** Present results, verification, and remaining limitations,
+   then call ` + "`request_autonomous_exit`" + `. One approval completes the run and
+   leaves autonomous mode; rejection leaves the run active.
 
 ## Decision Discipline
 
@@ -527,18 +527,18 @@ boundary:
   push/merge, or user-data semantics;
 - you cannot honestly identify a clean preferred option.
 
-## Final Review
+## Completion
 
-` + "`request_autonomous_exit`" + ` starts review; it does not complete the run. During
-review:
+Completion checks whether the approved work is done; it is not a second approval
+of implementation decisions. Captured decisions are an audit trail, available on
+request. Do not replay settled decisions or ask for renewed acceptance, including
+when no decisions were captured. Present a concise summary of completed work,
+verification results, and remaining limitations before calling
+` + "`request_autonomous_exit`" + `. Its single confirmation completes the run and
+leaves autonomous mode. If declined, the run remains active.
 
-1. Present captured decisions in order.
-2. For each decision, explain the choice, the cleanest-option rationale, hack
-   flags, and reversibility.
-3. If the user accepts, move to the next decision.
-4. If the user changes a decision, keep autonomous mode active, revise the work,
-   and capture any new decision created by that revision.
-5. After all decisions are accepted, call ` + "`complete_autonomous_review`" + `.
+Raise unresolved blockers and new high-risk choices when they arise. Do not defer
+required authorization to completion or claim a blocked run is complete.
 
 ## Non-Negotiables
 
@@ -547,8 +547,7 @@ review:
 - Do not push or merge without explicit authorization.
 - Do not hide hacks. If an option is hacky, label it.
 - Do not skip verification because the run is autonomous.
-- Do not call ` + "`complete_autonomous_review`" + ` before walking through the captured
-  decisions or confirming there were no decisions to review.
+- Do not replay settled decisions at completion.
 `,
 	},
 	{

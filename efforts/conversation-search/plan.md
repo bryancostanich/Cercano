@@ -46,4 +46,4 @@ Objective: verify the complete CLI-local feature against the approved acceptance
 - [x] Build the CLI using its existing module/build conventions; do not require unrelated server or full end-to-end suites.
 - [x] Where terminal access permits, manually check under-title placement, Ctrl+F, Shift+Enter, Unicode highlighting, copying, loading indication, and pending-approval focus; explicitly report any unperformed checks.
 - [x] Document /search, Ctrl+F, navigation keys, excluded tool content, and the history-loading indicator in the relevant CLI documentation.
-- [~] Review the scoped diff, update plan checkboxes with actual outcomes, and checkpoint explicit feature paths with a conventional commit. Do not push unless asked.
+- [x] Review the scoped diff, update plan checkboxes with actual outcomes, and checkpoint explicit feature paths with a conventional commit. Do not push unless asked.

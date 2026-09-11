@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"cercano/source/server/internal/agent"
@@ -366,7 +367,13 @@ func (c *Core) RunTurn(
 		onTurn = func(m llm.Message) { persist(m) }
 	}
 
+	// Once output or tool execution begins, replaying the whole turn is unsafe.
+	// Tool execution events may arrive from concurrent read-only tool workers.
+	var replayUnsafe atomic.Bool
 	onTextDelta := func(t string) {
+		if t != "" {
+			replayUnsafe.Store(true)
+		}
 		sink.Emit(Event{Kind: EventToken, Text: t})
 	}
 
@@ -416,7 +423,13 @@ func (c *Core) RunTurn(
 	}
 
 	// 6. Internal adapter: agent.LoopEvent → runner.Event, forwarded to sink.
-	loopSink := c.makeLoopSink(sink, c.d.FailureLog, req.ConversationID)
+	forwardLoopEvent := c.makeLoopSink(sink, c.d.FailureLog, req.ConversationID)
+	loopSink := func(event agent.LoopEvent) {
+		if event.Kind == agent.LoopToolExecStart {
+			replayUnsafe.Store(true)
+		}
+		forwardLoopEvent(event)
+	}
 
 	// 7. Build the permission store for the loop.
 	var permStore *agent.PermissionStore
@@ -449,16 +462,10 @@ func (c *Core) RunTurn(
 		"output_tokens":   result.OutputTokens,
 	})
 
-	// 6.5. Same-provider turn retry: a transient loop error — server overload
-	// (busy), a transport reset (network), or an unclassified failure that may
-	// simply be transient (unknown) — is often a mid-stream one, where the
-	// resilience engine deliberately cannot re-serve (content already flowed).
-	// At the turn level a full re-run IS safe: the failed iteration's partial
-	// output was never persisted, and the re-run supersedes it — the same
-	// contract the cross-tier fallback below has always relied on. One narrated
-	// attempt on the same provider before any tier change; llm.Retryable owns
-	// the class policy so this site and the resilience engine stay in sync.
-	if loopErr != nil && ctx.Err() == nil && !errors.Is(loopErr, context.Canceled) && llm.Retryable(llm.ClassOf(loopErr)) {
+	// 6.5. Retry the whole turn only before visible output or tool execution.
+	// Unpersisted partial text can still be visible; tools can have external effects.
+	// llm.Retryable retains the existing failure classification policy.
+	if loopErr != nil && !replayUnsafe.Load() && ctx.Err() == nil && !errors.Is(loopErr, context.Canceled) && llm.Retryable(llm.ClassOf(loopErr)) {
 		failedProvider := failedProviderName(provider, loopErr)
 		notice := retryNotice(failedProvider, llm.ClassOf(loopErr))
 		fmt.Fprintf(os.Stderr, "[resilience] turn retry: %s route failed at %s (%v)\n", provider.Name(), failedProvider, loopErr)
@@ -493,7 +500,7 @@ func (c *Core) RunTurn(
 
 	// 7. Cross-tier fallback: on error, attempt the other tier if locus allows.
 	var fallbackNotice string
-	if loopErr != nil && ctx.Err() == nil && !errors.Is(loopErr, context.Canceled) {
+	if loopErr != nil && !replayUnsafe.Load() && ctx.Err() == nil && !errors.Is(loopErr, context.Canceled) {
 		failedProvider := failedProviderName(provider, loopErr)
 		fromWindow, _ := c.knownContextWindowFor(isCloud, selectedModel)
 		fallbackWindow, fallbackWindowKnown := c.knownContextWindowFor(fbCloud, fallbackModel)

@@ -1,9 +1,13 @@
 package runner
 
 import (
+	"cercano/source/server/internal/failurelog"
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -93,5 +97,32 @@ func TestRecoveryDoesNotReplayCompletedTools(t *testing.T) {
 				t.Fatal("unapproved fallback")
 			}
 		})
+	}
+}
+
+type diagnosticAuthProvider struct{ onceThenLogin }
+
+func (p *diagnosticAuthProvider) StreamChat(context.Context, llm.ChatRequest) (llm.StreamReader, error) {
+	return nil, &llm.CredentialError{Class: llm.ErrLoginRequired, Provider: "anthropic", Profile: "work", Method: llm.AuthSubscription, Reason: llm.CredentialRejected, Cause: errors.New("synthetic-secret-token")}
+}
+func TestAuthenticationFailureLogDoesNotPersistCredentialCause(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "failures.jsonl")
+	writer, err := failurelog.NewWriter(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writer.Close()
+	deps := buildDeps(resilience.New(&diagnosticAuthProvider{}, resilience.Options{}))
+	deps.FailureLog = writer
+	_, err = New(deps).RunTurn(context.Background(), Request{ConversationID: "safe-log", Input: "hello", WorkDir: t.TempDir()}, noopSink{}, nil, nil)
+	if err == nil {
+		t.Fatal("expected authentication failure")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "login_required") || strings.Contains(string(data), "synthetic-secret-token") {
+		t.Fatalf("unsafe or missing failure record: %s", data)
 	}
 }

@@ -47,6 +47,7 @@ Reconnect uses the existing confirmation lifecycle: retain the decision and capt
 | Queue, cancellation, reconnect, stale retry, late frames, fallback scope | CLI internal/ui/authentication_test.go, plus existing confirm_stale_test.go and confirmation suites |
 | Both legacy login modals reject stale same-profile frames | TestLegacySameProfileFramesAreAttemptScoped |
 | Token endpoint, HTTP auth body, login-stream and serialized-cause redaction | llm/httpx/oauth_test.go; provider auth_diagnostics tests; server/TestLoginFailureNeverEmitsUnstructuredSecrets; llm/TestCredentialErrorJSONDoesNotSerializeCause |
+| Production failure-log output does not persist credential causes | runner/TestAuthenticationFailureLogDoesNotPersistCredentialCause |
 
 ## Additional findings during implementation
 
@@ -70,3 +71,19 @@ Once stream events have escaped to the collector, recovery repairs credentials b
 Noninteractive callers fail rather than wait for a prompt they cannot answer. Hosts require an authentication-aware worker protocol for subscription profiles; older workers fail closed with an update requirement. Reauthentication has a separate RPC so an old server cannot ignore a preservation flag and perform onboarding instead.
 
 No merge, push, installation, running-agent restart, or production credential mutation is part of this effort. The active binary remains unchanged until separately installed.
+
+## Completion update — 2026-09-11
+
+Implementation checkpoint: `76404435c6b7` on `fix/cloud-auth-recovery`.
+
+Final verification completed successfully:
+
+- Server module: `go test ./... -count=1` and `go build ./...`.
+- CLI module: `go test ./... -count=1` and `go build ./...`.
+- Server race run: authentication sources, llm and both provider adapters, shared credentials/config/providers, resilience, runner, server, worker, and agentclient packages, all with `-race -count=1`.
+- CLI: full `internal/ui` suite with `-race -count=1`.
+- An additional production failure-log redaction regression and the no-tool-replay integration cases passed together under `-race` after the implementation checkpoint; they introduce no production behavior changes.
+- Regenerating protocol bindings produced identical file hashes.
+- Static review found no obsolete runtime authentication marker/parser. The only production raw subscription-source constructors are inside the shared credential owner. Server key-update entry points obtain the owner's facade through `cfgSvc.Secrets()`.
+
+Task-local temporary probes were removed. Unrelated pre-existing color/render probe files were left untouched. The planned implementation is complete, subject to the live-account and partial-stream limitations above. No merge, push, install, or running-agent restart was performed.

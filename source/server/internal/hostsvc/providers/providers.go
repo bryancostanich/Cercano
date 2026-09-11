@@ -22,6 +22,7 @@ import (
 	"cercano/source/server/internal/engine"
 	cfgsvc "cercano/source/server/internal/hostsvc/config"
 	"cercano/source/server/internal/inference"
+	"cercano/source/server/internal/inference/profilechain"
 	"cercano/source/server/internal/inference/resilience"
 	"cercano/source/server/internal/locus"
 	"cercano/source/server/internal/loop"
@@ -63,6 +64,7 @@ type Resolver interface {
 	InstallAbsentCloud(reason string)
 
 	// Cloud returns the raw (unwrapped) cloud LLM provider.
+	Candidates() inference.Tiers
 	Cloud() inference.Provider
 
 	// Open returns the raw (unwrapped) local LLM provider.
@@ -122,10 +124,11 @@ type Resolver interface {
 
 // service is the concrete Resolver implementation.
 type service struct {
-	cfgSvc              cfgsvc.Service
-	cloudLLMProvider    inference.Provider
-	openLLMProvider     inference.Provider
-	openProviderFactory func(cfg.Config) inference.Provider // rebuilds openLLMProvider on runtime change
+	cfgSvc               cfgsvc.Service
+	secondaryLLMProvider inference.Provider
+	cloudLLMProvider     inference.Provider
+	openLLMProvider      inference.Provider
+	openProviderFactory  func(cfg.Config) inference.Provider // rebuilds openLLMProvider on runtime change
 	// openModels resolves the EFFECTIVE open model for a tier on the active
 	// runtime (override-else-catalog-default). A required collaborator,
 	// constructed with config + catalog at startup — never nil in production.
@@ -230,10 +233,9 @@ func (p *service) Main() (inference.Provider, bool, bool, error) {
 	if !dispatch.OpenModelReadyFor(c, p.openModels.ChatModel()) {
 		open = nil
 	}
-	sel, err := inference.Select(mode, inference.RoleMain, inference.Tiers{
-		Cloud: p.cloudLLMProvider,
-		Open:  open,
-	})
+	candidates := p.Candidates()
+	candidates.Open = open
+	sel, err := inference.SelectDestination(mode, c.TaskAssignment(cfg.TaskChat).Destination, candidates)
 	if err != nil {
 		return nil, false, false, err
 	}
@@ -249,42 +251,26 @@ func (p *service) Main() (inference.Provider, bool, bool, error) {
 // ActiveCloudModel) so a profile-model change propagates without restart.
 // Was mainModelFor on Server.
 func (p *service) MainModel(isCloud bool) string {
+	c := p.cfgSvc.Get()
+	a := c.TaskAssignment(cfg.TaskChat)
 	if isCloud {
-		// Main chat is the everyday capability tier; on the cloud side that
-		// resolves through the active profile's vendor cost table (everyday ->
-		// standard), falling back to the profile's own Model when no table is
-		// configured. This keeps main-chat model selection on the same
-		// vendor-keyed path as dispatch — never a raw provider-blind tier slot.
-		if prof, ok := p.cfgSvc.ActiveProfile(); ok {
-			return p.cfgSvc.Get().ModelProfiles.ResolveCloudModelForTier(prof, cfg.TierEveryday)
+		name, _ := c.DestinationProfiles(a.Destination)
+		if prof, ok := c.Profile(name); ok {
+			return c.ModelProfiles.ResolveCloudModelForTier(prof, a.Quality.CapabilityTier())
 		}
-		return p.ActiveCloudModel()
+		return ""
 	}
-	return p.openModels.ChatModel()
+	if p.openModels == nil {
+		return ""
+	}
+	return p.openModels.Model(a.Quality.CapabilityTier())
 }
 
-// PrimaryModel returns the model the context meter measures against: the
-// locus route's primary serving model. cloud_only/cloud_primary → the active
-// cloud model (falling back to the open model when no cloud is configured);
-// open_primary/open_only → the open model.
-// Was primaryModel on Server.
 func (p *service) PrimaryModel() string {
-	cfgSnap := p.cfgSvc.Get()
-	switch cfgSnap.LocusMode {
-	case "cloud_only", "cloud_primary":
-		// Measure against the model main chat actually uses: the everyday tier
-		// resolved through the active profile's vendor cost table, so the meter
-		// tracks the served model rather than the profile's bare default.
-		if prof, ok := p.cfgSvc.ActiveProfile(); ok {
-			if m := cfgSnap.ModelProfiles.ResolveCloudModelForTier(prof, cfg.TierEveryday); m != "" {
-				return m
-			}
-		}
-		if m := p.ActiveCloudModel(); m != "" {
-			return m
-		}
-	}
-	return p.openModels.ChatModel()
+	c := p.cfgSvc.Get()
+	a := c.TaskAssignment(cfg.TaskChat)
+	cloud := a.Destination != cfg.DestinationLocal && c.LocusMode != "open_only" && (a.Destination == cfg.DestinationSecondary || c.LocusMode != "open_primary")
+	return p.MainModel(cloud)
 }
 
 // Rebuild re-derives providers from current config.
@@ -326,66 +312,48 @@ func (p *service) installAbsentCloud(reason string) {
 // provider wiring; this window is the documented trade-off of the extraction.
 func (p *service) rebuildCloud() error {
 	c := p.cfgSvc.Get()
-	var prof cfg.CloudProfile
-	found := false
-	for _, pp := range c.CloudProfiles {
-		if pp.Name == c.ActiveCloudProfile {
-			prof = pp
-			found = true
-			break
-		}
-	}
-	if !found {
-		p.installAbsentCloud("no active cloud profile")
-		return fmt.Errorf("no active cloud profile")
-	}
-	st := p.cfgSvc.Secrets()
-	key := ""
-	if st != nil {
-		if k, err := st.Get(prof.Name); err == nil {
-			key = k
-		}
-	}
-	// If neither a key nor a proxy BaseURL is present the profile cannot
-	// authenticate — install the absent sentinel rather than wiring a dead
-	// provider. Carve-outs: a proxy BaseURL (Meridian) handles auth with an
-	// empty key; and bedrock authenticates via the AWS credential chain, so it
-	// legitimately has no keychain key (its failure mode is a missing region).
-	if key == "" && prof.BaseURL == "" && prof.Flavor != cloudfactory.FlavorBedrock {
-		p.installAbsentCloud("no API key for profile " + prof.Name)
-		return fmt.Errorf("no API key for profile %s", prof.Name)
-	}
-	cloudOpts := cloudfactory.Options{ModelSupportsVision: p.modelSupportsVision}
-	if prof.Flavor == cloudfactory.FlavorResponses && prof.Route == cloudfactory.RouteChatGPT {
-		// ChatGPT subscription: authenticate via a refreshing token source over
-		// the keychain (the profile's key slot holds the token JSON), not a
-		// static API key.
-		cloudOpts.TokenSource = chatgptauth.NewSource(st, prof.Name, chatgptauth.Flow{})
-	}
-	if prof.Flavor == cloudfactory.FlavorMessages && prof.Route == cloudfactory.RouteSubscription {
-		// Claude subscription: same shape as ChatGPT — a refreshing token
-		// source over the keychain, not a static API key.
-		cloudOpts.AnthropicTokenSource = anthropicauth.NewSource(st, prof.Name, anthropicauth.Flow{})
-	}
-	prof.Model = c.ModelProfiles.ResolveCloudModelForTier(prof, cfg.TierEveryday)
-	prov, err := cloudfactory.BuildCloudProvider(prof, key, cloudOpts)
+	p.secondaryLLMProvider, _ = profilechain.Build(c, cfg.DestinationSecondary, p.buildProfile)
+	provider, err := profilechain.Build(c, cfg.DestinationPrimary, p.buildProfile)
 	if err != nil {
 		p.installAbsentCloud(err.Error())
 		return err
 	}
-	// The resilience engine wraps every cloud primary — with the backup when
-	// one is configured and buildable, without one otherwise (the class-driven
-	// busy retry and narration apply either way). Everything downstream
-	// (native loop, router, coordinator) sees one provider.
-	prov = p.wrapResilience(prov, prof.Name, c)
-	p.SetCloudLLMProvider(prov)
-	mp := agent.InferenceTurnRunner(prov, prof.Model)
+	p.SetCloudLLMProvider(provider)
+	model := p.MainModel(true)
+	mp := agent.InferenceTurnRunner(provider, model)
 	p.router.SetCloudProvider(mp)
 	if p.coordinator != nil {
 		p.coordinator.SetCloudProvider(mp)
 	}
-	p.cfgSvc.SetCloudModel(prof.Model) // keep CloudModel reporting consistent
+	p.cfgSvc.SetCloudModel(model)
 	return nil
+}
+
+func (p *service) buildProfile(prof cfg.CloudProfile) (inference.Provider, error) {
+	st := p.cfgSvc.Secrets()
+	key := ""
+	if st != nil {
+		key, _ = st.Get(prof.Name)
+	}
+	if key == "" && prof.BaseURL == "" && prof.Flavor != cloudfactory.FlavorBedrock {
+		return nil, fmt.Errorf("no API key for profile %s", prof.Name)
+	}
+	opts := cloudfactory.Options{ModelSupportsVision: p.modelSupportsVision}
+	if prof.Flavor == cloudfactory.FlavorResponses && prof.Route == cloudfactory.RouteChatGPT {
+		opts.TokenSource = chatgptauth.NewSource(st, prof.Name, chatgptauth.Flow{})
+	}
+	if prof.Flavor == cloudfactory.FlavorMessages && prof.Route == cloudfactory.RouteSubscription {
+		opts.AnthropicTokenSource = anthropicauth.NewSource(st, prof.Name, anthropicauth.Flow{})
+	}
+	return cloudfactory.BuildCloudProvider(prof, key, opts)
+}
+
+func (p *service) Candidates() inference.Tiers {
+	c := p.cfgSvc.Get()
+	return inference.Tiers{Cloud: p.cloudLLMProvider, Open: p.openLLMProvider, Destinations: map[cfg.Destination]inference.Candidate{
+		cfg.DestinationPrimary:   {Provider: p.cloudLLMProvider, Profile: c.ActiveCloudProfile, IsCloud: true},
+		cfg.DestinationSecondary: {Provider: p.secondaryLLMProvider, Profile: c.SecondaryCloudProfile, IsCloud: true},
+	}}
 }
 
 // wrapResilience wraps the freshly built active-profile provider in the

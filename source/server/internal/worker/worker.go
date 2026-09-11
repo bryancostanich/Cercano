@@ -16,6 +16,7 @@ import (
 	"cercano/source/server/internal/hostsvc/permissions"
 	providerssvc "cercano/source/server/internal/hostsvc/providers"
 	"cercano/source/server/internal/inference"
+	"cercano/source/server/internal/inference/profilechain"
 	"cercano/source/server/internal/inference/resilience"
 	"cercano/source/server/internal/llm"
 	ollamallm "cercano/source/server/internal/llm/ollama"
@@ -305,11 +306,21 @@ func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, cr
 	ctxLoader := projectctx.NewLoader()
 	engine := toolstack.NewEngine(toolstack.EngineDeps{
 		Providers: func() inference.Tiers {
-			return inference.Tiers{Cloud: provSvc.Cloud(), Open: provSvc.Open()}
+			return provSvc.Candidates()
 		},
-		LocusMode: func() locus.Mode { m, _ := locus.ParseMode(cfg.LocusMode); return m },
-		CtxLoader: ctxLoader,
-		ModelFor:  workerDispatchModelFor(cfg),
+		LocusMode:      func() locus.Mode { m, _ := locus.ParseMode(cfg.LocusMode); return m },
+		CtxLoader:      ctxLoader,
+		ModelFor:       workerDispatchModelFor(cfg),
+		TaskAssignment: cfg.TaskAssignment,
+		DestinationModelFor: func(sel inference.Selection, tier pkgcfg.Tier) string {
+			if !sel.IsCloud {
+				return openTierModel(cfg, tier)
+			}
+			if p, ok := cfg.Profile(sel.Profile); ok {
+				return cfg.ModelProfiles.ResolveCloudModelForTier(p, tier)
+			}
+			return ""
+		},
 	})
 
 	// Build the shared vision-as-tool store + service, mirroring the host. Local
@@ -405,9 +416,10 @@ func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, cr
 // It holds pre-built cloud + open providers and delegates model selection to
 // the config service.
 type workerResolver struct {
-	cloudProv inference.Provider
-	openProv  inference.Provider
-	cfgSvc    cfgsvc.Service
+	secondaryProv inference.Provider
+	cloudProv     inference.Provider
+	openProv      inference.Provider
+	cfgSvc        cfgsvc.Service
 }
 
 // profileByName selects a cloud profile by name, mirroring
@@ -426,60 +438,27 @@ func buildWorkerProviders(ctx context.Context, cfg pkgcfg.Config, credSource cre
 	cfgService := cfgsvc.New("", cfg, secrets.NewMemory())
 	r := &workerResolver{cfgSvc: cfgService}
 
-	// Build cloud provider from the ACTIVE profile, selected BY NAME (mirroring
-	// the host's rebuildCloud / ActiveProfile — the active profile is not
-	// necessarily CloudProfiles[0]). Selecting [0] here builds the wrong
-	// provider (route/flavor/credential-profile) whenever the active profile
-	// isn't first, while the worker's own model resolution correctly uses the
-	// named active profile — a silent worker/in-process divergence.
-	if prof, ok := profileByName(cfg.CloudProfiles, cfg.ActiveCloudProfile); ok {
-		var prov inference.Provider
-		var buildErr error
-
+	build := func(prof pkgcfg.CloudProfile) (inference.Provider, error) {
+		opts := cloudfactory.Options{ModelSupportsVision: modelSupportsVision}
 		if prof.Flavor == cloudfactory.FlavorResponses && prof.Route == cloudfactory.RouteChatGPT {
-			// ChatGPT subscription: use a stream-backed token source so the host
-			// owns refresh and OAuth — the worker never holds the credential.
-			ts := &streamTokenSource{creds: credSource, profileName: prof.Name}
-			prov, buildErr = cloudfactory.BuildCloudProvider(prof, "", cloudfactory.Options{TokenSource: ts, ModelSupportsVision: modelSupportsVision})
-		} else if prof.Flavor == cloudfactory.FlavorMessages && prof.Route == cloudfactory.RouteSubscription {
-			// Anthropic subscription has the same worker/host split as ChatGPT, but
-			// its token source only returns the bearer token (no account id).
-			ts := &anthropicStreamTokenSource{creds: credSource, profileName: prof.Name}
-			prov, buildErr = cloudfactory.BuildCloudProvider(prof, "", cloudfactory.Options{AnthropicTokenSource: ts, ModelSupportsVision: modelSupportsVision})
-		} else {
-			// Static-key route: fetch the key via the stream. A fetch FAILURE is
-			// treated as an EMPTY key, NOT a skip — mirror the host's rebuildCloud
-			// carve-out: a profile with no key can still authenticate when it has a
-			// proxy BaseURL (Meridian handles auth) or is bedrock (AWS credential
-			// chain). Only when it has NONE of those is cloud truly unauthable —
-			// then leave it unbuilt (the turn degrades to the open provider). Do
-			// NOT touch r.openProv here — it is built separately below.
-			key := ""
-			if k, _, err := credSource.Fetch(ctx, prof.Name); err == nil {
-				key = k
-			}
-			if key == "" && prof.BaseURL == "" && prof.Flavor != cloudfactory.FlavorBedrock {
-				log.Printf("[worker] no credential and no proxy BaseURL for profile %q; continuing without cloud", prof.Name)
-			} else {
-				prov, buildErr = cloudfactory.BuildCloudProvider(prof, key, cloudfactory.Options{ModelSupportsVision: modelSupportsVision})
-			}
+			opts.TokenSource = &streamTokenSource{creds: credSource, profileName: prof.Name}
+			return cloudfactory.BuildCloudProvider(prof, "", opts)
 		}
-		if buildErr != nil {
-			log.Printf("[worker] cloud provider build failed: %v; continuing without cloud", buildErr)
-		} else if prov != nil {
-			// Only wrap a REAL primary. If the primary was skipped (unauthable) or
-			// BuildCloudProvider returned a nil provider, leave cloud unset. Wrapping
-			// a nil primary yields a composite whose Name() nil-derefs the
-			// moment inference.Select probes it (p.Cloud != nil is true for a typed-nil
-			// interface) — the production panic this guards against.
-			//
-			// The resilience engine wraps every worker cloud primary, mirroring
-			// providers.wrapResilience; the backup credential is fetched via the
-			// stream credential proxy, keyed by the backup profile name.
-			r.cloudProv = wrapWorkerResilience(ctx, prov, prof.Name, cfg, credSource, modelSupportsVision)
+		if prof.Flavor == cloudfactory.FlavorMessages && prof.Route == cloudfactory.RouteSubscription {
+			opts.AnthropicTokenSource = &anthropicStreamTokenSource{creds: credSource, profileName: prof.Name}
+			return cloudfactory.BuildCloudProvider(prof, "", opts)
 		}
+		key := ""
+		if credSource != nil {
+			key, _, _ = credSource.Fetch(ctx, prof.Name)
+		}
+		if key == "" && prof.BaseURL == "" && prof.Flavor != cloudfactory.FlavorBedrock {
+			return nil, fmt.Errorf("no credential for profile %q", prof.Name)
+		}
+		return cloudfactory.BuildCloudProvider(prof, key, opts)
 	}
-	// No active profile → cloudProv remains nil.
+	r.cloudProv, _ = profilechain.Build(cfg, pkgcfg.DestinationPrimary, build)
+	r.secondaryProv, _ = profilechain.Build(cfg, pkgcfg.DestinationSecondary, build)
 
 	// Build the open provider, mirroring the host's openProviderFor: when the
 	// open runtime is llama-server the worker has no local access to it (the
@@ -652,47 +631,39 @@ func (r *workerResolver) Main() (inference.Provider, bool, bool, error) {
 	if !dispatch.OpenModelReadyFor(cfg, openTierModel(cfg, pkgcfg.TierEveryday)) {
 		open = nil
 	}
-	sel, err := inference.Select(mode, inference.RoleMain, inference.Tiers{
-		Cloud: r.cloudProv,
-		Open:  open,
-	})
+	candidates := r.Candidates()
+	candidates.Open = open
+	sel, err := inference.SelectDestination(mode, cfg.TaskAssignment(pkgcfg.TaskChat).Destination, candidates)
 	if err != nil {
 		return nil, false, false, err
 	}
 	return sel.Provider, sel.IsCloud, sel.FellBack, nil
 }
 
+func (r *workerResolver) Candidates() inference.Tiers {
+	c := r.cfgSvc.Get()
+	return inference.Tiers{Cloud: r.cloudProv, Open: r.openProv, Destinations: map[pkgcfg.Destination]inference.Candidate{
+		pkgcfg.DestinationPrimary:   {Provider: r.cloudProv, Profile: c.ActiveCloudProfile, IsCloud: true},
+		pkgcfg.DestinationSecondary: {Provider: r.secondaryProv, Profile: c.SecondaryCloudProfile, IsCloud: true},
+	}}
+}
 func (r *workerResolver) MainModel(isCloud bool) string {
 	c := r.cfgSvc.Get()
+	a := c.TaskAssignment(pkgcfg.TaskChat)
 	if isCloud {
-		// Mirror the host: resolve the everyday tier through the active profile's
-		// vendor cost table, falling back to ActiveCloudModel when no active
-		// profile is configured.
-		if prof, ok := r.cfgSvc.ActiveProfile(); ok {
-			return r.cfgSvc.Get().ModelProfiles.ResolveCloudModelForTier(prof, pkgcfg.TierEveryday)
+		name, _ := c.DestinationProfiles(a.Destination)
+		if p, ok := c.Profile(name); ok {
+			return c.ModelProfiles.ResolveCloudModelForTier(p, a.Quality.CapabilityTier())
 		}
-		return r.ActiveCloudModel()
+		return ""
 	}
-	return openTierModel(c, pkgcfg.TierEveryday)
+	return openTierModel(c, a.Quality.CapabilityTier())
 }
-
-// PrimaryModel mirrors the host: for cloud-primary locus modes it resolves the
-// everyday tier through the active profile's vendor cost table (falling back to
-// ActiveCloudModel), otherwise the open model.
 func (r *workerResolver) PrimaryModel() string {
 	c := r.cfgSvc.Get()
-	switch c.LocusMode {
-	case "cloud_only", "cloud_primary":
-		if prof, ok := r.cfgSvc.ActiveProfile(); ok {
-			if m := c.ModelProfiles.ResolveCloudModelForTier(prof, pkgcfg.TierEveryday); m != "" {
-				return m
-			}
-		}
-		if m := r.ActiveCloudModel(); m != "" {
-			return m
-		}
-	}
-	return openTierModel(c, pkgcfg.TierEveryday)
+	a := c.TaskAssignment(pkgcfg.TaskChat)
+	cloud := a.Destination != pkgcfg.DestinationLocal && c.LocusMode != "open_only" && (a.Destination == pkgcfg.DestinationSecondary || c.LocusMode != "open_primary")
+	return r.MainModel(cloud)
 }
 func (r *workerResolver) Rebuild() error              { return nil }
 func (r *workerResolver) InstallAbsentCloud(_ string) { r.cloudProv = nil }

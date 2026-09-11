@@ -727,14 +727,16 @@ func startGRPCServer(cfg config.Config, bindAddr string, events *crashlog.Writer
 	// own per-dispatch usage.Wrap doesn't double-count.
 	engineDeps := toolstack.EngineDeps{
 		Providers: func() inference.Tiers {
-			return inference.Tiers{Cloud: srv.CloudLLMProvider(), Open: srv.OpenLLMProvider()}
+			return srv.DispatchCandidates()
 		},
 		LocusMode: func() locus.Mode { m, _ := locus.ParseMode(srv.LocusMode()); return m },
 		CtxLoader: ctxLoader,
 		// Model resolution is tier-aware and live: DispatchModelFor reads the
 		// taxonomy under the config lock per dispatch, so runtime tier/profile
 		// changes are honored and no startup-captured cfg value can go stale.
-		ModelFor: srv.DispatchModelFor,
+		ModelFor:            srv.DispatchModelFor,
+		TaskAssignment:      srv.TaskAssignment,
+		DestinationModelFor: srv.DestinationModelFor,
 	}
 	// Activate the usage sink so capabilities that set RecordUsage=true (the coproc
 	// caps) emit one event per dispatch. processCoproc/research/document leave

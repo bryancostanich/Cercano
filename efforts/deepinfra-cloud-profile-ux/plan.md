@@ -40,7 +40,7 @@ Objective: add actual destination selection, not a backup-as-Secondary shortcut.
 - [ ] Make omitted explicit-dispatch difficulty consume the saved Premium default; preserve explicit light/standard/deep and unrecognized-value baseline. Do not globally redirect all RoleCoproc callers.
 - [ ] Enforce hard open_only/cloud_only restrictions and no automatic Secondary-to-Local fallback across normal routing, startup fallback, and error recovery. An unavailable Secondary must not silently become Primary.
 - [ ] Preserve existing independent Local runtime management; no GPU eviction or hardware inference from profile names. Keep cross-destination degradation separate from provider failover.
-- [ ] Implement only continuity fixes supported by Phase 1 probes. Test busy/quota failures, absent/exhausted backups, cancellation, and partial streaming without duplicated output or tool effects. Stop for review if safe continuation requires a new product policy.
+- [-] Implement only continuity fixes supported by Phase 1 probes. Test busy/quota failures, absent/exhausted backups, cancellation, and partial streaming without duplicated output or tool effects. Stop for review if safe continuation requires a new product policy.
 - [ ] Run a four-profile fixture proving Primary failure invokes only Primary backup, dispatch invokes Secondary, and Secondary failure invokes only Secondary backup; assert forbidden providers receive zero calls.
 - [ ] Run focused locus, inference/resilience, dispatch, provider, and dispatch-capability tests; checkpoint the routing foundation.
 

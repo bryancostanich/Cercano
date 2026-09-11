@@ -815,3 +815,12 @@ func TestCore_ToolLoopFailureLogsContextAndRequestBudgets(t *testing.T) {
 		t.Fatalf("failure log included prompt text: %s", logData)
 	}
 }
+
+func (f *fakeResolver) Candidates() inference.Tiers { return inference.Tiers{} }
+
+func (c *fakeConfig) SetDestinationProfiles(d config.Destination, preferred, backup string) error {
+	return c.cfg.SetDestinationProfiles(d, preferred, backup)
+}
+func (c *fakeConfig) SetTaskAssignment(task config.Task, a *config.TaskAssignment) error {
+	return c.cfg.SetTaskAssignment(task, a)
+}

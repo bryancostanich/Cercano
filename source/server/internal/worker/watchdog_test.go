@@ -157,3 +157,5 @@ func TestBuildWorkerWatchdog_EnabledAllowsWhenNoViolation(t *testing.T) {
 		t.Fatalf("no-violation should ALLOW, got %q", dec.Action)
 	}
 }
+
+func (r *openResolver) Candidates() inference.Tiers { return inference.Tiers{} }

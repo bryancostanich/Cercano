@@ -36,6 +36,7 @@ const (
 type Spec struct {
 	Mode                Mode
 	Role                Role
+	RoutingTask         config.Task // explicit task routing; empty preserves legacy role policy
 	Prompt              string
 	System              string
 	WantsProjectContext bool
@@ -117,12 +118,14 @@ type Result struct {
 
 // Engine routes dispatch calls to the appropriate provider.
 type Engine struct {
-	providersFn   func() inference.Tiers
-	modeFn        func() locus.Mode
-	ctxLoader     *projectctx.Loader
-	modelFor      func(isCloud bool, tier config.Tier) string
-	usageSink     func(usage.Usage)
-	agenticRunner AgenticRunner
+	providersFn         func() inference.Tiers
+	modeFn              func() locus.Mode
+	ctxLoader           *projectctx.Loader
+	modelFor            func(isCloud bool, tier config.Tier) string
+	taskAssignment      func(config.Task) config.TaskAssignment
+	destinationModelFor func(inference.Selection, config.Tier) string
+	usageSink           func(usage.Usage)
+	agenticRunner       AgenticRunner
 }
 
 // NewEngine constructs an Engine. ctx may be nil (project context injection skipped).
@@ -157,23 +160,11 @@ func (e *Engine) SetModelFor(fn func(isCloud bool, tier config.Tier) string) {
 // rules so callers that must budget before constructing a prompt can stay in
 // sync with execution.
 func (e *Engine) Target(spec Spec) (modelbudget.Target, error) {
-	sel, err := inference.Select(e.modeFn(), spec.Role, e.providersFn())
+	sel, tier, model, err := e.resolve(spec, e.modeFn(), e.providersFn())
 	if err != nil {
 		return modelbudget.Target{}, err
 	}
-	tier := spec.Tier
-	if tier == "" {
-		tier = config.TierEveryday
-		if spec.Role == RoleCoproc {
-			tier = config.TierFastLightText
-		}
-	}
-	model := ""
-	if e.modelFor != nil {
-		model = e.modelFor(sel.IsCloud, tier)
-	}
 	if spec.ModelOverride != "" {
-		model = spec.ModelOverride
 		tier = ""
 	}
 	return modelbudget.Target{
@@ -188,32 +179,12 @@ func (e *Engine) Target(spec Spec) (modelbudget.Target, error) {
 func (e *Engine) Dispatch(ctx context.Context, spec Spec) (Result, error) {
 	// 1. Select provider via locus (providers resolved fresh each dispatch).
 	mode, candidates := e.modeFn(), e.providersFn()
-	sel, err := inference.Select(mode, spec.Role, candidates)
+	sel, tier, model, err := e.resolve(spec, mode, candidates)
 	if err != nil {
 		return Result{}, err
 	}
-
-	// 2. Resolve model name: taxonomy tier first (role default when unset),
-	// then the caller's explicit override wins.
-	tier := spec.Tier
-	if tier == "" {
-		tier = config.TierEveryday
-		if spec.Role == RoleCoproc {
-			tier = config.TierFastLightText
-		}
-	}
-	// Normalize the resolved tier back onto the spec so downstream consumers
-	// (the agentic runner's ToolLoopInput, the one-shot ChatRequest) carry it
-	// as routing metadata — the cloud failover composite re-resolves it in
-	// the backup vendor's namespace. An explicit ModelOverride clears it: the
-	// caller pinned an exact model, not a tier.
 	spec.Tier = tier
-	model := ""
-	if e.modelFor != nil {
-		model = e.modelFor(sel.IsCloud, tier)
-	}
 	if spec.ModelOverride != "" {
-		model = spec.ModelOverride
 		spec.Tier = ""
 	}
 
@@ -317,4 +288,51 @@ func avoidedTokens(tokens int, isCloud bool) int {
 		return 0
 	}
 	return tokens
+}
+
+func (e *Engine) SetTaskAssignment(fn func(config.Task) config.TaskAssignment) { e.taskAssignment = fn }
+func (e *Engine) SetDestinationModelFor(fn func(inference.Selection, config.Tier) string) {
+	e.destinationModelFor = fn
+}
+
+func (e *Engine) resolve(spec Spec, mode locus.Mode, candidates inference.Tiers) (inference.Selection, config.Tier, string, error) {
+	var sel inference.Selection
+	var err error
+	tier := spec.Tier
+	if spec.RoutingTask != "" {
+		assignment := (config.Config{}).TaskAssignment(spec.RoutingTask)
+		if e.taskAssignment != nil {
+			assignment = e.taskAssignment(spec.RoutingTask)
+		}
+		if tier == "" {
+			tier = assignment.Quality.CapabilityTier()
+		}
+		sel, err = inference.SelectDestination(mode, assignment.Destination, candidates)
+	} else {
+		sel, err = inference.Select(mode, spec.Role, candidates)
+		if tier == "" {
+			tier = config.TierEveryday
+			if spec.Role == RoleCoproc {
+				tier = config.TierFastLightText
+			}
+		}
+	}
+	if err != nil {
+		return sel, tier, "", err
+	}
+	model := ""
+	if spec.RoutingTask != "" && e.destinationModelFor != nil {
+		model = e.destinationModelFor(sel, tier)
+	} else if spec.RoutingTask != "" && sel.Destination == config.DestinationSecondary {
+		return sel, tier, "", errors.New("dispatch: Secondary model resolver unavailable")
+	} else if e.modelFor != nil {
+		model = e.modelFor(sel.IsCloud, tier)
+	}
+	if spec.ModelOverride != "" {
+		model = spec.ModelOverride
+	}
+	if spec.RoutingTask != "" && model == "" {
+		return sel, tier, "", errors.New("dispatch: selected task model unavailable")
+	}
+	return sel, tier, model, nil
 }

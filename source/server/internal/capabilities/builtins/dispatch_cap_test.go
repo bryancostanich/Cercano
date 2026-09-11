@@ -63,8 +63,8 @@ func TestDispatch_Execute_ForwardsSpec(t *testing.T) {
 		t.Errorf("Spec.Role = %v, want RoleCoproc", captured.Role)
 	}
 	// No "tier" arg -> lightest tier by default, so grunt work offloads cheaply.
-	if captured.Tier != config.TierFastLight {
-		t.Errorf("Spec.Tier = %v, want TierFastLight (default)", captured.Tier)
+	if captured.Tier != "" || captured.RoutingTask != config.TaskDispatch {
+		t.Errorf("Spec.Tier = %v, want empty tier with explicit dispatch task (saved default)", captured.Tier)
 	}
 	if captured.Emit == nil {
 		t.Fatal("Spec.Emit is nil; dispatch progress would not reach the parent turn")
@@ -104,7 +104,7 @@ func TestDispatch_Execute_IncludesRouteHeader(t *testing.T) {
 				Text:         "done",
 				Model:        "qwen3-30b-a3b-instruct-2507",
 				Provider:     "mistralrs",
-				Tier:         string(spec.Tier),
+				Tier:         string(config.TierMostCapable),
 				IsCloud:      false,
 				GrantedTools: []string{"Read"},
 			}, nil
@@ -117,7 +117,7 @@ func TestDispatch_Execute_IncludesRouteHeader(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}
-	want := "[sub-agent route: open provider=mistralrs model=qwen3-30b-a3b-instruct-2507 tier=fast_light]"
+	want := "[sub-agent route: open provider=mistralrs model=qwen3-30b-a3b-instruct-2507 tier=most_capable]"
 	if !strings.Contains(res.Text, want) {
 		t.Fatalf("result missing route header %q:\n%s", want, res.Text)
 	}
@@ -133,7 +133,7 @@ func TestDispatch_Execute_EmptySubagentTextStillIncludesDiagnostics(t *testing.T
 				Text:         "",
 				Model:        "local-open-model",
 				Provider:     "llama_server",
-				Tier:         string(spec.Tier),
+				Tier:         string(config.TierMostCapable),
 				IsCloud:      false,
 				GrantedTools: []string{"Read", "Grep"},
 			}, nil
@@ -149,7 +149,7 @@ func TestDispatch_Execute_EmptySubagentTextStillIncludesDiagnostics(t *testing.T
 	if strings.TrimSpace(res.Text) == "" {
 		t.Fatal("empty sub-agent body must still produce diagnostic headers, got blank result")
 	}
-	if !strings.Contains(res.Text, "[sub-agent route: open provider=llama_server model=local-open-model tier=fast_light]") {
+	if !strings.Contains(res.Text, "[sub-agent route: open provider=llama_server model=local-open-model tier=most_capable]") {
 		t.Fatalf("missing route header for empty sub-agent body:\n%s", res.Text)
 	}
 	if !strings.Contains(res.Text, "[sub-agent tools: Read, Grep]") {
@@ -164,7 +164,7 @@ func TestDispatch_Execute_SuspiciousWarningIsPrepended(t *testing.T) {
 				Text:            "claimed done",
 				Model:           "local-open-model",
 				Provider:        "llama_server",
-				Tier:            string(spec.Tier),
+				Tier:            string(config.TierMostCapable),
 				GrantedTools:    []string{"Edit"},
 				Suspicious:      true,
 				SuspicionReason: "granted mutating tools but called none",
@@ -178,7 +178,7 @@ func TestDispatch_Execute_SuspiciousWarningIsPrepended(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}
-	wantPrefix := "[sub-agent warning: granted mutating tools but called none]\n[sub-agent route: open provider=llama_server model=local-open-model tier=fast_light]"
+	wantPrefix := "[sub-agent warning: granted mutating tools but called none]\n[sub-agent route: open provider=llama_server model=local-open-model tier=most_capable]"
 	if !strings.HasPrefix(res.Text, wantPrefix) {
 		t.Fatalf("warning should be first so parent does not trust the body blindly. got:\n%s\nwant prefix:\n%s", res.Text, wantPrefix)
 	}
@@ -197,7 +197,7 @@ func TestDispatch_Execute_TierKnob(t *testing.T) {
 		{"light", config.TierFastLight},
 		{"standard", config.TierEveryday},
 		{"deep", config.TierMostCapable},
-		{"", config.TierFastLight},         // omitted -> lightest
+		{"", ""},                           // omitted -> lightest
 		{"nonsense", config.TierFastLight}, // unrecognized -> lightest
 		{"DEEP", config.TierMostCapable},   // case-insensitive
 	}

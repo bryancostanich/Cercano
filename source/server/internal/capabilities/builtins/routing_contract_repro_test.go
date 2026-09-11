@@ -10,7 +10,7 @@ func TestRoutingContractDispatchDefaultQuality(t *testing.T) {
 		input string
 		want  config.Tier
 	}{
-		{"", config.TierMostCapable},
+		{"", ""},
 		{"light", config.TierFastLight},
 		{"standard", config.TierEveryday},
 		{"deep", config.TierMostCapable},

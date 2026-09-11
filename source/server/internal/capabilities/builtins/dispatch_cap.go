@@ -60,6 +60,8 @@ type dispatchArgs struct {
 // delegated grunt work offloads off the frontier tier by default.
 func tierForDispatch(s string) config.Tier {
 	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "":
+		return "" // The engine resolves the saved task quality.
 	case "deep":
 		return config.TierMostCapable
 	case "standard":
@@ -101,6 +103,7 @@ func (dispatchCap) Execute(ctx context.Context, call *capabilities.Call) (*capab
 		// thread (cloud under cloud_primary), which defeated the whole point of
 		// delegating recon off the frontier tier.
 		Role:           dispatch.RoleCoproc,
+		RoutingTask:    config.TaskDispatch,
 		Tier:           tierForDispatch(a.Tier),
 		Task:           a.Task,
 		Tools:          a.Tools,

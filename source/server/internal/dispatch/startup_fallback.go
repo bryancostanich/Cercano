@@ -43,6 +43,9 @@ func (p *startupFallback) Capabilities() inference.Capabilities {
 }
 
 func (e *Engine) startupFallback(sel inference.Selection, candidates inference.Tiers, mode locus.Mode, spec Spec, tier config.Tier) inference.Selection {
+	if spec.RoutingTask != "" {
+		return sel
+	}
 	policy := mode.Main()
 	if spec.Role == RoleCoproc {
 		policy = mode.Coproc()

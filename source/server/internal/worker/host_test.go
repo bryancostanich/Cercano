@@ -399,3 +399,5 @@ func TestWorkerRunner_ContextCancel(t *testing.T) {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
+
+func (f *echoResolver) Candidates() inference.Tiers { return inference.Tiers{} }

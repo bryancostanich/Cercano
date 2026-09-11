@@ -69,3 +69,21 @@ Implemented typed destination/task assignments, independently validated Primary 
 A new persistence probe failed because Save stripped values through the caller's shared profile slice. Save now deep-clones before normalization, and profile override/task maps are independently cloned throughout config ownership. Host config removal clears matching bindings without substitution.
 
 Verification: `go test ./pkg/config ./internal/hostsvc/config -count=1` PASS (0.526s/0.394s), `go build ./...` from source/server PASS. Existing tests asserting legacy pin precedence were updated to the approved retirement contract. These results do not claim that provider routing, transport, or CLI integration is complete; their target regressions remain outstanding.
+
+## Destination routing foundation and safety-review gate
+
+Added explicit task routing alongside legacy role routing, destination/profile-aware selections, shared Target/Dispatch resolution, independent profile-chain construction for host/worker, and saved chat quality selection. Four-provider synthetic dispatch tests cover independent preferred/backup chains with either backup absent, quality-preserving failover, missing Secondary, open-only prohibition, and unchanged non-dispatch co-processor routing. Omitted dispatch difficulty now remains unset at the capability boundary so the engine consumes the saved assignment. Host and worker construction share profilechain.Build; complete transport/evidence/UI integration is still pending.
+
+Passing verification before the safety stop:
+`go test ./internal/dispatch ./internal/inference/... ./internal/capabilities/builtins ./internal/hostsvc/providers ./pkg/config ./internal/hostsvc/config -count=1`
+All listed test packages passed; profilechain itself has no direct test file yet. `go build ./...` from source/server also passed. No full worker/server/runner suite or CLI verification is claimed for this intermediate foundation.
+
+**Safety blocker (autonomous decision 6):** the earlier statement that no new replay policy is required was too broad. It covered only the resilience provider wrapper, not the outer main runner. `internal/runner/core.go` explicitly performs a whole-tool-loop rerun after transient errors, including mid-stream errors after visible output. No production runner retry fix was applied.
+
+`go test ./internal/runner -run TestRoutingContractRunnerDoesNotReplayVisibleOutput -count=1 -v` FAILS with:
+- provider calls=2
+- visible output="visible-prefixvisible-prefix"
+
+The fixture emits message_start, then one text delta, then a network error. The runner emits both prefixes to its event sink. The first draft of the fixture omitted message_start and was correctly rejected by the framing guard; that draft was corrected before drawing the visible-output conclusion. Tool-effect replay risk is inferred from restarting the same tool loop; a dedicated executed-tool reproduction remains required, not claimed verified.
+
+The approved plan requires review before changing this continuity policy. Recommended policy: suppress automatic whole-turn retries and cross-destination fallback once visible output or tool execution has occurred; surface the interruption instead. Resuming safely from a failed iteration would need a separate, substantially broader continuation contract. Phase 3 is blocked at this policy gate. The run is not complete and has not been marked complete.

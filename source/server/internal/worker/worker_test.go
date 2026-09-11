@@ -278,3 +278,5 @@ func TestWorkerServer_RunTurn_NoHalfCloseNoDeadlock(t *testing.T) {
 	}
 	_ = stream.CloseSend() // only now, after the terminal message
 }
+
+func (f *fakeResolver) Candidates() inference.Tiers { return inference.Tiers{} }

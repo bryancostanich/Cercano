@@ -1,6 +1,7 @@
 package server
 
 import (
+	"cercano/source/server/internal/inference"
 	"cercano/source/server/pkg/config"
 )
 
@@ -50,4 +51,19 @@ func (s *Server) watchdogModelFor(wc config.WatchdogConfig) string {
 		return wc.Model
 	}
 	return s.resolveTierModel(config.TierFastLightText)
+}
+
+func (s *Server) DispatchCandidates() inference.Tiers { return s.providerSvc.Candidates() }
+func (s *Server) TaskAssignment(task config.Task) config.TaskAssignment {
+	return s.cfgSvc.Get().TaskAssignment(task)
+}
+func (s *Server) DestinationModelFor(sel inference.Selection, tier config.Tier) string {
+	if !sel.IsCloud {
+		return s.resolveTierModel(tier)
+	}
+	c := s.cfgSvc.Get()
+	if p, ok := c.Profile(sel.Profile); ok {
+		return c.ModelProfiles.ResolveCloudModelForTier(p, tier)
+	}
+	return ""
 }

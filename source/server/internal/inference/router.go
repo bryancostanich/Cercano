@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"cercano/source/server/internal/locus"
+	"cercano/source/server/pkg/config"
 )
 
 // Role selects which locus policy governs provider choice.
@@ -16,16 +17,26 @@ const (
 
 // Tiers holds the candidate inference providers; either may be nil/absent.
 type Tiers struct {
-	Cloud Provider
-	Open  Provider
+	Cloud        Provider
+	Open         Provider
+	Destinations map[config.Destination]Candidate
+}
+
+// Candidate retains logical profile identity separately from physical placement.
+type Candidate struct {
+	Provider Provider
+	Profile  string
+	IsCloud  bool
 }
 
 // Selection is the resolved provider for a unit of work.
 type Selection struct {
-	Provider Provider
-	IsCloud  bool
-	FellBack bool
-	Notice   string
+	Provider    Provider
+	Destination config.Destination
+	Profile     string
+	IsCloud     bool
+	FellBack    bool
+	Notice      string
 }
 
 // Router selects an inference provider from typed tiers under locus policy.
@@ -74,4 +85,39 @@ func (r Router) Select(mode locus.Mode, role Role) (Selection, error) {
 // Select is a convenience wrapper for one-shot callers.
 func Select(mode locus.Mode, role Role, tiers Tiers) (Selection, error) {
 	return Router{Tiers: tiers}.Select(mode, role)
+}
+
+// SelectDestination never treats Primary backup as Secondary. Explicit Secondary
+// has no cross-destination fallback. Primary keeps the established locus policy.
+func SelectDestination(mode locus.Mode, destination config.Destination, tiers Tiers) (Selection, error) {
+	if destination == config.DestinationPrimary {
+		selected, err := Select(mode, RoleMain, tiers)
+		if err != nil {
+			return Selection{}, err
+		}
+		selected.Destination = config.DestinationLocal
+		if selected.IsCloud {
+			selected.Destination = destination
+			if candidate, ok := tiers.Destinations[destination]; ok {
+				selected.Profile = candidate.Profile
+			}
+		}
+		return selected, nil
+	}
+	var candidate Candidate
+	switch destination {
+	case config.DestinationLocal:
+		candidate = Candidate{Provider: tiers.Open}
+	case config.DestinationSecondary:
+		candidate = tiers.Destinations[destination]
+	default:
+		return Selection{}, fmt.Errorf("unknown destination %q", destination)
+	}
+	if candidate.Provider == nil || candidate.Provider.Name() == "NONE" {
+		return Selection{}, fmt.Errorf("destination %s unavailable", destination)
+	}
+	if (mode == locus.OpenOnly && candidate.IsCloud) || (mode == locus.CloudOnly && !candidate.IsCloud) {
+		return Selection{}, fmt.Errorf("locus mode %q prohibits destination %s placement", mode, destination)
+	}
+	return Selection{Provider: candidate.Provider, Destination: destination, Profile: candidate.Profile, IsCloud: candidate.IsCloud}, nil
 }

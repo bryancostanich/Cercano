@@ -121,3 +121,64 @@ Cloud UI now exposes all four bindings with None options, chat/dispatch destinat
 DeepInfra profile discovery was still missing in this actual baseline. It now calls the registered deepinfracatalog Source with a bounded context rather than creating another index. An HTTP fixture test proves eligibility/catalog mapping and stale-on-error reuse after the fixture server closes; no credentials are sent to the public catalog. Other provider discovery remains unchanged and the CLI no longer offers Claude fallback IDs for non-messages providers.
 
 Verification: server/client/routingwire package tests PASS (server 2.415s, client 0.709s, routingwire 0.753s), complete CLI internal/ui and internal/wizard PASS (0.980s/0.232s), server and CLI `go build ./...` PASS. New tests exercise draft isolation, reset/Discard, row and page close confirmation/cancellation, picker cancellation, assignment transport presence/validation, and hosted model exclusion. Existing tests of obsolete immediate-model-save and hosted-browse behavior were updated to the approved replacement contract. Interactive desktop/terminal screenshots and the final all-layer routing fixture are not yet verified.
+
+## Final completion record
+
+The earlier intermediate limitations above are historical. The completed implementation is checkpointed at `156ee09d1fc6` on the existing `feat/cloud-profile-routing` worktree branch; nothing was pushed or merged.
+
+### Ownership correction and execution method
+
+The claim that wizard edits proved another writer was active was unsupported and was withdrawn. The user confirmed sole ownership. The wizard code was reconciled as unfinished work from this run, directly, with no further delegation. The final review tasks in plan.md were reworded to reflect that instruction; no independent reviewer result is claimed.
+
+### Final implementation and direct review findings
+
+- Provider/endpoint-scoped per-attempt metadata now survives streaming collection, worker transport, main-loop accounting, and one-shot/agentic dispatch results. Same model IDs on different endpoints do not exchange context or image evidence. Unknown scoped capacity keeps an explicitly unverified conventional fallback.
+- Invocation overrides retain their fallback quality independently of primary model normalization. Unavailable preferred construction and missing quality slots use only the configured, usable backup; absent or unconfirmed backup image choices receive no image request.
+- Image inspection resolves a confirmed target within Primary's existing image-policy chain. A configured confirmed backup is considered before Local if the preferred image choice is missing or unconfirmed. Cache keys, attachment storage, and tool-free inspection remain unchanged.
+- Credential rotation and removal of referenced backups refresh provider graphs. Activating a different Primary preserves the separately configured backup; self-backup activation is rejected instead of silently swapping identities.
+- A probe caught current configuration labels being paired with previously built provider objects. Complete provider graphs now publish atomically, serialized rebuilds cannot publish an obsolete graph over a newer rebuild, and main/dispatch task assignments remain tied to their selected graph. Concurrent read/rebuild checks pass under the race detector.
+- Complete structural draft presence allows intentional clears without treating omission as a clear. A successfully saved profile with an unavailable provider now returns an availability warning rather than falsely reporting an unsaved draft.
+- Wizard finish no longer writes retired CloudModel. Explicit picker-edit markers survive resume; autofilled recommendations remain inherited. Snapshot/rollback now captures sparse choices and AWS/provider metadata without credentials. Older snapshots leave fields they never captured untouched.
+- The full CLI race suite exposed a pre-existing timing dependency in the scripted golden: only `<1ms` versus `2–3ms` and padding differed. A private tool clock defaults to time.Now in production and is frozen in the scripted fixture. The golden was not regenerated or weakened; 20 repeated race-enabled runs pass.
+- Obsolete separate host/worker failover builders were removed. The shared chain retains resilience event logging with destination/profile identity.
+
+### Final commands and results
+
+From `source/server`:
+
+```sh
+go build -o bin/cercano ./cmd/cercano/
+go vet ./pkg/config ./pkg/agentclient ./internal/llm ./internal/locus ./internal/inference/... ./internal/dispatch ./internal/hostsvc/config ./internal/hostsvc/providers ./internal/hostsvc/tools ./internal/hostsvc/persistence ./internal/server ./internal/worker ./internal/toolstack ./internal/visioninspect ./internal/runner ./internal/requestassembly ./internal/agent ./internal/modelbudget ./internal/routingwire ./internal/usage
+go test -count=1 ./pkg/config ./pkg/agentclient ./internal/llm ./internal/locus ./internal/inference/... ./internal/dispatch ./internal/hostsvc/config ./internal/hostsvc/providers ./internal/hostsvc/tools ./internal/hostsvc/persistence ./internal/server ./internal/worker ./internal/toolstack ./internal/visioninspect ./internal/runner ./internal/requestassembly ./internal/agent ./internal/modelbudget ./internal/routingwire ./internal/usage ./internal/modelmetadata ./internal/modelevidence ./internal/deepinfracatalog ./internal/visionattach
+go test -race ./internal/runner ./internal/inference/... ./internal/dispatch ./internal/worker ./internal/server -count=1
+```
+
+All PASS. The normal test command reports 26 passing packages (worker 20.295s); the race command reports seven passing packages (worker 23.110s, server 11.067s). Build and vet emitted no errors.
+
+From `source/clients/cli`:
+
+```sh
+go build ./...
+go vet ./internal/ui ./internal/wizard
+go test -race -count=1 ./internal/ui ./internal/wizard
+go test -race ./internal/ui -run '^TestScriptedTurnTranscript$' -count=20
+```
+
+All PASS (UI 4.716s, wizard 1.243s, repeated golden 1.695s). Tests include actual loopback gRPC Save/error-retention checks, wizard profile mutation, snapshot YAML round trips, explicit edit-marker resume, picker cancellation, unsaved-navigation confirmation, and Local Models filtering.
+
+### Cross-layer evidence
+
+`TestRoutingSettingsSnapshotWorkerHTTP` covers four synthetic endpoints with all four backup-presence combinations. It applies profile choices and assignments, saves/reloads YAML, round-trips protobuf snapshots, builds the real worker providers, and executes Primary chat and Secondary dispatch through HTTP adapters. Each endpoint checks its own credential, successful backups report their actual profile/model/context, and forbidden calls are counted. The same IDs deliberately have different endpoint capacities, including a smaller Secondary backup.
+
+Related tests cover explicit difficulty and override fallback quality, missing Secondary, legacy co-processor routing, hard locality restrictions, changed/removed backups and credentials, initial preferred unavailability, unknown image capability, confirmed image backup before Local, wire preservation, meter evidence, cancellation/worker crash isolation, and text/tool replay prevention. Existing codec tests cover explicit clears and omission; catalog fixtures verify DeepInfra discovery and stale-on-error reuse.
+
+### Verification limits and preserved boundaries
+
+- No paid inference or live-provider reliability/price benchmark was run.
+- No manual interactive terminal screenshot session was performed. CLI smoke coverage is automated form/transcript and loopback RPC testing; the live user daemon/settings were not changed or replaced.
+- No GPU/runtime eviction or local-model default migration was introduced.
+- General disk-failure transactional persistence semantics and mixed-version worker negotiation were not redesigned. Deploy rebuilt agent/workers together.
+- Successful image-answer cache behavior remains unchanged; a repeated question can reuse the earlier answer after a model selection changes.
+- Review and checkpoints used explicit effort file paths. Unrelated root artifacts and built binaries were not staged. No clean-whole-worktree or remote-publication claim is made.
+
+Final reconciliation: all 59 plan tasks are marked done. The final verification logs were checked again: 26 normal server package pass rows and seven race-enabled server package pass rows, with no failure markers. The dispatch-capability package (`go test -count=1 ./internal/capabilities/builtins`) also passed separately. No code changed during the final status reconciliation; the remaining checkpoint contains only this verification record and plan completion state.

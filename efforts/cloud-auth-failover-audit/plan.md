@@ -11,7 +11,7 @@ Objective: preserve the audit findings as reproducible tests and locate the exac
 - [x] Inspect current branch and user changes through delegated git operations; create an isolated feature worktree from the intended base and copy only the approved effort artifacts as needed.
 - [ ] Confirm the approved spec still matches the current checkout; inspect intervening changes without overwriting user work.
 - [ ] Map direct host, worker, primary, backup, streaming, non-streaming, and outer-tier fallback call paths and their request cancellation owners.
-- [ ] Turn the audit probes into durable regressions that first demonstrate the existing failures.
+- [~] Turn the audit probes into durable regressions that first demonstrate the existing failures.
   - [ ] Capture SDK-wrapped Claude expiration and ChatGPT transient refresh-network errors with their actual current classes.
   - [ ] Count backup and alternate-tier calls to show silent fallback, including no-backup and backup-authentication cases.
   - [ ] Demonstrate provider/profile misrouting, discarded auth confirmations, and missing live continuation.
@@ -23,14 +23,14 @@ Objective: preserve the audit findings as reproducible tests and locate the exac
 
 Objective: represent actionable login failure independently of prose and ordinary provider errors. Files: internal/llm/error.go; internal/llm/anthropic/normalize.go and subscription authorization; internal/llm/responses/client.go and normalization; internal/anthropicauth/source.go and token exchange; internal/chatgptauth/source.go and token exchange; corresponding tests. Tests: source-to-adapter errors through wrapping, missing and expired credentials, rejected refresh, malformed stores, endpoint failures, API-key 401, subscription 401, and permission-denied 403.
 
-- [ ] Introduce a shared typed authentication failure contract carrying non-secret provider, named profile or credential identity, authentication method, and actionable reason; preserve the wrapped cause for safe diagnostics.
-- [ ] Classify known token-endpoint rejection separately from transient transport or service failure using structured endpoint responses where supported.
-- [ ] Preserve actionable expiry/rejection through Anthropic SDK wrapping instead of letting a URL wrapper turn it into a retryable network failure.
-- [ ] Stop converting every ChatGPT token-source error into authentication failure.
-- [ ] Distinguish subscription login from API-key errors and authorization denial; avoid blanket conversion of 403 into login-required.
-- [ ] Bound diagnostic payloads and redact token endpoint responses and sensitive URLs before they reach logs or UI.
-- [ ] Keep ordinary network, overload, and quota retry behavior unchanged and prove it with existing and new tests.
-- [ ] Verify all new classification regressions independently of CLI behavior.
+- [x] Introduce a shared typed authentication failure contract carrying non-secret provider, named profile or credential identity, authentication method, and actionable reason; preserve the wrapped cause for safe diagnostics.
+- [x] Classify known token-endpoint rejection separately from transient transport or service failure using structured endpoint responses where supported.
+- [x] Preserve actionable expiry/rejection through Anthropic SDK wrapping instead of letting a URL wrapper turn it into a retryable network failure.
+- [x] Stop converting every ChatGPT token-source error into authentication failure.
+- [x] Distinguish subscription login from API-key errors and authorization denial; avoid blanket conversion of 403 into login-required.
+- [~] Bound diagnostic payloads and redact token endpoint responses and sensitive URLs before they reach logs or UI.
+- [x] Keep ordinary network, overload, and quota retry behavior unchanged and prove it with existing and new tests.
+- [x] Verify all new classification regressions independently of CLI behavior.
 
 ## Phase 3 — Coordinate credentials and preserve login configuration
 

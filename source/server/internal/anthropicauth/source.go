@@ -2,9 +2,13 @@ package anthropicauth
 
 import (
 	"context"
-	"fmt"
+	"errors"
+	"io/fs"
+	"strings"
 	"sync"
 	"time"
+
+	"cercano/source/server/internal/llm"
 )
 
 // Store is the subset of the secrets store the token source needs. The
@@ -62,25 +66,34 @@ func (s *Source) Token(ctx context.Context) (string, error) {
 
 	raw, err := s.store.Get(s.profile)
 	if err != nil {
-		return "", fmt.Errorf("anthropic token source: load %q: %w", s.profile, err)
+		if errors.Is(err, fs.ErrNotExist) {
+			return "", s.failure(llm.ErrLoginRequired, llm.CredentialMissing, err)
+		}
+		return "", s.failure(llm.ErrCredential, llm.CredentialStore, err)
+	}
+	if strings.TrimSpace(raw) == "" {
+		return "", s.failure(llm.ErrLoginRequired, llm.CredentialMissing, nil)
 	}
 	ts, err := DecodeTokenSet(raw)
 	if err != nil {
-		return "", err
+		return "", s.failure(llm.ErrCredential, llm.CredentialMalformed, err)
+	}
+	if ts.Access == "" {
+		return "", s.failure(llm.ErrCredential, llm.CredentialMalformed, nil)
 	}
 	if !ts.Expired(s.clock()) {
 		return ts.Access, nil
 	}
 	if ts.Refresh == "" {
-		return "", fmt.Errorf("anthropic token source: token expired and no refresh token; sign in again")
+		return "", s.failure(llm.ErrLoginRequired, llm.CredentialExpired, nil)
 	}
 
 	refreshed, err := s.flow.Refresh(ctx, ts.Refresh)
 	if err != nil {
-		return "", fmt.Errorf("anthropic token source: refresh: %w", err)
+		return "", llm.RefreshFailure(err, "anthropic", s.profile)
 	}
 	if err := Save(s.store, s.profile, *refreshed); err != nil {
-		return "", fmt.Errorf("anthropic token source: persist refreshed token: %w", err)
+		return "", s.failure(llm.ErrCredential, llm.CredentialStore, err)
 	}
 	return refreshed.Access, nil
 }
@@ -90,4 +103,10 @@ func (s *Source) clock() time.Time {
 		return s.now()
 	}
 	return time.Now()
+}
+
+// CredentialProfile supplies non-secret identity to the provider adapter.
+func (s *Source) CredentialProfile() string { return s.profile }
+func (s *Source) failure(class llm.ErrorClass, reason string, cause error) error {
+	return &llm.CredentialError{Class: class, Provider: "anthropic", Profile: s.profile, Method: llm.AuthSubscription, Reason: reason, Cause: cause}
 }

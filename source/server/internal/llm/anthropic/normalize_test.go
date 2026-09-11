@@ -65,11 +65,11 @@ func TestNormalize_QuotaScale429(t *testing.T) {
 	}
 }
 
-func TestNormalize_SubscriptionRefreshInvalidGrantIsAuth(t *testing.T) {
+func TestNormalize_AuthLikeTextDoesNotAuthorizeLogin(t *testing.T) {
 	c := NewClient(Config{APIKey: "k"})
 	err := c.normalize(errors.New(`anthropic: subscription token: anthropic token source: refresh: anthropic token request: HTTP 400: {"error":"invalid_grant","error_description":"Refresh token expired"}`))
-	if got := llm.ClassOf(err); got != llm.ErrAuth {
-		t.Fatalf("ClassOf = %q, want auth: %v", got, err)
+	if got := llm.ClassOf(err); got != llm.ErrUnknown {
+		t.Fatalf("ClassOf = %q, want unknown for untyped prose: %v", got, err)
 	}
 }
 
@@ -94,7 +94,7 @@ func TestNormalize_TransientClasses(t *testing.T) {
 		{"401", 401, nil,
 			`{"type":"error","error":{"type":"authentication_error","message":"bad key"}}`, llm.ErrAuth},
 		{"403", 403, nil,
-			`{"type":"error","error":{"type":"permission_error","message":"forbidden"}}`, llm.ErrAuth},
+			`{"type":"error","error":{"type":"permission_error","message":"forbidden"}}`, llm.ErrPermission},
 		{"generic 400", 400, nil,
 			`{"type":"error","error":{"type":"invalid_request_error","message":"max_tokens required"}}`, llm.ErrInvalidRequest},
 		{"credit-balance 400", 400, nil,

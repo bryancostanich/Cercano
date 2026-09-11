@@ -23,6 +23,10 @@ func (c *Client) normalize(err error) error {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return err
 	}
+	var credential *llm.CredentialError
+	if errors.As(err, &credential) {
+		return llm.NormalizeCredentialFailure(err, c.Name(), "")
+	}
 	var ae *sdk.Error
 	if errors.As(err, &ae) {
 		ne := &llm.Error{Provider: c.Name(), StatusCode: ae.StatusCode, Err: err}
@@ -30,8 +34,18 @@ func (c *Client) normalize(err error) error {
 			ne.RetryAfter = httpx.RetryAfter(ae.Response.Header)
 		}
 		switch {
-		case ae.StatusCode == http.StatusUnauthorized || ae.StatusCode == http.StatusForbidden:
+		case ae.StatusCode == http.StatusUnauthorized:
 			ne.Class = llm.ErrAuth
+			if c.cfg.Route == "subscription" {
+				profile := ""
+				if source, ok := c.cfg.TokenSource.(interface{ CredentialProfile() string }); ok {
+					profile = source.CredentialProfile()
+				}
+				ne.Class = llm.ErrLoginRequired
+				ne.Err = &llm.CredentialError{Class: ne.Class, Provider: c.Name(), Profile: profile, Method: llm.AuthSubscription, Reason: llm.CredentialRejected, Cause: err}
+			}
+		case ae.StatusCode == http.StatusForbidden:
+			ne.Class = llm.ErrPermission
 		case ae.StatusCode == http.StatusTooManyRequests:
 			// Quota must NEVER be retried — it fails over immediately. Detect
 			// it by a quota-scale Retry-After OR the message markers Anthropic
@@ -57,22 +71,10 @@ func (c *Client) normalize(err error) error {
 		}
 		return ne
 	}
-	if isSubscriptionAuthError(err) {
-		return &llm.Error{Class: llm.ErrAuth, Provider: c.Name(), Err: err}
-	}
 	if llm.IsNetworkError(err) {
 		return &llm.Error{Class: llm.ErrNetwork, Provider: c.Name(), Err: err}
 	}
 	return &llm.Error{Class: llm.ErrUnknown, Provider: c.Name(), Err: err}
-}
-
-func isSubscriptionAuthError(err error) bool {
-	if err == nil {
-		return false
-	}
-	m := strings.ToLower(err.Error())
-	return strings.Contains(m, "subscription token") &&
-		(strings.Contains(m, "invalid_grant") || strings.Contains(m, "refresh token expired") || strings.Contains(m, "reauth"))
 }
 
 // hasQuotaMarker matches the phrasings Anthropic uses for plan/credit

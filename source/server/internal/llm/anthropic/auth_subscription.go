@@ -2,8 +2,9 @@ package anthropic
 
 import (
 	"context"
-	"fmt"
 	"net/http"
+
+	"cercano/source/server/internal/llm"
 )
 
 // claudeCodeIdentity is the system-prompt identity block Anthropic requires on
@@ -34,11 +35,15 @@ type subscriptionAuth struct {
 
 func (a *subscriptionAuth) decorate(r *http.Request) error {
 	if a.tokens == nil {
-		return fmt.Errorf("anthropic: subscription route requires a token source")
+		return &llm.CredentialError{Class: llm.ErrCredential, Provider: "anthropic", Method: llm.AuthSubscription, Reason: llm.CredentialSource}
 	}
 	access, err := a.tokens.Token(r.Context())
 	if err != nil {
-		return fmt.Errorf("anthropic: subscription token: %w", err)
+		profile := ""
+		if source, ok := a.tokens.(interface{ CredentialProfile() string }); ok {
+			profile = source.CredentialProfile()
+		}
+		return llm.NormalizeCredentialFailure(err, "anthropic", profile)
 	}
 	r.Header.Del("X-Api-Key")
 	r.Header.Set("Authorization", "Bearer "+access)

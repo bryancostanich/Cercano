@@ -107,7 +107,7 @@ func TestNormalize_TransportErrorIsNetwork(t *testing.T) {
 	}
 }
 
-func TestNormalize_AuthTokenFailureIsAuthClass(t *testing.T) {
+func TestNormalize_OpaqueTokenFailureDoesNotDemandLogin(t *testing.T) {
 	c := NewClient(Config{Model: "gpt-5.5", Route: RouteChatGPT,
 		TokenSource: failingTokens{}})
 	_, err := c.Chat(context.Background(), llm.ChatRequest{
@@ -116,8 +116,8 @@ func TestNormalize_AuthTokenFailureIsAuthClass(t *testing.T) {
 	if err == nil {
 		t.Fatal("want error")
 	}
-	if got := llm.ClassOf(err); got != llm.ErrAuth {
-		t.Errorf("class = %q, want auth (err: %v)", got, err)
+	if got := llm.ClassOf(err); got != llm.ErrCredential {
+		t.Errorf("class = %q, want credential_error (err: %v)", got, err)
 	}
 }
 

@@ -25,7 +25,13 @@ const (
 	// ErrBusy: transient overload — rate limit, 5xx, vendor "overloaded". A
 	// short same-provider retry may succeed.
 	ErrBusy ErrorClass = "busy"
-	// ErrAuth: the credential was rejected (invalid, expired, forbidden).
+	// ErrLoginRequired requires explicit subscription authentication recovery.
+	ErrLoginRequired ErrorClass = "login_required"
+	// ErrCredential is a local store/configuration failure, not a login request.
+	ErrCredential ErrorClass = "credential_error"
+	// ErrPermission denotes authorization denial; logging in is not presumed to help.
+	ErrPermission ErrorClass = "permission_denied"
+	// ErrAuth: non-interactive credentials (such as an API key) were rejected.
 	ErrAuth ErrorClass = "auth"
 	// ErrInvalidRequest: the request itself is malformed; it will fail on any
 	// provider and must be surfaced, never retried or failed over.
@@ -90,6 +96,10 @@ func ClassOf(err error) ErrorClass {
 	if errors.As(err, &e) {
 		return e.Class
 	}
+	var credential *CredentialError
+	if errors.As(err, &credential) {
+		return credential.Class
+	}
 	return ErrUnknown
 }
 
@@ -135,6 +145,9 @@ func Failoverable(class ErrorClass, err error) bool {
 // plausibly serve the failed request. Context overflow is allowed only when the
 // target window is known and strictly larger than the failed attempt's window.
 func FailoverableToWindow(class ErrorClass, err error, failedWindow, targetWindow int, targetWindowKnown bool) bool {
+	if class == ErrLoginRequired || class == ErrCredential || class == ErrPermission {
+		return false
+	}
 	if class == ErrContextOverflow {
 		return failedWindow > 0 && targetWindowKnown && targetWindow > failedWindow
 	}

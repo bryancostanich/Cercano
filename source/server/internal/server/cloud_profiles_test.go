@@ -314,7 +314,7 @@ func TestUpsertCloudProfileCreatesAndUpdates(t *testing.T) {
 	// Create a new profile.
 	resp, err := s.UpsertCloudProfile(context.Background(), &proto.UpsertCloudProfileRequest{
 		Name: "openai", Flavor: "chat_completions", Backend: "openai",
-		BaseUrl: "https://api.openai.com/v1", Model: "gpt-x",
+		BaseUrl: "https://api.openai.com/v1", ModelChoices: premiumChoices("gpt-x"),
 	})
 	if err != nil {
 		t.Fatalf("UpsertCloudProfile: %v", err)
@@ -327,13 +327,13 @@ func TestUpsertCloudProfileCreatesAndUpdates(t *testing.T) {
 	if !ok {
 		t.Fatal("profile openai was not added")
 	}
-	if p.Backend != "openai" || p.BaseURL != "https://api.openai.com/v1" || p.Model != "gpt-x" {
+	if p.Backend != "openai" || p.BaseURL != "https://api.openai.com/v1" || p.TierOverrides[config.CostPremium] != "gpt-x" {
 		t.Fatalf("created profile wrong: %+v", p)
 	}
 	// Update the same name in place (no duplicate row).
 	if _, err := s.UpsertCloudProfile(context.Background(), &proto.UpsertCloudProfileRequest{
 		Name: "openai", Flavor: "chat_completions", Backend: "openai",
-		BaseUrl: "https://api.openai.com/v1", Model: "gpt-y",
+		BaseUrl: "https://api.openai.com/v1", ModelChoices: premiumChoices("gpt-y"),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -347,7 +347,7 @@ func TestUpsertCloudProfileCreatesAndUpdates(t *testing.T) {
 		t.Fatalf("update should not duplicate; got %d openai rows", count)
 	}
 	p2, _ := profileByName(s.cfgSvc.Get().CloudProfiles, "openai")
-	if p2.Model != "gpt-y" {
+	if p2.TierOverrides[config.CostPremium] != "gpt-y" {
 		t.Fatalf("update did not change model: %+v", p2)
 	}
 }
@@ -374,7 +374,7 @@ func TestUpsertCloudProfileRoute(t *testing.T) {
 	// A metadata update that omits route must preserve the existing one —
 	// clients that don't know about routes can't demote meridian to direct.
 	if _, err := s.UpsertCloudProfile(context.Background(), &proto.UpsertCloudProfileRequest{
-		Name: "anthropic", Flavor: "messages", BaseUrl: "http://127.0.0.1:3456", Model: "claude-fable-5",
+		Name: "anthropic", Flavor: "messages", BaseUrl: "http://127.0.0.1:3456", ModelChoices: premiumChoices("claude-fable-5"),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -382,7 +382,7 @@ func TestUpsertCloudProfileRoute(t *testing.T) {
 	if p2.Route != "meridian" {
 		t.Fatalf("route lost on routeless update: %+v", p2)
 	}
-	if p2.Model != "claude-fable-5" {
+	if p2.TierOverrides[config.CostPremium] != "claude-fable-5" {
 		t.Fatalf("update did not apply: %+v", p2)
 	}
 	// An explicit route replaces the existing one.
@@ -399,6 +399,9 @@ func TestUpsertCloudProfileRoute(t *testing.T) {
 
 func TestUpsertCloudProfileModelPreservedOnEmptyUpdate(t *testing.T) {
 	s, _ := newTestServer()
+	s.cfgSvc.Mutate(func(c *config.Config) {
+		c.CloudProfiles[0].TierOverrides = map[config.CostTier]string{config.CostPremium: "claude-3-5-haiku-20241022"}
+	})
 	// A metadata update that omits the model must preserve the existing one —
 	// the wizard's meridian/key commits send no model, and a modelless active
 	// profile means an empty model on every cloud request (and no header chip).
@@ -408,17 +411,17 @@ func TestUpsertCloudProfileModelPreservedOnEmptyUpdate(t *testing.T) {
 		t.Fatal(err)
 	}
 	p, _ := profileByName(s.cfgSvc.Get().CloudProfiles, "messages-one")
-	if p.Model != "claude-3-5-haiku-20241022" {
+	if p.TierOverrides[config.CostPremium] != "claude-3-5-haiku-20241022" {
 		t.Fatalf("model lost on modelless update: %+v", p)
 	}
 	// An explicit model still replaces the existing one.
 	if _, err := s.UpsertCloudProfile(context.Background(), &proto.UpsertCloudProfileRequest{
-		Name: "messages-one", Flavor: "messages", Model: "claude-fable-5",
+		Name: "messages-one", Flavor: "messages", ModelChoices: premiumChoices("claude-fable-5"),
 	}); err != nil {
 		t.Fatal(err)
 	}
 	p2, _ := profileByName(s.cfgSvc.Get().CloudProfiles, "messages-one")
-	if p2.Model != "claude-fable-5" {
+	if p2.TierOverrides[config.CostPremium] != "claude-fable-5" {
 		t.Fatalf("explicit model not applied: %+v", p2)
 	}
 }
@@ -441,7 +444,7 @@ func TestUpsertCloudProfileRebuildsActiveProvider(t *testing.T) {
 	}
 	// Upsert the active profile with a new model.
 	resp, err := s.UpsertCloudProfile(context.Background(), &proto.UpsertCloudProfileRequest{
-		Name: "messages-one", Flavor: "messages", Model: "claude-opus-5",
+		Name: "messages-one", Flavor: "messages", ModelChoices: premiumChoices("claude-opus-5"),
 	})
 	if err != nil {
 		t.Fatalf("UpsertCloudProfile: %v", err)
@@ -551,42 +554,16 @@ func TestGetCloudProfilesReportsBackend(t *testing.T) {
 // at #commit-pre-c99faa3 (cloud_model edited, active profile untouched,
 // requests still went to the old model) lives in this seam. Guards the
 // SoT switch.
-func TestUpdateConfig_CloudModel_UpdatesActiveProfile(t *testing.T) {
+func TestUpdateConfigRejectsRetiredCloudModel(t *testing.T) {
 	s, _ := newTestServer()
-	s.cfgSvc.Mutate(func(c *config.Config) {
-		c.ActiveCloudProfile = "messages-one"
-	})
-	if err := s.cfgSvc.Secrets().Set("messages-one", "sk-test"); err != nil {
-		t.Fatalf("seed key: %v", err)
+	before := s.cfgSvc.Get()
+	resp, err := s.UpdateConfig(t.Context(), &proto.UpdateConfigRequest{CloudModel: "obsolete"})
+	if err != nil || resp.Success {
+		t.Fatalf("retired mutation accepted: %v %v", resp, err)
 	}
-	s.events = newEventHub()
-	ch, unsub := s.events.subscribe()
-	defer unsub()
-
-	resp, err := s.UpdateConfig(t.Context(), &proto.UpdateConfigRequest{
-		CloudModel: "claude-opus-5",
-	})
-	if err != nil || !resp.Success {
-		t.Fatalf("UpdateConfig: err=%v resp=%+v", err, resp)
-	}
-
-	if got := s.activeCloudModel(); got != "claude-opus-5" {
-		t.Errorf("activeCloudModel() = %q, want claude-opus-5", got)
-	}
-	p, ok := s.activeProfile()
-	if !ok || p.Model != "claude-opus-5" {
-		t.Errorf("active profile model = %q (ok=%v), want claude-opus-5", p.Model, ok)
-	}
-
-	select {
-	case ev := <-ch:
-		if ev.GetConfigChanged() == nil {
-			t.Errorf("expected ConfigChanged event, got %T", ev.Event)
-		}
-	default:
-		// Broadcast happens after the rebuild block but before the early
-		// return; if it's missing the watcher loop won't drive UI updates.
-		t.Errorf("expected ConfigChanged broadcast for cloud_model, none received")
+	after := s.cfgSvc.Get()
+	if after.CloudProfiles[0].Model != before.CloudProfiles[0].Model {
+		t.Fatal("retired mutation changed profile")
 	}
 }
 
@@ -628,7 +605,7 @@ func TestUpsertCloudProfile_ActiveBroadcastsCloudModel(t *testing.T) {
 	defer unsub()
 
 	resp, err := s.UpsertCloudProfile(context.Background(), &proto.UpsertCloudProfileRequest{
-		Name: "messages-one", Flavor: "messages", Model: "claude-fable-5",
+		Name: "messages-one", Flavor: "messages", ModelChoices: premiumChoices("claude-fable-5"),
 	})
 	if err != nil || !resp.Ok {
 		t.Fatalf("UpsertCloudProfile: err=%v resp=%+v", err, resp)
@@ -674,4 +651,8 @@ func TestUpsertCloudProfile_InactiveDoesNotBroadcast(t *testing.T) {
 	default:
 		// good — no broadcast
 	}
+}
+
+func premiumChoices(model string) *proto.ProfileModelChoices {
+	return &proto.ProfileModelChoices{TierOverrides: map[string]string{"premium": model}}
 }

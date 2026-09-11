@@ -161,7 +161,7 @@ func (w *workerRunner) resolveOpenTiers() map[string]string {
 	out := map[string]string{}
 	for _, t := range []pkgcfg.Tier{
 		pkgcfg.TierMostCapable, pkgcfg.TierEveryday, pkgcfg.TierFastLight,
-		pkgcfg.TierFastLightText, pkgcfg.TierEmbedding,
+		pkgcfg.TierFastLightText, pkgcfg.TierEmbedding, pkgcfg.TierVision,
 	} {
 		var id string
 		if w.openTierModel != nil {

@@ -13,6 +13,7 @@
 package worker
 
 import (
+	"cercano/source/server/internal/routingwire"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -274,6 +275,8 @@ func SnapshotConfig(cfg config.Config, cred string, openTiers map[string]string)
 	}
 
 	return &proto.ConfigSnapshot{
+		Routing:            routingwire.Snapshot(cfg),
+		TierVisionOpen:     openTiers[string(config.TierVision)],
 		LocusMode:          cfg.LocusMode,
 		ActiveCloudProfile: cfg.ActiveCloudProfile,
 		CloudFlavor:        flavor,
@@ -405,6 +408,7 @@ func ConfigFromSnapshot(p *proto.ConfigSnapshot) config.Config {
 			string(config.TierFastLight):     p.TierFastLightOpen,
 			string(config.TierFastLightText): p.TierFastLightTextOpen,
 			string(config.TierEmbedding):     p.TierEmbeddingOpen,
+			string(config.TierVision):        p.TierVisionOpen,
 		}),
 
 		Compaction: config.CompactionConfig{
@@ -424,6 +428,14 @@ func ConfigFromSnapshot(p *proto.ConfigSnapshot) config.Config {
 			EscalateAfter: int(p.WatchdogEscalateAfter),
 			Echo:          p.WatchdogEcho,
 		},
+	}
+	if err := routingwire.ApplySnapshot(&cfg, p.Routing); err != nil {
+		log.Printf("[worker] invalid routing snapshot: %v", err)
+		cfg.CloudProfiles = nil
+		cfg.ActiveCloudProfile = ""
+		cfg.BackupCloudProfile = ""
+		cfg.SecondaryCloudProfile = ""
+		cfg.SecondaryBackupCloudProfile = ""
 	}
 	return cfg
 }

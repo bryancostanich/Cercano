@@ -24,10 +24,8 @@ func TestRoutingContractProfileEditPreservesIdentity(t *testing.T) {
 	}
 }
 
-// Probe the old mutation's empty-string semantics before replacing it with
-// presence-aware quality/image fields. This is baseline evidence, not a desired
-// future contract for the retired model field.
-func TestRoutingBaselineEmptyModelPreservesPin(t *testing.T) {
+// The obsolete model field must not survive a new profile mutation.
+func TestRoutingContractEmptyModelRetiresPin(t *testing.T) {
 	s, _ := newTestServer()
 	s.cfgSvc.Set(config.Config{CloudProfiles: []config.CloudProfile{{Name: "fixture", Flavor: "messages", Model: "legacy", ModelPinned: true}}})
 	resp, err := s.UpsertCloudProfile(context.Background(), &proto.UpsertCloudProfileRequest{Name: "fixture", Flavor: "messages"})
@@ -36,7 +34,7 @@ func TestRoutingBaselineEmptyModelPreservesPin(t *testing.T) {
 	}
 	got := s.cfgSvc.Get().CloudProfiles[0]
 	t.Logf("empty model upsert: model=%q pinned=%v", got.Model, got.ModelPinned)
-	if got.Model != "legacy" || !got.ModelPinned {
+	if got.Model != "" || got.ModelPinned {
 		t.Fatalf("baseline changed: %+v", got)
 	}
 }
@@ -67,5 +65,28 @@ func TestRoutingContractBackupEditRefreshesProviders(t *testing.T) {
 	key, err := s.cfgSvc.Secrets().Get("backup")
 	if err != nil || key != "fixture-key" {
 		t.Fatal("backup credential identity changed")
+	}
+}
+
+func TestRoutingContractChoicePresenceAndClear(t *testing.T) {
+	s, _ := newTestServer()
+	original := config.CloudProfile{Name: "custom", Flavor: "chat_completions", Backend: "openai", BaseURL: "https://example.invalid", Provider: "openai", TierOverrides: map[config.CostTier]string{config.CostPremium: "text"}, ImageModel: "image"}
+	s.cfgSvc.Set(config.Config{CloudProfiles: []config.CloudProfile{original}})
+	for _, choices := range []*proto.ProfileModelChoices{nil, {}} {
+		resp, err := s.UpsertCloudProfile(context.Background(), &proto.UpsertCloudProfileRequest{Name: "custom", ModelChoices: choices})
+		if err != nil || !resp.GetOk() {
+			t.Fatalf("%v %v", resp, err)
+		}
+		got := s.cfgSvc.Get().CloudProfiles[0]
+		if got.Backend != original.Backend || got.Provider != original.Provider || got.BaseURL != original.BaseURL {
+			t.Fatalf("metadata lost: %+v", got)
+		}
+		if choices == nil {
+			if got.ImageModel != "image" || got.TierOverrides[config.CostPremium] != "text" {
+				t.Fatal("omission changed choices")
+			}
+		} else if got.ImageModel != "" || len(got.TierOverrides) != 0 {
+			t.Fatal("clear did not remove choices")
+		}
 	}
 }

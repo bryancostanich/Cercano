@@ -1414,6 +1414,24 @@ message RestartMcpServerRequest  { string name = 1; }
 message RestartMcpServerResponse { bool ok = 1; string error = 2; int32 tool_count = 3; }
 
 // Cloud profile management messages.
+// Present-empty choices explicitly restore inheritance and clear the image choice.
+message ProfileModelChoices {
+ map<string,string> tier_overrides = 1;
+ string image_model = 2;
+}
+message TaskModelAssignment { string destination = 1; string quality = 2; }
+message RoutingAssignments {
+ string primary = 1;
+ string primary_backup = 2;
+ string secondary = 3;
+ string secondary_backup = 4;
+ map<string,TaskModelAssignment> tasks = 5;
+}
+message RoutingSnapshot {
+ RoutingAssignments assignments = 1;
+ repeated CloudProfileInfo profiles = 2;
+}
+
 message CloudProfileInfo {
   string name = 1;
   string flavor = 2;
@@ -1422,6 +1440,11 @@ message CloudProfileInfo {
   bool   has_key = 5; // a key exists in the keychain for this profile
   string backend = 6; // chat_completions quirks selector (openai|gemini|groq|…)
   string route = 7;   // direct (default) | meridian | ccr (future) — selects adapter-specific auth/header conventions
+ ProfileModelChoices model_choices = 8;
+ map<string,string> effective_quality_models = 9;
+ string provider = 10;
+ string region = 11;
+ string aws_profile = 12;
 }
 message GetCloudProfilesRequest {}
 message GetCloudProfilesResponse {
@@ -1470,6 +1493,10 @@ message UpsertCloudProfileRequest {
   string base_url = 4;
   string model = 5;
   string route = 6; // direct (default) | meridian | ccr (future); empty preserves an existing profile's route
+ ProfileModelChoices model_choices = 7;
+ optional string provider = 8;
+ optional string region = 9;
+ optional string aws_profile = 10;
 }
 message UpsertCloudProfileResponse { bool ok = 1; string error = 2; }
 message RemoveCloudProfileRequest  { string name = 1; }
@@ -1813,6 +1840,8 @@ message ConfigSnapshot {
   // Host-resolved evidence for this turn. Empty or missing evidence does not
   // establish model capability. Contains no credentials.
   repeated ModelMetadataEntry model_metadata = 47;
+ RoutingSnapshot routing = 48;
+ string tier_vision_open = 49;
 }
 
 message ModelMetadataEntry {

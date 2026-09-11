@@ -1,6 +1,7 @@
 package server
 
 import (
+	"cercano/source/server/internal/routingwire"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -749,10 +750,9 @@ func (s *Server) GetCloudProfiles(ctx context.Context, req *proto.GetCloudProfil
 	out := &proto.GetCloudProfilesResponse{Active: active}
 	for _, p := range profiles {
 		hasKey := keyNamesForPresence[p.Name]
-		model := cfg.ModelProfiles.ResolveCloudModelForTier(p, config.TierEveryday)
-		out.Profiles = append(out.Profiles, &proto.CloudProfileInfo{
-			Name: p.Name, Flavor: p.Flavor, BaseUrl: p.BaseURL, Model: model, HasKey: hasKey, Backend: p.Backend, Route: p.Route,
-		})
+		info := routingwire.Profile(p, cfg.ModelProfiles)
+		info.HasKey = hasKey
+		out.Profiles = append(out.Profiles, info)
 	}
 	return out, nil
 }
@@ -835,39 +835,43 @@ func (s *Server) UpsertCloudProfile(ctx context.Context, req *proto.UpsertCloudP
 	if name == "" {
 		return &proto.UpsertCloudProfileResponse{Ok: false, Error: "profile name is required"}, nil
 	}
-	if !knownFlavor(req.GetFlavor()) {
-		return &proto.UpsertCloudProfileResponse{Ok: false, Error: fmt.Sprintf("unknown flavor %q", req.GetFlavor())}, nil
+	c := s.cfgSvc.Get()
+	np, _ := c.Profile(name)
+	np.Name = name
+	if req.GetFlavor() != "" {
+		np.Flavor = req.GetFlavor()
 	}
-	if req.GetFlavor() == cloudfactory.FlavorChatCompletions && strings.TrimSpace(req.GetBaseUrl()) == "" {
-		return &proto.UpsertCloudProfileResponse{Ok: false, Error: "base_url is required for chat_completions"}, nil
+	if req.GetBackend() != "" {
+		np.Backend = req.GetBackend()
 	}
-	np := config.CloudProfile{
-		Name: name, Flavor: req.GetFlavor(), Backend: req.GetBackend(),
-		BaseURL: req.GetBaseUrl(), Model: req.GetModel(), ModelPinned: req.GetModel() != "", Route: req.GetRoute(),
+	if req.GetBaseUrl() != "" {
+		np.BaseURL = req.GetBaseUrl()
 	}
-	// Preserve existing route/model when the request omits them (partial-metadata upsert).
-	// We need to read first, then upsert with merged values.
-	if existing, existsAlready := s.cfgSvc.ProfileInfo(name); existing {
-		// Fetch the existing profile to preserve its route/model if not provided.
-		cfg := s.cfgSvc.Get()
-		for _, p := range cfg.CloudProfiles {
-			if p.Name == name {
-				if np.Route == "" {
-					np.Route = p.Route
-				}
-				if np.Model == "" {
-					np.Model = p.Model
-					np.ModelPinned = p.ModelPinned
-				}
-				break
-			}
-		}
-		_ = existsAlready // used below via cfgSvc.UpsertProfile return
+	if !knownFlavor(np.Flavor) {
+		return &proto.UpsertCloudProfileResponse{Error: fmt.Sprintf("unknown flavor %q", np.Flavor)}, nil
 	}
-	_, isActive := s.cfgSvc.UpsertProfile(np)
-	// If this is the active profile, rebuild so metadata changes take effect
-	// now, and broadcast the model so client chrome (header chip) updates live.
-	if isActive {
+	if np.Flavor == cloudfactory.FlavorChatCompletions && strings.TrimSpace(np.BaseURL) == "" {
+		return &proto.UpsertCloudProfileResponse{Error: "base_url is required for chat_completions"}, nil
+	}
+	if req.GetRoute() != "" {
+		np.Route = req.GetRoute()
+	}
+	if req.Provider != nil {
+		np.Provider = req.GetProvider()
+	}
+	if req.Region != nil {
+		np.Region = req.GetRegion()
+	}
+	if req.AwsProfile != nil {
+		np.AWSProfile = req.GetAwsProfile()
+	}
+	np.Model = ""
+	np.ModelPinned = false
+	if err := routingwire.ApplyChoices(&np, req.ModelChoices); err != nil {
+		return &proto.UpsertCloudProfileResponse{Error: err.Error()}, nil
+	}
+	s.cfgSvc.UpsertProfile(np)
+	if c.ReferencesProfile(name) {
 		if err := s.rebuildCloud(); err != nil {
 			// active is set, but the provider couldn't be built — report it, keep going.
 			s.persistConfig()
@@ -1213,6 +1217,9 @@ func (s *Server) LocusMode() string {
 // (previously atomic under one cfgMu span) — a concurrent reader can momentarily
 // observe new config with old provider wiring (documented trade-off).
 func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigRequest) (*proto.UpdateConfigResponse, error) {
+	if req.GetCloudModel() != "" {
+		return &proto.UpdateConfigResponse{Success: false, Message: "cloud_model is retired; edit profile quality choices"}, nil
+	}
 	// Take a snapshot to work from. Mutations accumulate into this local copy,
 	// then cfgSvc.Set(c) commits everything atomically at the end. This keeps
 	// each individual step free of cfgMu (cfgSvc's internal lock is fine-grained).

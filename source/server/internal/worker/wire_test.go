@@ -430,7 +430,7 @@ func TestSnapshotConfigRoundTrip(t *testing.T) {
 	if gp.BaseURL != op.BaseURL {
 		t.Errorf("CloudProfile.BaseURL: got %q want %q", gp.BaseURL, op.BaseURL)
 	}
-	if gp.Model != op.Model {
+	if gp.Model != "" {
 		t.Errorf("CloudProfile.Model: got %q want %q", gp.Model, op.Model)
 	}
 
@@ -456,7 +456,7 @@ func TestSnapshotConfigRoundTrip(t *testing.T) {
 	if gbp.BaseURL != obp.BaseURL {
 		t.Errorf("backup CloudProfile.BaseURL: got %q want %q", gbp.BaseURL, obp.BaseURL)
 	}
-	if gbp.Model != obp.Model {
+	if gbp.Model != "" {
 		t.Errorf("backup CloudProfile.Model: got %q want %q", gbp.Model, obp.Model)
 	}
 	if gbp.Region != obp.Region {

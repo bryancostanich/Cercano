@@ -213,11 +213,7 @@ func (p *service) LocusMode() string {
 // code that asks "what cloud model are we using right now?" should go
 // through cfgSvc.ActiveProfile(), not currentConfig.CloudModel directly.
 func (p *service) ActiveCloudModel() string {
-	cfgSnap := p.cfgSvc.Get()
-	if prof, ok := p.cfgSvc.ActiveProfile(); ok {
-		return cfgSnap.ModelProfiles.ResolveCloudModelForTier(prof, cfg.TierEveryday)
-	}
-	return cfgSnap.CloudModel
+	return p.MainModel(true)
 }
 
 // Main returns the provider + model for the active locus mode.

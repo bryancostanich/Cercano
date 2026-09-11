@@ -1,6 +1,7 @@
 package server
 
 import (
+	"cercano/source/server/internal/routingwire"
 	"context"
 
 	"cercano/source/server/internal/cloudcatalog"
@@ -47,10 +48,9 @@ func (s *Server) GetCloudProviders(ctx context.Context, req *proto.GetCloudProvi
 	toInfo := func(ref cloudcatalog.ProfileRef) *proto.CloudProfileInfo {
 		p := byName[ref.Name]
 		hasKey := keyNamesForPresence[p.Name]
-		return &proto.CloudProfileInfo{
-			Name: p.Name, Flavor: p.Flavor, BaseUrl: p.BaseURL, Model: p.Model,
-			HasKey: hasKey, Backend: p.Backend, Route: p.Route,
-		}
+		info := routingwire.Profile(p, cfg.ModelProfiles)
+		info.HasKey = hasKey
+		return info
 	}
 
 	out := &proto.GetCloudProvidersResponse{Active: active, Backup: backup}

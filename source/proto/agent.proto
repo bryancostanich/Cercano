@@ -230,6 +230,7 @@ service Agent {
   // profile already grouped under its provider (primary first). The agent owns
   // provider knowledge; the CLI renders this view without its own catalog.
   rpc GetCloudProviders (GetCloudProvidersRequest) returns (GetCloudProvidersResponse) {}
+  rpc UpdateRoutingAssignments(UpdateRoutingAssignmentsRequest) returns (UpdateRoutingAssignmentsResponse) {}
   rpc SetActiveCloudProfile (SetActiveCloudProfileRequest) returns (SetActiveCloudProfileResponse) {}
   // SetBackupCloudProfile names the profile that serves requests when the
   // active profile's provider fails (auth/rate-limit/5xx/network). An empty
@@ -1445,6 +1446,7 @@ message CloudProfileInfo {
  string provider = 10;
  string region = 11;
  string aws_profile = 12;
+ map<string,string> recommended_quality_models = 13;
 }
 message GetCloudProfilesRequest {}
 message GetCloudProfilesResponse {
@@ -1479,7 +1481,10 @@ message GetCloudProvidersResponse {
   string active = 3;
   // Backup (fallback) profile name; empty when none is configured.
   string backup = 5;
+ RoutingAssignments assignments = 6;
 }
+message UpdateRoutingAssignmentsRequest { RoutingAssignments assignments = 1; }
+message UpdateRoutingAssignmentsResponse { bool ok = 1; string error = 2; string warning = 3; }
 message SetActiveCloudProfileRequest  { string name = 1; }
 message SetActiveCloudProfileResponse { bool ok = 1; string error = 2; }
 message SetBackupCloudProfileRequest  { string name = 1; } // empty clears the backup

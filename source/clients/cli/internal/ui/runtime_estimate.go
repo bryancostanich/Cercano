@@ -64,6 +64,9 @@ func estimateIsLocal(m agentclient.RuntimeModel) bool {
 // "can't estimate this entry" (not on disk and no ollama ref — e.g.
 // hardcoded catalog entries backed by direct HF URLs).
 func estimateKey(m agentclient.RuntimeModel) string {
+	if m.Served() {
+		return ""
+	}
 	if estimateIsLocal(m) {
 		return "local:" + m.Runtime + ":" + m.ID
 	}

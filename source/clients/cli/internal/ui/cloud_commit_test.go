@@ -90,7 +90,7 @@ func TestShouldApplyModelEdit(t *testing.T) {
 		draftNew bool
 		want     bool
 	}{
-		{"cloud-model", false, true},
+		{"cloud-model", false, false},
 		{"cloud-model", true, false},
 		{"cloud-base-url", false, false},
 		{"cloud-name", false, false},
@@ -149,8 +149,8 @@ func TestCloudCommitNeedsAgent(t *testing.T) {
 	if cloudCommitNeedsAgent(cloudCommitAction{kind: cloudCommitDraftEdit, field: "cloud-model"}, true) {
 		t.Error("model edit on a NEW draft must stay local")
 	}
-	if !cloudCommitNeedsAgent(cloudCommitAction{kind: cloudCommitDraftEdit, field: "cloud-model"}, false) {
-		t.Error("model edit on an existing profile pushes immediately — needs the agent")
+	if cloudCommitNeedsAgent(cloudCommitAction{kind: cloudCommitDraftEdit, field: "cloud-model"}, false) {
+		t.Error("existing-profile model edits must remain local until Save")
 	}
 }
 

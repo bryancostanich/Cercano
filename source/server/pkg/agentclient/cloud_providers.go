@@ -30,7 +30,8 @@ type CloudProvidersView struct {
 	CustomProfiles []CloudProfileInfo
 	Active         string
 	// Backup is the fallback profile name; empty when none is configured.
-	Backup string
+	Backup      string
+	Assignments *RoutingAssignments
 }
 
 // GetCloudProviders returns the known-provider catalog with configured profiles
@@ -41,7 +42,7 @@ func (c *Client) GetCloudProviders(ctx context.Context) (CloudProvidersView, err
 	if err != nil {
 		return CloudProvidersView{}, err
 	}
-	view := CloudProvidersView{Active: resp.GetActive(), Backup: resp.GetBackup()}
+	view := CloudProvidersView{Active: resp.GetActive(), Backup: resp.GetBackup(), Assignments: assignmentsFromProto(resp.GetAssignments())}
 	for _, p := range resp.GetProviders() {
 		cp := CloudProvider{
 			ID:             p.GetId(),
@@ -69,6 +70,7 @@ func (c *Client) GetCloudProviders(ctx context.Context) (CloudProvidersView, err
 // profiles and providers wrappers share one conversion.
 func cloudProfileInfoFromProto(p *proto.CloudProfileInfo) CloudProfileInfo {
 	return CloudProfileInfo{
+		Choices: choicesFromProto(p.GetModelChoices()), EffectiveQualityModels: copyStringMap(p.GetEffectiveQualityModels()), RecommendedQualityModels: copyStringMap(p.GetRecommendedQualityModels()), Provider: p.GetProvider(), Region: p.GetRegion(), AWSProfile: p.GetAwsProfile(),
 		Name:    p.GetName(),
 		Flavor:  p.GetFlavor(),
 		BaseURL: p.GetBaseUrl(),

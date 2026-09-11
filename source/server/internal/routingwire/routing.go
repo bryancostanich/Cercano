@@ -31,7 +31,11 @@ func ApplyChoices(p *config.CloudProfile, choices *proto.ProfileModelChoices) er
 }
 func Profile(p config.CloudProfile, models config.ModelProfiles) *proto.CloudProfileInfo {
 	out := &proto.CloudProfileInfo{Name: p.Name, Flavor: p.Flavor, Backend: p.Backend, BaseUrl: p.BaseURL, Route: p.Route, Provider: p.Provider, Region: p.Region, AwsProfile: p.AWSProfile, ModelChoices: Choices(p), EffectiveQualityModels: map[string]string{}}
+	recommended := p.Clone()
+	recommended.TierOverrides = nil
+	out.RecommendedQualityModels = map[string]string{}
 	for _, q := range []config.CostTier{config.CostEconomy, config.CostStandard, config.CostPremium} {
+		out.RecommendedQualityModels[string(q)] = models.ResolveCloudModelForTier(recommended, q.CapabilityTier())
 		out.EffectiveQualityModels[string(q)] = models.ResolveCloudModelForTier(p, q.CapabilityTier())
 	}
 	return out

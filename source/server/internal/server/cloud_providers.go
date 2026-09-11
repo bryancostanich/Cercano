@@ -53,7 +53,7 @@ func (s *Server) GetCloudProviders(ctx context.Context, req *proto.GetCloudProvi
 		return info
 	}
 
-	out := &proto.GetCloudProvidersResponse{Active: active, Backup: backup}
+	out := &proto.GetCloudProvidersResponse{Active: active, Backup: backup, Assignments: routingwire.Assignments(cfg)}
 	for _, gp := range grouped {
 		cp := &proto.CloudProvider{
 			Id: gp.ID, Label: gp.Label, Flavor: gp.Flavor, Backend: gp.Backend,

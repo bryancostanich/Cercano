@@ -18,7 +18,7 @@ const (
 )
 
 // configTabLabels are the visible tab titles, indexed by configTab.
-var configTabLabels = []string{"General", "Cloud", "Runtime", "Models", "MCP", "UI", "Context"}
+var configTabLabels = []string{"General", "Cloud", "Runtime", "Local Models", "MCP", "UI", "Context"}
 
 // configTabCount is the number of tabs; kept as a named constant so wrap-around
 // navigation and digit-jump bounds stay in one place.

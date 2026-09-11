@@ -92,10 +92,15 @@ type settingsPage struct {
 	// cloudView is the grouped provider catalog from GetCloudProviders that the
 	// cloud section renders (one row per provider with its profiles grouped
 	// under it). Loaded alongside profiles under the same profilesLoaded gate.
-	cloudView     agentclient.CloudProvidersView
-	cloudSelected string
-	cloudDraft    cloudDraft
-	cloudDraftNew bool
+	cloudView             agentclient.CloudProvidersView
+	cloudSelected         string
+	cloudDraft            cloudDraft
+	cloudDraftNew         bool
+	cloudDirty            bool
+	routingDirty          bool
+	routingDraft          *agentclient.RoutingAssignments
+	cloudPendingLeave     string
+	cloudNavigationPrompt bool
 	// Cloud model catalog for the selected profile. Fetched lazily by
 	// selectCloudRow via ListCloudProfileModels when the row is anthropic-
 	// style; cleared on row-selection change so a switch between profiles
@@ -154,6 +159,9 @@ func (sp *settingsPage) snapshotSections() []form.Section {
 		defer cancel()
 		if view, err := sp.agent.GetCloudProviders(ctx); err == nil {
 			sp.cloudView = view
+			if !sp.routingDirty {
+				sp.routingDraft = nil
+			}
 			sp.activeProfile = view.Active
 			var profs []agentclient.CloudProfileInfo
 			for _, prov := range view.Providers {
@@ -274,7 +282,33 @@ func (sp *settingsPage) applySpinnerTick() tea.Cmd {
 }
 
 func (sp *settingsPage) Update(msg tea.KeyPressMsg) (tea.Cmd, bool) {
+	if sp.cloudPendingLeave != "" {
+		switch msg.String() {
+		case "y", "Y":
+			target := sp.cloudPendingLeave
+			sp.cloudPendingLeave = ""
+			sp.cloudNavigationPrompt = false
+			if target == "__close" {
+				sp.discardCloudDrafts()
+				return nil, true
+			}
+			sp.selectCloudRow(target)
+			sp.form.Reload()
+			return nil, false
+		case "n", "N", "esc":
+			sp.cloudPendingLeave = ""
+			sp.cloudNavigationPrompt = false
+			sp.form.SetStatus("kept unsaved edits")
+		}
+		return nil, false
+	}
+
 	cmd, closed := sp.form.Update(msg)
+	if closed && sp.cloudHasUnsaved() {
+		sp.cloudPendingLeave = "__close"
+		sp.cloudNavigationPrompt = true
+		closed = false
+	}
 	sp.scrollToFocus()
 	return cmd, closed
 }
@@ -302,7 +336,11 @@ func (sp *settingsPage) scrollToFocus() {
 func (sp *settingsPage) View() string {
 	lines := sp.form.Lines(sp.width, sp.palette, sp.styles)
 	sp.clampScroll()
-	return renderScrollable(lines, sp.viewportHeight(), sp.width-2, sp.offset, sp.styles)
+	body := renderScrollable(lines, sp.viewportHeight(), sp.width-2, sp.offset, sp.styles)
+	if sp.cloudNavigationPrompt {
+		return "Unsaved Cloud edits. Discard and leave? y/n\n" + body
+	}
+	return body
 }
 
 // onCommit routes a committed field to its sink.

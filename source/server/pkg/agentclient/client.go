@@ -2445,13 +2445,17 @@ func (c *Client) ListCloudProfileModels(ctx context.Context, profileName string)
 
 // CloudProfileInfo is a point-in-time view of one cloud profile.
 type CloudProfileInfo struct {
-	Name    string
-	Flavor  string
-	BaseURL string
-	Model   string
-	HasKey  bool // a key exists in the keychain for this profile
-	Backend string
-	Route   string // "direct" (default), "meridian", "ccr" (future) — selects adapter-specific auth
+	Choices                      *CloudModelChoices
+	EffectiveQualityModels       map[string]string
+	RecommendedQualityModels     map[string]string
+	Provider, Region, AWSProfile string
+	Name                         string
+	Flavor                       string
+	BaseURL                      string
+	Model                        string
+	HasKey                       bool // a key exists in the keychain for this profile
+	Backend                      string
+	Route                        string // "direct" (default), "meridian", "ccr" (future) — selects adapter-specific auth
 }
 
 // GetCloudProfiles returns all configured cloud profiles and the name of the
@@ -2463,15 +2467,7 @@ func (c *Client) GetCloudProfiles(ctx context.Context) ([]CloudProfileInfo, stri
 	}
 	out := make([]CloudProfileInfo, 0, len(resp.GetProfiles()))
 	for _, p := range resp.GetProfiles() {
-		out = append(out, CloudProfileInfo{
-			Name:    p.GetName(),
-			Flavor:  p.GetFlavor(),
-			BaseURL: p.GetBaseUrl(),
-			Model:   p.GetModel(),
-			HasKey:  p.GetHasKey(),
-			Backend: p.GetBackend(),
-			Route:   p.GetRoute(),
-		})
+		out = append(out, cloudProfileInfoFromProto(p))
 	}
 	return out, resp.GetActive(), nil
 }
@@ -2503,7 +2499,8 @@ func (c *Client) SetCloudProfileKey(ctx context.Context, name, key string) error
 // UpsertCloudProfile creates or updates a cloud profile's metadata.
 func (c *Client) UpsertCloudProfile(ctx context.Context, p CloudProfileInfo) error {
 	resp, err := c.agent.UpsertCloudProfile(ctx, &proto.UpsertCloudProfileRequest{
-		Name: p.Name, Flavor: p.Flavor, Backend: p.Backend, BaseUrl: p.BaseURL, Model: p.Model, Route: p.Route,
+		Name: p.Name, Flavor: p.Flavor, Backend: p.Backend, BaseUrl: p.BaseURL, Route: p.Route,
+		ModelChoices: choicesToProto(p.Choices), Provider: nonemptyProfileField(p.Provider), Region: nonemptyProfileField(p.Region), AwsProfile: nonemptyProfileField(p.AWSProfile),
 	})
 	if err != nil {
 		return err

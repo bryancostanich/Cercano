@@ -74,12 +74,12 @@ Objective: ensure actual inference, budgeting, and image inspection use the same
 
 Objective: expose controls that match the routing model without mixing destination assignment with profile model choice. Files: source/clients/cli/internal/ui/cloud_section.go, cloud_commit.go, cloud_models.go, config_tabs.go, runtime_dashboard.go, runtime_tiers.go, runtime_served_test.go and task controls alongside the existing settings pages; source/server/internal/server/cloud_models.go and catalog handlers; internal/deepinfracatalog only if adaptation is needed. Tests: CLI state transitions and server/client discovery integration.
 
-- [ ] Expose clearly labeled Primary preferred/optional backup and Secondary preferred/optional backup controls backed by Phase 4 interfaces. Include explicit None for backups; do not relabel the existing Primary backup as Secondary.
-- [ ] Add task destination/quality controls with approved defaults and no task-level model IDs. Keep explicit per-call difficulty independent of saved controls.
-- [ ] Replace the single-model editor with sparse quality choices and dedicated image choice. Show inherited/overridden state and reset actions.
-- [ ] Reuse profile drafts and explicit Save; remove the immediate-model-apply exception. Implement Discard, picker cancellation, unsaved-navigation confirmation, and save-error draft retention. Keep authentication/activation separate.
-- [ ] Reuse any already-landed profile discovery; add missing DeepInfra support via the registered /models/list catalog rather than a parallel index. Preserve other providers, current selections missing from discovery, and honest price/context/capability unknowns.
-- [ ] Rename Models to Local Models and filter hosted entries from browse/download/RAM-estimate candidates while retaining defensive server guards. Preserve source-qualified references and Local runtime overrides.
+- [x] Expose clearly labeled Primary preferred/optional backup and Secondary preferred/optional backup controls backed by Phase 4 interfaces. Include explicit None for backups; do not relabel the existing Primary backup as Secondary.
+- [x] Add task destination/quality controls with approved defaults and no task-level model IDs. Keep explicit per-call difficulty independent of saved controls.
+- [x] Replace the single-model editor with sparse quality choices and dedicated image choice. Show inherited/overridden state and reset actions.
+- [x] Reuse profile drafts and explicit Save; remove the immediate-model-apply exception. Implement Discard, picker cancellation, unsaved-navigation confirmation, and save-error draft retention. Keep authentication/activation separate.
+- [x] Reuse any already-landed profile discovery; add missing DeepInfra support via the registered /models/list catalog rather than a parallel index. Preserve other providers, current selections missing from discovery, and honest price/context/capability unknowns.
+- [x] Rename Models to Local Models and filter hosted entries from browse/download/RAM-estimate candidates while retaining defensive server guards. Preserve source-qualified references and Local runtime overrides.
 - [ ] Test assignment independence, optional backups, draft save/reload/reset/discard, two same-vendor profiles, disconnected/save-error paths, missing catalog entries, and hosted/local separation.
 - [ ] Run focused CLI UI and provider-discovery integration tests, build CLI, and checkpoint the settings unit.
 

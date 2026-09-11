@@ -1316,14 +1316,11 @@ func runtimeStatusModels(status *agentclient.RuntimeStatus) []agentclient.Runtim
 }
 
 func runtimeModelsForRuntime(models []agentclient.RuntimeModel, runtime string) []agentclient.RuntimeModel {
-	if runtime == "" {
-		return models
-	}
 	out := make([]agentclient.RuntimeModel, 0, len(models))
 	for _, model := range models {
 		// Empty runtime appears in older tests / defensive fallback records; keep
 		// it rather than blanking the catalog entirely.
-		if model.Runtime == "" || model.Runtime == runtime {
+		if !model.Served() && (runtime == "" || model.Runtime == "" || model.Runtime == runtime) {
 			out = append(out, model)
 		}
 	}
@@ -1366,16 +1363,12 @@ func filteredCatalogModels(models []agentclient.RuntimeModel, query string) []ag
 }
 
 func isCatalogDownloadModel(model agentclient.RuntimeModel) bool {
+	if model.Served() {
+		return false
+	}
 	source := strings.ToLower(model.Source)
 	state := strings.ToLower(model.DownloadState)
 	if source == "catalog" || source == "recommended" {
-		return true
-	}
-	// A served model belongs in the browse list even though it has no
-	// download state — the states below are a *download* lifecycle, and a
-	// model that is never downloaded has none. Without this it would be
-	// filtered out and never shown at all.
-	if model.Served() {
 		return true
 	}
 	switch state {

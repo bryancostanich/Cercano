@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"cercano/source/server/pkg/agentclient"
 	"context"
 	"time"
 
@@ -10,6 +11,9 @@ import (
 // cloudDraft is the in-progress profile edit backing the detail editor.
 type cloudDraft struct {
 	Name, Flavor, Backend, Route, BaseURL, Model string
+	Choices                                      *agentclient.CloudModelChoices
+	Effective                                    map[string]string
+	Provider, Region, AWSProfile                 string
 }
 
 // selectCloudRow expands a list row's detail editor and seeds the draft from the
@@ -19,7 +23,8 @@ type cloudDraft struct {
 // from the previously-selected row.
 func (sp *settingsPage) selectCloudRow(rowID string) {
 	sp.cloudSelected = rowID
-	sp.cloudDraft = cloudDraft{}
+	sp.cloudDirty = false
+	sp.cloudDraft = cloudDraft{Choices: (&agentclient.CloudModelChoices{}).Clone()}
 	sp.cloudDraftNew = true
 	sp.cloudModels = nil
 	sp.cloudModelsFetched = false
@@ -30,7 +35,7 @@ func (sp *settingsPage) selectCloudRow(rowID string) {
 		name := rowID[8:]
 		for _, p := range sp.profiles {
 			if p.Name == name {
-				sp.cloudDraft = cloudDraft{Name: p.Name, Flavor: p.Flavor, Backend: p.Backend, Route: p.Route, BaseURL: p.BaseURL, Model: p.Model}
+				sp.cloudDraft = cloudDraft{Name: p.Name, Flavor: p.Flavor, Backend: p.Backend, Route: p.Route, BaseURL: p.BaseURL, Model: p.Model, Choices: p.Choices.Clone(), Effective: p.RecommendedQualityModels, Provider: p.Provider, Region: p.Region, AWSProfile: p.AWSProfile}
 				sp.cloudDraftNew = false
 				return
 			}
@@ -39,7 +44,7 @@ func (sp *settingsPage) selectCloudRow(rowID string) {
 		id := rowID[9:]
 		for _, prov := range sp.cloudView.Providers {
 			if prov.ID == id {
-				sp.cloudDraft = cloudDraft{Name: prov.ID, Flavor: prov.Flavor, Backend: prov.Backend, Route: prov.Route, BaseURL: prov.BaseURL}
+				sp.cloudDraft = cloudDraft{Name: prov.ID, Flavor: prov.Flavor, Backend: prov.Backend, Route: prov.Route, BaseURL: prov.BaseURL, Choices: (&agentclient.CloudModelChoices{}).Clone()}
 				return
 			}
 		}
@@ -50,7 +55,7 @@ func (sp *settingsPage) selectCloudRow(rowID string) {
 // under the selected row.
 func (sp *settingsPage) buildCloudSection() form.Section {
 	rows := buildCloudRowsFromProviders(sp.cloudView)
-	fields := make([]form.Field, 0, len(rows)+8)
+	fields := sp.cloudRoutingFields()
 	for _, r := range rows {
 		fields = append(fields, form.NewRow("cloud-row:"+r.ID, r.Label, rowAnnotation(r), r.Active))
 		if r.ID == sp.cloudSelected {
@@ -105,16 +110,7 @@ func (sp *settingsPage) cloudDetailFields(r cloudRow) []form.Field {
 	} else {
 		out = append(out, form.NewText("cloud-base-url", il("base-url"), d.BaseURL, "https://…"))
 	}
-	// Model field: anthropic-style profiles (flavor=messages) get a curated
-	// Select populated from the profile's /v1/models catalog; other flavors
-	// keep the free-form text input because we don't have a shared model-
-	// catalog shape for them yet. Falls back to a static Claude model list
-	// when the live fetch fails.
-	if d.Flavor == "messages" {
-		out = append(out, form.NewSelect("cloud-model", il("model"), sp.cloudModelOptions(r, d.Model), d.Model))
-	} else {
-		out = append(out, form.NewText("cloud-model", il("model"), d.Model, "model id"))
-	}
+	out = append(out, sp.cloudChoiceFields(r)...)
 	// ChatGPT subscription sign-in: the responses flavor can authenticate with
 	// a ChatGPT Plus/Pro subscription via device-code OAuth instead of an API
 	// key. Offer the button on responses rows; the api-key field stays as the
@@ -144,15 +140,16 @@ func (sp *settingsPage) cloudDetailFields(r cloudRow) []form.Field {
 	}
 	out = append(out,
 		form.NewButton("cloud-save", il("save"), true),
+		form.NewButton("cloud-discard", il("discard"), true),
 		form.NewButton("cloud-activate", il(activateLabel), activateEnabled),
 	)
 	if !sp.cloudDraftNew {
 		// Backup toggle: the active profile can't be its own backup (the
 		// server rejects it), so the set button is disabled on the active row.
-		label := "set as backup"
+		label := "set as Primary backup"
 		enabled := !r.Active && !r.ComingSoon
 		if r.Profile != nil && r.Profile.Name == sp.cloudView.Backup {
-			label, enabled = "clear backup", true
+			label, enabled = "clear Primary backup", true
 		}
 		out = append(out, form.NewButton("cloud-backup", il(label), enabled))
 		out = append(out, form.NewButton("cloud-delete", il("delete"), true))
@@ -240,7 +237,7 @@ func (sp *settingsPage) cloudModelOptions(r cloudRow, currentID string) []form.O
 		sp.cloudModelsFetched = true
 	}
 	models := sp.cloudModels
-	if len(models) == 0 {
+	if len(models) == 0 && sp.cloudDraft.Flavor == "messages" {
 		models = fallbackClaudeModels()
 	}
 	return modelOptionsFromCatalog(models, currentID)

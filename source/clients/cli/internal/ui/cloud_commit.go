@@ -23,6 +23,8 @@ const (
 	cloudCommitKey
 	cloudCommitSignIn
 	cloudCommitSignInClaude
+	cloudCommitDiscard
+	cloudCommitRouting
 )
 
 type cloudCommitAction struct {
@@ -35,6 +37,15 @@ type cloudCommitAction struct {
 // classifyCloudCommit maps a committed (key,value) from the Cloud Providers
 // section to an action. Returns cloudCommitNone for non-cloud keys.
 func classifyCloudCommit(key, value string) cloudCommitAction {
+	if strings.HasPrefix(key, "cloud-routing-") || strings.HasPrefix(key, "cloud-task-") {
+		return cloudCommitAction{kind: cloudCommitRouting, field: key, value: value}
+	}
+	if key == "cloud-discard" {
+		return cloudCommitAction{kind: cloudCommitDiscard}
+	}
+	if strings.HasPrefix(key, "cloud-quality-") || strings.HasPrefix(key, "cloud-custom-") || key == "cloud-image" {
+		return cloudCommitAction{kind: cloudCommitDraftEdit, field: key, value: value}
+	}
 	if strings.HasPrefix(key, "cloud-row:") {
 		return cloudCommitAction{kind: cloudCommitSelect, rowID: strings.TrimPrefix(key, "cloud-row:")}
 	}
@@ -59,18 +70,17 @@ func classifyCloudCommit(key, value string) cloudCommitAction {
 	return cloudCommitAction{kind: cloudCommitNone}
 }
 
-// shouldApplyModelEdit reports whether a committed cloud-section field edit is
-// pushed to the server immediately instead of parking in the draft. Model
-// changes on an EXISTING profile apply right away: picking a model in the
-// Select and leaving the page must not silently discard the choice. New
-// drafts still go through explicit save (they may lack name/flavor), and
-// structural fields (name, base_url, …) keep the draft+save flow.
+// All profile model edits remain drafts until explicit Save.
 func shouldApplyModelEdit(field string, draftNew bool) bool {
-	return field == "cloud-model" && !draftNew
+	return false
 }
 
 // applyCloudDraftEdit writes one committed detail field into the draft.
 func (sp *settingsPage) applyCloudDraftEdit(field, value string) {
+	sp.cloudDirty = true
+	if sp.applyCloudChoice(field, value) {
+		return
+	}
 	switch field {
 	case "cloud-name":
 		sp.cloudDraft.Name = value
@@ -91,6 +101,8 @@ func (sp *settingsPage) applyCloudDraftEdit(field, value string) {
 // and so needs the agent too.
 func cloudCommitNeedsAgent(ca cloudCommitAction, draftNew bool) bool {
 	switch ca.kind {
+	case cloudCommitRouting:
+		return ca.field == "cloud-routing-save"
 	case cloudCommitSave, cloudCommitActivate, cloudCommitBackup,
 		cloudCommitDelete, cloudCommitKey, cloudCommitSignIn, cloudCommitSignInClaude:
 		return true
@@ -112,24 +124,22 @@ func (sp *settingsPage) commitCloud(ca cloudCommitAction) (string, tea.Cmd, erro
 		return "agent reconnecting — retry in a moment", nil, nil
 	}
 	switch ca.kind {
+	case cloudCommitRouting:
+		return sp.commitCloudRouting(ca.field, ca.value)
+	case cloudCommitDiscard:
+		sp.selectCloudRow(sp.cloudSelected)
+		return "discarded profile draft", nil, nil
 	case cloudCommitSelect:
+		if sp.cloudDirty {
+			sp.cloudPendingLeave = ca.rowID
+			sp.cloudNavigationPrompt = true
+			return "Unsaved profile edits. Discard and leave? y/n", nil, nil
+		}
 		sp.selectCloudRow(ca.rowID)
 		return "", nil, nil
 	case cloudCommitDraftEdit:
 		sp.applyCloudDraftEdit(ca.field, ca.value)
-		if shouldApplyModelEdit(ca.field, sp.cloudDraftNew) && sp.agent != nil {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			d := sp.cloudDraft
-			err := sp.agent.UpsertCloudProfile(ctx, agentclient.CloudProfileInfo{
-				Name: d.Name, Flavor: d.Flavor, Backend: d.Backend, Route: d.Route, BaseURL: d.BaseURL, Model: d.Model,
-			})
-			if err != nil {
-				return "", nil, err
-			}
-			sp.profilesLoaded = false
-			return "model applied: " + d.Model, nil, nil
-		}
+
 		return "", nil, nil
 	case cloudCommitSave:
 		if sp.agent == nil {
@@ -139,7 +149,7 @@ func (sp *settingsPage) commitCloud(ca cloudCommitAction) (string, tea.Cmd, erro
 		defer cancel()
 		d := sp.cloudDraft
 		err := sp.agent.UpsertCloudProfile(ctx, agentclient.CloudProfileInfo{
-			Name: d.Name, Flavor: d.Flavor, Backend: d.Backend, Route: d.Route, BaseURL: d.BaseURL, Model: d.Model,
+			Name: d.Name, Flavor: d.Flavor, Backend: d.Backend, Route: d.Route, BaseURL: d.BaseURL, Choices: d.Choices, Provider: d.Provider, Region: d.Region, AWSProfile: d.AWSProfile,
 		})
 		if err != nil {
 			return "", nil, err
@@ -147,6 +157,7 @@ func (sp *settingsPage) commitCloud(ca cloudCommitAction) (string, tea.Cmd, erro
 		sp.profilesLoaded = false
 		sp.cloudSelected = "profile:" + d.Name
 		sp.cloudDraftNew = false
+		sp.cloudDirty = false
 		return "saved " + d.Name, nil, nil
 	case cloudCommitActivate:
 		if sp.agent == nil {

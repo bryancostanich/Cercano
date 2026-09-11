@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"strings"
 	"testing"
 
 	"cercano/source/server/pkg/agentclient"
@@ -76,25 +75,25 @@ func TestServedAndDownloadable(t *testing.T) {
 	}
 }
 
-// TestIsCatalogDownloadModel_IncludesServed: a served model has no download
+// TestIsCatalogDownloadModel_ExcludesServed: a served model has no download
 // lifecycle, so the download-state switch would have dropped it from browse
 // entirely — it would never appear in the picker at all.
-func TestIsCatalogDownloadModel_IncludesServed(t *testing.T) {
-	if !isCatalogDownloadModel(servedModel()) {
-		t.Error("served model excluded from the catalog list; it would never be shown")
+func TestIsCatalogDownloadModel_ExcludesServed(t *testing.T) {
+	if isCatalogDownloadModel(servedModel()) {
+		t.Error("hosted model leaked into Local Models")
 	}
 	if !isCatalogDownloadModel(downloadableModel()) {
 		t.Error("downloadable model excluded from the catalog list")
 	}
 }
 
-// TestFilteredCatalogModels_ServedSurvivesFiltering is the same claim through
+// TestFilteredCatalogModels_ExcludesHosted is the same claim through
 // the real filter entry point rather than the predicate alone.
-func TestFilteredCatalogModels_ServedSurvivesFiltering(t *testing.T) {
+func TestFilteredCatalogModels_ExcludesHosted(t *testing.T) {
 	models := []agentclient.RuntimeModel{downloadableModel(), servedModel()}
 	got := filteredCatalogModels(models, "")
-	if len(got) != 2 {
-		t.Fatalf("filtered to %d models, want 2 (both should be browsable)", len(got))
+	if len(got) != 1 || got[0].Served() {
+		t.Fatalf("filtered to %+v, want only downloadable", got)
 	}
 }
 
@@ -129,8 +128,11 @@ func TestStartSelectedDownload_RefusesServedModel(t *testing.T) {
 	if d.catalogMessage == "" {
 		t.Fatal("no message explaining the refusal")
 	}
-	if !strings.Contains(d.catalogMessage, "deepinfra") || !strings.Contains(d.catalogMessage, "nothing to download") {
-		t.Errorf("message %q should name the provider and say there is nothing to download", d.catalogMessage)
+	if d.catalogMessage != "no model selected" {
+		t.Errorf("hosted model should be absent: %q", d.catalogMessage)
+	}
+	if estimateKey(servedModel()) != "" {
+		t.Fatal("hosted model entered RAM estimation")
 	}
 }
 

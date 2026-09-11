@@ -1,6 +1,7 @@
 package server
 
 import (
+	"cercano/source/server/internal/catalog"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -8,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -28,6 +30,27 @@ func (s *Server) ListCloudProfileModels(ctx context.Context, req *proto.ListClou
 	p, ok := profileByName(cfg.CloudProfiles, name)
 	if !ok {
 		return &proto.ListCloudProfileModelsResponse{Error: fmt.Sprintf("no profile %q", name)}, nil
+	}
+	endpoint, _ := url.Parse(p.BaseURL)
+	if p.Provider == "deepinfra" || (endpoint != nil && strings.EqualFold(endpoint.Hostname(), "api.deepinfra.com")) {
+		if s.catalogRegistry == nil {
+			return &proto.ListCloudProfileModelsResponse{Error: "DeepInfra catalog unavailable"}, nil
+		}
+		source, ok := s.catalogRegistry.Lookup("deepinfra")
+		if !ok {
+			return &proto.ListCloudProfileModelsResponse{Error: "DeepInfra catalog unavailable"}, nil
+		}
+		bounded, cancel := context.WithTimeout(ctx, 6*time.Second)
+		defer cancel()
+		models, err := source.List(bounded, catalog.ListOptions{Limit: 500})
+		if err != nil {
+			return &proto.ListCloudProfileModelsResponse{Error: err.Error()}, nil
+		}
+		out := &proto.ListCloudProfileModelsResponse{}
+		for _, m := range models {
+			out.Models = append(out.Models, &proto.CloudModelInfo{Id: m.ID, DisplayName: m.ID})
+		}
+		return out, nil
 	}
 	base := strings.TrimRight(p.BaseURL, "/")
 	if base == "" {
@@ -63,7 +86,7 @@ func (s *Server) ListCloudProfileModels(ctx context.Context, req *proto.ListClou
 		return &proto.ListCloudProfileModelsResponse{Error: err.Error()}, nil
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
 	if err != nil {
 		return &proto.ListCloudProfileModelsResponse{Error: err.Error()}, nil
 	}

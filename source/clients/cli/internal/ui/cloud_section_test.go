@@ -91,7 +91,7 @@ func TestCloudSectionShowsDetailForSelectedProfile(t *testing.T) {
 		keys = append(keys, f.Key())
 	}
 	j := strings.Join(keys, "|")
-	for _, want := range []string{"cloud-base-url", "cloud-model", "cloud-key", "cloud-save", "cloud-activate", "cloud-delete"} {
+	for _, want := range []string{"cloud-base-url", "cloud-quality-premium", "cloud-image", "cloud-discard", "cloud-key", "cloud-save", "cloud-activate", "cloud-delete"} {
 		if !strings.Contains(j, want) {
 			t.Errorf("missing detail field %q in %v", want, keys)
 		}

@@ -13,8 +13,10 @@ const configStripRows = 1
 // `focused` is true while the tab bar (rather than the page body) owns keyboard
 // input — the state that decides whether ←/→ switch tabs or reach the body.
 type configSurface struct {
-	active  configTab
-	focused bool
+	active       configTab
+	focused      bool
+	pendingTab   *configTab
+	pendingClose bool
 }
 
 // contentPageHeight is the height budget handed to the active content page —
@@ -50,6 +52,9 @@ func (m *Model) openConfigSurface(tab configTab) tea.Cmd {
 // legacy page-close path by refreshing the header's model names, which a
 // General/Cloud/Models edit may have changed.
 func (m *Model) closeConfigSurface() tea.Cmd {
+	if m.deferCloudNavigation(nil, true) {
+		return nil
+	}
 	m.configSurface = nil
 	m.content = nil
 	m.contentScrollbarDragging = false
@@ -61,6 +66,9 @@ func (m *Model) closeConfigSurface() tea.Cmd {
 // init/refresh cmd.
 func (m *Model) switchConfigTab(tab configTab) tea.Cmd {
 	tab = clampConfigTab(tab)
+	if m.configSurface != nil && tab != m.configSurface.active && m.deferCloudNavigation(&tab, false) {
+		return nil
+	}
 	if m.configSurface == nil {
 		return m.openConfigSurface(tab)
 	}
@@ -123,6 +131,32 @@ func (m Model) handleConfigSurfaceKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool
 	}
 
 	key := msg.String()
+	if cs.pendingClose || cs.pendingTab != nil {
+		switch key {
+		case "y", "Y":
+			close, tab := cs.pendingClose, cs.pendingTab
+			cs.pendingClose = false
+			cs.pendingTab = nil
+			if sp, ok := m.content.(*settingsPage); ok {
+				sp.discardCloudDrafts()
+				sp.cloudNavigationPrompt = false
+			}
+			if close {
+				return m, m.closeConfigSurface(), true
+			}
+			if tab != nil {
+				return m, m.switchConfigTab(*tab), true
+			}
+		case "n", "N", "esc":
+			cs.pendingClose = false
+			cs.pendingTab = nil
+			if sp, ok := m.content.(*settingsPage); ok {
+				sp.cloudNavigationPrompt = false
+				sp.form.SetStatus("kept unsaved edits")
+			}
+		}
+		return m, nil, true
+	}
 
 	if key == "esc" {
 		if !cs.focused {
@@ -296,4 +330,18 @@ func (m *Model) blurContentBody() {
 	if p, ok := m.content.(bodyFocusablePage); ok {
 		p.blurBody()
 	}
+}
+
+func (m *Model) deferCloudNavigation(tab *configTab, close bool) bool {
+	if m.configSurface == nil {
+		return false
+	}
+	sp, ok := m.content.(*settingsPage)
+	if !ok || !sp.cloudHasUnsaved() {
+		return false
+	}
+	m.configSurface.pendingTab = tab
+	m.configSurface.pendingClose = close
+	sp.cloudNavigationPrompt = true
+	return true
 }

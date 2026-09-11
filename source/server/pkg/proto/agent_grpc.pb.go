@@ -81,6 +81,7 @@ const (
 	Agent_RestartMcpServer_FullMethodName                      = "/agent.Agent/RestartMcpServer"
 	Agent_GetCloudProfiles_FullMethodName                      = "/agent.Agent/GetCloudProfiles"
 	Agent_GetCloudProviders_FullMethodName                     = "/agent.Agent/GetCloudProviders"
+	Agent_UpdateRoutingAssignments_FullMethodName              = "/agent.Agent/UpdateRoutingAssignments"
 	Agent_SetActiveCloudProfile_FullMethodName                 = "/agent.Agent/SetActiveCloudProfile"
 	Agent_SetBackupCloudProfile_FullMethodName                 = "/agent.Agent/SetBackupCloudProfile"
 	Agent_SetCloudProfileKey_FullMethodName                    = "/agent.Agent/SetCloudProfileKey"
@@ -282,6 +283,7 @@ type AgentClient interface {
 	// profile already grouped under its provider (primary first). The agent owns
 	// provider knowledge; the CLI renders this view without its own catalog.
 	GetCloudProviders(ctx context.Context, in *GetCloudProvidersRequest, opts ...grpc.CallOption) (*GetCloudProvidersResponse, error)
+	UpdateRoutingAssignments(ctx context.Context, in *UpdateRoutingAssignmentsRequest, opts ...grpc.CallOption) (*UpdateRoutingAssignmentsResponse, error)
 	SetActiveCloudProfile(ctx context.Context, in *SetActiveCloudProfileRequest, opts ...grpc.CallOption) (*SetActiveCloudProfileResponse, error)
 	// SetBackupCloudProfile names the profile that serves requests when the
 	// active profile's provider fails (auth/rate-limit/5xx/network). An empty
@@ -1023,6 +1025,16 @@ func (c *agentClient) GetCloudProviders(ctx context.Context, in *GetCloudProvide
 	return out, nil
 }
 
+func (c *agentClient) UpdateRoutingAssignments(ctx context.Context, in *UpdateRoutingAssignmentsRequest, opts ...grpc.CallOption) (*UpdateRoutingAssignmentsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpdateRoutingAssignmentsResponse)
+	err := c.cc.Invoke(ctx, Agent_UpdateRoutingAssignments_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *agentClient) SetActiveCloudProfile(ctx context.Context, in *SetActiveCloudProfileRequest, opts ...grpc.CallOption) (*SetActiveCloudProfileResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SetActiveCloudProfileResponse)
@@ -1321,6 +1333,7 @@ type AgentServer interface {
 	// profile already grouped under its provider (primary first). The agent owns
 	// provider knowledge; the CLI renders this view without its own catalog.
 	GetCloudProviders(context.Context, *GetCloudProvidersRequest) (*GetCloudProvidersResponse, error)
+	UpdateRoutingAssignments(context.Context, *UpdateRoutingAssignmentsRequest) (*UpdateRoutingAssignmentsResponse, error)
 	SetActiveCloudProfile(context.Context, *SetActiveCloudProfileRequest) (*SetActiveCloudProfileResponse, error)
 	// SetBackupCloudProfile names the profile that serves requests when the
 	// active profile's provider fails (auth/rate-limit/5xx/network). An empty
@@ -1546,6 +1559,9 @@ func (UnimplementedAgentServer) GetCloudProfiles(context.Context, *GetCloudProfi
 }
 func (UnimplementedAgentServer) GetCloudProviders(context.Context, *GetCloudProvidersRequest) (*GetCloudProvidersResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetCloudProviders not implemented")
+}
+func (UnimplementedAgentServer) UpdateRoutingAssignments(context.Context, *UpdateRoutingAssignmentsRequest) (*UpdateRoutingAssignmentsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UpdateRoutingAssignments not implemented")
 }
 func (UnimplementedAgentServer) SetActiveCloudProfile(context.Context, *SetActiveCloudProfileRequest) (*SetActiveCloudProfileResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetActiveCloudProfile not implemented")
@@ -2648,6 +2664,24 @@ func _Agent_GetCloudProviders_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Agent_UpdateRoutingAssignments_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateRoutingAssignmentsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServer).UpdateRoutingAssignments(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Agent_UpdateRoutingAssignments_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServer).UpdateRoutingAssignments(ctx, req.(*UpdateRoutingAssignmentsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Agent_SetActiveCloudProfile_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(SetActiveCloudProfileRequest)
 	if err := dec(in); err != nil {
@@ -3014,6 +3048,10 @@ var Agent_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetCloudProviders",
 			Handler:    _Agent_GetCloudProviders_Handler,
+		},
+		{
+			MethodName: "UpdateRoutingAssignments",
+			Handler:    _Agent_UpdateRoutingAssignments_Handler,
 		},
 		{
 			MethodName: "SetActiveCloudProfile",

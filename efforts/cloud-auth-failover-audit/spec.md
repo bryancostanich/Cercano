@@ -78,6 +78,19 @@ After reviewing the existing y/n/d/c confirmation implementation, the user accep
 
 The viable path within this effort is to generalize the shared confirmation lifecycle for authentication. A separate reconnect policy would duplicate ownership and lose established behavior; durable execution is not needed to match the existing contract. There is no new persistence decision to approve.
 
+### One shared credential service
+
+After reproducing duplicate refreshes across separate sources and an old refresh overwriting a newer login, the user explicitly selected a shared service: “definitely shared. this needs to be unified.”
+
+| Axis | Shared credential service — selected | Coordination in secrets storage — not selected |
+|---|---|---|
+| Ownership | One host service for providers, workers, and credential replacement | Storage owns refresh/write synchronization; login still needs another owner |
+| Integration | Existing config owner exposes the same service and a coordinated write facade | Expand the backend storage contract and its implementations |
+| Risk | Every host credential path must use the service rather than a raw backend | Splits the authentication lifecycle across storage and login ownership |
+| Rationale | Unifies lifecycle ownership while retaining provider-specific refresh logic and keychain persistence | Write protection alone does not unify recovery |
+
+The service coordinates per stored profile, stages refresh writes against a credential generation, and rejects obsolete results after replacement. Interactive login must not wait for an old network refresh to finish. Individual request cancellation must not cancel other active waiters. Rebuilt providers and worker requests receive views of the same owner, not independent refresh caches.
+
 ## Acceptance criteria
 
 An expired or revoked subscription credential pauses before either fallback layer, with the correct provider and profile, across host and worker execution. No-backup and backup-authentication cases remain actionable. Transient refresh failures and API-key or permission failures are not misrepresented as subscription expiry.

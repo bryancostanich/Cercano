@@ -39,6 +39,8 @@ func (s *Server) StartClaudeLogin(req *proto.StartClaudeLoginRequest, stream pro
 	if err != nil {
 		return sendClaudeLoginResult(stream, false, "", err.Error())
 	}
+	// Own the listener immediately, including failure before Wait is reached.
+	defer pending.Close()
 	if err := stream.Send(&proto.StartClaudeLoginEvent{
 		AuthorizeUrl: pending.AuthorizeURL,
 	}); err != nil {

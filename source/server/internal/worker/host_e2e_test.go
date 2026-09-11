@@ -150,7 +150,7 @@ func TestWorker_RealProcess_CrashIsolated(t *testing.T) {
 		Models:      models,
 	}, secrets.NewMemory())
 
-	runnerA := worker.NewWorkerRunnerWithDial(&recordingHistory{}, cfg, newTestBroker(), newHostSecrets(nil), dialA)
+	runnerA := worker.NewWorkerRunnerWithDial(&recordingHistory{}, cfg, newTestBroker(), dialA)
 
 	// Kill the worker process 300ms into the turn.
 	go func() {
@@ -193,7 +193,7 @@ func TestWorker_RealProcess_CrashIsolated(t *testing.T) {
 	procB, dialB := spawnRealWorker(t, bin)
 	defer func() { _ = procB.Process.Kill() }()
 
-	runnerB := worker.NewWorkerRunnerWithDial(&recordingHistory{}, cfg, newTestBroker(), newHostSecrets(nil), dialB)
+	runnerB := worker.NewWorkerRunnerWithDial(&recordingHistory{}, cfg, newTestBroker(), dialB)
 
 	// This turn also hits the unreachable ollama; we don't require success, only
 	// that the host can drive it and we then cleanly cancel — the point is the

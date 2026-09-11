@@ -40,12 +40,12 @@ import (
 	"cercano/source/server/internal/chatgptauth"
 	"cercano/source/server/internal/cloudfactory"
 	cfgsvc "cercano/source/server/internal/hostsvc/config"
+	"cercano/source/server/internal/hostsvc/credentials"
 	"cercano/source/server/internal/hostsvc/permissions"
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/modelmetadata"
 	"cercano/source/server/internal/runner"
-	"cercano/source/server/internal/secrets"
 	pkgcfg "cercano/source/server/pkg/config"
 	proto "cercano/source/server/pkg/proto"
 )
@@ -58,7 +58,6 @@ type workerRunner struct {
 	persist runner.TurnHistory
 	cfg     cfgsvc.Service
 	perms   permissions.Broker
-	secrets secrets.Store
 
 	// openTierModel resolves the EFFECTIVE open model id for a tier on the
 	// active runtime (override-else-catalog-default), so the ConfigSnapshot
@@ -73,16 +72,7 @@ type workerRunner struct {
 	// routing means "do not send". nil on dial-injected test runners.
 	modelEvidence func(ctx context.Context, cfg pkgcfg.Config) modelmetadata.Snapshot
 
-	// srcMu guards the per-profile token-source caches below. Reusing one
-	// Source per profile is what makes the sources' single-flight refresh
-	// actually apply: a fresh Source per credential request gives each
-	// concurrent caller its own mutex, and Anthropic/OpenAI refresh tokens
-	// rotate (single-use), so racing refreshes invalidate each other.
-	srcMu    sync.Mutex
-	anthSrcs map[string]*anthropicauth.Source
-	chatSrcs map[string]*chatgptauth.Source
-	// anthFlow/chatFlow configure the token endpoints for the cached sources.
-	// The zero value targets the real endpoints; tests override them.
+	// Test endpoint overrides; refresh ownership belongs to cfg.Credentials().
 	anthFlow anthropicauth.Flow
 	chatFlow chatgptauth.Flow
 
@@ -122,12 +112,11 @@ type EnsureSubagentFunc func(ctx context.Context, id, parentID, projectDir, mode
 // The caller supplies the host-side services the runner needs to:
 //   - pre-assemble history + project context (persist),
 //   - build the ConfigSnapshot + permission mode (cfg, perms),
-//   - answer CredentialRequests from the worker (cfg + st).
+//   - answer CredentialRequests through the shared config credential service.
 func NewWorkerRunner(
 	persist runner.TurnHistory,
 	cfg cfgsvc.Service,
 	perms permissions.Broker,
-	st secrets.Store,
 	ensureSubagent EnsureSubagentFunc,
 	setProfile func(ctx context.Context, convID, name string) error,
 	openProvider func() inference.Provider,
@@ -143,7 +132,6 @@ func NewWorkerRunner(
 		persist:        persist,
 		cfg:            cfg,
 		perms:          perms,
-		secrets:        st,
 		ensureSubagent: ensureSubagent,
 		setProfile:     setProfile,
 		openProvider:   openProvider,
@@ -203,10 +191,9 @@ func NewWorkerRunnerWithDial(
 	persist runner.TurnHistory,
 	cfg cfgsvc.Service,
 	perms permissions.Broker,
-	st secrets.Store,
 	dial DialFunc,
 ) runner.TurnRunner {
-	return newWorkerRunnerWithDial(persist, cfg, perms, st, dial)
+	return newWorkerRunnerWithDial(persist, cfg, perms, dial)
 }
 
 // newWorkerRunnerWithDial builds a workerRunner with an injected dial function
@@ -215,14 +202,12 @@ func newWorkerRunnerWithDial(
 	persist runner.TurnHistory,
 	cfg cfgsvc.Service,
 	perms permissions.Broker,
-	st secrets.Store,
 	dial dialFunc,
 ) *workerRunner {
 	return &workerRunner{
 		persist: persist,
 		cfg:     cfg,
 		perms:   perms,
-		secrets: st,
 		dial:    dial,
 	}
 }
@@ -533,7 +518,7 @@ func (w *workerRunner) resolveCredential(ctx context.Context, cfg pkgcfg.Config,
 		return "", "", fmt.Errorf("credential: profile %q not found", profileName)
 	}
 
-	st := w.secrets
+	st := w.cfg.Secrets()
 	if st == nil {
 		return "", "", fmt.Errorf("credential: secrets store not configured")
 	}
@@ -565,37 +550,13 @@ func (w *workerRunner) resolveCredential(ctx context.Context, cfg pkgcfg.Config,
 	return key, "", nil
 }
 
-// anthropicSource returns the cached Anthropic token source for a profile,
-// creating it on first use. Reusing one Source per profile keeps its
-// single-flight refresh effective across concurrent credential requests.
-func (w *workerRunner) anthropicSource(profile string) *anthropicauth.Source {
-	w.srcMu.Lock()
-	defer w.srcMu.Unlock()
-	if s, ok := w.anthSrcs[profile]; ok {
-		return s
-	}
-	if w.anthSrcs == nil {
-		w.anthSrcs = make(map[string]*anthropicauth.Source)
-	}
-	s := anthropicauth.NewSource(w.secrets, profile, w.anthFlow)
-	w.anthSrcs[profile] = s
-	return s
+// Token sources are views of the one host credential owner. Rebuilding a
+// provider or requesting a worker credential cannot create a competing cache.
+func (w *workerRunner) anthropicSource(profile string) *credentials.AnthropicSource {
+	return w.cfg.Credentials().Anthropic(profile, w.anthFlow)
 }
-
-// chatgptSource returns the cached ChatGPT token source for a profile,
-// creating it on first use. See anthropicSource for why the instance is reused.
-func (w *workerRunner) chatgptSource(profile string) *chatgptauth.Source {
-	w.srcMu.Lock()
-	defer w.srcMu.Unlock()
-	if s, ok := w.chatSrcs[profile]; ok {
-		return s
-	}
-	if w.chatSrcs == nil {
-		w.chatSrcs = make(map[string]*chatgptauth.Source)
-	}
-	s := chatgptauth.NewSource(w.secrets, profile, w.chatFlow)
-	w.chatSrcs[profile] = s
-	return s
+func (w *workerRunner) chatgptSource(profile string) *credentials.ChatGPTSource {
+	return w.cfg.Credentials().ChatGPT(profile, w.chatFlow)
 }
 
 // testDialUnix returns a dialFunc that dials a bufconn listener via the given

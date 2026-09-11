@@ -106,3 +106,9 @@ func BuildCloudProvider(p config.CloudProfile, apiKey string, opts ...Options) (
 		return nil, fmt.Errorf("flavor %q not yet supported", p.Flavor)
 	}
 }
+
+// IsSubscription identifies routes whose credentials are resolved lazily by
+// the host credential service, not static API keys read during construction.
+func IsSubscription(p config.CloudProfile) bool {
+	return (p.Flavor == FlavorMessages && p.Route == RouteSubscription) || (p.Flavor == FlavorResponses && p.Route == RouteChatGPT)
+}

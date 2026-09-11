@@ -44,7 +44,8 @@ func NewWorkerRunnerForTest(
 	st secrets.Store,
 	dial func(ctx context.Context) (*grpc.ClientConn, error),
 ) runner.TurnRunner {
-	return newWorkerRunnerWithDial(persist, cfg, perms, st, dial)
+	cfg.SetSecrets(st)
+	return newWorkerRunnerWithDial(persist, cfg, perms, dial)
 }
 
 // ResolveCredentialForTest exposes the host's credential resolution logic
@@ -55,7 +56,7 @@ func ResolveCredentialForTest(
 	st secrets.Store,
 	profileName string,
 ) (token, account string, err error) {
-	wr := &workerRunner{secrets: st}
+	wr := &workerRunner{cfg: cfgsvc.New("", cfg, st)}
 	return wr.resolveCredential(ctx, cfg, profileName)
 }
 
@@ -85,11 +86,11 @@ func NewWorkerRunnerWithPoolSpawnForTest(
 	st secrets.Store,
 	spawn PoolSpawnFunc,
 ) runner.TurnRunner {
+	cfg.SetSecrets(st)
 	return &workerRunner{
 		persist: persist,
 		cfg:     cfg,
 		perms:   perms,
-		secrets: st,
 		pool:    newWorkerPool(spawn),
 	}
 }

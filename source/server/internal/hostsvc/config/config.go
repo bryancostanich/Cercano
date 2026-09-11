@@ -7,6 +7,7 @@ package config
 import (
 	"sync"
 
+	"cercano/source/server/internal/hostsvc/credentials"
 	"cercano/source/server/internal/secrets"
 	cfg "cercano/source/server/pkg/config"
 )
@@ -17,6 +18,7 @@ type Service interface {
 	Get() cfg.Config
 	Path() string
 	Secrets() secrets.Store
+	Credentials() *credentials.Service
 	ActiveProfile() (cfg.CloudProfile, bool)
 
 	// Full-state writes (replace entire config; no notify — caller persists
@@ -50,15 +52,16 @@ type Service interface {
 }
 
 type svc struct {
-	mu      sync.RWMutex
-	current cfg.Config
-	path    string
-	store   secrets.Store
+	mu          sync.RWMutex
+	current     cfg.Config
+	path        string
+	store       secrets.Store
+	credentials *credentials.Service
 }
 
 // New returns a Service initialized with the given path, config, and secrets.
 func New(path string, c cfg.Config, st secrets.Store) Service {
-	return &svc{path: path, current: c.Clone(), store: st}
+	return &svc{path: path, current: c.Clone(), store: st, credentials: credentials.New(st)}
 }
 
 // Get returns a deep copy of the current config. The returned snapshot shares
@@ -80,10 +83,13 @@ func (s *svc) Path() string {
 
 func (s *svc) Secrets() secrets.Store {
 	s.mu.RLock()
-	st := s.store
-	s.mu.RUnlock()
-	return st
+	defer s.mu.RUnlock()
+	if s.store == nil {
+		return nil
+	}
+	return s.credentials
 }
+func (s *svc) Credentials() *credentials.Service { return s.credentials }
 
 func (s *svc) ActiveProfile() (cfg.CloudProfile, bool) {
 	s.mu.RLock()
@@ -118,7 +124,10 @@ func (s *svc) SetPath(path string) {
 
 func (s *svc) SetSecrets(st secrets.Store) {
 	s.mu.Lock()
-	s.store = st
+	if st != s.credentials {
+		s.credentials.ReplaceStore(st)
+		s.store = st
+	}
 	s.mu.Unlock()
 }
 

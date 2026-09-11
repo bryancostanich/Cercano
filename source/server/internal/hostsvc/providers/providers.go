@@ -341,7 +341,7 @@ func (p *service) rebuildCloud() error {
 	}
 	st := p.cfgSvc.Secrets()
 	key := ""
-	if st != nil {
+	if st != nil && !cloudfactory.IsSubscription(prof) {
 		if k, err := st.Get(prof.Name); err == nil {
 			key = k
 		}
@@ -351,7 +351,8 @@ func (p *service) rebuildCloud() error {
 	// provider. Carve-outs: a proxy BaseURL (Meridian) handles auth with an
 	// empty key; and bedrock authenticates via the AWS credential chain, so it
 	// legitimately has no keychain key (its failure mode is a missing region).
-	if key == "" && prof.BaseURL == "" && prof.Flavor != cloudfactory.FlavorBedrock {
+	// Subscription routes resolve credentials lazily through the shared owner.
+	if key == "" && prof.BaseURL == "" && prof.Flavor != cloudfactory.FlavorBedrock && !cloudfactory.IsSubscription(prof) {
 		p.installAbsentCloud("no API key for profile " + prof.Name)
 		return fmt.Errorf("no API key for profile %s", prof.Name)
 	}
@@ -360,12 +361,12 @@ func (p *service) rebuildCloud() error {
 		// ChatGPT subscription: authenticate via a refreshing token source over
 		// the keychain (the profile's key slot holds the token JSON), not a
 		// static API key.
-		cloudOpts.TokenSource = chatgptauth.NewSource(st, prof.Name, chatgptauth.Flow{})
+		cloudOpts.TokenSource = p.cfgSvc.Credentials().ChatGPT(prof.Name, chatgptauth.Flow{})
 	}
 	if prof.Flavor == cloudfactory.FlavorMessages && prof.Route == cloudfactory.RouteSubscription {
 		// Claude subscription: same shape as ChatGPT — a refreshing token
 		// source over the keychain, not a static API key.
-		cloudOpts.AnthropicTokenSource = anthropicauth.NewSource(st, prof.Name, anthropicauth.Flow{})
+		cloudOpts.AnthropicTokenSource = p.cfgSvc.Credentials().Anthropic(prof.Name, anthropicauth.Flow{})
 	}
 	prof.Model = c.ModelProfiles.ResolveCloudModelForTier(prof, cfg.TierEveryday)
 	prov, err := cloudfactory.BuildCloudProvider(prof, key, cloudOpts)
@@ -448,7 +449,7 @@ func (p *service) buildBackup(primaryName string, c cfg.Config) (inference.Provi
 	}
 	st := p.cfgSvc.Secrets()
 	key := ""
-	if st != nil {
+	if st != nil && !cloudfactory.IsSubscription(bp) {
 		if k, err := st.Get(bp.Name); err == nil {
 			key = k
 		}
@@ -456,7 +457,7 @@ func (p *service) buildBackup(primaryName string, c cfg.Config) (inference.Provi
 	// Same authentication carve-outs as the primary build in rebuildCloud:
 	// a proxy BaseURL (Meridian) authenticates with no key, and bedrock uses
 	// the AWS credential chain.
-	if key == "" && bp.BaseURL == "" && bp.Flavor != cloudfactory.FlavorBedrock {
+	if key == "" && bp.BaseURL == "" && bp.Flavor != cloudfactory.FlavorBedrock && !cloudfactory.IsSubscription(bp) {
 		log.Printf("[cloud] backup profile %q has no API key; running without failover", name)
 		return nil, nil, false
 	}
@@ -464,10 +465,10 @@ func (p *service) buildBackup(primaryName string, c cfg.Config) (inference.Provi
 	bp.Model = bpDefault
 	opts := cloudfactory.Options{ModelSupportsVision: p.modelSupportsVision}
 	if bp.Flavor == cloudfactory.FlavorResponses && bp.Route == cloudfactory.RouteChatGPT {
-		opts.TokenSource = chatgptauth.NewSource(st, bp.Name, chatgptauth.Flow{})
+		opts.TokenSource = p.cfgSvc.Credentials().ChatGPT(bp.Name, chatgptauth.Flow{})
 	}
 	if bp.Flavor == cloudfactory.FlavorMessages && bp.Route == cloudfactory.RouteSubscription {
-		opts.AnthropicTokenSource = anthropicauth.NewSource(st, bp.Name, anthropicauth.Flow{})
+		opts.AnthropicTokenSource = p.cfgSvc.Credentials().Anthropic(bp.Name, anthropicauth.Flow{})
 	}
 	backup, err := cloudfactory.BuildCloudProvider(bp, key, opts)
 	if err != nil {

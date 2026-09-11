@@ -1146,10 +1146,9 @@ func (s *Server) SelectExecutionMode() {
 	// Production default ("worker" or empty): arm worker-process execution. The
 	// in-process runner stays as the fallback for MCP-involving turns.
 	s.workerRunner = worker.NewWorkerRunner(
-		s.persistSvc,       // pre-assembles history + project context
-		s.cfgSvc,           // builds the ConfigSnapshot
-		s.permBroker,       // permission mode + decisions
-		s.cfgSvc.Secrets(), // resolves credentials for the worker's CredentialRequests
+		s.persistSvc, // pre-assembles history + project context
+		s.cfgSvc,     // builds the ConfigSnapshot
+		s.permBroker, // permission mode + decisions
 		func(ctx context.Context, id, parentID, projectDir, model string, grantedTools []string) error {
 			st := s.persistSvc.Store()
 			if st == nil {

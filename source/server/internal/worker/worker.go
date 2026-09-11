@@ -588,22 +588,17 @@ func buildWorkerBackup(
 		return nil, nil, false
 	}
 
-	// Fetch the backup's credential via the stream (mirrors wrapBackup's
-	// st.Get(bp.Name)) — for a ChatGPT-sub backup this is the access token, for
-	// a static route the API key. The eager fetch gates the carve-out below for
-	// ALL flavors, exactly like in-process; ChatGPT-sub still installs a lazy
-	// TokenSource for per-call refresh.
+	// Subscription backups are lazy just like host providers: constructing an
+	// unused backup must not refresh credentials or hide a missing login.
 	key := ""
-	if k, _, err := credSource.Fetch(ctx, bp.Name); err == nil {
-		key = k
-	}
-	// Same carve-out as in-process wrapBackup, applied to every flavor: no
-	// credential (e.g. a logged-out ChatGPT-sub backup) + no BaseURL (proxy) +
-	// not bedrock (AWS credential chain) → run without fallback rather than
-	// wrapping an unusable backup.
-	if key == "" && bp.BaseURL == "" && bp.Flavor != cloudfactory.FlavorBedrock {
-		log.Printf("[worker] backup profile %q has no credential; running without failover", name)
-		return nil, nil, false
+	if !cloudfactory.IsSubscription(bp) {
+		if k, _, err := credSource.Fetch(ctx, bp.Name); err == nil {
+			key = k
+		}
+		if key == "" && bp.BaseURL == "" && bp.Flavor != cloudfactory.FlavorBedrock {
+			log.Printf("[worker] backup profile %q has no credential; running without failover", name)
+			return nil, nil, false
+		}
 	}
 	opts := cloudfactory.Options{ModelSupportsVision: modelSupportsVision}
 	if bp.Flavor == cloudfactory.FlavorResponses && bp.Route == cloudfactory.RouteChatGPT {

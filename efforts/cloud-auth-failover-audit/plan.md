@@ -36,11 +36,11 @@ Objective: represent actionable login failure independently of prose and ordinar
 
 Objective: ensure a completed login or refresh produces usable, current credentials for every execution path without races or profile mutation. Files: internal/hostsvc/providers/providers.go; internal/hostsvc/config/config.go; internal/worker/host.go; internal/anthropicauth and internal/chatgptauth sources and stores; internal/server/claude_login.go and chatgpt_login.go; related login flow and loopback code. Tests: concurrent host/worker refresh, rebuilt providers, simultaneous login replacement, unrelated profiles, cancellation, store failure, and exact configuration preservation.
 
-- [ ] Unify refresh coordination for the actual credential identity across host provider construction, worker credential requests, and provider rebuilds; reuse existing ownership facilities rather than adding a competing cache.
-- [ ] Ensure a refresh started before interactive login cannot overwrite newer credentials; reread or invalidate cached credentials at the coordinated boundary.
+- [x] Unify refresh coordination for the actual credential identity across host provider construction, worker credential requests, and provider rebuilds; reuse existing ownership facilities rather than adding a competing cache.
+- [x] Ensure a refresh started before interactive login cannot overwrite newer credentials; reread or invalidate cached credentials at the coordinated boundary.
 - [ ] Release refresh locks before waiting for human interaction; allow individual canceled waiters to leave without breaking unrelated consumers.
-- [ ] Route primary and backup credential resolution through the consistent path, resolving unused backup credentials lazily.
-- [ ] Preserve actionable missing-credential failures rather than hiding a configured profile behind an absent provider or silently removing its backup.
+- [x] Route primary and backup credential resolution through the consistent path, resolving unused backup credentials lazily.
+- [x] Preserve actionable missing-credential failures rather than hiding a configured profile behind an absent provider or silently removing its backup.
 - [ ] Separate reauthentication of an existing profile from first-time profile setup; preserve model, endpoints, active profile, and unrelated settings on reauthentication.
 - [ ] Close Claude loopback resources on every exit, including stream-send failure before waiting for the callback; verify equivalent device-login cancellation cleanup.
 - [ ] Run race-enabled credential and login ownership tests with deterministic synchronization.

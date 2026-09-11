@@ -43,14 +43,16 @@ type searchPaint struct {
 }
 
 type conversationSearch struct {
-	paint   map[int][]searchPaint
-	cache   map[*Entry]searchProjection
-	input   promptInput
-	chat    *chatView
-	convID  string
-	matches []conversationMatch
-	active  int
-	query   string
+	dirty, working, jumpWhenReady bool
+	revision                      uint64
+	paint                         map[int][]searchPaint
+	cache                         map[*Entry]searchProjection
+	input                         promptInput
+	chat                          *chatView
+	convID                        string
+	matches                       []conversationMatch
+	active                        int
+	query                         string
 }
 
 func searchableEntry(e *Entry) bool {
@@ -244,8 +246,7 @@ func (m *Model) openConversationSearch(query string) {
 	}
 	m.search.input.SetValue(query)
 	m.relayout()
-	m.search.rebuild()
-	m.search.jump(0)
+	m.search.invalidate(true)
 }
 
 func (m *Model) closeConversationSearch() {
@@ -265,7 +266,7 @@ func (m *Model) updateConversationSearch() {
 		m.relayout()
 		return
 	}
-	m.search.rebuild()
+	m.search.invalidate(false)
 	m.sizeSearchInput()
 }
 
@@ -276,6 +277,9 @@ func (m Model) searchStatus() string {
 	status := "Type to search"
 	if m.search.input.Value() != "" {
 		status = "No matches"
+		if m.search.dirty || m.search.working {
+			status = "Searching…"
+		}
 		if n := len(m.search.matches); n > 0 {
 			status = fmt.Sprintf("%d of %d", m.search.active+1, n)
 		}
@@ -360,15 +364,13 @@ func (m Model) handleConversationSearch(msg tea.Msg) (tea.Model, tea.Cmd, bool) 
 		var cmd tea.Cmd
 		m.search.input, cmd = m.search.input.Update(event)
 		if m.search.input.Value() != before {
-			m.search.rebuild()
-			m.search.jump(0)
+			m.search.invalidate(true)
 			m.sizeSearchInput()
 		}
 		return m, cmd, true
 	case tea.PasteMsg:
 		m.search.input.InsertString(searchInputText(event.Content))
-		m.search.rebuild()
-		m.search.jump(0)
+		m.search.invalidate(true)
 		m.sizeSearchInput()
 		return m, nil, true
 	}

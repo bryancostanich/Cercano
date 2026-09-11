@@ -983,7 +983,22 @@ func waitProgressiveResumeCmd(ch <-chan resumeViewportStreamMsg) tea.Cmd {
 }
 
 // Update is the Bubble Tea reducer.
-func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m Model) Update(msg tea.Msg) (nextModel tea.Model, nextCmd tea.Cmd) {
+	// Search commands work on immutable snapshots, never on live UI state.
+	// Schedule after the reducer so background transcript updates are coalesced.
+	defer func() {
+		if next, ok := nextModel.(Model); ok {
+			if cmd := next.conversationSearchCmd(); cmd != nil {
+				nextCmd = tea.Batch(nextCmd, cmd)
+			}
+			nextModel = next
+		}
+	}()
+	if result, ok := msg.(conversationSearchResultMsg); ok {
+		m.applyConversationSearchResult(result)
+		return m, nil
+	}
+
 	start := time.Now()
 	defer func() { m.logSlowUpdate(start, msg) }()
 

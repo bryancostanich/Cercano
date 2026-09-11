@@ -9,7 +9,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-func searchModel(t *testing.T) Model {
+func searchModel(t testing.TB) Model {
 	t.Helper()
 	m := minimalModel()
 	p := theme.Cracker()

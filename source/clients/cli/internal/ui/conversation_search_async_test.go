@@ -2,6 +2,7 @@ package ui
 
 import (
 	tea "charm.land/bubbletea/v2"
+	"strings"
 	"testing"
 )
 
@@ -28,7 +29,7 @@ func TestConversationSearchTypingDoesNotScanInline(t *testing.T) {
 // The existing layout tests call reducer helpers directly and intentionally do
 // not run Bubble Tea commands (some commands access the system clipboard).
 // Drain only search work in those tests, discarding their scheduled command.
-func settleSearch(t *testing.T, m *Model) {
+func settleSearch(t testing.TB, m *Model) {
 	t.Helper()
 	for i := 0; i < 4 && m.search != nil && (m.search.dirty || m.search.working); i++ {
 		if m.search.working {
@@ -136,5 +137,32 @@ func TestConversationSearchResultRebasesPrependedHistory(t *testing.T) {
 	}
 	if followup == nil {
 		t.Fatal("updated history was not scheduled for searching")
+	}
+}
+
+func TestConversationSearchIdleRefreshDoesNotScheduleMatching(t *testing.T) {
+	m := searchModel(t)
+	m.openConversationSearch("needle")
+	settleSearch(t, &m)
+	revision := m.search.revision
+	m.refreshVisibleDynamicViewport()
+	if m.search.revision != revision || m.search.dirty {
+		t.Fatal("unchanged transcript refresh invalidated search")
+	}
+}
+
+func TestConversationSearchRefreshFindsOffscreenStreamingText(t *testing.T) {
+	m := searchModel(t)
+	entry := &Entry{Role: RoleAssistant, Content: "before", Streaming: true}
+	m.mainChat().SetEntries([]*Entry{{Role: RoleUser, Content: strings.Repeat("long history\n", 80)}, entry})
+	m.relayout()
+	m.openConversationSearch("needle")
+	settleSearch(t, &m)
+	m.mainChat().SetYOffset(0)
+	entry.Content = "after needle"
+	m.refreshVisibleDynamicViewport()
+	settleSearch(t, &m)
+	if len(m.search.matches) != 1 {
+		t.Fatal("off-screen streamed message was not refreshed for search")
 	}
 }

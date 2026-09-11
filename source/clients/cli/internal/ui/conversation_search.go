@@ -43,6 +43,7 @@ type searchPaint struct {
 }
 
 type conversationSearch struct {
+	observed                      []searchObservedMessage
 	dirty, working, jumpWhenReady bool
 	revision                      uint64
 	paint                         map[int][]searchPaint
@@ -266,7 +267,9 @@ func (m *Model) updateConversationSearch() {
 		m.relayout()
 		return
 	}
-	m.search.invalidate(false)
+	if m.search.observeLayout() {
+		m.search.invalidate(false)
+	}
 	m.sizeSearchInput()
 }
 

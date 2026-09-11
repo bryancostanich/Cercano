@@ -145,3 +145,35 @@ func (m *Model) applyConversationSearchResult(result conversationSearchResultMsg
 	}
 	m.sizeSearchInput()
 }
+
+// Keep invalidation proportional to message metadata, without allocating or
+// re-indexing the transcript on animation ticks or unrelated tool updates.
+type searchObservedMessage struct {
+	entry      *Entry
+	content    string
+	row, width int
+}
+
+func (s *conversationSearch) observeLayout() bool {
+	oldLen := len(s.observed)
+	next := s.observed[:0]
+	changed := false
+	for _, unit := range s.chat.layout.units {
+		if unit.kind != unitEntry || unit.startEntry < 0 || unit.startEntry >= len(s.chat.entries) {
+			continue
+		}
+		entry := s.chat.entries[unit.startEntry]
+		if !searchableEntry(entry) {
+			continue
+		}
+		value := searchObservedMessage{entry, entry.Content, unit.startLine, s.chat.Width()}
+		i := len(next)
+		if i >= oldLen || s.observed[i] != value {
+			changed = true
+		}
+		next = append(next, value)
+	}
+	changed = changed || len(next) != oldLen
+	s.observed = next
+	return changed
+}

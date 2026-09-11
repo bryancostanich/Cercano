@@ -3397,10 +3397,6 @@ func (m *Model) refreshViewport() {
 }
 
 func (m *Model) refreshVisibleDynamicViewport() {
-	if m.searchVisible() {
-		m.refreshViewport()
-		return
-	}
 	// Same strip-drift guard as refreshViewport: a visible-tab topology change is
 	// structural, so fall back to the full layout pass that recalculates bodyH and
 	// scrollbarTop. Ordinary token deltas keep the existing layout and repaint only

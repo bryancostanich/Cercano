@@ -399,6 +399,19 @@ func (m Model) handleConversationSearch(msg tea.Msg) (tea.Model, tea.Cmd, bool) 
 		return m, nil, false
 	}
 	switch event := msg.(type) {
+	case tea.MouseClickMsg:
+		mouse := event.Mouse()
+		if mouse.Button == tea.MouseLeft && m.mouseInPrompt(mouse) {
+			// Hit-test against the frame the user clicked, before removing
+			// the search row changes the layout.
+			row := mouse.Y - m.promptTop()
+			m.closeConversationSearch()
+			m.relayout()
+			m.activeChat().ClearSelection()
+			cmd := m.input.Focus()
+			m.input.MouseDown(mouse.X, row)
+			return m, cmd, true
+		}
 	case tea.KeyPressMsg:
 		if event.Key().Code == tea.KeyEscape {
 			m.closeConversationSearch()

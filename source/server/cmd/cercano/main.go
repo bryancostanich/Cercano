@@ -708,7 +708,7 @@ func startGRPCServer(cfg config.Config, bindAddr string, events *crashlog.Writer
 	llamaEng.SetFailureLog(srv.FailureLog())
 	llamaEng.SetContextWindowResolver(func(model string) int {
 		llamaCfg := srv.ConfigSnapshot().LlamaServer
-		return localModelContextWindow(llamaCfg.ContextSize, llamaCfg.ContextSizeSet, model)
+		return localModelContextWindow(llamaCfg.ContextOverride(), llamaCfg.ContextSize != nil, model)
 	})
 
 	// Native tool-loop local provider — follows the configured runtime.
@@ -1418,9 +1418,6 @@ func applyLlamaServerSetupDefaults(cfg *config.Config) {
 	}
 	if cfg.LlamaServer.Host == "" {
 		cfg.LlamaServer.Host = defaults.Host
-	}
-	if cfg.LlamaServer.ContextSize == 0 {
-		cfg.LlamaServer.ContextSize = defaults.ContextSize
 	}
 	if cfg.LlamaServer.GPULayers == "" {
 		cfg.LlamaServer.GPULayers = defaults.GPULayers

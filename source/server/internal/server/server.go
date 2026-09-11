@@ -1059,7 +1059,7 @@ func NewServer(a *agent.Agent, router RouterCloudUpdater, coordinator *loop.ADKC
 			return 0
 		}
 		llamaCfg := s.cfgSvc.Get().LlamaServer
-		return localModelContextWindow(llamaCfg.ContextSize, llamaCfg.ContextSizeSet, model)
+		return localModelContextWindow(llamaCfg.ContextOverride(), llamaCfg.ContextSize != nil, model)
 	})
 	// Wire the in-process turn runner with nil Perms (permBroker not yet set).
 	// Rebuilt in SetPermissions once the broker is wired. workerRunner stays nil
@@ -1565,7 +1565,9 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 
 		// Commit the profile mutations before rebuilding so rebuildCloudLocked
 		// reads the updated profile from cfgSvc.
-		s.cfgSvc.Set(c)
+		if err := s.cfgSvc.Set(c); err != nil {
+			return nil, grpcstatus.Error(codes.InvalidArgument, err.Error())
+		}
 		c = s.cfgSvc.Get() // re-snapshot so subsequent reads are consistent
 
 		if err := s.rebuildCloudLocked(); err != nil {
@@ -1713,7 +1715,9 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 	}
 
 	// Commit all config mutations to the service and persist.
-	s.cfgSvc.Set(c)
+	if err := s.cfgSvc.Set(c); err != nil {
+		return nil, grpcstatus.Error(codes.InvalidArgument, err.Error())
+	}
 	s.applyRuntimeEndpoints(c)
 	s.cfgSvc.Persist()
 

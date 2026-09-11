@@ -177,9 +177,6 @@ func applyDefaults(cfg *config.LlamaServerConfig) {
 	if cfg.Host == "" {
 		cfg.Host = defaults.Host
 	}
-	if cfg.ContextSize == 0 {
-		cfg.ContextSize = defaults.ContextSize
-	}
 	if cfg.GPULayers == "" {
 		cfg.GPULayers = defaults.GPULayers
 	}

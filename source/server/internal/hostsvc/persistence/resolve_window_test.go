@@ -46,8 +46,7 @@ func TestResolveWindow_FallsBackToNameTable(t *testing.T) {
 // headroom the running process cannot serve.
 func TestResolveWindow_LocalRuntimeCeilingWins(t *testing.T) {
 	c := cfg.Config{LocusMode: "open_primary", OpenRuntime: "llama_server"}
-	c.LlamaServer.ContextSize = 8192
-	c.LlamaServer.ContextSizeSet = true
+	c.LlamaServer.ContextSize = contextOverridePtr(8192)
 	x := windowSvc(t, c, func(string) (int, bool) { return 1_048_576, true })
 	window, known := x.resolveWindow("some-local-model")
 	if window != 8192 || !known {
@@ -63,3 +62,5 @@ func TestResolveWindow_NilResolverKeepsPreviousBehavior(t *testing.T) {
 		t.Fatalf("resolveWindow = %d/%v, want 200000/true", window, known)
 	}
 }
+
+func contextOverridePtr(n int) *int { return &n }

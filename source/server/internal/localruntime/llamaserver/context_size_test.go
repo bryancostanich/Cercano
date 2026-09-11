@@ -81,7 +81,7 @@ func TestModelContextOverride_ProfileEntry(t *testing.T) {
 }
 
 func TestArgsFor_NoDuplicateCtxSizeWhenModelPinsLegacy(t *testing.T) {
-	provider := NewProvider(config.LlamaServerConfig{Host: "127.0.0.1", ContextSize: 16384})
+	provider := NewProvider(config.LlamaServerConfig{Host: "127.0.0.1"})
 	model := provider.modelRecord("/models/glm.gguf", fakeFileInfo{size: 42})
 	model.ExtraArgs = []string{"--jinja", "--ctx-size", "32768"}
 
@@ -98,7 +98,7 @@ func TestArgsFor_NoDuplicateCtxSizeWhenModelPinsLegacy(t *testing.T) {
 }
 
 func TestArgsFor_ProfileCtxBeatsLegacyModelPin(t *testing.T) {
-	provider := NewProvider(config.LlamaServerConfig{Host: "127.0.0.1", ContextSize: 8192})
+	provider := NewProvider(config.LlamaServerConfig{Host: "127.0.0.1"})
 	model := provider.modelRecord("/models/glm.gguf", fakeFileInfo{size: 42})
 	model.ContextSize = 131072
 	model.ExtraArgs = []string{"--jinja", "--ctx-size", "32768"}
@@ -109,7 +109,7 @@ func TestArgsFor_ProfileCtxBeatsLegacyModelPin(t *testing.T) {
 }
 
 func TestArgsFor_ExplicitConfigBeatsProfileCtx(t *testing.T) {
-	provider := NewProvider(config.LlamaServerConfig{Host: "127.0.0.1", ContextSize: 65536, ContextSizeSet: true})
+	provider := NewProvider(config.LlamaServerConfig{Host: "127.0.0.1", ContextSize: contextOverridePtr(65536)})
 	model := provider.modelRecord("/models/glm.gguf", fakeFileInfo{size: 42})
 	model.ContextSize = 131072
 	model.ExtraArgs = []string{"--jinja"}
@@ -119,13 +119,13 @@ func TestArgsFor_ExplicitConfigBeatsProfileCtx(t *testing.T) {
 	assertSingleCtxSize(t, args, 65536)
 }
 
-func TestArgsFor_EmitsDefaultConfigCtxSizeWhenNoOverride(t *testing.T) {
-	provider := NewProvider(config.LlamaServerConfig{Host: "127.0.0.1", ContextSize: 16384})
+func TestArgsFor_EmitsExplicitConfigCtxSize(t *testing.T) {
+	provider := NewProvider(config.LlamaServerConfig{Host: "127.0.0.1", ContextSize: contextOverridePtr(16384)})
 	model := provider.modelRecord("/models/test.gguf", fakeFileInfo{size: 42})
 	model.ExtraArgs = []string{"--jinja"}
 
 	args := provider.argsFor(provider.snapshot(), model, 8123)
-	assertSingleCtxSize(t, args, 8192)
+	assertSingleCtxSize(t, args, 16384)
 }
 
 func assertSingleCtxSize(t *testing.T, args []string, want int) {
@@ -147,3 +147,5 @@ func countFlag(args []string, flag string) int {
 	}
 	return n
 }
+
+func contextOverridePtr(n int) *int { return &n }

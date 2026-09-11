@@ -155,3 +155,31 @@ func TestFindLlamaServerBinary_ConfiguredPath(t *testing.T) {
 		t.Fatalf("got %q, want %q", got, bin)
 	}
 }
+
+func TestSetupPreservesContextSelectionAcrossSaves(t *testing.T) {
+	for _, size := range []int{0, 8192, 65536} {
+		c := config.Defaults()
+		if size > 0 {
+			n := size
+			c.LlamaServer.ContextSize = &n
+		}
+		path := filepath.Join(t.TempDir(), "config.yaml")
+		for i := 0; i < 3; i++ {
+			applyLlamaServerSetupDefaults(&c)
+			if err := config.Save(c, path); err != nil {
+				t.Fatal(err)
+			}
+			var err error
+			c, err = config.Load(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if c.LlamaServer.ContextOverride() != size {
+				t.Fatalf("override=%d, want %d", c.LlamaServer.ContextOverride(), size)
+			}
+			if size == 0 && c.LlamaServer.ContextSize != nil {
+				t.Fatal("setup persisted automatic context")
+			}
+		}
+	}
+}

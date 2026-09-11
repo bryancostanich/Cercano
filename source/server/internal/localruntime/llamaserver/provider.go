@@ -176,6 +176,7 @@ func NewProvider(cfg config.LlamaServerConfig) *Provider {
 // at construction or via ReloadConfig, so a reloaded config behaves identically
 // to a boot-time one.
 func withDefaults(cfg config.LlamaServerConfig) config.LlamaServerConfig {
+	cfg = (config.Config{LlamaServer: cfg}).Clone().LlamaServer
 	if cfg.Host == "" {
 		cfg.Host = "127.0.0.1"
 	}
@@ -208,7 +209,7 @@ func (p *Provider) ReloadConfig(cfg config.Config) {
 func (p *Provider) snapshot() config.LlamaServerConfig {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	return p.cfg
+	return (config.Config{LlamaServer: p.cfg}).Clone().LlamaServer
 }
 
 func (p *Provider) Name() string { return runtimeName }
@@ -568,11 +569,11 @@ func (p *Provider) checkMemoryBudget(model localruntime.ModelRecord) (memoryProj
 		HeadroomBytes: memoryGuardHeadroomBytes,
 		RegistryBytes: p.registryResidentEstimate(),
 		ContextTokens: EffectiveContextSize(ContextSizeInput{
-			ConfigContextSize:  p.snapshot().ContextSize,
-			ConfigExplicit:     p.snapshot().ContextSizeSet,
+			ConfigContextSize:  p.snapshot().ContextOverride(),
+			ConfigExplicit:     p.snapshot().ContextSize != nil,
 			ProfileContextSize: model.ContextSize,
 			ModelExtraArgs:     model.ExtraArgs,
-			DefaultContextSize: config.Defaults().LlamaServer.ContextSize,
+			DefaultContextSize: config.Defaults().LlamaServer.ContextOverride(),
 		}),
 		CurrentProbeOK: false,
 	}
@@ -875,11 +876,11 @@ func (p *Provider) argsFor(cfg config.LlamaServerConfig, model localruntime.Mode
 		args = append(args, "--embedding")
 	}
 	ctxSize := EffectiveContextSize(ContextSizeInput{
-		ConfigContextSize:  cfg.ContextSize,
-		ConfigExplicit:     cfg.ContextSizeSet,
+		ConfigContextSize:  cfg.ContextOverride(),
+		ConfigExplicit:     cfg.ContextSize != nil,
 		ProfileContextSize: model.ContextSize,
 		ModelExtraArgs:     model.ExtraArgs,
-		DefaultContextSize: config.Defaults().LlamaServer.ContextSize,
+		DefaultContextSize: config.Defaults().LlamaServer.ContextOverride(),
 	})
 	if ctxSize > 0 {
 		args = append(args, "--ctx-size", strconv.Itoa(ctxSize))

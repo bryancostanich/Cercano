@@ -55,10 +55,10 @@ func LocalRuntimeWindow(cfg config.Config, model string) int {
 	case "mistralrs":
 		return cfg.MistralRS.MaxSeqLen
 	case "llama_server":
-		return LlamaServerWindow(cfg.LlamaServer.ContextSize, cfg.LlamaServer.ContextSizeSet, model)
+		return LlamaServerWindow(cfg.LlamaServer.ContextOverride(), cfg.LlamaServer.ContextSize != nil, model)
 	default:
-		if cfg.LlamaServer.ContextSize > 0 {
-			return LlamaServerWindow(cfg.LlamaServer.ContextSize, cfg.LlamaServer.ContextSizeSet, model)
+		if cfg.LlamaServer.ContextOverride() > 0 {
+			return LlamaServerWindow(cfg.LlamaServer.ContextOverride(), cfg.LlamaServer.ContextSize != nil, model)
 		}
 		return cfg.MistralRS.MaxSeqLen
 	}

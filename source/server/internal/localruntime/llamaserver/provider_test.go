@@ -76,12 +76,12 @@ func TestDiscoverIncludesQwenCatalogModels(t *testing.T) {
 
 func TestArgsForBuildsLlamaServerCommand(t *testing.T) {
 	provider := NewProvider(config.LlamaServerConfig{
-		Host:           "127.0.0.1",
-		ContextSize:    4096,
-		ContextSizeSet: true,
-		GPULayers:      "auto",
-		Threads:        6,
-		ExtraArgs:      []string{"--no-webui"},
+		Host:        "127.0.0.1",
+		ContextSize: contextOverridePtr(4096),
+
+		GPULayers: "auto",
+		Threads:   6,
+		ExtraArgs: []string{"--no-webui"},
 	})
 	model := provider.modelRecord("/models/test.gguf", fakeFileInfo{size: 42})
 
@@ -115,7 +115,6 @@ func TestArgsForAppendsPerModelExtraArgs(t *testing.T) {
 		"--model", "/models/glm.gguf",
 		"--host", "127.0.0.1",
 		"--port", "8123",
-		"--ctx-size", "8192",
 		"--no-webui",
 		"--jinja",
 	}
@@ -169,7 +168,6 @@ func TestArgsForPassesMmproj(t *testing.T) {
 		"--host", "127.0.0.1",
 		"--port", "8123",
 		"--mmproj", projector,
-		"--ctx-size", "8192",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("vision args mismatch:\n got: %#v\nwant: %#v", got, want)
@@ -315,5 +313,24 @@ func TestCatalogModelRecordsCarryProfileContext(t *testing.T) {
 		if got[id] != want {
 			t.Fatalf("%s ContextSize = %d, want %d", id, got[id], want)
 		}
+	}
+}
+
+func TestProviderContextConfigSnapshotIsolation(t *testing.T) {
+	n := 8192
+	p := NewProvider(config.LlamaServerConfig{ContextSize: &n})
+	n = 65536
+	if p.snapshot().ContextOverride() != 8192 {
+		t.Fatal("provider aliases constructor input")
+	}
+	snapshot := p.snapshot()
+	*snapshot.ContextSize = 1
+	if p.snapshot().ContextOverride() != 8192 {
+		t.Fatal("provider aliases snapshot")
+	}
+	p.ReloadConfig(config.Config{LlamaServer: config.LlamaServerConfig{ContextSize: &n}})
+	n = 2
+	if p.snapshot().ContextOverride() != 65536 {
+		t.Fatal("provider aliases reload input")
 	}
 }

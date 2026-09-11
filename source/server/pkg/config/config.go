@@ -532,8 +532,7 @@ type LlamaServerConfig struct {
 	DefaultModel     string        `yaml:"default_model"`
 	Host             string        `yaml:"host"`
 	Port             int           `yaml:"port"`
-	ContextSize      int           `yaml:"context_size"`
-	ContextSizeSet   bool          `yaml:"-"`
+	ContextSize      *int          `yaml:"context_size,omitempty"`
 	GPULayers        string        `yaml:"gpu_layers"`
 	Threads          int           `yaml:"threads"`
 	ExtraArgs        []string      `yaml:"extra_args"`
@@ -664,7 +663,6 @@ func Defaults() Config {
 		LlamaServer: LlamaServerConfig{
 			ModelDirs:        []string{"~/.cercano/models"},
 			Host:             "127.0.0.1",
-			ContextSize:      8192,
 			GPULayers:        "auto",
 			ReadinessTimeout: "60s",
 			Restart: RestartConfig{
@@ -1015,7 +1013,6 @@ func Load(path string) (Config, error) {
 		if err := yaml.Unmarshal(data, &cfg); err != nil {
 			return cfg, fmt.Errorf("failed to parse config file %q: %w", path, err)
 		}
-		markLlamaServerExplicitFields(data, &cfg)
 
 		// Backward-compat: accept the pre-rename `local_model` /
 		// `local_runtime` YAML keys (and `locus_mode` values
@@ -1051,6 +1048,9 @@ func Load(path string) (Config, error) {
 	migrateMeridianToSubscription(&cfg)
 	collapseLegacySubscriptionAliases(&cfg)
 	normalizeCloudModelDefaults(&cfg)
+	if err := cfg.LlamaServer.Validate(); err != nil {
+		return cfg, err
+	}
 	if !ValidateToolLoopMaxIterations(cfg.ToolLoop.MaxIterations) {
 		return cfg, fmt.Errorf("tool_loop.max_iterations must be -1 or a non-negative integer, got %d", cfg.ToolLoop.MaxIterations)
 	}
@@ -1086,20 +1086,6 @@ func applyLegacyLocalKeys(data []byte, cfg *Config) {
 		cfg.LocusMode = "open_primary"
 	case "local_only":
 		cfg.LocusMode = "open_only"
-	}
-}
-
-func markLlamaServerExplicitFields(data []byte, cfg *Config) {
-	var raw map[string]any
-	if err := yaml.Unmarshal(data, &raw); err != nil {
-		return
-	}
-	llama, ok := raw["llama_server"].(map[string]any)
-	if !ok {
-		return
-	}
-	if _, ok := llama["context_size"]; ok {
-		cfg.LlamaServer.ContextSizeSet = true
 	}
 }
 
@@ -1148,9 +1134,6 @@ func applyLlamaServerDefaults(cfg *LlamaServerConfig, defaults LlamaServerConfig
 	}
 	if cfg.Host == "" {
 		cfg.Host = defaults.Host
-	}
-	if cfg.ContextSize == 0 {
-		cfg.ContextSize = defaults.ContextSize
 	}
 	if cfg.GPULayers == "" {
 		cfg.GPULayers = defaults.GPULayers
@@ -1214,6 +1197,10 @@ func applyEnvOverrides(cfg *Config) {
 // array.
 func (c Config) Clone() Config {
 	out := c // copy all scalar and nested-struct fields
+	if c.LlamaServer.ContextSize != nil {
+		n := *c.LlamaServer.ContextSize
+		out.LlamaServer.ContextSize = &n
+	}
 
 	// CloudProfiles: independent slice + elements are all-scalar structs, so a
 	// slice copy suffices.
@@ -1283,6 +1270,9 @@ func VenvPython() string {
 // split-state bug that motivated this refactor (cloud_model edited, profile
 // untouched, runtime still on the old model).
 func Save(cfg Config, path string) error {
+	if err := cfg.LlamaServer.Validate(); err != nil {
+		return err
+	}
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("failed to create config directory %q: %w", dir, err)
@@ -1303,6 +1293,23 @@ func Save(cfg Config, path string) error {
 
 	if err := os.WriteFile(path, data, 0644); err != nil {
 		return fmt.Errorf("failed to write config file %q: %w", path, err)
+	}
+	return nil
+}
+
+// ContextOverride returns the explicit context override, or zero for automatic
+// selection. Zero is not a serving capacity and must not authorize inference.
+func (c LlamaServerConfig) ContextOverride() int {
+	if c.ContextSize == nil {
+		return 0
+	}
+	return *c.ContextSize
+}
+
+// Validate rejects explicit nonpositive context overrides.
+func (c LlamaServerConfig) Validate() error {
+	if c.ContextSize != nil && *c.ContextSize <= 0 {
+		return fmt.Errorf("llama_server.context_size must be positive, got %d (omit it for automatic selection)", *c.ContextSize)
 	}
 	return nil
 }

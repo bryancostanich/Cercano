@@ -230,7 +230,7 @@ func TestDetect_AppliesDefaultsWhenFieldsEmpty(t *testing.T) {
 	if cfg.Host == "" {
 		t.Errorf("Host should be populated from defaults")
 	}
-	if cfg.ContextSize == 0 {
-		t.Errorf("ContextSize should be populated from defaults")
+	if cfg.ContextSize != nil {
+		t.Errorf("ContextSize should remain automatic")
 	}
 }

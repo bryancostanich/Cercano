@@ -191,7 +191,7 @@ func main() {
 	llamaEng.SetFailureLog(srv.FailureLog())
 	llamaEng.SetContextWindowResolver(func(model string) int {
 		llamaCfg := srv.ConfigSnapshot().LlamaServer
-		return llamaCfg.ContextSize
+		return llamaCfg.ContextOverride()
 	})
 	srv.SetRuntimeManager(runtimeManager)
 	srv.SetConfigPersistence(config.DefaultPath(), cfg)

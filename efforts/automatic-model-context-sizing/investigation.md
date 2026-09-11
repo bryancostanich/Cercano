@@ -85,3 +85,20 @@ startProcess calls argsFor(p.snapshot(), instance.model, port), independently of
 GGUF ParseMeta requires core sizing fields including ContextLength; its KVBytesPerToken uses an f16 assumption. The existing kvEstimate silently returns zeros for parse failures and zero estimates. The approved implementation must fail closed for automatic sizing lacking required evidence, validate arithmetic bounds and cache/parallel flags, and avoid describing unsupported inputs as safely estimated. Existing Start reuse/adoption and finishReadiness paths must confirm capacity too.
 
 No evidence found in this audit invalidates the approved optional-config/runtime-owned approach. Unknown metadata is an actionable failure case already covered by the spec. Non-default launch settings that make the memory estimate untrustworthy must not be silently accepted by the automatic path. Full behavioral verification belongs in the planned resolver, runtime, and consumer integration phases.
+
+## Phase 2 implementation verification
+
+Implemented optional llama-server ContextSize (*int, YAML omission), removed the 8192 allocation and ContextSizeSet parser, removed both config/setup and runtime-detection default filling, and added positive-value validation at Load/Save/Set/Mutate boundaries. Set and Mutate now return errors; invalid mutations retain the previous state. Provider construction, reload, and snapshots deep-copy context pointers.
+
+Tests now cover null/absent repeated save/reload, unrelated settings saves, deliberate 8192 and 65536 overrides, nonpositive rejection, setup save/reload, config service snapshots, and provider snapshots. Mutate invalid-state regression was observed failing before the atomic candidate-validation fix.
+
+Passed:
+- go test ./pkg/config ./internal/hostsvc/config ./internal/localruntime/llamaserver ./cmd/cercano -count=1
+- go test -race ./pkg/config ./internal/hostsvc/config ./internal/localruntime/llamaserver -count=1
+- go test ./internal/modelwindow ./internal/hostsvc/persistence ./internal/server ./internal/worker ./internal/toolstack -count=1
+- go test ./... -run '^$' (server compile-only gate, not full test suite)
+- go test ./internal/ui ./internal/uiconfig -run '^$' (CLI compile-only gate)
+
+The runner suite still fails the deliberately red TestLocalContextWindow_ConfigEditDoesNotChangeServingCapacity: 65536 becomes 8192 after config-only change. Runtime-owned confirmation and budgeting propagation are NOT implemented by Phase 2. Existing argument construction can omit a context flag for an automatic model without catalog policy; the planned safe GGUF resolver and memory gate in Phase 3 must address this before the full effort is ready to deploy. This checkpoint is an intermediate implementation unit, not completion of the six-phase contract.
+
+No live config edits, runtime restarts, installations, or pushes were performed.

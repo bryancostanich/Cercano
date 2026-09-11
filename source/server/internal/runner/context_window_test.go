@@ -13,7 +13,6 @@ import (
 // host, GLM should resolve to 128K, not the default/config fallback.
 func TestLocalContextWindow_UsesProfileContextNotConfigDefault(t *testing.T) {
 	cfg := config.Config{OpenRuntime: "llama_server"}
-	cfg.LlamaServer.ContextSize = 16384
 
 	got := modelwindow.LocalRuntimeWindow(cfg, "llama_server:catalog:glm-4.5-air-q4_k_m")
 	if got != 131072 {
@@ -27,7 +26,7 @@ func TestLocalContextWindow_UsesProfileContextNotConfigDefault(t *testing.T) {
 
 func TestLocalContextWindow_FallsBackToConfigWithoutOverride(t *testing.T) {
 	cfg := config.Config{OpenRuntime: "llama_server"}
-	cfg.LlamaServer.ContextSize = 16384
+	cfg.LlamaServer.ContextSize = contextOverridePtr(16384)
 
 	for _, model := range []string{"", "llama_server:catalog:no-such-model"} {
 		if got := modelwindow.LocalRuntimeWindow(cfg, model); got != 16384 {
@@ -38,7 +37,6 @@ func TestLocalContextWindow_FallsBackToConfigWithoutOverride(t *testing.T) {
 
 func TestLocalContextWindow_BareModelIDAlsoResolves(t *testing.T) {
 	cfg := config.Config{OpenRuntime: "llama_server"}
-	cfg.LlamaServer.ContextSize = 16384
 
 	if got := modelwindow.LocalRuntimeWindow(cfg, "glm-4.5-air-q4_k_m"); got != 131072 {
 		t.Fatalf("LocalRuntimeWindow(bare id) = %d, want 131072", got)
@@ -47,8 +45,7 @@ func TestLocalContextWindow_BareModelIDAlsoResolves(t *testing.T) {
 
 func TestLocalContextWindow_ExplicitConfigOverridesProfile(t *testing.T) {
 	cfg := config.Config{OpenRuntime: "llama_server"}
-	cfg.LlamaServer.ContextSize = 65536
-	cfg.LlamaServer.ContextSizeSet = true
+	cfg.LlamaServer.ContextSize = contextOverridePtr(65536)
 
 	if got := modelwindow.LocalRuntimeWindow(cfg, "glm-4.5-air-q4_k_m"); got != 65536 {
 		t.Fatalf("explicit LocalRuntimeWindow = %d, want 65536", got)
@@ -61,8 +58,7 @@ func TestLocalContextWindow_ExplicitConfigOverridesProfile(t *testing.T) {
 // and add separate lifecycle/confirmation integration coverage.
 func TestLocalContextWindow_ConfigEditDoesNotChangeServingCapacity(t *testing.T) {
 	cfg := config.Config{OpenRuntime: "llama_server"}
-	cfg.LlamaServer.ContextSize = 65536
-	cfg.LlamaServer.ContextSizeSet = true
+	cfg.LlamaServer.ContextSize = contextOverridePtr(65536)
 	svc := cfgsvc.New("", cfg, nil)
 	core := &Core{d: Deps{Config: svc}}
 	const model = "glm-4.5-air-q4_k_m"
@@ -70,7 +66,7 @@ func TestLocalContextWindow_ConfigEditDoesNotChangeServingCapacity(t *testing.T)
 	if !known || before != 65536 {
 		t.Fatalf("initial capacity = (%d, %v), want (65536, true)", before, known)
 	}
-	cfg.LlamaServer.ContextSize = 8192
+	cfg.LlamaServer.ContextSize = contextOverridePtr(8192)
 	svc.Set(cfg)
 	after, known := core.knownContextWindowFor(false, model)
 	if !known || after != before {
@@ -81,9 +77,11 @@ func TestLocalContextWindow_ConfigEditDoesNotChangeServingCapacity(t *testing.T)
 func TestLocalContextWindow_MistralRSUnaffected(t *testing.T) {
 	cfg := config.Config{OpenRuntime: "mistralrs"}
 	cfg.MistralRS.MaxSeqLen = 8192
-	cfg.LlamaServer.ContextSize = 16384
+	cfg.LlamaServer.ContextSize = contextOverridePtr(16384)
 
 	if got := modelwindow.LocalRuntimeWindow(cfg, "glm-4.5-air-q4_k_m"); got != 8192 {
 		t.Fatalf("mistralrs window = %d, want MaxSeqLen 8192", got)
 	}
 }
+
+func contextOverridePtr(n int) *int { return &n }

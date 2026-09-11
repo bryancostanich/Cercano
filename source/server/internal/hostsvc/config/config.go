@@ -21,7 +21,7 @@ type Service interface {
 
 	// Full-state writes (replace entire config; no notify — caller persists
 	// and broadcasts as needed)
-	Set(c cfg.Config)
+	Set(c cfg.Config) error
 
 	// Initialization (no persist, no notify)
 	SetPath(path string)
@@ -35,11 +35,12 @@ type Service interface {
 	SetBackupProfile(name string) bool // false if name!="" and not found
 	ProfileInfo(name string) (exists bool, isActive bool)
 
-	// Mutate applies fn to the live config under the write lock. It does NOT
+	// Mutate applies fn to an isolated candidate under the write lock, validates it,
+	// and commits only valid state. It does NOT
 	// persist to disk and does NOT notify — use Persist() and/or Set()
 	// explicitly when those side-effects are needed. Intended for targeted
 	// in-place patches (rebuildCloud CloudModel write-back, tests).
-	Mutate(fn func(*cfg.Config))
+	Mutate(fn func(*cfg.Config)) error
 
 	// CloudModel mirror write (rebuildCloud write-back only; no notify, no persist)
 	SetCloudModel(model string)
@@ -98,11 +99,15 @@ func (s *svc) ActiveProfile() (cfg.CloudProfile, bool) {
 // Set replaces the entire config (deep-cloning the incoming value so the
 // caller retaining c cannot later mutate shared state). Does NOT persist and
 // does NOT notify — caller handles those.
-func (s *svc) Set(c cfg.Config) {
+func (s *svc) Set(c cfg.Config) error {
+	if err := c.LlamaServer.Validate(); err != nil {
+		return err
+	}
 	clone := c.Clone()
 	s.mu.Lock()
 	s.current = clone
 	s.mu.Unlock()
+	return nil
 }
 
 func (s *svc) SetPath(path string) {
@@ -192,10 +197,16 @@ func (s *svc) ProfileInfo(name string) (exists bool, isActive bool) {
 	return ok, s.current.ActiveCloudProfile == name
 }
 
-func (s *svc) Mutate(fn func(*cfg.Config)) {
+func (s *svc) Mutate(fn func(*cfg.Config)) error {
 	s.mu.Lock()
-	fn(&s.current)
-	s.mu.Unlock()
+	defer s.mu.Unlock()
+	candidate := s.current.Clone()
+	fn(&candidate)
+	if err := candidate.LlamaServer.Validate(); err != nil {
+		return err
+	}
+	s.current = candidate.Clone()
+	return nil
 }
 
 func (s *svc) SetCloudModel(model string) {

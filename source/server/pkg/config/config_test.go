@@ -154,11 +154,8 @@ func TestLoad_FromFile(t *testing.T) {
 	if cfg.Port != "50052" {
 		t.Errorf("expected default Port, got %q", cfg.Port)
 	}
-	if cfg.LlamaServer.ContextSize != 8192 {
-		t.Errorf("expected default llama-server context size, got %d", cfg.LlamaServer.ContextSize)
-	}
-	if cfg.LlamaServer.ContextSizeSet {
-		t.Error("defaulted llama-server context size must not be marked explicit")
+	if cfg.LlamaServer.ContextSize != nil {
+		t.Error("default context must remain automatic")
 	}
 }
 
@@ -185,7 +182,7 @@ func TestSavePreservesAutomaticLlamaServerContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reloaded.LlamaServer.ContextSizeSet {
+	if reloaded.LlamaServer.ContextSize != nil {
 		t.Error("automatic context became explicit after save/reload")
 	}
 }
@@ -203,8 +200,8 @@ llama_server:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.LlamaServer.ContextSize != 65536 || !cfg.LlamaServer.ContextSizeSet {
-		t.Fatalf("context presence = size %d explicit %v, want 65536/true", cfg.LlamaServer.ContextSize, cfg.LlamaServer.ContextSizeSet)
+	if cfg.LlamaServer.ContextOverride() != 65536 {
+		t.Fatalf("context presence = size %d explicit %v, want 65536/true", cfg.LlamaServer.ContextOverride(), cfg.LlamaServer.ContextSize != nil)
 	}
 }
 

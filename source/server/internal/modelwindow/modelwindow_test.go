@@ -12,8 +12,7 @@ func localCfg(mode string, ctxSize int) config.Config {
 	var c config.Config
 	c.LocusMode = mode
 	c.OpenRuntime = "llama_server"
-	c.LlamaServer.ContextSize = ctxSize
-	c.LlamaServer.ContextSizeSet = true
+	c.LlamaServer.ContextSize = contextOverridePtr(ctxSize)
 	return c
 }
 
@@ -89,3 +88,5 @@ func TestMeterWindowLocalFallsBackWhenConfigEmpty(t *testing.T) {
 		t.Errorf("window = %d, want the published 200000 fallback", got.Tokens)
 	}
 }
+
+func contextOverridePtr(n int) *int { return &n }

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net"
 	"net/http"
 	"os"
@@ -153,12 +154,14 @@ func (p *Provider) headerIdentity(path string, info os.FileInfo) headerIdentity 
 }
 
 type managedInstance struct {
-	record   localruntime.InstanceRecord
-	model    localruntime.ModelRecord
-	cmd      *exec.Cmd
-	stopping bool
-	adopted  bool
-	ownerPID int
+	launchConfig   config.LlamaServerConfig
+	plannedContext PlannedContext
+	record         localruntime.InstanceRecord
+	model          localruntime.ModelRecord
+	cmd            *exec.Cmd
+	stopping       bool
+	adopted        bool
+	ownerPID       int
 }
 
 func NewProvider(cfg config.LlamaServerConfig) *Provider {
@@ -301,7 +304,13 @@ func (p *Provider) Start(ctx context.Context, req localruntime.StartRequest, sin
 		return existing, nil
 	}
 	p.reapBeforeSpawn(ctx, model, binary, sink)
-	projection, err := p.checkMemoryBudget(model)
+	launchConfig := p.snapshot()
+	planned, err := p.planContext(launchConfig, model)
+	if err != nil {
+		p.spawnMu.Unlock()
+		return nil, err
+	}
+	projection, err := p.checkPlannedMemory(model, planned)
 	if err != nil {
 		p.spawnMu.Unlock()
 		p.event(crashlog.EventRefused, err.Error(), crashlog.RuntimeInfo{ModelID: model.ID}, projection.extra())
@@ -319,6 +328,7 @@ func (p *Provider) Start(ctx context.Context, req localruntime.StartRequest, sin
 	id := runtimeName + ":" + shortID(model.Path) + ":" + strconv.Itoa(port)
 	now := time.Now()
 	instance := &managedInstance{
+		launchConfig: launchConfig, plannedContext: planned,
 		model: model,
 		record: localruntime.InstanceRecord{
 			ID:        id,
@@ -553,6 +563,18 @@ func (m memoryProjection) extra() map[string]any {
 }
 
 func (p *Provider) checkMemoryBudget(model localruntime.ModelRecord) (memoryProjection, error) {
+	plan, err := p.planContext(p.snapshot(), model)
+	if err != nil {
+		return memoryProjection{}, err
+	}
+	return p.checkPlannedMemory(model, plan)
+}
+
+func (p *Provider) checkPlannedMemory(model localruntime.ModelRecord, plan PlannedContext, excludeInstance ...string) (memoryProjection, error) {
+	exclude := ""
+	if len(excludeInstance) > 0 {
+		exclude = excludeInstance[0]
+	}
 	totalFn := p.totalRAM
 	if totalFn == nil {
 		totalFn = sysram.Total
@@ -564,20 +586,18 @@ func (p *Provider) checkMemoryBudget(model localruntime.ModelRecord) (memoryProj
 
 	p.pruneDeadAdoptedInstances()
 	projection := memoryProjection{
-		TotalBytes:    totalFn(),
-		ModelBytes:    model.SizeBytes,
-		HeadroomBytes: memoryGuardHeadroomBytes,
-		RegistryBytes: p.registryResidentEstimate(),
-		ContextTokens: EffectiveContextSize(ContextSizeInput{
-			ConfigContextSize:  p.snapshot().ContextOverride(),
-			ConfigExplicit:     p.snapshot().ContextSize != nil,
-			ProfileContextSize: model.ContextSize,
-			ModelExtraArgs:     model.ExtraArgs,
-			DefaultContextSize: config.Defaults().LlamaServer.ContextOverride(),
-		}),
+		TotalBytes:     totalFn(),
+		ModelBytes:     model.SizeBytes,
+		HeadroomBytes:  memoryGuardHeadroomBytes,
+		RegistryBytes:  p.registryResidentEstimateExcept(exclude),
+		ContextTokens:  plan.Tokens,
 		CurrentProbeOK: false,
 	}
-	projection.KVBytesPerToken, projection.KVBytes = p.kvEstimate(model, projection.ContextTokens)
+	projection.KVBytesPerToken = plan.KVBytesPerToken
+	if plan.Tokens <= 0 || plan.KVBytesPerToken < 0 || (plan.KVBytesPerToken > 0 && int64(plan.Tokens) > math.MaxInt64/plan.KVBytesPerToken) {
+		return projection, fmt.Errorf("llama-server memory guard: invalid or overflowing context allocation")
+	}
+	projection.KVBytes = plan.KVBytesPerToken * int64(plan.Tokens)
 	current, ok := nonEvictableFn()
 	if ok {
 		projection.CurrentBytes = current
@@ -593,6 +613,12 @@ func (p *Provider) checkMemoryBudget(model localruntime.ModelRecord) (memoryProj
 	} else {
 		projection.CurrentBytes = projection.RegistryBytes
 		projection.FallbackToRegistry = true
+	}
+	if plan.Automatic && (projection.TotalBytes <= 0 || !projection.CurrentProbeOK || projection.ModelBytes <= 0 || projection.KVBytesPerToken <= 0) {
+		return projection, fmt.Errorf("llama-server automatic context memory evidence unavailable; supply an explicit context_size or restore memory probes/metadata")
+	}
+	if projection.CurrentBytes < 0 || projection.ModelBytes < 0 || projection.ModelBytes > math.MaxInt64-projection.KVBytes || projection.CurrentBytes > math.MaxInt64-projection.ModelBytes-projection.KVBytes {
+		return projection, fmt.Errorf("llama-server projected allocation overflows memory accounting")
 	}
 	projection.ProjectedBytes = projection.CurrentBytes + projection.ModelBytes + projection.KVBytes
 	if projection.TotalBytes <= 0 {
@@ -619,35 +645,31 @@ func (p *Provider) checkMemoryBudget(model localruntime.ModelRecord) (memoryProj
 		blockingInstanceSuffix(projection))
 }
 
-func (p *Provider) kvEstimate(model localruntime.ModelRecord, ctxTokens int) (perToken int64, total int64) {
-	if ctxTokens <= 0 || model.Path == "" {
-		return 0, 0
-	}
-	f, err := os.Open(model.Path)
-	if err != nil {
-		return 0, 0
-	}
-	defer f.Close()
-	meta, err := gguf.ParseMeta(io.LimitReader(f, identityHeaderWindow))
-	if err != nil || meta == nil {
-		return 0, 0
-	}
-	perToken = meta.KVBytesPerToken()
-	if perToken <= 0 {
-		return 0, 0
-	}
-	return perToken, perToken * int64(ctxTokens)
-}
+func (p *Provider) registryResidentEstimate() int64 { return p.registryResidentEstimateExcept("") }
 
-func (p *Provider) registryResidentEstimate() int64 {
+func (p *Provider) registryResidentEstimateExcept(exclude string) int64 {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	var total int64
-	for _, inst := range p.running {
+	for id, inst := range p.running {
+		if id == exclude {
+			continue
+		}
 		if !countsTowardMemoryFloor(inst) {
 			continue
 		}
-		total += inst.model.SizeBytes
+		size := inst.model.SizeBytes
+		if inst.plannedContext.KVBytesPerToken > 0 && inst.plannedContext.Tokens > 0 {
+			kv := inst.plannedContext.KVBytesPerToken * int64(inst.plannedContext.Tokens)
+			if kv < 0 || size > math.MaxInt64-kv {
+				return math.MaxInt64
+			}
+			size += kv
+		}
+		if size < 0 || total > math.MaxInt64-size {
+			return math.MaxInt64
+		}
+		total += size
 	}
 	return total
 }
@@ -812,8 +834,18 @@ func (p *Provider) startProcess(instanceID, binary string, sink localruntime.Log
 	if !ok {
 		return fmt.Errorf("llama-server instance %q not found", instanceID)
 	}
-	args := p.argsFor(p.snapshot(), instance.model, instance.record.Port)
+	if instance.plannedContext.Tokens <= 0 {
+		return fmt.Errorf("llama-server launch has no resolved context")
+	}
+	if _, err := p.checkPlannedMemory(instance.model, instance.plannedContext, instanceID); err != nil {
+		return err
+	}
+	cfg := instance.launchConfig
+	n := instance.plannedContext.Tokens
+	cfg.ContextSize = &n
+	args := p.argsFor(cfg, instance.model, instance.record.Port)
 	cmd := exec.Command(binary, args...)
+	cmd.Env = managedEnvironment(os.Environ())
 	cmd.Stdin = nil
 	setProcessGroup(cmd)
 	stdout, err := cmd.StdoutPipe()
@@ -880,7 +912,6 @@ func (p *Provider) argsFor(cfg config.LlamaServerConfig, model localruntime.Mode
 		ConfigExplicit:     cfg.ContextSize != nil,
 		ProfileContextSize: model.ContextSize,
 		ModelExtraArgs:     model.ExtraArgs,
-		DefaultContextSize: config.Defaults().LlamaServer.ContextOverride(),
 	})
 	if ctxSize > 0 {
 		args = append(args, "--ctx-size", strconv.Itoa(ctxSize))
@@ -891,12 +922,14 @@ func (p *Provider) argsFor(cfg config.LlamaServerConfig, model localruntime.Mode
 	if cfg.GPULayers != "" {
 		args = append(args, "--gpu-layers", cfg.GPULayers)
 	}
-	args = append(args, stripFlag(append([]string(nil), cfg.ExtraArgs...), "--ctx-size")...)
+	configArgs, _, _ := contextArgs(cfg.ExtraArgs)
+	args = append(args, configArgs...)
 	// Per-model launch flags (from the catalog's ExtraArgs) apply last, scoped
 	// to this model only — e.g. GLM-4.5-Air's required "--jinja". Strip legacy
 	// --ctx-size pins here so profile/user context policy cannot be overridden by
 	// a later duplicate flag.
-	args = append(args, stripFlag(append([]string(nil), model.ExtraArgs...), "--ctx-size")...)
+	modelArgs, _, _ := contextArgs(model.ExtraArgs)
+	args = append(args, modelArgs...)
 	return args
 }
 
@@ -1122,7 +1155,10 @@ func (p *Provider) watch(instanceID, binary string, sink localruntime.LogSink) {
 
 		p.emit(sink, "warn", instanceID, record.ModelID, "llama-server exited; restarting")
 		time.Sleep(p.restartBackoff())
-		if err := p.startProcess(instanceID, binary, sink); err != nil {
+		p.spawnMu.Lock()
+		restartErr := p.startProcess(instanceID, binary, sink)
+		p.spawnMu.Unlock()
+		if err := restartErr; err != nil {
 			p.updateRecord(instanceID, sink, func(record *localruntime.InstanceRecord) {
 				record.State = localruntime.InstanceFailed
 				record.LastError = err.Error()

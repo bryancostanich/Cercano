@@ -34,7 +34,7 @@ func sparseModel(t *testing.T, dir, name string, size int64) string {
 func TestStart_ReusesLiveInstanceBeforeMemoryGuard(t *testing.T) {
 	dir := t.TempDir()
 	modelPath := sparseModel(t, dir, "same-model.gguf", 20*gib)
-	p := NewProvider(config.LlamaServerConfig{ModelDirs: []string{dir}, Binary: "/usr/bin/false"})
+	p := NewProvider(config.LlamaServerConfig{ContextSize: contextOverridePtr(8192), ModelDirs: []string{dir}, Binary: "/usr/bin/false"})
 	p.totalRAM = func() int64 { return 128 * gib }
 	p.nonEvictable = func() (int64, bool) { return 110 * gib, true }
 	p.running["existing"] = &managedInstance{
@@ -57,7 +57,7 @@ func TestStart_ReusesLiveInstanceBeforeMemoryGuard(t *testing.T) {
 func TestStart_MemoryGuardRefusesBeforeSpawning(t *testing.T) {
 	dir := t.TempDir()
 	sparseModel(t, dir, "huge-model.gguf", 20*gib)
-	p := NewProvider(config.LlamaServerConfig{ModelDirs: []string{dir}, Binary: "/usr/bin/false"})
+	p := NewProvider(config.LlamaServerConfig{ContextSize: contextOverridePtr(8192), ModelDirs: []string{dir}, Binary: "/usr/bin/false"})
 	p.totalRAM = func() int64 { return 128 * gib }
 	p.nonEvictable = func() (int64, bool) { return 110 * gib, true }
 	log, read := newTestEventLog(t)
@@ -87,7 +87,7 @@ func TestStart_MemoryGuardRefusesBeforeSpawning(t *testing.T) {
 func TestStart_MemoryGuardPermitsWhenProjectionFits(t *testing.T) {
 	dir := t.TempDir()
 	sparseModel(t, dir, "small-model.gguf", 1*gib)
-	p := NewProvider(config.LlamaServerConfig{ModelDirs: []string{dir}, Binary: "/usr/bin/false"})
+	p := NewProvider(config.LlamaServerConfig{ContextSize: contextOverridePtr(8192), ModelDirs: []string{dir}, Binary: "/usr/bin/false"})
 	p.totalRAM = func() int64 { return 128 * gib }
 	p.nonEvictable = func() (int64, bool) { return 10 * gib, true }
 
@@ -103,7 +103,7 @@ func TestStart_MemoryGuardPermitsWhenProjectionFits(t *testing.T) {
 }
 
 func TestDeadAdoptedInstanceDoesNotBlockRestart(t *testing.T) {
-	p := NewProvider(config.LlamaServerConfig{})
+	p := NewProvider(config.LlamaServerConfig{ContextSize: contextOverridePtr(8192)})
 	deadPID := 99999999
 	if processAlive(deadPID) {
 		t.Fatalf("test picked an unexpectedly live pid: %d", deadPID)
@@ -127,7 +127,7 @@ func TestDeadAdoptedInstanceDoesNotBlockRestart(t *testing.T) {
 }
 
 func TestMemoryGuardUsesRegistryAsFloorWhenProbeLags(t *testing.T) {
-	p := NewProvider(config.LlamaServerConfig{})
+	p := NewProvider(config.LlamaServerConfig{ContextSize: contextOverridePtr(8192)})
 	p.totalRAM = func() int64 { return 128 * gib }
 	// Simulate the check-to-load window: the OS has not yet reflected a
 	// just-started 100 GiB model as wired, but the provider has already
@@ -151,7 +151,7 @@ func TestMemoryGuardUsesRegistryAsFloorWhenProbeLags(t *testing.T) {
 }
 
 func TestMemoryGuardFallsBackToRegistryWhenProbeUnknown(t *testing.T) {
-	p := NewProvider(config.LlamaServerConfig{})
+	p := NewProvider(config.LlamaServerConfig{ContextSize: contextOverridePtr(8192)})
 	p.totalRAM = func() int64 { return 128 * gib }
 	p.nonEvictable = func() (int64, bool) { return 0, false }
 	p.running["seed"] = &managedInstance{
@@ -175,7 +175,7 @@ func TestMemoryGuardFallsBackToRegistryWhenProbeUnknown(t *testing.T) {
 }
 
 func TestMemoryGuardPermitsWhenTotalUnknown(t *testing.T) {
-	p := NewProvider(config.LlamaServerConfig{})
+	p := NewProvider(config.LlamaServerConfig{ContextSize: contextOverridePtr(8192)})
 	p.totalRAM = func() int64 { return 0 }
 	p.nonEvictable = func() (int64, bool) { return 120 * gib, true }
 	_, err := p.checkMemoryBudget(localruntime.ModelRecord{ID: "next", DisplayName: "next", SizeBytes: 20 * gib})

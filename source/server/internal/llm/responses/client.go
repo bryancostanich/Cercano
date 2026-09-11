@@ -251,7 +251,7 @@ func (c *Client) normalizeHTTP(resp *http.Response, body []byte) error {
 	msg := strings.ToLower(inner.Error())
 	quotaMarked := code == "insufficient_quota" || typ == "insufficient_quota" ||
 		strings.Contains(msg, "quota") || strings.Contains(msg, "usage limit")
-	if overflow, used, limit := llm.DetectContextOverflow(inner.Error()); overflow {
+	if overflow, used, limit := llm.DetectContextOverflow(inner.Error()); overflow && resp.StatusCode != http.StatusUnauthorized && resp.StatusCode != http.StatusForbidden {
 		ne.Class = llm.ErrContextOverflow
 		ne.Used, ne.Limit = used, limit
 		return ne
@@ -281,6 +281,9 @@ func (c *Client) normalizeHTTP(resp *http.Response, body []byte) error {
 		ne.Class = llm.ErrInvalidRequest
 	default:
 		ne.Class = llm.ErrUnknown
+	}
+	if ne.Class == llm.ErrAuth || ne.Class == llm.ErrPermission {
+		ne.Err = llm.SafeAuthenticationDiagnostic(ne.Class, ne.Err)
 	}
 	return ne
 }
@@ -374,5 +377,18 @@ func (c *Client) streamOnce(ctx context.Context, req llm.ChatRequest) (llm.Strea
 		httpResp.Body.Close()
 		return nil, c.normalizeHTTP(httpResp, body)
 	}
-	return newStreamReader(httpResp.Body, c.Name()), nil
+	reader := newStreamReader(httpResp.Body, c.Name())
+	reader.normalizeAuth = c.normalizeStreamAuthentication
+	return reader, nil
+}
+
+func (c *Client) normalizeStreamAuthentication(err error) error {
+	if llm.ClassOf(err) != llm.ErrAuth || c.tokens == nil {
+		return err
+	}
+	profile := ""
+	if source, ok := c.tokens.(interface{ CredentialProfile() string }); ok {
+		profile = source.CredentialProfile()
+	}
+	return &llm.Error{Class: llm.ErrLoginRequired, Provider: c.Name(), Err: &llm.CredentialError{Class: llm.ErrLoginRequired, Provider: c.Name(), Profile: profile, Method: llm.AuthSubscription, Reason: llm.CredentialRejected, Cause: err}}
 }

@@ -242,6 +242,13 @@ func (w *workerRunner) RunTurn(
 
 	// ── 3. Build ConfigSnapshot + permission mode ──────────────────────────
 	cfg := w.cfg.Get()
+	needsAuthProtocol := req.AuthRecovery != nil
+	for _, profile := range cfg.CloudProfiles {
+		if (profile.Name == cfg.ActiveCloudProfile || profile.Name == cfg.BackupCloudProfile) && cloudfactory.IsSubscription(profile) {
+			needsAuthProtocol = true
+		}
+	}
+
 	// Resolve the active runtime's effective open tier models host-side (the
 	// worker cannot see the catalog); the snapshot carries them as overrides.
 	snap := SnapshotConfig(cfg, "", w.resolveOpenTiers()) // no credential — worker fetches on demand
@@ -314,7 +321,13 @@ func (w *workerRunner) RunTurn(
 
 	// ── 6. Open bidi stream and send StartTurn ────────────────────────────
 	client := proto.NewWorkerClient(conn)
-	stream, err := client.RunTurn(ctx)
+	var err error
+	var stream proto.Worker_RunTurnClient
+	if needsAuthProtocol {
+		stream, err = client.RunTurnWithAuthentication(ctx)
+	} else {
+		stream, err = client.RunTurn(ctx)
+	}
 	if err != nil {
 		return runner.Result{}, fmt.Errorf("workerRunner: open stream: %w", err)
 	}
@@ -356,6 +369,9 @@ func (w *workerRunner) RunTurn(
 				// worker finished cleanly → keep it WARM for the next turn.
 				turnHealthy = true
 				return result, nil
+			}
+			if needsAuthProtocol && status.Code(recvErr) == codes.Unimplemented {
+				return runner.Result{}, status.Error(codes.FailedPrecondition, "worker does not support authentication recovery; update the worker")
 			}
 			// Worker crashed or the stream died before TurnDone.
 			// Kill is already deferred via cleanupFn; return Unavailable.
@@ -404,6 +420,23 @@ func (w *workerRunner) RunTurn(
 				}
 			}()
 
+		case *proto.WorkerToHost_AuthRequest:
+			request := m.AuthRequest
+			go func() {
+				response := &proto.WorkerAuthenticationResponse{Id: request.GetId()}
+				if req.AuthRecovery == nil || request.GetChallenge() == nil {
+					response.Error = "authentication recovery unavailable"
+				} else {
+					c := request.GetChallenge()
+					choice, e := req.AuthRecovery(ctx, llm.AuthChallenge{Provider: c.GetProvider(), Profile: c.GetProfileName(), Reason: c.GetReason(), Fallback: c.GetFallback(), RetrySafe: c.GetRetrySafe()})
+					if e != nil {
+						response.Error = "authentication recovery canceled"
+					} else {
+						response.Decision = string(choice)
+					}
+				}
+				safeSend(&proto.HostToWorker{Msg: &proto.HostToWorker_AuthResponse{AuthResponse: response}})
+			}()
 		case *proto.WorkerToHost_CredRequest:
 			// Answer credential requests off the drain path (in a goroutine) so
 			// a slow keychain/OAuth resolve doesn't stall the event stream.
@@ -414,7 +447,8 @@ func (w *workerRunner) RunTurn(
 				token, account, credErr := w.resolveCredential(ctx, cfg, profileName)
 				resp := &proto.CredentialResponse{Id: id}
 				if credErr != nil {
-					resp.Error = credErr.Error()
+					resp.Error = "credential resolution failed"
+					resp.Failure = marshalCredentialFailure(credErr, profileName)
 				} else {
 					resp.Token = token
 					resp.Account = account

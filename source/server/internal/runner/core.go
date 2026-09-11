@@ -442,6 +442,15 @@ func (c *Core) RunTurn(
 		"model":           selectedModel,
 		"is_cloud":        isCloud,
 	})
+	if req.AuthRecovery != nil && isCloud && !fellBack && res.CrossAllowed && fbProv != nil {
+		window, _ := c.knownContextWindowFor(fbCloud, fallbackModel)
+		provider = &authenticationFallback{primary: provider, fallback: fbProv, model: fallbackModel, window: window, onSelect: func() {
+			fellBack = true
+			selectedModel = fallbackModel
+			isCloud = fbCloud
+			sink.Emit(Event{Kind: EventRouteSelected, Model: fallbackModel, IsCloud: fbCloud})
+		}}
+	}
 	result, loopErr := c.runLoop(ctx, req, provider, selectedModel, isCloud,
 		loopSink, requester, convHistory, onTextDelta, onTurn, wdGate, wdTurnEnd, gateRegistry, permStore, profile, false)
 	c.logRoute("loop.result", routinglog.Event{
@@ -626,6 +635,7 @@ func (c *Core) runLoop(
 	profile agent.Profile,
 	tightContextFallback bool,
 ) (agent.ToolLoopResult, error) {
+	ctx = llm.WithAuthRecovery(ctx, req.AuthRecovery)
 	maxIterations := 0
 	contextWindow := 0
 	contextWindowKnown := false
@@ -802,17 +812,8 @@ func (c *Core) makeLoopSink(sink EventSink, failures *failurelog.Writer, convers
 			}
 
 		case agent.LoopNotice:
-			// Resilience-engine narration ("anthropic quota reached — switching
-			// to openai"). Logged so backup-served/retried turns are visible in
-			// the server log, and forwarded on the progress channel so the CLI
-			// shows it as the live status line. Auth failures carry a marker so
-			// capable clients can raise an actionable re-auth prompt.
 			fmt.Fprintf(os.Stderr, "[resilience] %s\n", ev.Summary)
-			text := "⚠ " + ev.Summary
-			if strings.Contains(strings.ToLower(ev.Summary), "anthropic auth failed") {
-				text = "cercano:reauth-required provider=anthropic profile=claude | " + text
-			}
-			sink.Emit(Event{Kind: EventProgress, Text: text})
+			sink.Emit(Event{Kind: EventProgress, Text: "⚠ " + ev.Summary})
 
 		case agent.LoopWatchdogChallenge:
 			sink.Emit(Event{

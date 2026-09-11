@@ -240,3 +240,19 @@ expanded; search does not reveal it automatically.
 Ctrl+F is search in the conversation view; Page Down remains available for paging.
 Other content pages keep their own bindings. Command-F remains the terminal
 emulator's Find shortcut. Search state is not carried to a different conversation.
+
+### Expired cloud subscription login
+
+When a Claude or ChatGPT subscription login expires, the request pauses instead of silently switching providers. The prompt names the affected provider and profile:
+
+- **y — Log in:** opens the appropriate login flow. A successful login resumes a live request without changing its model, endpoint, or active-profile setting.
+- **f — Use fallback:** appears only when a configured, permitted fallback is available. The choice applies to this user request, not future requests or default routing.
+- **n / Escape — Cancel:** stops the interrupted request; dismissal never authorizes fallback.
+- **d — Details:** explains the affected profile and recovery state.
+- **c — Chat:** cancels this authentication request and returns control to the message composer.
+
+Authentication prompts queue behind existing confirmations. Concurrent requests for one profile share the successful login, while each request keeps its own cancellation and fallback choice.
+
+A disconnect preserves the pending decision and its captured retry text, like existing tool confirmations. After reconnect, a lost request is marked stale: choosing login or fallback explicitly starts a fresh turn rather than approving an old waiter. Late login events cannot restart canceled work. If part of a response has already been emitted, the CLI does not silently replay it; follow the recovery error with an explicit new request.
+
+Programmatic clients that cannot answer prompts should use the noninteractive API, which returns an error instead of waiting. Host, worker, and CLI upgrades must be compatible; unsupported recovery is an error, not permission to fall back silently.

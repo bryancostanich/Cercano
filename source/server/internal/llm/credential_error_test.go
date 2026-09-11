@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -60,5 +61,18 @@ func TestNonInteractiveCredentialFailuresDoNotFailover(t *testing.T) {
 		if Retryable(class) || Failoverable(class, &Error{Class: class}) {
 			t.Fatalf("unexpected implicit retry/fallback: %s", class)
 		}
+	}
+}
+
+type credentialSecretCause struct{ Token string }
+
+func (c credentialSecretCause) Error() string { return c.Token }
+func TestCredentialErrorJSONDoesNotSerializeCause(t *testing.T) {
+	encoded, err := json.Marshal(&CredentialError{Class: ErrLoginRequired, Provider: "anthropic", Profile: "work", Reason: CredentialExpired, Cause: credentialSecretCause{Token: "synthetic-secret"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "synthetic-secret") {
+		t.Fatal("credential cause leaked through JSON serialization")
 	}
 }

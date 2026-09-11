@@ -104,6 +104,8 @@ type Options struct {
 	// Backup, when non-nil, serves calls the primary failed in a way a
 	// different vendor could plausibly serve.
 	Backup inference.Provider
+	// BackupLabel identifies the configured profile in authentication prompts.
+	BackupLabel string
 	// BackupModelFor maps a capability-tier name to the backup vendor's model
 	// for that tier (experience-preserving rewrite); called with "" for
 	// untiered requests, where it must return the backup profile's default
@@ -134,6 +136,7 @@ type Provider struct {
 	primary         inference.Provider
 	primaryModelFor func(tier string) string
 	backup          inference.Provider
+	backupLabel     string
 	backupModelFor  func(tier string) string
 	onEvent         func(Event)
 	retryWait       time.Duration
@@ -154,13 +157,14 @@ func New(primary inference.Provider, opts Options) *Provider {
 		primary:         primary,
 		primaryModelFor: opts.PrimaryModelFor,
 		backup:          opts.Backup,
+		backupLabel:     opts.BackupLabel,
 		backupModelFor:  opts.BackupModelFor,
-		onEvent:        opts.OnEvent,
-		retryWait:      opts.RetryWait,
-		retryWaitCap:   opts.RetryWaitCap,
-		quotaCooldown:  opts.QuotaCooldown,
-		sleep:          ctxSleep,
-		now:            time.Now,
+		onEvent:         opts.OnEvent,
+		retryWait:       opts.RetryWait,
+		retryWaitCap:    opts.RetryWaitCap,
+		quotaCooldown:   opts.QuotaCooldown,
+		sleep:           ctxSleep,
+		now:             time.Now,
 	}
 	if p.retryWait <= 0 {
 		p.retryWait = defaultRetryWait
@@ -272,10 +276,22 @@ func (p *Provider) backupRequest(req inference.Call) inference.Call {
 // there is no user-visible stream on this path.
 func (p *Provider) Chat(ctx context.Context, req inference.Call) (inference.Result, error) {
 	req = p.primaryRequest(req)
-	if p.quotaCoolingDown() {
-		return p.backup.Chat(ctx, p.backupRequest(req))
+	attempts := make(map[string]bool)
+	if llm.AuthFallbackSelected(ctx, p) {
+		if !p.authenticationBackupAllowed(req) {
+			return inference.Result{}, incompatibleAuthFallback()
+		}
+		r, e, _ := p.chatAuth(ctx, p.backup, p.backupRequest(req), false, attempts)
+		return r, llm.SelectedAuthFallbackFailure(e)
 	}
-	resp, err := p.primary.Chat(ctx, req)
+	if p.quotaCoolingDown() {
+		r, e, _ := p.chatAuth(ctx, p.backup, p.backupRequest(req), false, attempts)
+		return r, e
+	}
+	resp, err, terminal := p.chatAuth(ctx, p.primary, req, true, attempts)
+	if terminal {
+		return resp, err
+	}
 	if err == nil || ctx.Err() != nil {
 		return resp, err
 	}
@@ -286,7 +302,10 @@ func (p *Provider) Chat(ctx context.Context, req inference.Call) (inference.Resu
 		if !p.sleep(ctx, ev.Wait) {
 			return resp, err
 		}
-		resp, err = p.primary.Chat(ctx, req)
+		resp, err, terminal = p.chatAuth(ctx, p.primary, req, true, attempts)
+		if terminal {
+			return resp, err
+		}
 		if err == nil || ctx.Err() != nil {
 			return resp, err
 		}
@@ -302,7 +321,8 @@ func (p *Provider) Chat(ctx context.Context, req inference.Call) (inference.Resu
 	}
 	p.emit(Event{Action: ActionFailover, Stage: "chat", Class: class,
 		From: eventFrom(p.primary.Name(), err), To: p.backup.Name(), Err: err})
-	return p.backup.Chat(ctx, p.backupRequest(req))
+	r, e, _ := p.chatAuth(ctx, p.backup, p.backupRequest(req), false, attempts)
+	return r, e
 }
 
 // StreamChat runs the streaming policy. Decisions are narrated in-band: the
@@ -310,15 +330,14 @@ func (p *Provider) Chat(ctx context.Context, req inference.Call) (inference.Resu
 // following Next() — so the UI shows "trying once more" while the engine
 // waits, not after.
 func (p *Provider) StreamChat(ctx context.Context, req inference.Call) (inference.Stream, error) {
-	req = p.primaryRequest(req)
-	if p.quotaCoolingDown() {
-		return p.backup.StreamChat(ctx, p.backupRequest(req))
+	if llm.AuthFallbackSelected(ctx, p) && !p.authenticationBackupAllowed(req) {
+		return nil, incompatibleAuthFallback()
 	}
-	r := &reader{ctx: ctx, p: p, req: req}
-	inner, err := p.primary.StreamChat(ctx, req)
+	r := &reader{ctx: ctx, p: p, req: p.primaryRequest(req), authAttempts: make(map[string]bool), failedOver: p.quotaCoolingDown() || llm.AuthFallbackSelected(ctx, p), authFallback: llm.AuthFallbackSelected(ctx, p)}
+	inner, err := r.open()
 	if err != nil {
 		if !r.decide("stream_dial", err) {
-			return nil, err
+			return nil, r.failure(err)
 		}
 		return r, nil
 	}
@@ -340,9 +359,12 @@ type reader struct {
 	queue   []llm.StreamEvent                // injected notices to deliver first
 	attempt func() (llm.StreamReader, error) // deferred action set by decide()
 
-	emitted    bool // a real event was delivered; recovery is off the table
-	retried    bool // the one busy retry has been used
-	failedOver bool // already on the backup; never cascade
+	emitted      bool // a real event was delivered; recovery is off the table
+	retried      bool // the one busy retry has been used
+	failedOver   bool // already on the backup; never cascade
+	authAttempts map[string]bool
+	terminalErr  error
+	authFallback bool
 }
 
 func (r *reader) Next() (llm.StreamEvent, bool, error) {
@@ -360,7 +382,7 @@ func (r *reader) Next() (llm.StreamEvent, bool, error) {
 				if r.decide("stream_dial", err) {
 					continue
 				}
-				return llm.StreamEvent{}, false, err
+				return llm.StreamEvent{}, false, r.failure(err)
 			}
 			r.inner = inner
 			continue
@@ -369,7 +391,25 @@ func (r *reader) Next() (llm.StreamEvent, bool, error) {
 			return llm.StreamEvent{}, false, nil
 		}
 		ev, ok, err := r.inner.Next()
+		authErr := err
+		if authErr == nil && ok && ev.Type == llm.EventError {
+			authErr = ev.Err
+		}
+		if llm.ClassOf(authErr) == llm.ErrLoginRequired {
+			if r.decide("stream_auth", authErr) {
+				continue
+			}
+			return llm.StreamEvent{}, false, r.failure(authErr)
+		}
 		if r.emitted || r.failedOver {
+			if r.authFallback {
+				if err != nil {
+					return llm.StreamEvent{}, false, r.failure(err)
+				}
+				if ok && ev.Type == llm.EventError {
+					return llm.StreamEvent{}, false, r.failure(ev.Err)
+				}
+			}
 			return ev, ok, err
 		}
 		switch {
@@ -377,7 +417,7 @@ func (r *reader) Next() (llm.StreamEvent, bool, error) {
 			if r.decide("stream_first", err) {
 				continue
 			}
-			return llm.StreamEvent{}, false, err
+			return llm.StreamEvent{}, false, r.failure(err)
 		case ok && ev.Type == llm.EventError:
 			streamErr := ev.Err
 			if streamErr == nil {
@@ -390,7 +430,7 @@ func (r *reader) Next() (llm.StreamEvent, bool, error) {
 			if r.decide("stream_first", streamErr) {
 				continue
 			}
-			return llm.StreamEvent{}, false, streamErr
+			return llm.StreamEvent{}, false, r.failure(streamErr)
 		default:
 			// First real event (or a clean immediate end): the stream is live.
 			r.emitted = true
@@ -412,6 +452,41 @@ func (r *reader) decide(stage string, err error) bool {
 	}
 	class := llm.ClassOf(err)
 	p := r.p
+	if class == llm.ErrLoginRequired {
+		fallback := ""
+		if !r.failedOver && p.authenticationBackupAllowed(r.req) {
+			fallback = p.authenticationBackupName()
+		}
+		choice, recoveryErr := requestAuth(r.ctx, err, fallback, !r.emitted, r.authAttempts)
+		if recoveryErr != nil {
+			r.terminalErr = recoveryErr
+			return false
+		}
+		switch choice {
+		case llm.AuthLogin:
+			if r.emitted {
+				r.terminalErr = &llm.CredentialError{Class: llm.ErrCredential, Reason: "login completed; partial response requires an explicit fresh request"}
+				return false
+			}
+			r.attempt = r.open
+			return true
+		case llm.AuthFallback:
+			if !r.failedOver && p.authenticationBackupAllowed(r.req) {
+				r.failedOver = true
+				r.authFallback = true
+				llm.SelectAuthFallback(r.ctx, p)
+				r.ctx = llm.WithExternalAuthFallback(r.ctx, "")
+				r.attempt = r.open
+				return true
+			}
+			r.terminalErr = &llm.AuthFallbackRequest{Cause: err}
+			return false
+		}
+		return false
+	}
+	if r.failedOver {
+		return false
+	}
 	if llm.Retryable(class) && !r.retried {
 		r.retried = true
 		ev := Event{Action: ActionRetry, Stage: stage, Class: class,
@@ -450,4 +525,27 @@ func (r *reader) Close() error {
 		return r.inner.Close()
 	}
 	return nil
+}
+
+func (r *reader) open() (llm.StreamReader, error) {
+	if r.failedOver {
+		return r.p.backup.StreamChat(r.ctx, r.p.backupRequest(r.req))
+	}
+	return r.p.primary.StreamChat(r.ctx, r.req)
+}
+func (r *reader) failure(err error) error {
+	if r.terminalErr != nil {
+		return r.terminalErr
+	}
+	if r.authFallback {
+		return llm.SelectedAuthFallbackFailure(err)
+	}
+	return err
+}
+
+func (p *Provider) authenticationBackupName() string {
+	if p.backupLabel != "" {
+		return p.backupLabel + " (" + p.backup.Name() + ")"
+	}
+	return p.backup.Name()
 }

@@ -16,7 +16,7 @@ type CredentialError struct {
 	Profile  string
 	Method   string
 	Reason   string
-	Cause    error
+	Cause    error `json:"-"`
 }
 
 const (

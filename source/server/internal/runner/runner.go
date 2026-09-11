@@ -10,12 +10,12 @@ import (
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/agenttools"
 	"cercano/source/server/internal/failurelog"
-	cfgsvc "cercano/source/server/internal/hostsvc/config"
 	permissions "cercano/source/server/internal/hostsvc/permissions"
 	providers "cercano/source/server/internal/hostsvc/providers"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/routinglog"
 	"cercano/source/server/internal/watchdog"
+	"cercano/source/server/pkg/config"
 )
 
 // TurnHistory is the narrow subset of persistence.Service the runner needs:
@@ -50,6 +50,7 @@ type ToolSvc interface {
 // assembles history itself (so it works across a process boundary; see the
 // plan's load-bearing decision).
 type Request struct {
+	AuthRecovery   llm.AuthRequester
 	ConversationID string
 	Input          string
 	Images         []agent.InlineImage
@@ -76,11 +77,13 @@ type TurnRunner interface {
 
 // Deps are the shared, process-wide services the runner consumes. Injected once
 // at construction; a worker builds its own set from a config snapshot.
+type ConfigReader interface{ Get() config.Config }
+
 type Deps struct {
 	Providers providers.Resolver
 	Tools     ToolSvc     // narrow interface; tools.Catalog satisfies it
 	Persist   TurnHistory // narrow interface; persistence.Service satisfies it
-	Config    cfgsvc.Service
+	Config    ConfigReader
 	Perms     permissions.Broker
 	Agent     *agent.Agent
 	// Watchdog is a LIVE accessor, not a snapshot: the host wires its watchdog

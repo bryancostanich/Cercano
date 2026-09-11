@@ -1,6 +1,7 @@
 package server
 
 import (
+	"cercano/source/server/internal/hostsvc/credentials"
 	"context"
 	"errors"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 	"net/url"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -139,5 +141,51 @@ func TestLoginFailureNeverEmitsUnstructuredSecrets(t *testing.T) {
 		if got := loginFailure(err); strings.Contains(got, "secret") {
 			t.Fatalf("unsafe login error: %s", got)
 		}
+	}
+}
+
+type supersedingLoginStream struct {
+	proto.Agent_ReauthenticateCloudServer
+	server *Server
+	events []*proto.CloudLoginEvent
+	newer  *credentials.LoginAttempt
+}
+
+func (s *supersedingLoginStream) Context() context.Context { return context.Background() }
+func (s *supersedingLoginStream) Send(e *proto.CloudLoginEvent) error {
+	s.events = append(s.events, e)
+	if e.VerificationUrl != "" {
+		var err error
+		s.newer, err = s.server.cfgSvc.Credentials().BeginLogin(context.Background(), e.ProfileName, "openai-responses")
+		return err
+	}
+	return nil
+}
+func TestSupersededDeviceLoginStopsBeforePollingOrSaving(t *testing.T) {
+	var polls atomic.Int32
+	endpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/api/accounts/deviceauth/usercode" {
+			w.Write([]byte(`{"device_auth_id":"device","user_code":"user","interval":"1"}`))
+			return
+		}
+		polls.Add(1)
+		w.WriteHeader(403)
+	}))
+	defer endpoint.Close()
+	cfg := config.Defaults()
+	cfg.CloudProfiles = []config.CloudProfile{{Name: "work", Flavor: cloudfactory.FlavorResponses, Route: cloudfactory.RouteChatGPT}}
+	server := &Server{cfgSvc: cfgsvc.New("", cfg, secrets.NewMemory())}
+	server.cfgSvc.Secrets().Set("work", "original")
+	stream := &supersedingLoginStream{server: server}
+	err := server.runCloudReauthentication(&proto.CloudReauthenticationRequest{ProfileName: "work", AttemptId: "old"}, stream, anthropicauth.Flow{}, chatgptauth.Flow{Issuer: endpoint.URL})
+	if stream.newer != nil {
+		defer stream.newer.Close()
+	}
+	if err != nil || len(stream.events) != 2 || !stream.events[1].Done || stream.events[1].Ok || polls.Load() != 0 {
+		t.Fatalf("superseded login continued: err=%v events=%+v polls=%d", err, stream.events, polls.Load())
+	}
+	if stored, _ := server.cfgSvc.Secrets().Get("work"); stored != "original" {
+		t.Fatal("superseded login saved credentials")
 	}
 }

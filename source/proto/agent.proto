@@ -261,6 +261,7 @@ service Agent {
   // Separate from onboarding so an old server fails with Unimplemented rather
   // than ignoring a new flag and silently rewriting or activating a profile.
   rpc ReauthenticateCloud(CloudReauthenticationRequest) returns (stream CloudLoginEvent);
+  rpc ResolveAuthentication(AuthenticationDecisionRequest) returns (AuthenticationDecisionResponse);
 
   // ExportImage returns the raw bytes of an image the user attached to a live
   // conversation, looked up by its per-conversation attachment ID (e.g.
@@ -308,6 +309,7 @@ message StreamProcessResponse {
     SubAgentEvent     sub_agent_event = 11;
     RolloverOffered   rollover_offered = 12;
     TaskChange        task_change = 13;
+    AuthenticationRequired authentication_required = 14;
   }
 }
 
@@ -409,6 +411,7 @@ message ProcessRequestRequest {
   string model_override = 7; // Use this model instead of the configured default (temporary, per-request)
   bool coproc = 8; // Route per Locus Mode's co-processor tier (local/cloud)
   repeated InlineImage images = 9; // user-attached images, spliced in at "[image N]" markers in input
+  bool supports_auth_recovery = 10;
 }
 
 // InlineImage is one user-attached image. Index matches the "[image <Index>]"
@@ -1556,6 +1559,7 @@ service Worker {
   // needed); worker sends WorkerToHost (WorkerEvent, PermissionRequest,
   // PersistTurn, TurnDone, TurnError).
   rpc RunTurn (stream HostToWorker) returns (stream WorkerToHost) {}
+  rpc RunTurnWithAuthentication (stream HostToWorker) returns (stream WorkerToHost) {}
 }
 
 // HostToWorker is the host→worker envelope.
@@ -1567,6 +1571,7 @@ message HostToWorker {
     CredentialResponse     cred_response    = 4;
     OpenInferenceEvent     open_event       = 5;
     SessionProfileResponse profile_response = 6;
+    WorkerAuthenticationResponse auth_response = 7;
   }
 }
 
@@ -1583,6 +1588,7 @@ message WorkerToHost {
     OpenInferenceRequest     open_request    = 8;
     SessionProfileRequest    profile_request = 9;
  RuntimeRequestAccounting request_accounting = 10;
+    WorkerAuthenticationRequest auth_request = 11;
   }
 }
 
@@ -1853,6 +1859,7 @@ message CredentialResponse {
   string token   = 2; // API key or fresh access token, per the profile's auth flavor
   string error   = 3;
   string account = 4; // ChatGPT account ID (non-empty for subscription route; empty for static-key routes)
+  CredentialFailure failure = 5;
 }
 
 // OpenInferenceRequest asks the host to run an open-model chat on the worker's
@@ -1949,3 +1956,41 @@ message CloudLoginEvent {
   bool ok = 8;
   string error = 9;
 }
+
+
+// Safe classification only: no raw error body, cause, token or endpoint URL.
+message CredentialFailure {
+ string class = 1;
+ string provider = 2;
+ string profile_name = 3;
+ string method = 4;
+ string reason = 5;
+}
+
+
+message AuthenticationRequired {
+ string conversation_id = 1;
+ string request_id = 2;
+ string provider = 3;
+ string profile_name = 4;
+ string reason = 5;
+ string fallback = 6;
+ bool retry_safe = 7;
+ bool resolved = 8;
+}
+message AuthenticationDecisionRequest {
+ string conversation_id = 1;
+ string request_id = 2;
+ string decision = 3; // fallback or cancel; login completion comes from the credential service
+}
+message WorkerAuthenticationRequest {
+ uint64 id = 1;
+ AuthenticationRequired challenge = 2;
+}
+message WorkerAuthenticationResponse {
+ uint64 id = 1;
+ string decision = 2;
+ string error = 3;
+}
+
+message AuthenticationDecisionResponse {}

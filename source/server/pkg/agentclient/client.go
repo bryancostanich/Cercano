@@ -1975,30 +1975,31 @@ func parseRuntimeTime(value string) time.Time {
 
 // StreamMsg is a typed event produced by a streaming chat turn.
 type StreamMsg struct {
-	Type         StreamMsgType
-	Token        string // for TypeToken
-	Note         string // for TypeProgress
-	Final        string // for TypeDone (full response)
-	Notice       string // for TypeDone (agent informational note, e.g. cloud absent)
-	Model        string // for TypeDone
-	TokIn        int    // for TypeDone
-	TokOut       int    // for TypeDone
-	Err          error  // for TypeError
-	ToolUseID    string // for TypeToolUseStart/Stop, TypeToolExecStart/Complete, TypePermissionRequired
-	ToolName     string // for TypeToolUseStart, TypePermissionRequired
-	ArgsSummary  string // for TypeToolUseStop
-	ArgsJSON     string // for TypePermissionRequired
-	Summary      string // for TypeToolExecComplete
-	Detail       string // for TypeToolExecComplete (clean outcome token)
-	StartLine    int    // for TypeToolExecComplete (1-based first line of an edit/write; 0 = n/a)
-	IsError      bool   // for TypeToolExecComplete
-	RouteModel   string // for TypeRouteSelected (engine handling the turn)
-	RouteCloud   bool   // for TypeRouteSelected (true = cloud, false = local)
-	Tier         string // for TypePermissionRequired ("W" | "X")
-	Destructive  bool   // for TypePermissionRequired (display-only ⚠ hint)
-	WatchdogKind string // for TypeWatchdog ("challenge" | "block" | "echo")
-	Protocol     string // for TypeWatchdog (protocol name, empty for echo)
-	Thread       string // for TypeWatchdog echo only ("watchdog" | "main")
+	Authentication *AuthenticationRequired
+	Type           StreamMsgType
+	Token          string // for TypeToken
+	Note           string // for TypeProgress
+	Final          string // for TypeDone (full response)
+	Notice         string // for TypeDone (agent informational note, e.g. cloud absent)
+	Model          string // for TypeDone
+	TokIn          int    // for TypeDone
+	TokOut         int    // for TypeDone
+	Err            error  // for TypeError
+	ToolUseID      string // for TypeToolUseStart/Stop, TypeToolExecStart/Complete, TypePermissionRequired
+	ToolName       string // for TypeToolUseStart, TypePermissionRequired
+	ArgsSummary    string // for TypeToolUseStop
+	ArgsJSON       string // for TypePermissionRequired
+	Summary        string // for TypeToolExecComplete
+	Detail         string // for TypeToolExecComplete (clean outcome token)
+	StartLine      int    // for TypeToolExecComplete (1-based first line of an edit/write; 0 = n/a)
+	IsError        bool   // for TypeToolExecComplete
+	RouteModel     string // for TypeRouteSelected (engine handling the turn)
+	RouteCloud     bool   // for TypeRouteSelected (true = cloud, false = local)
+	Tier           string // for TypePermissionRequired ("W" | "X")
+	Destructive    bool   // for TypePermissionRequired (display-only ⚠ hint)
+	WatchdogKind   string // for TypeWatchdog ("challenge" | "block" | "echo")
+	Protocol       string // for TypeWatchdog (protocol name, empty for echo)
+	Thread         string // for TypeWatchdog echo only ("watchdog" | "main")
 
 	SubAgentID       string   // for TypeSubAgent
 	SubAgentParentID string   // for TypeSubAgent
@@ -2047,6 +2048,7 @@ const (
 	TypeSubAgent
 	TypeRolloverOffered
 	TypeTaskChange
+	TypeAuthentication
 )
 
 func toProtoImages(images []InlineImage) []*proto.InlineImage {
@@ -2070,11 +2072,15 @@ func toProtoImages(images []InlineImage) []*proto.InlineImage {
 // awareness. images are user-attached images spliced in at "[image N]" markers.
 // The channel closes when the stream ends.
 func (c *Client) StreamChat(ctx context.Context, conversationID, input, workDir string, images ...InlineImage) (<-chan StreamMsg, error) {
+	return c.streamChat(ctx, conversationID, input, workDir, false, images...)
+}
+func (c *Client) streamChat(ctx context.Context, conversationID, input, workDir string, recovery bool, images ...InlineImage) (<-chan StreamMsg, error) {
 	stream, err := c.agent.StreamProcessRequest(ctx, &proto.ProcessRequestRequest{
-		Input:          input,
-		ConversationId: conversationID,
-		WorkDir:        workDir,
-		Images:         toProtoImages(images),
+		SupportsAuthRecovery: recovery,
+		Input:                input,
+		ConversationId:       conversationID,
+		WorkDir:              workDir,
+		Images:               toProtoImages(images),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("stream open: %w", err)
@@ -2091,6 +2097,14 @@ func (c *Client) StreamChat(ctx context.Context, conversationID, input, workDir 
 			if err != nil {
 				out <- StreamMsg{Type: TypeError, Err: err}
 				return
+			}
+			if auth := msg.GetAuthenticationRequired(); auth != nil {
+				select {
+				case out <- StreamMsg{Type: TypeAuthentication, Authentication: &AuthenticationRequired{ConversationID: auth.GetConversationId(), RequestID: auth.GetRequestId(), Provider: auth.GetProvider(), Profile: auth.GetProfileName(), Reason: auth.GetReason(), Fallback: auth.GetFallback(), RetrySafe: auth.GetRetrySafe(), Resolved: auth.GetResolved()}}:
+				case <-ctx.Done():
+					return
+				}
+				continue
 			}
 			if td := msg.GetTokenDelta(); td != nil {
 				out <- StreamMsg{Type: TypeToken, Token: td.GetContent()}

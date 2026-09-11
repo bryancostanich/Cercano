@@ -26,6 +26,9 @@ func (s *Service) BeginLogin(ctx context.Context, profile, provider string) (*Lo
 	p := s.profile(profile)
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if p.store == nil {
 		return nil, errNoStore
 	}
@@ -62,6 +65,10 @@ func (a *LoginAttempt) Commit(encoded string) error {
 		return &llm.CredentialError{Class: llm.ErrCredential, Provider: a.provider, Profile: a.profile, Method: llm.AuthSubscription, Reason: llm.CredentialStore, Cause: err}
 	}
 	p.invalidate()
+	if changed := p.loginCompleted[a.provider]; changed != nil {
+		close(changed)
+		p.loginCompleted[a.provider] = make(chan struct{})
+	}
 	return nil
 }
 func (p *profileState) cancelLogin() {
@@ -79,4 +86,18 @@ func (s *Service) CancelLogin(profile string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.cancelLogin()
+}
+
+// WatchLogin observes the next successful interactive commit. Refreshes and
+// arbitrary store writes do not count as completion of a human login attempt.
+func (s *Service) WatchLogin(profile, provider string) <-chan struct{} {
+	p := s.profile(profile)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	changed := p.loginCompleted[provider]
+	if changed == nil {
+		changed = make(chan struct{})
+		p.loginCompleted[provider] = changed
+	}
+	return changed
 }

@@ -60,6 +60,19 @@ func driveNewPath(t *testing.T) string {
 		m = next.(Model)
 	}
 	m.turnStart = frozenTurnStart
+	// The transcript is a rendering fixture, not a timing measurement. Race
+	// instrumentation can push the scripted tool over the 1ms display boundary.
+	for _, event := range scriptedTurn() {
+		if event.Type != agentclient.TypeToolExecComplete {
+			continue
+		}
+		if tool := m.mainChat().findToolEntry(event.ToolUseID); tool != nil {
+			tool.StartedAt = frozenTurnStart
+			tool.Duration = 100 * time.Microsecond
+			tool.ResultSummary = humanizeResult(event.Detail, event.Summary, event.IsError, tool.Duration)
+		}
+	}
+	m.mainChat().markTranscriptDirty()
 	m.refreshViewport()
 	return m.renderViewportWithScrollbar()
 }

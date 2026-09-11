@@ -27,11 +27,12 @@ type Service struct {
 	profiles map[string]*profileState
 }
 type profileState struct {
-	mu         sync.Mutex
-	store      secrets.Store
-	generation uint64
-	flight     *flight
-	login      *LoginAttempt
+	mu             sync.Mutex
+	store          secrets.Store
+	generation     uint64
+	flight         *flight
+	login          *LoginAttempt
+	loginCompleted map[string]chan struct{}
 }
 type token struct{ access, account string }
 type flight struct {
@@ -55,7 +56,7 @@ func (s *Service) profile(name string) *profileState {
 	defer s.mu.Unlock()
 	p := s.profiles[name]
 	if p == nil {
-		p = &profileState{store: s.store}
+		p = &profileState{store: s.store, loginCompleted: make(map[string]chan struct{})}
 		s.profiles[name] = p
 	}
 	return p

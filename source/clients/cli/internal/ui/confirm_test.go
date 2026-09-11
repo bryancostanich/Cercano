@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"cercano/source/server/pkg/agentclient"
 	"strings"
 	"testing"
 
@@ -21,16 +22,16 @@ func minimalModel() Model {
 
 func TestReauthRequiredRaisesReusableConfirmPrompt(t *testing.T) {
 	m := modelWithContextView()
-	msg := reauthRequiredMsg{provider: "anthropic", profile: "claude", note: "anthropic auth failed — switching to openai-responses"}
+	msg := authenticationRequiredMsg{request: agentclient.AuthenticationRequired{Provider: "anthropic", Profile: "work", RequestID: "id"}}
 	m2, _ := m.routeChatMsg(msg)
 	if m2.pendingConfirm == nil {
 		t.Fatal("reauth should raise pendingConfirm")
 	}
 	out := stripAnsiCSI(m2.renderConfirmRequest(m2.pendingConfirm))
-	if !strings.Contains(out, "Claude sign-in expired") {
+	if !strings.Contains(out, "anthropic login required") {
 		t.Fatalf("prompt missing title: %q", out)
 	}
-	if !strings.Contains(out, "[y]es re-auth") || !strings.Contains(out, "[n]o dismiss") || !strings.Contains(out, "[d]etails") {
+	if !strings.Contains(out, "[y] log in") || !strings.Contains(out, "[n] cancel") || !strings.Contains(out, "[d] details") {
 		t.Fatalf("prompt missing custom hints: %q", out)
 	}
 }

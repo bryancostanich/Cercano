@@ -68,6 +68,9 @@ func (mo *claudeLoginModal) setURL(authorizeURL string) { mo.authorizeURL = auth
 // setDone transitions to the success state.
 func (mo *claudeLoginModal) setDone() {
 	mo.state = claudeLoginDone
+	if mo.cancel != nil {
+		mo.cancel()
+	}
 	mo.cancel = nil
 }
 
@@ -75,6 +78,9 @@ func (mo *claudeLoginModal) setDone() {
 func (mo *claudeLoginModal) setFailed(msg string) {
 	mo.state = claudeLoginFailed
 	mo.errMsg = msg
+	if mo.cancel != nil {
+		mo.cancel()
+	}
 	mo.cancel = nil
 }
 
@@ -91,44 +97,50 @@ type openClaudeLoginModalMsg struct {
 
 // claudeLoginStartedMsg carries the opened stream (or the open error).
 type claudeLoginStartedMsg struct {
-	cancel context.CancelFunc
-	ch     <-chan agentclient.ClaudeLoginMsg
-	err    error
+	attempt uint64
+	cancel  context.CancelFunc
+	ch      <-chan agentclient.ClaudeLoginMsg
+	err     error
 }
 
 // claudeLoginFrameMsg carries one drained frame plus the channel to keep
 // draining (nil once the stream is exhausted).
 type claudeLoginFrameMsg struct {
-	frame agentclient.ClaudeLoginMsg
-	ch    <-chan agentclient.ClaudeLoginMsg
+	attempt uint64
+	frame   agentclient.ClaudeLoginMsg
+	ch      <-chan agentclient.ClaudeLoginMsg
 }
 
 // startClaudeLoginCmd opens the StartClaudeLogin streaming RPC under a
 // cancellable context and returns the stream (or error) for the drain loop.
-func startClaudeLoginCmd(ag *agentclient.Client, profile, model string, setActive bool) tea.Cmd {
+func startClaudeLoginCmd(ag *agentclient.Client, profile, model string, setActive bool, attempt uint64) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithCancel(context.Background())
 		ch, err := ag.StartClaudeLogin(ctx, profile, model, setActive)
 		if err != nil {
 			cancel()
-			return claudeLoginStartedMsg{err: err}
+			return claudeLoginStartedMsg{attempt: attempt, err: err}
 		}
-		return claudeLoginStartedMsg{cancel: cancel, ch: ch}
+		return claudeLoginStartedMsg{attempt: attempt, cancel: cancel, ch: ch}
 	}
 }
 
 // drainClaudeLoginCmd reads one frame from the stream channel and re-arms. A
 // closed channel without a terminal frame is reported as a failure so the
 // modal never hangs in the waiting state.
-func drainClaudeLoginCmd(ch <-chan agentclient.ClaudeLoginMsg) tea.Cmd {
+func drainClaudeLoginCmd(ch <-chan agentclient.ClaudeLoginMsg, attempts ...uint64) tea.Cmd {
+	var attempt uint64
+	if len(attempts) > 0 {
+		attempt = attempts[0]
+	}
 	return func() tea.Msg {
 		frame, ok := <-ch
 		if !ok {
-			return claudeLoginFrameMsg{
+			return claudeLoginFrameMsg{attempt: attempt,
 				frame: agentclient.ClaudeLoginMsg{Done: true, Ok: false, Error: "sign-in stream closed unexpectedly"},
 			}
 		}
-		return claudeLoginFrameMsg{frame: frame, ch: ch}
+		return claudeLoginFrameMsg{attempt: attempt, frame: frame, ch: ch}
 	}
 }
 

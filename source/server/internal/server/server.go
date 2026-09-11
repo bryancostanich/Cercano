@@ -102,6 +102,7 @@ type McpManager interface {
 
 // Server is the gRPC server for the Agent service.
 type Server struct {
+	authenticationWaiters sync.Map
 	proto.UnimplementedAgentServer
 	agent       *agent.Agent
 	providerSvc providers.Resolver // owns cloud/open providers, router, coordinator, registry, catalogManager
@@ -3179,6 +3180,10 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 		Gen:            turnGen,
 	}
 
+	if req.GetSupportsAuthRecovery() {
+		runReq.AuthRecovery = s.authenticationRequester(convID, sink)
+	}
+
 	// turnResult carries RunTurn's return values from the goroutine to the
 	// main goroutine. Written exactly once before doneCh receives; read after.
 	type turnResult struct {
@@ -3431,6 +3436,13 @@ func isTurnCancellation(err error) bool {
 // did the same).
 func sendRunnerEvent(stream streamResponseSender, ev runnersvc.Event) error {
 	switch ev.Kind {
+	case runnersvc.EventAuthentication:
+		if ev.Authentication == nil {
+			return nil
+		}
+		a := ev.Authentication
+		return stream.Send(&proto.StreamProcessResponse{Payload: &proto.StreamProcessResponse_AuthenticationRequired{AuthenticationRequired: &proto.AuthenticationRequired{ConversationId: a.ConversationID, RequestId: a.RequestID, Provider: a.Challenge.Provider, ProfileName: a.Challenge.Profile, Reason: a.Challenge.Reason, Fallback: a.Challenge.Fallback, RetrySafe: a.Challenge.RetrySafe, Resolved: a.Resolved}}})
+
 	case runnersvc.EventProgress:
 		return stream.Send(&proto.StreamProcessResponse{
 			Payload: &proto.StreamProcessResponse_Progress{

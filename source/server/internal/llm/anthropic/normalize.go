@@ -34,7 +34,7 @@ func (c *Client) normalize(err error) error {
 			ne.RetryAfter = httpx.RetryAfter(ae.Response.Header)
 		}
 		switch {
-		case ae.StatusCode == http.StatusUnauthorized:
+		case ae.StatusCode == http.StatusUnauthorized || (ae.StatusCode >= 200 && ae.StatusCode < 300 && ae.Type() == "authentication_error"):
 			ne.Class = llm.ErrAuth
 			if c.cfg.Route == "subscription" {
 				profile := ""
@@ -44,7 +44,7 @@ func (c *Client) normalize(err error) error {
 				ne.Class = llm.ErrLoginRequired
 				ne.Err = &llm.CredentialError{Class: ne.Class, Provider: c.Name(), Profile: profile, Method: llm.AuthSubscription, Reason: llm.CredentialRejected, Cause: err}
 			}
-		case ae.StatusCode == http.StatusForbidden:
+		case ae.StatusCode == http.StatusForbidden || (ae.StatusCode >= 200 && ae.StatusCode < 300 && ae.Type() == "permission_error"):
 			ne.Class = llm.ErrPermission
 		case ae.StatusCode == http.StatusTooManyRequests:
 			// Quota must NEVER be retried — it fails over immediately. Detect
@@ -68,6 +68,9 @@ func (c *Client) normalize(err error) error {
 			ne.Class = llm.ErrInvalidRequest
 		default:
 			ne.Class = llm.ErrUnknown
+		}
+		if ne.Class == llm.ErrAuth || ne.Class == llm.ErrPermission {
+			ne.Err = llm.SafeAuthenticationDiagnostic(ne.Class, ne.Err)
 		}
 		return ne
 	}

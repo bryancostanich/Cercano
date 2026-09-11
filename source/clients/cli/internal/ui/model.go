@@ -78,9 +78,10 @@ type Entry struct {
 
 // Model is the Bubble Tea root model.
 type Model struct {
-	search        *conversationSearch
-	searchShown   bool
-	width, height int
+	claudeLoginAttempt, chatgptLoginAttempt uint64
+	search                                  *conversationSearch
+	searchShown                             bool
+	width, height                           int
 
 	// scrollbarTop is the absolute screen row of the viewport's first line,
 	// used to hit-test scrollbar mouse events. Set in relayout().
@@ -259,6 +260,10 @@ type Model struct {
 	// (and optional extra) keypress. While non-nil, all key events route to
 	// the confirm resolver instead of the input or scrollback.
 	pendingConfirm *confirmRequest
+	confirmQueue   []*confirmRequest
+	authLogin      *authenticationLogin
+	authEpoch      uint64
+	authReplay     *authenticationReplay
 
 	// composeToolUseID is set while the user composes a "chat about this"
 	// redirect after pressing [c] on a tool confirm: the prompt is dismissed,
@@ -357,6 +362,7 @@ type pendingToolCall struct {
 // model routes y / n / esc (and optional extra keys) to it. onYes/onNo
 // resolve and should clear m.pendingConfirm; extras run without resolving.
 type confirmRequest struct {
+	auth    *agentclient.AuthenticationRequired
 	tool    *pendingToolCall
 	title   string
 	details []string
@@ -1314,10 +1320,30 @@ func (m Model) Update(msg tea.Msg) (nextModel tea.Model, nextCmd tea.Cmd) {
 		return m, cmd
 
 	case tea.KeyPressMsg:
+		if m.authLogin != nil {
+			if msg.String() == "esc" || msg.String() == "ctrl+c" || (m.authLogin.failed && msg.String() == "enter") {
+				return m.cancelAuthentication(m.authLogin.gate)
+			}
+			if m.claudeLoginModal != nil {
+				return m.handleClaudeLoginModalKey(msg)
+			}
+			if m.chatgptLoginModal != nil {
+				return m.handleChatGPTLoginModalKey(msg)
+			}
+		}
 		// Pending confirm gates keys — until the user resolves it, the
 		// input and any in-flight slash commands stay dormant. Scrollback
 		// navigation stays live, though, so the user can page back to review
 		// what the tool is about to touch before answering y/n.
+		if m.claudeLoginModal != nil {
+			return m.handleClaudeLoginModalKey(msg)
+		}
+		if m.chatgptLoginModal != nil {
+			return m.handleChatGPTLoginModalKey(msg)
+		}
+		if m.pendingConfirm != nil && m.pendingConfirm.auth != nil && msg.String() == "ctrl+c" {
+			return m.cancelAuthentication(m.pendingConfirm)
+		}
 		if m.pendingConfirm != nil {
 			next, cmd := m.handlePendingConfirmKey(msg)
 			return next, cmd
@@ -1771,15 +1797,10 @@ func (m Model) Update(msg tea.Msg) (nextModel tea.Model, nextCmd tea.Cmd) {
 			// RouteSelected telemetry: engine badge for the footer.
 			m.turnModel = ev.model
 			m.turnCloud = ev.cloud
-		case reauthRequiredMsg:
-			m.turnActivity = "auth"
-			m.mainChat().Apply(chatProgressMsg{note: ev.note})
-			if m.pendingConfirm == nil {
-				m.pendingConfirm = reauthConfirm(ev)
-				m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: m.renderConfirmRequest(m.pendingConfirm)})
-			}
-			m.chatDirty = true
-			return m, tea.Batch(msg.next, m.ensureAnimTick())
+		case authenticationRequiredMsg:
+			next, cmd := m.receiveAuthentication(ev.request)
+			return next, tea.Batch(msg.next, cmd, m.ensureAnimTick())
+
 		case chatProgressMsg:
 			// Coalesced: mark the transcript dirty and let the next anim
 			// tick repaint. Rebuilding per event made rebuild rate track
@@ -1843,12 +1864,9 @@ func (m Model) Update(msg tea.Msg) (nextModel tea.Model, nextCmd tea.Cmd) {
 				Permission:  ev.tier,
 				Destructive: ev.destructive,
 			}
-			m.pendingConfirm = toolConfirm(tc)
-			m.pendingConfirm.retryPrompt = m.lastSubmittedPrompt
-			m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: m.renderConfirmPrompt(tc)})
+			m.enqueueConfirmation(toolConfirm(tc))
 		case rolloverOfferedMsg:
-			m.pendingConfirm = m.rolloverConfirm(ev)
-			m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: m.renderRolloverPrompt(ev)})
+			m.enqueueConfirmation(m.rolloverConfirm(ev))
 		case chatErrorMsg:
 			m.turnToolStarted = 0
 			m.turnToolDone = 0
@@ -2208,14 +2226,35 @@ func (m Model) Update(msg tea.Msg) (nextModel tea.Model, nextCmd tea.Cmd) {
 		m.pendingRuntimeSwitch = msg.pending
 		return m, nil
 
+	case authenticationStartedMsg:
+		return m.handleAuthenticationStarted(msg)
+	case authenticationFrameMsg:
+		return m.handleAuthenticationFrame(msg)
+	case authenticationResolvedMsg:
+		if msg.err != nil {
+			m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: "Authentication response could not be delivered; the old request may have ended."})
+			m.refreshViewport()
+		}
+		return m, nil
 	case openClaudeLoginModalMsg:
+		if m.authLogin != nil {
+			return m, nil
+		}
 		if m.claudeLoginModal == nil {
+			m.claudeLoginAttempt++
 			m.claudeLoginModal = newClaudeLoginModal(msg.profile, msg.model)
-			return m, startClaudeLoginCmd(m.agent, msg.profile, msg.model, msg.setActive)
+			return m, startClaudeLoginCmd(m.agent, msg.profile, msg.model, msg.setActive, m.claudeLoginAttempt)
 		}
 		return m, nil
 
 	case claudeLoginStartedMsg:
+		if m.authLogin != nil || msg.attempt != m.claudeLoginAttempt {
+			if msg.cancel != nil {
+				msg.cancel()
+			}
+			return m, nil
+		}
+
 		if m.claudeLoginModal == nil {
 			if msg.cancel != nil {
 				msg.cancel()
@@ -2227,9 +2266,16 @@ func (m Model) Update(msg tea.Msg) (nextModel tea.Model, nextCmd tea.Cmd) {
 			return m, nil
 		}
 		m.claudeLoginModal.cancel = msg.cancel
-		return m, drainClaudeLoginCmd(msg.ch)
+		return m, drainClaudeLoginCmd(msg.ch, msg.attempt)
 
 	case claudeLoginFrameMsg:
+		if m.authLogin != nil || msg.attempt != m.claudeLoginAttempt {
+			return m, nil
+		}
+		if m.claudeLoginModal != nil && m.claudeLoginModal.profile != "" && msg.frame.ProfileName != "" && msg.frame.ProfileName != m.claudeLoginModal.profile {
+			return m, nil
+		}
+
 		if m.claudeLoginModal == nil {
 			return m, nil
 		}
@@ -2253,7 +2299,7 @@ func (m Model) Update(msg tea.Msg) (nextModel tea.Model, nextCmd tea.Cmd) {
 		m.claudeLoginModal.setURL(msg.frame.AuthorizeURL)
 		var claudeCmds []tea.Cmd
 		if msg.ch != nil {
-			claudeCmds = append(claudeCmds, drainClaudeLoginCmd(msg.ch))
+			claudeCmds = append(claudeCmds, drainClaudeLoginCmd(msg.ch, msg.attempt))
 		}
 		// Auto-open the authorize page once, the moment we have the URL, so the
 		// user lands on it without hunting for the link in the modal.
@@ -2264,13 +2310,24 @@ func (m Model) Update(msg tea.Msg) (nextModel tea.Model, nextCmd tea.Cmd) {
 		return m, tea.Batch(claudeCmds...)
 
 	case openChatGPTLoginModalMsg:
+		if m.authLogin != nil {
+			return m, nil
+		}
 		if m.chatgptLoginModal == nil {
+			m.chatgptLoginAttempt++
 			m.chatgptLoginModal = newChatGPTLoginModal(msg.profile, msg.model)
-			return m, startChatGPTLoginCmd(m.agent, msg.profile, msg.model, msg.setActive)
+			return m, startChatGPTLoginCmd(m.agent, msg.profile, msg.model, msg.setActive, m.chatgptLoginAttempt)
 		}
 		return m, nil
 
 	case chatgptLoginStartedMsg:
+		if m.authLogin != nil || msg.attempt != m.chatgptLoginAttempt {
+			if msg.cancel != nil {
+				msg.cancel()
+			}
+			return m, nil
+		}
+
 		if m.chatgptLoginModal == nil {
 			if msg.cancel != nil {
 				msg.cancel()
@@ -2282,9 +2339,16 @@ func (m Model) Update(msg tea.Msg) (nextModel tea.Model, nextCmd tea.Cmd) {
 			return m, nil
 		}
 		m.chatgptLoginModal.cancel = msg.cancel
-		return m, drainChatGPTLoginCmd(msg.ch)
+		return m, drainChatGPTLoginCmd(msg.ch, msg.attempt)
 
 	case chatgptLoginFrameMsg:
+		if m.authLogin != nil || msg.attempt != m.chatgptLoginAttempt {
+			return m, nil
+		}
+		if m.chatgptLoginModal != nil && m.chatgptLoginModal.profile != "" && msg.frame.ProfileName != "" && msg.frame.ProfileName != m.chatgptLoginModal.profile {
+			return m, nil
+		}
+
 		if m.chatgptLoginModal == nil {
 			return m, nil
 		}
@@ -2308,7 +2372,7 @@ func (m Model) Update(msg tea.Msg) (nextModel tea.Model, nextCmd tea.Cmd) {
 		m.chatgptLoginModal.setCode(msg.frame.VerificationURL, msg.frame.UserCode)
 		var cmds []tea.Cmd
 		if msg.ch != nil {
-			cmds = append(cmds, drainChatGPTLoginCmd(msg.ch))
+			cmds = append(cmds, drainChatGPTLoginCmd(msg.ch, msg.attempt))
 		}
 		// Auto-open the verification page once, the moment we have the URL, so
 		// the user lands on it without hunting for the link in the modal.
@@ -2368,6 +2432,19 @@ func (m Model) Update(msg tea.Msg) (nextModel tea.Model, nextCmd tea.Cmd) {
 		m.connAttempt = msg.attempt
 		m.connFailErrMsg = msg.errMsg
 		if msg.state == agentclient.ConnStateReconnecting && prev == agentclient.ConnStateConnected {
+			m.markAuthenticationStale()
+			if m.authLogin != nil {
+				m.authLogin.cancel()
+				m.authLogin = nil
+				m.claudeLoginModal = nil
+				m.chatgptLoginModal = nil
+			}
+			for _, c := range append([]*confirmRequest{m.pendingConfirm}, m.confirmQueue...) {
+				if c != nil && c.auth != nil {
+					c.stale = true
+				}
+			}
+
 			if m.streaming && m.pendingConfirm != nil {
 				// A permission gate is the active user input surface. Do not restore
 				// the submitted chat prompt into the composer while y/n/d/c is still
@@ -2380,6 +2457,9 @@ func (m Model) Update(msg tea.Msg) (nextModel tea.Model, nextCmd tea.Cmd) {
 					e.Streaming = false
 				}
 				body := "⚠ agent disconnected while awaiting your tool decision — reconnecting; answer y/n/d/c once the agent is back."
+				if m.pendingConfirm.auth != nil {
+					body = "⚠ agent disconnected while awaiting authentication — reconnecting; the decision is preserved."
+				}
 				if msg.crashSummary != "" {
 					body += "\n  cause: " + msg.crashSummary + " (full trace in ~/.config/cercano/crash.log)"
 				}
@@ -2412,9 +2492,13 @@ func (m Model) Update(msg tea.Msg) (nextModel tea.Model, nextCmd tea.Cmd) {
 			// old process, so answering it can never resolve anything. Mark it
 			// so the y/n resolver stops pretending the gate is live and instead
 			// re-runs the user's request on yes.
-			if m.pendingConfirm != nil && m.pendingConfirm.tool != nil {
+			if m.pendingConfirm != nil && (m.pendingConfirm.tool != nil || m.pendingConfirm.auth != nil) {
 				m.pendingConfirm.stale = true
-				m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: m.styles.Muted.Render("↻ the pending tool decision was lost when the agent restarted — press [y] to re-run that request, [n] to drop it, or type a new message and press Enter.")})
+				notice := "↻ the pending tool decision was lost when the agent restarted — press [y] to re-run that request, [n] to drop it, or type a new message and press Enter."
+				if m.pendingConfirm.auth != nil {
+					notice = "↻ the authentication decision belongs to a lost request — login/fallback will explicitly start a fresh turn; [n] cancels."
+				}
+				m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: m.styles.Muted.Render(notice)})
 			}
 			m.refreshViewport()
 			return m, tea.Batch(msg.next, fetchConfigCmd(m.agent), fetchToolsCmd(m.agent), fetchPermissionModeCmd(m.agent), fetchVisionCmd(m.agent), fetchOpenRuntimeStatusCmd(m.agent))
@@ -2458,6 +2542,7 @@ func (m Model) Update(msg tea.Msg) (nextModel tea.Model, nextCmd tea.Cmd) {
 		return m, nil
 
 	case streamEndMsg:
+		m.markAuthenticationStale()
 		// A dead turn's channel close is inert: running the completion path
 		// here would tear down the LIVE turn — including invoking
 		// m.cancelStream, which now belongs to it.
@@ -2855,6 +2940,7 @@ func (m *Model) setInputValue(s string) {
 // append a muted "canceled" note. Any late events are ignored by the
 // chatStreamMsg guard once m.streaming is false.
 func (m *Model) cancelCurrentStream() {
+	m.clearAuthenticationForConversation(m.convID)
 	m.cancelCurrentStreamWithNotice(true)
 }
 
@@ -3080,9 +3166,7 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 		}
 		// W or X — queue confirm.
 		tc := &pendingToolCall{Name: res.ToolName, Args: res.ToolArgs, Permission: perm}
-		m.pendingConfirm = toolConfirm(tc)
-		prompt := m.renderConfirmPrompt(tc)
-		m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: prompt})
+		m.enqueueConfirmation(toolConfirm(tc))
 		m.refreshViewport()
 	case slash.ResultDevMode:
 		kickoff := m.applyDevMode(res.WorkDir)
@@ -4534,6 +4618,13 @@ func (m Model) steerPendingConfirm(text string) (Model, tea.Cmd) {
 	if text == "" {
 		return m, nil
 	}
+	if c.auth != nil {
+		next, cancelCmd := m.cancelAuthentication(c)
+		next.input.SetValue(text)
+		next.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: "Authentication canceled. Press Enter to submit your new message."})
+		next.refreshViewport()
+		return next, cancelCmd
+	}
 	if c.stale && c.tool != nil {
 		m.pendingConfirm = nil
 		m.input.SetValue("")
@@ -4581,7 +4672,9 @@ func (m Model) resolveConfirmKey(key string) (Model, tea.Cmd) {
 	return next, cmd
 }
 
-func (m Model) resolveConfirmHotkey(key string) (Model, tea.Cmd, bool) {
+func (m Model) resolveConfirmHotkey(key string) (next Model, cmd tea.Cmd, handled bool) {
+	defer func() { next.advanceConfirmation() }()
+
 	c := m.pendingConfirm
 	if c == nil {
 		return m, nil, false
@@ -4641,62 +4734,6 @@ func (m Model) resolveConfirmHotkey(key string) (Model, tea.Cmd, bool) {
 			return next, cmd, true
 		}
 		return m, nil, false
-	}
-}
-
-func reauthConfirm(req reauthRequiredMsg) *confirmRequest {
-	profile := req.profile
-	if profile == "" {
-		profile = "claude"
-	}
-	note := req.note
-	if note == "" {
-		note = "Claude sign-in expired."
-	}
-	var detailsEntry *Entry
-	toggleDetails := func(m Model) (Model, tea.Cmd) {
-		if detailsEntry != nil {
-			if m.mainChat().RemoveEntry(detailsEntry) {
-				detailsEntry = nil
-				m.refreshViewport()
-				return m, nil
-			}
-			detailsEntry = nil
-		}
-		detailsEntry = &Entry{Role: RoleSystem, Content: "auth details:\n" + note}
-		m.mainChat().AppendEntry(detailsEntry)
-		m.refreshViewport()
-		return m, nil
-	}
-	return &confirmRequest{
-		title: "Claude sign-in expired",
-		details: []string{
-			"Cercano could not refresh the Claude subscription token.",
-			"Re-authenticate now, or dismiss and keep using the backup profile for this turn.",
-		},
-		hints: "[" + "y" + "]es re-auth / [" + "n" + "]o dismiss / [" + "d" + "]etails",
-		onYes: func(m Model) (Model, tea.Cmd) {
-			m.pendingConfirm = nil
-			if m.agent == nil {
-				m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: m.styles.Error.Render("Claude sign-in unavailable — no agent connection.")})
-				m.refreshViewport()
-				return m, nil
-			}
-			m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: m.styles.Accent.Render("opening Claude sign-in…")})
-			m.refreshViewport()
-			m.claudeLoginModal = newClaudeLoginModal(profile, "")
-			return m, startClaudeLoginCmd(m.agent, profile, "", true)
-		},
-		onNo: func(m Model) (Model, tea.Cmd) {
-			m.pendingConfirm = nil
-			m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: m.styles.Muted.Render("Claude re-auth dismissed.")})
-			m.refreshViewport()
-			return m, nil
-		},
-		extras: map[string]func(Model) (Model, tea.Cmd){
-			"d": toggleDetails,
-			"D": toggleDetails,
-		},
 	}
 }
 
@@ -4962,15 +4999,12 @@ func (m Model) routeChatMsg(msg tea.Msg) (Model, tea.Cmd) {
 	if !ok {
 		return m, nil
 	}
-	if rm, ok := msg.(reauthRequiredMsg); ok {
-		cv.chat.Apply(chatProgressMsg{note: rm.note})
-		if m.pendingConfirm == nil {
-			m.pendingConfirm = reauthConfirm(rm)
-			cv.chat.AppendEntry(&Entry{Role: RoleSystem, Content: m.renderConfirmRequest(m.pendingConfirm)})
-		}
+	if rm, ok := msg.(authenticationRequiredMsg); ok {
+		next, cmd := m.receiveAuthentication(rm.request)
 		cv.chat.rebuild()
-		return m, progressAnimTick()
+		return next, cmd
 	}
+
 	if cm, isConfirm := msg.(chatConfirmMsg); isConfirm {
 		// Fill the open streaming placeholder with the rationale rather than
 		// appending after it — prevents a frozen working… orphan mid-transcript.
@@ -4980,7 +5014,7 @@ func (m Model) routeChatMsg(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		cv.chat.rebuild()
 		onYes, onNo := cm.onYes, cm.onNo
-		m.pendingConfirm = &confirmRequest{
+		confirmation := &confirmRequest{
 			onYes: func(m Model) (Model, tea.Cmd) { m.pendingConfirm = nil; return m, onYes },
 			onNo: func(m Model) (Model, tea.Cmd) {
 				m.pendingConfirm = nil
@@ -4989,6 +5023,7 @@ func (m Model) routeChatMsg(msg tea.Msg) (Model, tea.Cmd) {
 				return m, onNo
 			},
 		}
+		m.enqueueConfirmation(confirmation)
 		return m, progressAnimTick()
 	}
 	switch msg.(type) {

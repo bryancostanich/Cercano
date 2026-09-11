@@ -26,7 +26,6 @@ import (
 	"cercano/source/server/internal/agenttools"
 	engine "cercano/source/server/internal/engine"
 	"cercano/source/server/internal/failurelog"
-	cfgsvc "cercano/source/server/internal/hostsvc/config"
 	permissions "cercano/source/server/internal/hostsvc/permissions"
 	providers "cercano/source/server/internal/hostsvc/providers"
 	"cercano/source/server/internal/inference"
@@ -331,7 +330,7 @@ func (p *fakePerms) StartWatcher(_ context.Context, _ string) error { return nil
 // ---------------------------------------------------------------------------
 
 var _ providers.Resolver = (*fakeResolver)(nil)
-var _ cfgsvc.Service = (*fakeConfig)(nil)
+var _ ConfigReader = (*fakeConfig)(nil)
 var _ permissions.Broker = (*fakePerms)(nil)
 var _ TurnHistory = (*fakeTurnHistory)(nil)
 var _ ToolSvc = (*fakeToolSvc)(nil)

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"runtime/debug"
+	"strings"
 
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/cloudfactory"
@@ -61,6 +62,9 @@ func NewWithFactories(
 
 // RunTurn is the bidi RPC handler.
 func (w *WorkerServer) RunTurn(stream proto.Worker_RunTurnServer) error {
+	return w.runTurn(stream, false)
+}
+func (w *WorkerServer) runTurn(stream proto.Worker_RunTurnServer, authRecovery bool) error {
 	// First message must be StartTurn.
 	firstMsg, err := stream.Recv()
 	if err != nil {
@@ -101,6 +105,7 @@ func (w *WorkerServer) RunTurn(stream proto.Worker_RunTurnServer) error {
 	// Session profile proxy: session-control capabilities such as suggest_plan
 	// must mutate the host's live profile broker, not a worker-local copy.
 	profileCtl := newStreamSessionProfileController(sndr, start.GetConversationId())
+	authRequest := newStreamAuthentication(sndr)
 
 	// Recv loop: routes incoming HostToWorker messages from the host.
 	recvDone := make(chan struct{})
@@ -112,6 +117,8 @@ func (w *WorkerServer) RunTurn(stream proto.Worker_RunTurnServer) error {
 				return // stream closed or host hung up
 			}
 			switch {
+			case msg.GetAuthResponse() != nil:
+				authRequest.deliver(msg.GetAuthResponse())
 			case msg.GetPermResponse() != nil:
 				permReq.deliver(msg.GetPermResponse())
 			case msg.GetCredResponse() != nil:
@@ -170,6 +177,9 @@ func (w *WorkerServer) RunTurn(stream proto.Worker_RunTurnServer) error {
 		Input:          start.GetInput(),
 		WorkDir:        start.GetWorkDir(),
 		Gen:            start.GetGen(),
+	}
+	if authRecovery {
+		req.AuthRecovery = authRequest.Request
 	}
 	for _, img := range start.GetImages() {
 		req.Images = append(req.Images, agent.InlineImage{
@@ -555,6 +565,7 @@ func wrapWorkerResilience(
 	}
 	if backup, backupModelFor, ok := buildWorkerBackup(ctx, primaryName, cfg, credSource, modelSupportsVision); ok {
 		opts.Backup = backup
+		opts.BackupLabel = strings.TrimSpace(cfg.BackupCloudProfile)
 		opts.BackupModelFor = backupModelFor
 	}
 	return resilience.New(primary, opts)

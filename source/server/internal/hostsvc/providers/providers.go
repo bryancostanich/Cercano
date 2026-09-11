@@ -12,6 +12,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"cercano/source/server/internal/agent"
@@ -429,6 +430,7 @@ func (p *service) wrapResilience(primary inference.Provider, primaryName string,
 	}
 	if backup, backupModelFor, ok := p.buildBackup(primaryName, c); ok {
 		opts.Backup = backup
+		opts.BackupLabel = strings.TrimSpace(c.BackupCloudProfile)
 		opts.BackupModelFor = backupModelFor
 	}
 	return resilience.New(primary, opts)

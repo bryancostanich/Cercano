@@ -24,6 +24,7 @@ const (
 	EventSubAgent                          // structured child-agent lifecycle/transcript event
 	EventTaskChange                        // planning/session task-store mutation; TaskChange* fields set
 	EventDone                              // turn complete; Result populated
+	EventAuthentication
 )
 
 // TaskSnapshot is the runner's proto-free mirror of a task-store node snapshot.
@@ -42,8 +43,15 @@ type TaskSnapshot struct {
 
 // Event is one runner-emitted notification. Only the fields relevant to Kind
 // are set. Proto-free by design.
+type Authentication struct {
+	Resolved                  bool
+	ConversationID, RequestID string
+	Challenge                 llm.AuthChallenge
+}
+
 type Event struct {
-	Kind EventKind
+	Authentication *Authentication
+	Kind           EventKind
 
 	// Text: EventToken text delta; EventProgress message.
 	Text string

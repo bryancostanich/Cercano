@@ -90,6 +90,7 @@ const (
 	Agent_StartChatGPTLogin_FullMethodName                     = "/agent.Agent/StartChatGPTLogin"
 	Agent_StartClaudeLogin_FullMethodName                      = "/agent.Agent/StartClaudeLogin"
 	Agent_ReauthenticateCloud_FullMethodName                   = "/agent.Agent/ReauthenticateCloud"
+	Agent_ResolveAuthentication_FullMethodName                 = "/agent.Agent/ResolveAuthentication"
 	Agent_ExportImage_FullMethodName                           = "/agent.Agent/ExportImage"
 )
 
@@ -311,6 +312,7 @@ type AgentClient interface {
 	// Separate from onboarding so an old server fails with Unimplemented rather
 	// than ignoring a new flag and silently rewriting or activating a profile.
 	ReauthenticateCloud(ctx context.Context, in *CloudReauthenticationRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[CloudLoginEvent], error)
+	ResolveAuthentication(ctx context.Context, in *AuthenticationDecisionRequest, opts ...grpc.CallOption) (*AuthenticationDecisionResponse, error)
 	// ExportImage returns the raw bytes of an image the user attached to a live
 	// conversation, looked up by its per-conversation attachment ID (e.g.
 	// "img_7f3a9c_1"). The attachment store is in-memory only, so a miss is
@@ -1145,6 +1147,16 @@ func (c *agentClient) ReauthenticateCloud(ctx context.Context, in *CloudReauthen
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Agent_ReauthenticateCloudClient = grpc.ServerStreamingClient[CloudLoginEvent]
 
+func (c *agentClient) ResolveAuthentication(ctx context.Context, in *AuthenticationDecisionRequest, opts ...grpc.CallOption) (*AuthenticationDecisionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AuthenticationDecisionResponse)
+	err := c.cc.Invoke(ctx, Agent_ResolveAuthentication_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *agentClient) ExportImage(ctx context.Context, in *ExportImageRequest, opts ...grpc.CallOption) (*ExportImageResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ExportImageResponse)
@@ -1373,6 +1385,7 @@ type AgentServer interface {
 	// Separate from onboarding so an old server fails with Unimplemented rather
 	// than ignoring a new flag and silently rewriting or activating a profile.
 	ReauthenticateCloud(*CloudReauthenticationRequest, grpc.ServerStreamingServer[CloudLoginEvent]) error
+	ResolveAuthentication(context.Context, *AuthenticationDecisionRequest) (*AuthenticationDecisionResponse, error)
 	// ExportImage returns the raw bytes of an image the user attached to a live
 	// conversation, looked up by its per-conversation attachment ID (e.g.
 	// "img_7f3a9c_1"). The attachment store is in-memory only, so a miss is
@@ -1601,6 +1614,9 @@ func (UnimplementedAgentServer) StartClaudeLogin(*StartClaudeLoginRequest, grpc.
 }
 func (UnimplementedAgentServer) ReauthenticateCloud(*CloudReauthenticationRequest, grpc.ServerStreamingServer[CloudLoginEvent]) error {
 	return status.Error(codes.Unimplemented, "method ReauthenticateCloud not implemented")
+}
+func (UnimplementedAgentServer) ResolveAuthentication(context.Context, *AuthenticationDecisionRequest) (*AuthenticationDecisionResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ResolveAuthentication not implemented")
 }
 func (UnimplementedAgentServer) ExportImage(context.Context, *ExportImageRequest) (*ExportImageResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ExportImage not implemented")
@@ -2820,6 +2836,24 @@ func _Agent_ReauthenticateCloud_Handler(srv interface{}, stream grpc.ServerStrea
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Agent_ReauthenticateCloudServer = grpc.ServerStreamingServer[CloudLoginEvent]
 
+func _Agent_ResolveAuthentication_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AuthenticationDecisionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServer).ResolveAuthentication(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Agent_ResolveAuthentication_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServer).ResolveAuthentication(ctx, req.(*AuthenticationDecisionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Agent_ExportImage_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ExportImageRequest)
 	if err := dec(in); err != nil {
@@ -3082,6 +3116,10 @@ var Agent_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Agent_ListCloudProfileModels_Handler,
 		},
 		{
+			MethodName: "ResolveAuthentication",
+			Handler:    _Agent_ResolveAuthentication_Handler,
+		},
+		{
 			MethodName: "ExportImage",
 			Handler:    _Agent_ExportImage_Handler,
 		},
@@ -3152,7 +3190,8 @@ var Agent_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	Worker_RunTurn_FullMethodName = "/agent.Worker/RunTurn"
+	Worker_RunTurn_FullMethodName                   = "/agent.Worker/RunTurn"
+	Worker_RunTurnWithAuthentication_FullMethodName = "/agent.Worker/RunTurnWithAuthentication"
 )
 
 // WorkerClient is the client API for Worker service.
@@ -3164,6 +3203,7 @@ type WorkerClient interface {
 	// needed); worker sends WorkerToHost (WorkerEvent, PermissionRequest,
 	// PersistTurn, TurnDone, TurnError).
 	RunTurn(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[HostToWorker, WorkerToHost], error)
+	RunTurnWithAuthentication(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[HostToWorker, WorkerToHost], error)
 }
 
 type workerClient struct {
@@ -3187,6 +3227,19 @@ func (c *workerClient) RunTurn(ctx context.Context, opts ...grpc.CallOption) (gr
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Worker_RunTurnClient = grpc.BidiStreamingClient[HostToWorker, WorkerToHost]
 
+func (c *workerClient) RunTurnWithAuthentication(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[HostToWorker, WorkerToHost], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &Worker_ServiceDesc.Streams[1], Worker_RunTurnWithAuthentication_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[HostToWorker, WorkerToHost]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Worker_RunTurnWithAuthenticationClient = grpc.BidiStreamingClient[HostToWorker, WorkerToHost]
+
 // WorkerServer is the server API for Worker service.
 // All implementations must embed UnimplementedWorkerServer
 // for forward compatibility.
@@ -3196,6 +3249,7 @@ type WorkerServer interface {
 	// needed); worker sends WorkerToHost (WorkerEvent, PermissionRequest,
 	// PersistTurn, TurnDone, TurnError).
 	RunTurn(grpc.BidiStreamingServer[HostToWorker, WorkerToHost]) error
+	RunTurnWithAuthentication(grpc.BidiStreamingServer[HostToWorker, WorkerToHost]) error
 	mustEmbedUnimplementedWorkerServer()
 }
 
@@ -3208,6 +3262,9 @@ type UnimplementedWorkerServer struct{}
 
 func (UnimplementedWorkerServer) RunTurn(grpc.BidiStreamingServer[HostToWorker, WorkerToHost]) error {
 	return status.Error(codes.Unimplemented, "method RunTurn not implemented")
+}
+func (UnimplementedWorkerServer) RunTurnWithAuthentication(grpc.BidiStreamingServer[HostToWorker, WorkerToHost]) error {
+	return status.Error(codes.Unimplemented, "method RunTurnWithAuthentication not implemented")
 }
 func (UnimplementedWorkerServer) mustEmbedUnimplementedWorkerServer() {}
 func (UnimplementedWorkerServer) testEmbeddedByValue()                {}
@@ -3237,6 +3294,13 @@ func _Worker_RunTurn_Handler(srv interface{}, stream grpc.ServerStream) error {
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Worker_RunTurnServer = grpc.BidiStreamingServer[HostToWorker, WorkerToHost]
 
+func _Worker_RunTurnWithAuthentication_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(WorkerServer).RunTurnWithAuthentication(&grpc.GenericServerStream[HostToWorker, WorkerToHost]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Worker_RunTurnWithAuthenticationServer = grpc.BidiStreamingServer[HostToWorker, WorkerToHost]
+
 // Worker_ServiceDesc is the grpc.ServiceDesc for Worker service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -3248,6 +3312,12 @@ var Worker_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "RunTurn",
 			Handler:       _Worker_RunTurn_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
+		{
+			StreamName:    "RunTurnWithAuthentication",
+			Handler:       _Worker_RunTurnWithAuthentication_Handler,
 			ServerStreams: true,
 			ClientStreams: true,
 		},

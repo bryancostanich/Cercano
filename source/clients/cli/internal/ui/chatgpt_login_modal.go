@@ -86,6 +86,9 @@ func (mo *chatgptLoginModal) setCode(verificationURL, userCode string) {
 func (mo *chatgptLoginModal) setDone(accountID string) {
 	mo.state = chatgptLoginDone
 	mo.accountID = accountID
+	if mo.cancel != nil {
+		mo.cancel()
+	}
 	mo.cancel = nil
 }
 
@@ -93,6 +96,9 @@ func (mo *chatgptLoginModal) setDone(accountID string) {
 func (mo *chatgptLoginModal) setFailed(msg string) {
 	mo.state = chatgptLoginFailed
 	mo.errMsg = msg
+	if mo.cancel != nil {
+		mo.cancel()
+	}
 	mo.cancel = nil
 }
 
@@ -110,44 +116,50 @@ type openChatGPTLoginModalMsg struct {
 // chatgptLoginStartedMsg carries the opened stream (or the open error). The
 // root model stashes cancel and kicks the drain loop.
 type chatgptLoginStartedMsg struct {
-	cancel context.CancelFunc
-	ch     <-chan agentclient.ChatGPTLoginMsg
-	err    error
+	attempt uint64
+	cancel  context.CancelFunc
+	ch      <-chan agentclient.ChatGPTLoginMsg
+	err     error
 }
 
 // chatgptLoginFrameMsg carries one drained frame plus the channel to keep
 // draining (nil once the stream is exhausted).
 type chatgptLoginFrameMsg struct {
-	frame agentclient.ChatGPTLoginMsg
-	ch    <-chan agentclient.ChatGPTLoginMsg
+	attempt uint64
+	frame   agentclient.ChatGPTLoginMsg
+	ch      <-chan agentclient.ChatGPTLoginMsg
 }
 
 // startChatGPTLoginCmd opens the StartChatGPTLogin streaming RPC under a
 // cancellable context and returns the stream (or error) for the drain loop.
-func startChatGPTLoginCmd(ag *agentclient.Client, profile, model string, setActive bool) tea.Cmd {
+func startChatGPTLoginCmd(ag *agentclient.Client, profile, model string, setActive bool, attempt uint64) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithCancel(context.Background())
 		ch, err := ag.StartChatGPTLogin(ctx, profile, model, setActive)
 		if err != nil {
 			cancel()
-			return chatgptLoginStartedMsg{err: err}
+			return chatgptLoginStartedMsg{attempt: attempt, err: err}
 		}
-		return chatgptLoginStartedMsg{cancel: cancel, ch: ch}
+		return chatgptLoginStartedMsg{attempt: attempt, cancel: cancel, ch: ch}
 	}
 }
 
 // drainChatGPTLoginCmd reads one frame from the stream channel and re-arms.
 // A closed channel without a terminal frame is reported as a failure so the
 // modal never hangs in the waiting state.
-func drainChatGPTLoginCmd(ch <-chan agentclient.ChatGPTLoginMsg) tea.Cmd {
+func drainChatGPTLoginCmd(ch <-chan agentclient.ChatGPTLoginMsg, attempts ...uint64) tea.Cmd {
+	var attempt uint64
+	if len(attempts) > 0 {
+		attempt = attempts[0]
+	}
 	return func() tea.Msg {
 		frame, ok := <-ch
 		if !ok {
-			return chatgptLoginFrameMsg{
+			return chatgptLoginFrameMsg{attempt: attempt,
 				frame: agentclient.ChatGPTLoginMsg{Done: true, Ok: false, Error: "sign-in stream closed unexpectedly"},
 			}
 		}
-		return chatgptLoginFrameMsg{frame: frame, ch: ch}
+		return chatgptLoginFrameMsg{attempt: attempt, frame: frame, ch: ch}
 	}
 }
 

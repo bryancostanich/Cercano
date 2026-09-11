@@ -1483,3 +1483,10 @@ func Hello() string {
 		t.Errorf("expected 'already documented' message, got: %s", text)
 	}
 }
+
+func (m *mockAgentClient) ReauthenticateCloud(context.Context, *proto.CloudReauthenticationRequest, ...grpc.CallOption) (proto.Agent_ReauthenticateCloudClient, error) {
+	return nil, status.Error(codes.Unimplemented, "not used by MCP")
+}
+func (m *mockAgentClient) ResolveAuthentication(context.Context, *proto.AuthenticationDecisionRequest, ...grpc.CallOption) (*proto.AuthenticationDecisionResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "not used by MCP")
+}

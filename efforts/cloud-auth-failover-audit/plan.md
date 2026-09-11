@@ -11,7 +11,7 @@ Objective: preserve the audit findings as reproducible tests and locate the exac
 - [x] Inspect current branch and user changes through delegated git operations; create an isolated feature worktree from the intended base and copy only the approved effort artifacts as needed.
 - [ ] Confirm the approved spec still matches the current checkout; inspect intervening changes without overwriting user work.
 - [ ] Map direct host, worker, primary, backup, streaming, non-streaming, and outer-tier fallback call paths and their request cancellation owners.
-- [~] Turn the audit probes into durable regressions that first demonstrate the existing failures.
+- [x] Turn the audit probes into durable regressions that first demonstrate the existing failures.
   - [ ] Capture SDK-wrapped Claude expiration and ChatGPT transient refresh-network errors with their actual current classes.
   - [ ] Count backup and alternate-tier calls to show silent fallback, including no-backup and backup-authentication cases.
   - [ ] Demonstrate provider/profile misrouting, discarded auth confirmations, and missing live continuation.

@@ -25,7 +25,8 @@ type streamReader struct {
 	// "error"), returned from Next after pending events drain — as a normalized
 	// error, not an EventError, so both the resilience engine (pre-content) and
 	// the turn runner (mid-stream) can apply class-driven policy to it.
-	failure error
+	failure       error
+	normalizeAuth func(error) error
 }
 
 func newStreamReader(rc io.ReadCloser, provider string) *streamReader {
@@ -157,6 +158,9 @@ func (s *streamReader) dispatch(data string) {
 		s.pending = append(s.pending, ev)
 	case "response.failed", "response.error", "error":
 		s.failure = classifyStreamError(env, data)
+		if s.normalizeAuth != nil {
+			s.failure = s.normalizeAuth(s.failure)
+		}
 	}
 }
 
@@ -182,6 +186,27 @@ func classifyStreamError(env streamEnvelope, raw string) error {
 		if typ == "" {
 			typ = env.Response.Error.Type
 		}
+	}
+	// Explicit authentication and permission codes outrank message prose.
+	authCode := func(v string) bool {
+		switch v {
+		case "invalid_api_key", "authentication_error", "invalid_token", "invalid_access_token", "token_expired":
+			return true
+		}
+		return false
+	}
+	permissionCode := func(v string) bool {
+		switch v {
+		case "permission_error", "permission_denied", "insufficient_permissions":
+			return true
+		}
+		return false
+	}
+	if authCode(code) || authCode(typ) {
+		return &llm.Error{Class: llm.ErrAuth, Provider: "openai-responses", Err: llm.SafeAuthenticationDiagnostic(llm.ErrAuth, fmt.Errorf("stream error: %s", msg))}
+	}
+	if permissionCode(code) || permissionCode(typ) {
+		return &llm.Error{Class: llm.ErrPermission, Provider: "openai-responses", Err: llm.SafeAuthenticationDiagnostic(llm.ErrPermission, fmt.Errorf("stream error: %s", msg))}
 	}
 	class := llm.ErrBusy
 	used, limit := 0, 0

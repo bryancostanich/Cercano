@@ -31,6 +31,7 @@ type profileState struct {
 	store      secrets.Store
 	generation uint64
 	flight     *flight
+	login      *LoginAttempt
 }
 type token struct{ access, account string }
 type flight struct {
@@ -81,6 +82,7 @@ func (s *Service) ReplaceStore(store secrets.Store) {
 // they can resolve the new generation immediately, even if an old transport is
 // slow to honor cancellation. That transport can no longer commit its result.
 func (p *profileState) invalidate() {
+	p.cancelLogin()
 	p.generation++
 	if f := p.flight; f != nil {
 		p.flight = nil

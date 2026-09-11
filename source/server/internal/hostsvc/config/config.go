@@ -5,6 +5,7 @@
 package config
 
 import (
+	"context"
 	"sync"
 
 	"cercano/source/server/internal/hostsvc/credentials"
@@ -19,6 +20,7 @@ type Service interface {
 	Path() string
 	Secrets() secrets.Store
 	Credentials() *credentials.Service
+	BeginCloudLogin(context.Context, cfg.CloudProfile, bool, bool) (*CloudLogin, error)
 	ActiveProfile() (cfg.CloudProfile, bool)
 
 	// Full-state writes (replace entire config; no notify — caller persists
@@ -111,6 +113,7 @@ func (s *svc) Set(c cfg.Config) error {
 	}
 	clone := c.Clone()
 	s.mu.Lock()
+	s.cancelChangedLogins(clone.CloudProfiles)
 	s.current = clone
 	s.mu.Unlock()
 	return nil
@@ -134,6 +137,9 @@ func (s *svc) SetSecrets(st secrets.Store) {
 func (s *svc) SetActiveProfile(name string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.setActiveProfileLocked(name)
+}
+func (s *svc) setActiveProfileLocked(name string) bool {
 	if _, ok := profileByName(s.current.CloudProfiles, name); !ok {
 		return false
 	}
@@ -158,10 +164,14 @@ func (s *svc) UpsertProfile(p cfg.CloudProfile) (replaced bool, isActive bool) {
 	name := p.Name
 	for i, existing := range s.current.CloudProfiles {
 		if existing.Name == name {
+			if existing != p {
+				s.credentials.CancelLogin(name)
+			}
 			s.current.CloudProfiles[i] = p
 			return true, name == s.current.ActiveCloudProfile
 		}
 	}
+	s.credentials.CancelLogin(name)
 	s.current.CloudProfiles = append(s.current.CloudProfiles, p)
 	return false, name == s.current.ActiveCloudProfile
 }
@@ -173,6 +183,7 @@ func (s *svc) RemoveProfile(name string) (existed, wasActive bool) {
 	if !ok {
 		return false, false
 	}
+	s.credentials.CancelLogin(name)
 	kept := s.current.CloudProfiles[:0]
 	for _, p := range s.current.CloudProfiles {
 		if p.Name != name {
@@ -214,6 +225,7 @@ func (s *svc) Mutate(fn func(*cfg.Config)) error {
 	if err := candidate.LlamaServer.Validate(); err != nil {
 		return err
 	}
+	s.cancelChangedLogins(candidate.CloudProfiles)
 	s.current = candidate.Clone()
 	return nil
 }

@@ -89,6 +89,7 @@ const (
 	Agent_ListCloudProfileModels_FullMethodName                = "/agent.Agent/ListCloudProfileModels"
 	Agent_StartChatGPTLogin_FullMethodName                     = "/agent.Agent/StartChatGPTLogin"
 	Agent_StartClaudeLogin_FullMethodName                      = "/agent.Agent/StartClaudeLogin"
+	Agent_ReauthenticateCloud_FullMethodName                   = "/agent.Agent/ReauthenticateCloud"
 	Agent_ExportImage_FullMethodName                           = "/agent.Agent/ExportImage"
 )
 
@@ -306,6 +307,10 @@ type AgentClient interface {
 	// reports ok/error. On success the agent stores the token set and creates a
 	// messages+subscription cloud profile.
 	StartClaudeLogin(ctx context.Context, in *StartClaudeLoginRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[StartClaudeLoginEvent], error)
+	// Credential-only reauthentication of an existing subscription profile.
+	// Separate from onboarding so an old server fails with Unimplemented rather
+	// than ignoring a new flag and silently rewriting or activating a profile.
+	ReauthenticateCloud(ctx context.Context, in *CloudReauthenticationRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[CloudLoginEvent], error)
 	// ExportImage returns the raw bytes of an image the user attached to a live
 	// conversation, looked up by its per-conversation attachment ID (e.g.
 	// "img_7f3a9c_1"). The attachment store is in-memory only, so a miss is
@@ -1121,6 +1126,25 @@ func (c *agentClient) StartClaudeLogin(ctx context.Context, in *StartClaudeLogin
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Agent_StartClaudeLoginClient = grpc.ServerStreamingClient[StartClaudeLoginEvent]
 
+func (c *agentClient) ReauthenticateCloud(ctx context.Context, in *CloudReauthenticationRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[CloudLoginEvent], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[11], Agent_ReauthenticateCloud_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[CloudReauthenticationRequest, CloudLoginEvent]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Agent_ReauthenticateCloudClient = grpc.ServerStreamingClient[CloudLoginEvent]
+
 func (c *agentClient) ExportImage(ctx context.Context, in *ExportImageRequest, opts ...grpc.CallOption) (*ExportImageResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ExportImageResponse)
@@ -1345,6 +1369,10 @@ type AgentServer interface {
 	// reports ok/error. On success the agent stores the token set and creates a
 	// messages+subscription cloud profile.
 	StartClaudeLogin(*StartClaudeLoginRequest, grpc.ServerStreamingServer[StartClaudeLoginEvent]) error
+	// Credential-only reauthentication of an existing subscription profile.
+	// Separate from onboarding so an old server fails with Unimplemented rather
+	// than ignoring a new flag and silently rewriting or activating a profile.
+	ReauthenticateCloud(*CloudReauthenticationRequest, grpc.ServerStreamingServer[CloudLoginEvent]) error
 	// ExportImage returns the raw bytes of an image the user attached to a live
 	// conversation, looked up by its per-conversation attachment ID (e.g.
 	// "img_7f3a9c_1"). The attachment store is in-memory only, so a miss is
@@ -1570,6 +1598,9 @@ func (UnimplementedAgentServer) StartChatGPTLogin(*StartChatGPTLoginRequest, grp
 }
 func (UnimplementedAgentServer) StartClaudeLogin(*StartClaudeLoginRequest, grpc.ServerStreamingServer[StartClaudeLoginEvent]) error {
 	return status.Error(codes.Unimplemented, "method StartClaudeLogin not implemented")
+}
+func (UnimplementedAgentServer) ReauthenticateCloud(*CloudReauthenticationRequest, grpc.ServerStreamingServer[CloudLoginEvent]) error {
+	return status.Error(codes.Unimplemented, "method ReauthenticateCloud not implemented")
 }
 func (UnimplementedAgentServer) ExportImage(context.Context, *ExportImageRequest) (*ExportImageResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ExportImage not implemented")
@@ -2778,6 +2809,17 @@ func _Agent_StartClaudeLogin_Handler(srv interface{}, stream grpc.ServerStream) 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Agent_StartClaudeLoginServer = grpc.ServerStreamingServer[StartClaudeLoginEvent]
 
+func _Agent_ReauthenticateCloud_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(CloudReauthenticationRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(AgentServer).ReauthenticateCloud(m, &grpc.GenericServerStream[CloudReauthenticationRequest, CloudLoginEvent]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Agent_ReauthenticateCloudServer = grpc.ServerStreamingServer[CloudLoginEvent]
+
 func _Agent_ExportImage_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ExportImageRequest)
 	if err := dec(in); err != nil {
@@ -3098,6 +3140,11 @@ var Agent_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "StartClaudeLogin",
 			Handler:       _Agent_StartClaudeLogin_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "ReauthenticateCloud",
+			Handler:       _Agent_ReauthenticateCloud_Handler,
 			ServerStreams: true,
 		},
 	},

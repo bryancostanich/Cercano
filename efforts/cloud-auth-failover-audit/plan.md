@@ -38,10 +38,10 @@ Objective: ensure a completed login or refresh produces usable, current credenti
 
 - [x] Unify refresh coordination for the actual credential identity across host provider construction, worker credential requests, and provider rebuilds; reuse existing ownership facilities rather than adding a competing cache.
 - [x] Ensure a refresh started before interactive login cannot overwrite newer credentials; reread or invalidate cached credentials at the coordinated boundary.
-- [ ] Release refresh locks before waiting for human interaction; allow individual canceled waiters to leave without breaking unrelated consumers.
+- [x] Release refresh locks before waiting for human interaction; allow individual canceled waiters to leave without breaking unrelated consumers.
 - [x] Route primary and backup credential resolution through the consistent path, resolving unused backup credentials lazily.
 - [x] Preserve actionable missing-credential failures rather than hiding a configured profile behind an absent provider or silently removing its backup.
-- [ ] Separate reauthentication of an existing profile from first-time profile setup; preserve model, endpoints, active profile, and unrelated settings on reauthentication.
+- [x] Separate reauthentication of an existing profile from first-time profile setup; preserve model, endpoints, active profile, and unrelated settings on reauthentication.
 - [ ] Close Claude loopback resources on every exit, including stream-send failure before waiting for the callback; verify equivalent device-login cancellation cleanup.
 - [ ] Run race-enabled credential and login ownership tests with deterministic synchronization.
 
@@ -49,7 +49,7 @@ Objective: ensure a completed login or refresh produces usable, current credenti
 
 Objective: connect an owning request to a structured authentication decision and its outcome, preserving identity across process boundaries. Files: source/proto/agent.proto and generated bindings via source/proto/generate.sh; internal/worker/host.go, worker.go, proxies.go, and event conversion; internal/server request/confirmation handling; pkg/agentclient; internal/runner event and request plumbing. Tests: real in-process client/server and host/worker transport round trips, cancellation, duplicate responses, wrong owners, and unsupported peers.
 
-- [ ] Extend the existing event/confirmation plumbing with authentication-specific payloads and correlated outcomes, rather than encoding login requests in notice text or disguising them as permission approval.
+- [~] Extend the existing event/confirmation plumbing with authentication-specific payloads and correlated outcomes, rather than encoding login requests in notice text or disguising them as permission approval.
 - [ ] Carry typed credential failures across CredentialResponse so workers do not reconstruct every failure as an untyped string.
 - [ ] Bind recovery decisions to their conversation, owning request, provider/profile, and login attempt; reject stale, mismatched, and duplicate responses.
 - [ ] Represent Login, Use fallback, and Cancel distinctly; carry fallback availability from actual routing policy, not from CLI guesses.

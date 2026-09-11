@@ -21,6 +21,10 @@ import (
 
 // StartChatGPTLogin implements proto.AgentServer.
 func (s *Server) StartChatGPTLogin(req *proto.StartChatGPTLoginRequest, stream proto.Agent_StartChatGPTLoginServer) error {
+	return s.runChatGPTLogin(req, stream, false, chatgptauth.Flow{})
+}
+
+func (s *Server) runChatGPTLogin(req *proto.StartChatGPTLoginRequest, stream proto.Agent_StartChatGPTLoginServer, reauthenticate bool, flow chatgptauth.Flow) error {
 	ctx := stream.Context()
 	st := s.cfgSvc.Secrets()
 	if st == nil {
@@ -38,10 +42,18 @@ func (s *Server) StartChatGPTLogin(req *proto.StartChatGPTLoginRequest, stream p
 		}, config.TierEveryday)
 	}
 
-	// Start the device authorization and show the user the code + URL.
-	pending, err := chatgptauth.Flow{}.Start(ctx)
+	np := config.CloudProfile{Name: profile, Flavor: cloudfactory.FlavorResponses, Route: cloudfactory.RouteChatGPT, Model: model, ModelPinned: strings.TrimSpace(req.GetModel()) != ""}
+	login, err := s.cfgSvc.BeginCloudLogin(ctx, np, req.GetSetActive(), reauthenticate)
 	if err != nil {
-		return sendChatGPTLoginResult(stream, false, "", "", err.Error())
+		return sendChatGPTLoginResult(stream, false, profile, "", loginFailure(err))
+	}
+	defer login.Close()
+	ctx = login.Context()
+
+	// Start the device authorization and show the user the code + URL.
+	pending, err := flow.Start(ctx)
+	if err != nil {
+		return sendChatGPTLoginResult(stream, false, "", "", loginFailure(err))
 	}
 	if err := stream.Send(&proto.StartChatGPTLoginEvent{
 		VerificationUrl: pending.VerificationURL,
@@ -53,32 +65,27 @@ func (s *Server) StartChatGPTLogin(req *proto.StartChatGPTLoginRequest, stream p
 	// Block until the user approves in their browser (or ctx cancels).
 	ts, err := pending.Poll(ctx)
 	if err != nil {
-		return sendChatGPTLoginResult(stream, false, "", "", err.Error())
+		return sendChatGPTLoginResult(stream, false, "", "", loginFailure(err))
 	}
 
-	// Persist the token set under the profile name (same keychain slot API
-	// keys use — a stored blob is the "signed in" signal).
-	if err := chatgptauth.Save(st, profile, *ts); err != nil {
-		return sendChatGPTLoginResult(stream, false, "", "", err.Error())
+	encoded, err := ts.Encode()
+	if err != nil {
+		return sendChatGPTLoginResult(stream, false, profile, "", loginFailure(err))
 	}
-
-	// Create/replace the responses+chatgpt profile carrying the route.
-	np := config.CloudProfile{
-		Name:   profile,
-		Flavor: cloudfactory.FlavorResponses,
-		Route:  cloudfactory.RouteChatGPT,
-		Model:  model,
+	result, err := login.Commit(encoded)
+	if err != nil {
+		return sendChatGPTLoginResult(stream, false, profile, "", loginFailure(err))
 	}
-	_, isActive := s.cfgSvc.UpsertProfile(np)
-	if req.GetSetActive() {
-		s.cfgSvc.SetActiveProfile(profile)
-		isActive = true
+	if result.Reauthenticated {
+		return sendChatGPTLoginResult(stream, true, profile, ts.AccountID, "")
 	}
+	isActive := result.Active
+	np = result.Profile
 
 	if isActive {
 		if err := s.rebuildCloud(); err != nil {
 			s.persistConfig()
-			return sendChatGPTLoginResult(stream, false, profile, ts.AccountID, err.Error())
+			return sendChatGPTLoginResult(stream, false, profile, ts.AccountID, loginFailure(err))
 		}
 		s.broadcastConfigChanged("cloud_model", np.Model)
 	}

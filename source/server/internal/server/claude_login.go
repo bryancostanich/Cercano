@@ -21,6 +21,10 @@ import (
 
 // StartClaudeLogin implements proto.AgentServer.
 func (s *Server) StartClaudeLogin(req *proto.StartClaudeLoginRequest, stream proto.Agent_StartClaudeLoginServer) error {
+	return s.runClaudeLogin(req, stream, false, anthropicauth.Flow{})
+}
+
+func (s *Server) runClaudeLogin(req *proto.StartClaudeLoginRequest, stream proto.Agent_StartClaudeLoginServer, reauthenticate bool, flow anthropicauth.Flow) error {
 	ctx := stream.Context()
 	st := s.cfgSvc.Secrets()
 	if st == nil {
@@ -34,10 +38,18 @@ func (s *Server) StartClaudeLogin(req *proto.StartClaudeLoginRequest, stream pro
 	model := strings.TrimSpace(req.GetModel())
 	modelPinned := model != ""
 
-	// Start the loopback authorize and show the user the URL to open.
-	pending, err := anthropicauth.Flow{}.Start(ctx)
+	np := config.CloudProfile{Name: profile, Flavor: cloudfactory.FlavorMessages, Route: cloudfactory.RouteSubscription, Model: model, ModelPinned: modelPinned}
+	login, err := s.cfgSvc.BeginCloudLogin(ctx, np, shouldActivateClaudeLogin(req.GetSetActive(), canonicalProfile), reauthenticate)
 	if err != nil {
-		return sendClaudeLoginResult(stream, false, "", err.Error())
+		return sendClaudeLoginResult(stream, false, profile, loginFailure(err))
+	}
+	defer login.Close()
+	ctx = login.Context()
+
+	// Start the loopback authorize and show the user the URL to open.
+	pending, err := flow.Start(ctx)
+	if err != nil {
+		return sendClaudeLoginResult(stream, false, "", loginFailure(err))
 	}
 	// Own the listener immediately, including failure before Wait is reached.
 	defer pending.Close()
@@ -52,35 +64,27 @@ func (s *Server) StartClaudeLogin(req *proto.StartClaudeLoginRequest, stream pro
 	// the code for a token set.
 	ts, err := pending.Wait(ctx)
 	if err != nil {
-		return sendClaudeLoginResult(stream, false, "", err.Error())
+		return sendClaudeLoginResult(stream, false, "", loginFailure(err))
 	}
 
-	// Persist the token set under the profile name (same keychain slot API
-	// keys use — a stored blob is the "signed in" signal).
-	if err := anthropicauth.Save(st, profile, *ts); err != nil {
-		return sendClaudeLoginResult(stream, false, "", err.Error())
+	encoded, err := ts.Encode()
+	if err != nil {
+		return sendClaudeLoginResult(stream, false, profile, loginFailure(err))
 	}
-
-	// Create/replace the messages+subscription profile carrying the route.
-	// Empty model means "follow the baked cloud catalog". Only an explicitly
-	// supplied model should become a profile pin.
-	np := config.CloudProfile{
-		Name:        profile,
-		Flavor:      cloudfactory.FlavorMessages,
-		Route:       cloudfactory.RouteSubscription,
-		Model:       model,
-		ModelPinned: modelPinned,
+	result, err := login.Commit(encoded)
+	if err != nil {
+		return sendClaudeLoginResult(stream, false, profile, loginFailure(err))
 	}
-	_, isActive := s.cfgSvc.UpsertProfile(np)
-	if shouldActivateClaudeLogin(req.GetSetActive(), canonicalProfile) {
-		s.cfgSvc.SetActiveProfile(profile)
-		isActive = true
+	if result.Reauthenticated {
+		return sendClaudeLoginResult(stream, true, profile, "")
 	}
+	isActive := result.Active
+	np = result.Profile
 
 	if isActive {
 		if err := s.rebuildCloud(); err != nil {
 			s.persistConfig()
-			return sendClaudeLoginResult(stream, false, profile, err.Error())
+			return sendClaudeLoginResult(stream, false, profile, loginFailure(err))
 		}
 		s.broadcastConfigChanged("active_cloud_profile", profile)
 		s.broadcastConfigChanged("cloud_model", np.Model)

@@ -1577,6 +1577,7 @@ message WorkerToHost {
     EnsureSubagentConversation ensure_subagent = 7;
     OpenInferenceRequest     open_request    = 8;
     SessionProfileRequest    profile_request = 9;
+ RuntimeRequestAccounting request_accounting = 10;
   }
 }
 
@@ -1857,6 +1858,10 @@ message CredentialResponse {
 message OpenInferenceRequest {
   uint64         id      = 1;
   LLMChatRequest request = 2;
+  bool context_only = 3;
+  bool prepare_context = 4;
+  string expected_instance_id = 5;
+  int64 expected_context_tokens = 6;
 }
 
 // LLMChatRequest mirrors llm.ChatRequest for the open-inference proxy.
@@ -1884,6 +1889,8 @@ message LLMTool {
 // routed by request id. Terminates with done=true or a non-empty error.
 message OpenInferenceEvent {
   uint64 id = 1;
+  int64 context_tokens = 5;
+  string context_instance_id = 6;
   oneof kind {
     LLMStreamEvent event = 2;
     string         error = 3;
@@ -1904,4 +1911,18 @@ message LLMStreamEvent {
   int64  input_tokens   = 9;
   int64  output_tokens  = 10;
   string err_text       = 11;
+}
+
+// Numeric request accounting and the actual serving target; no prompt content.
+message RuntimeRequestAccounting {
+ string model = 1;
+ string provider = 2;
+ string runtime_instance_id = 3;
+ int64 message_tokens = 4;
+ int64 system_tokens = 5;
+ int64 tool_schema_tokens = 6;
+ int64 output_reserve_tokens = 7;
+ int64 estimated_request_tokens = 8;
+ int64 context_window = 9;
+ bool context_window_known = 10;
 }

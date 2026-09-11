@@ -87,6 +87,9 @@ type Event struct {
 // It is not a runner.Event because it is internal meter state, not transcript or
 // stream output. Sinks that care can opt in via RequestAccountingSink.
 type RequestAccounting struct {
+	Model                  string
+	Provider               string
+	RuntimeInstanceID      string
 	MessageTokens          int
 	SystemTokens           int
 	ToolSchemaTokens       int

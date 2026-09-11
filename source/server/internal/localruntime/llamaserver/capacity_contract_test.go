@@ -78,3 +78,11 @@ func TestConfirmationRejectsReplacedGeneration(t *testing.T) {
 		t.Fatal("replacement inherited capacity")
 	}
 }
+
+func TestLateReadinessCannotPromoteInvalidatedCapacity(t *testing.T) {
+	record := localruntime.InstanceRecord{State: localruntime.InstanceStarting, Context: localruntime.ContextCapacity{PlannedTokens: 8192}}
+	markInstanceReady(&record)
+	if record.State != localruntime.InstanceStarting {
+		t.Fatal("late ready callback promoted invalidated capacity")
+	}
+}

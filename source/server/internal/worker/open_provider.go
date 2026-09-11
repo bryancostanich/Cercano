@@ -24,16 +24,18 @@ type streamOpenProvider struct {
 	caps   inference.Capabilities
 	nextID atomic.Uint64
 
-	mu      sync.Mutex
-	pending map[uint64]*openStreamReader
+	mu             sync.Mutex
+	pending        map[uint64]*openStreamReader
+	contextPending map[uint64]chan *proto.OpenInferenceEvent
 }
 
 func newStreamOpenProvider(sndr *sender, name string, caps inference.Capabilities) *streamOpenProvider {
 	return &streamOpenProvider{
-		sndr:    sndr,
-		name:    name,
-		caps:    caps,
-		pending: make(map[uint64]*openStreamReader),
+		sndr:           sndr,
+		name:           name,
+		caps:           caps,
+		pending:        make(map[uint64]*openStreamReader),
+		contextPending: make(map[uint64]chan *proto.OpenInferenceEvent),
 	}
 }
 
@@ -59,8 +61,9 @@ func (p *streamOpenProvider) StreamChat(ctx context.Context, req llm.ChatRequest
 	p.mu.Unlock()
 
 	p.sndr.send(&proto.WorkerToHost{Msg: &proto.WorkerToHost_OpenRequest{OpenRequest: &proto.OpenInferenceRequest{
-		Id:      id,
-		Request: pr,
+		Id: id, Request: pr,
+		ExpectedInstanceId:    llm.ExpectedRuntimeContext(ctx).InstanceID,
+		ExpectedContextTokens: int64(llm.ExpectedRuntimeContext(ctx).Window),
 	}}})
 	return r, nil
 }
@@ -80,8 +83,16 @@ func (p *streamOpenProvider) Chat(ctx context.Context, req llm.ChatRequest) (llm
 // order and the terminal (done/error) always follows its events.
 func (p *streamOpenProvider) deliver(ev *proto.OpenInferenceEvent) {
 	p.mu.Lock()
+	contextCh := p.contextPending[ev.GetId()]
 	r, ok := p.pending[ev.GetId()]
 	p.mu.Unlock()
+	if contextCh != nil {
+		select {
+		case contextCh <- ev:
+		default:
+		}
+		return
+	}
 	if !ok {
 		return // unknown or already-closed id
 	}
@@ -168,4 +179,34 @@ func newHostManagedOpenProxy(sndr *sender, runtime string) *streamOpenProvider {
 		name = "host_managed_open"
 	}
 	return newStreamOpenProvider(sndr, name, inference.Capabilities{SupportsTools: true})
+}
+
+// RuntimeContext asks the owning host; no worker-local config reconstruction or
+// stale capacity cache is used, including for a non-preparing meter read.
+func (p *streamOpenProvider) RuntimeContext(ctx context.Context, model string, prepare bool) (llm.RuntimeContext, error) {
+	id := p.nextID.Add(1)
+	ch := make(chan *proto.OpenInferenceEvent, 1)
+	p.mu.Lock()
+	p.contextPending[id] = ch
+	p.mu.Unlock()
+	defer func() { p.mu.Lock(); delete(p.contextPending, id); p.mu.Unlock() }()
+	message := &proto.WorkerToHost{Msg: &proto.WorkerToHost_OpenRequest{OpenRequest: &proto.OpenInferenceRequest{Id: id, Request: &proto.LLMChatRequest{Model: model}, ContextOnly: true, PrepareContext: prepare}}}
+	select {
+	case p.sndr.ch <- message:
+	case <-ctx.Done():
+		return llm.RuntimeContext{}, ctx.Err()
+	}
+	select {
+	case <-ctx.Done():
+		return llm.RuntimeContext{}, ctx.Err()
+	case ev := <-ch:
+		if ev.GetError() != "" {
+			return llm.RuntimeContext{}, &llm.LocalStartupError{Provider: p.name, Model: model, Err: fmt.Errorf("host runtime capacity: %s", ev.GetError())}
+		}
+		c := llm.RuntimeContext{Window: int(ev.GetContextTokens()), InstanceID: ev.GetContextInstanceId()}
+		if c.Window <= 0 || c.InstanceID == "" {
+			return c, fmt.Errorf("host did not confirm runtime capacity")
+		}
+		return c, nil
+	}
 }

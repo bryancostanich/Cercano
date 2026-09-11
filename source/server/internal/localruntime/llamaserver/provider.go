@@ -1103,13 +1103,7 @@ func (p *Provider) finishReadiness(instanceID, endpoint string, sink localruntim
 		})
 		return
 	}
-	p.updateRecord(instanceID, sink, func(record *localruntime.InstanceRecord) {
-		if record.State == localruntime.InstanceStarting {
-			record.State = localruntime.InstanceRunning
-			record.ReadyAt = time.Now()
-			record.LastError = ""
-		}
-	})
+	p.updateRecord(instanceID, sink, markInstanceReady)
 	p.emit(sink, "info", instanceID, "", "llama-server finished loading and is ready")
 }
 
@@ -1532,3 +1526,11 @@ func errorString(err error) string {
 // callers map each shard filename to its model ID to match stranded .part
 // files back to the model that owns them.
 func (p *Provider) CatalogModels() []localruntime.ModelRecord { return p.catalogModels() }
+
+func markInstanceReady(record *localruntime.InstanceRecord) {
+	if record.State == localruntime.InstanceStarting && record.Context.ConfirmedTokens > 0 && !record.Context.ConfirmedAt.IsZero() {
+		record.State = localruntime.InstanceRunning
+		record.ReadyAt = time.Now()
+		record.LastError = ""
+	}
+}

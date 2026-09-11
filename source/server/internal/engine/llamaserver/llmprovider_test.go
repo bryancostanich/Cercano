@@ -51,6 +51,7 @@ func TestLLMProviderChat(t *testing.T) {
 			Runtime:  runtimeName,
 			ModelID:  "llama_server:phi4",
 			State:    localruntime.InstanceRunning,
+			Context:  confirmedTestCapacity(),
 			Endpoint: server.URL,
 		}},
 	}
@@ -117,6 +118,7 @@ func TestLLMProviderLogsRichLocalRuntimeFailure(t *testing.T) {
 			Runtime:  runtimeName,
 			ModelID:  "llama_server:phi4",
 			State:    localruntime.InstanceRunning,
+			Context:  confirmedTestCapacity(),
 			PID:      4242,
 			Port:     8080,
 			Endpoint: server.URL,
@@ -130,7 +132,6 @@ func TestLLMProviderLogsRichLocalRuntimeFailure(t *testing.T) {
 		}},
 	}
 	eng := NewEngine(manager)
-	eng.SetContextWindowResolver(func(string) int { return 8192 })
 	logPath := filepath.Join(t.TempDir(), "failures.jsonl")
 	w, err := failurelog.NewWriter(logPath)
 	if err != nil {
@@ -164,7 +165,7 @@ func TestLLMProviderLogsRichLocalRuntimeFailure(t *testing.T) {
 		`"error_class":"context_overflow"`,
 		`"request_token_estimate":`,
 		`"max_tokens":123`,
-		`"context_window":8192`,
+		`"context_window":16384`,
 		`"instance_id":"inst-chat"`,
 		`"pid":4242`,
 		`"port":8080`,

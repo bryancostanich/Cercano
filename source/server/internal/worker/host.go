@@ -387,6 +387,10 @@ func (w *workerRunner) RunTurn(
 				sink.Emit(UnmarshalEvent(m.Event))
 			}
 
+		case *proto.WorkerToHost_RequestAccounting:
+			if accountingSink, ok := sink.(runner.RequestAccountingSink); ok {
+				accountingSink.RecordRequestAccounting(unmarshalRequestAccounting(m.RequestAccounting))
+			}
 		case *proto.WorkerToHost_PermRequest:
 			// Answer in a goroutine so a slow human decision doesn't block Recv.
 			pr := m.PermRequest
@@ -685,6 +689,18 @@ func (w *workerRunner) serveOpenInference(ctx context.Context, req *proto.OpenIn
 	if prov == nil {
 		fail(fmt.Errorf("open inference unavailable: open provider not configured"))
 		return
+	}
+	if req.GetContextOnly() {
+		capacity, err := llm.ResolveRuntimeContext(ctx, prov, req.GetRequest().GetModel(), req.GetPrepareContext())
+		if err != nil {
+			fail(err)
+			return
+		}
+		emit(&proto.OpenInferenceEvent{ContextTokens: int64(capacity.Window), ContextInstanceId: capacity.InstanceID, Kind: &proto.OpenInferenceEvent_Done{Done: true}})
+		return
+	}
+	if req.GetExpectedInstanceId() != "" {
+		ctx = llm.WithRuntimeContext(ctx, llm.RuntimeContext{Window: int(req.GetExpectedContextTokens()), InstanceID: req.GetExpectedInstanceId()})
 	}
 	chatReq, err := UnmarshalChatRequest(req.GetRequest())
 	if err != nil {

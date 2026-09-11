@@ -76,6 +76,7 @@ func TestCompleteStream_DecodesSSE(t *testing.T) {
 			Runtime:  runtimeName,
 			ModelID:  "llama_server:model-a",
 			State:    localruntime.InstanceRunning,
+			Context:  confirmedTestCapacity(),
 			Endpoint: server.URL,
 		}},
 		models: []localruntime.ModelRecord{{
@@ -129,6 +130,7 @@ func TestChatWithTools_DecodesToolCalls(t *testing.T) {
 			Runtime:  runtimeName,
 			ModelID:  "llama_server:model-a",
 			State:    localruntime.InstanceRunning,
+			Context:  confirmedTestCapacity(),
 			Endpoint: server.URL,
 		}},
 		models: []localruntime.ModelRecord{{
@@ -206,8 +208,9 @@ func (m *fakeRuntimeManager) Start(_ context.Context, req localruntime.StartRequ
 	instance := localruntime.InstanceRecord{
 		ID:        "started",
 		Runtime:   runtimeName,
-		ModelID:   "llama_server:model-a",
+		ModelID:   req.ModelID,
 		State:     localruntime.InstanceRunning,
+		Context:   confirmedTestCapacity(),
 		Endpoint:  m.startEndpoint,
 		StartedAt: time.Now(),
 	}
@@ -282,4 +285,15 @@ func TestComplete_TemperatureOption(t *testing.T) {
 	if sawPayload.Temperature != nil {
 		t.Fatalf("default request temperature = %v, want unset", *sawPayload.Temperature)
 	}
+}
+
+func TestEndpointRejectsUnconfirmedRuntime(t *testing.T) {
+	m := &fakeRuntimeManager{instances: []localruntime.InstanceRecord{{ID: "unknown", ModelID: "model", Runtime: runtimeName, State: localruntime.InstanceRunning, Endpoint: "http://127.0.0.1:1"}}}
+	if _, _, _, err := NewEngine(m).endpointFor(context.Background(), "model"); err == nil {
+		t.Fatal("running endpoint with unknown capacity was authorized")
+	}
+}
+
+func confirmedTestCapacity() localruntime.ContextCapacity {
+	return localruntime.ContextCapacity{ConfirmedTokens: 16384, ConfirmedAt: time.Now()}
 }

@@ -112,8 +112,9 @@ type Service struct {
 
 // SetContextWindowResolver installs the resolver that maps a dispatch
 // sub-agent's resolved model to its input context window in tokens. The front
-// door wires this from config (e.g. config.LlamaServer.ContextSize for local
-// models). Leaving it unset disables the dispatch pre-flight size guard.
+// door wires this from runtime/provider evidence. The tool loop independently
+// prepares managed llama-server capacity and never treats an unset value as
+// permission to infer against an unknown local window.
 func (x *Service) SetContextWindowResolver(fn func(model string, isCloud bool) int) {
 	x.contextWindowFor = fn
 }

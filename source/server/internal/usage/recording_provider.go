@@ -124,3 +124,7 @@ func (rr *recordingReader) flush() {
 	rr.reported = true
 	rr.rp.report(rr.model, rr.in, rr.out, time.Since(rr.start))
 }
+
+func (r *recordingProvider) RuntimeContext(ctx context.Context, model string, prepare bool) (llm.RuntimeContext, error) {
+	return llm.ResolveRuntimeContext(ctx, r.inner, model, prepare)
+}

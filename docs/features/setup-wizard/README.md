@@ -33,6 +33,45 @@ Mistral, Groq, …) — is a deliberate, post-setup configuration action on the
 lets the wizard present a single, honest "llama-server is the local engine"
 story.
 
+## Automatic context selection
+
+`llama_server.context_size` is optional. Omit it (or use YAML `null`) for
+**automatic selection**; a positive integer is an intentional override. Zero
+and negative overrides are rejected. Setup and unrelated settings saves retain
+this distinction instead of writing an implicit 8K value.
+
+For a new managed process, selection is:
+
+1. An explicit `llama_server.context_size` override.
+2. The applicable model/RAM-profile context setting.
+3. A model-specific context launch argument.
+4. The model's native context length from GGUF metadata.
+
+There is no universal 8K fallback. Automatic selection requires enough model and
+memory information to validate the allocation. Missing evidence or an unsafe
+allocation produces an error rather than launching with an arbitrary size or
+silently shrinking it. An explicit override still undergoes applicable memory
+checks. Context flag aliases and inherited context/cache environment settings
+cannot override the checked launch allocation.
+
+A selected size is **planned**, not yet a serving limit. Cercano confirms the
+per-request capacity using the running server's properties and slot reports.
+Missing or contradictory confirmation blocks inference. Budgeting, research
+requests, worker dispatch, and the context meter use confirmed capacity—not a
+fresh guess from config. Editing config does not change an already-serving
+process's capacity; a subsequent runtime start/restart applies the new setting.
+The runtime dashboard distinguishes planned, server-confirmed, and unknown
+capacity. Stopped/replaced processes cannot lend their old capacity to a new
+request.
+
+### Existing accidental 8K overrides
+
+Older versions could write `context_size: 8192` during an unrelated save, even
+when automatic mode was intended. Cercano cannot distinguish that accidental
+value from a deliberate 8K override, so it does **not** remove it automatically.
+If you know it was accidental, remove only that key from your config and restart
+the affected model runtime when convenient. Keep intentional overrides intact.
+
 ## Model catalog & the compatibility gate
 
 **The problem this closes.** llama-server (llama.cpp) is not a catalog — it

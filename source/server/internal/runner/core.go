@@ -132,6 +132,12 @@ func (c *Core) contextWindowFor(isCloud bool, model string) int {
 }
 
 func (c *Core) knownContextWindowFor(isCloud bool, model string) (int, bool) {
+	if !isCloud && c.d.Providers != nil && c.d.Providers.Open() != nil && c.d.Providers.Open().Name() == "llama_server" {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		capacity, err := llm.ResolveRuntimeContext(ctx, c.d.Providers.Open(), model, false)
+		return capacity.Window, err == nil && capacity.Window > 0
+	}
 	if c.d.Config != nil && !isCloud {
 		// Local runtimes remain authoritative for local execution: the launched
 		// --ctx-size is a hard ceiling no provider metadata can override.
@@ -251,7 +257,7 @@ func (c *Core) RunTurn(
 		startFields["open_runtime"] = cfgSnap.OpenRuntime
 		startFields["mistralrs_enabled"] = cfgSnap.MistralRS.Enabled
 		startFields["mistralrs_max_seq_len"] = cfgSnap.MistralRS.MaxSeqLen
-		startFields["llama_server_context_size"] = cfgSnap.LlamaServer.ContextSize
+		startFields["llama_server_context_override"] = cfgSnap.LlamaServer.ContextSize
 		addCloudProfileFields(startFields, "active", cfgSnap, cfgSnap.ActiveCloudProfile)
 		addCloudProfileFields(startFields, "backup", cfgSnap, cfgSnap.BackupCloudProfile)
 	}
@@ -297,6 +303,9 @@ func (c *Core) RunTurn(
 		IsCloud: isCloud,
 	})
 
+	// Prepare local capacity before history budgeting. A refusal is also
+	// returned by runLoop, preserving its normal cross-tier fallback path.
+	_, _ = llm.ResolveRuntimeContext(ctx, provider, selectedModel, true)
 	// 2. Assemble conversation history before crash-resilient user persistence.
 	// The tool loop receives the current user input separately; if assembly runs
 	// after PersistTurn below, the current user turn is duplicated in the model
@@ -317,7 +326,7 @@ func (c *Core) RunTurn(
 		fbProv, fbCloud = c.d.Providers.Open(), false
 	}
 	fallbackModel := c.d.Providers.MainModel(fbCloud)
-	if fbProv != nil {
+	if fbProv != nil && fbProv.Name() != "llama_server" {
 		fallbackPrepared = true
 		fallbackHistory, fallbackAccounting = c.assembleAttemptHistory(ctx, req, "cross_tier_fallback", fbProv, fallbackModel, fbCloud, !fbCloud)
 	}
@@ -495,6 +504,12 @@ func (c *Core) RunTurn(
 	var fallbackNotice string
 	if loopErr != nil && ctx.Err() == nil && !errors.Is(loopErr, context.Canceled) {
 		failedProvider := failedProviderName(provider, loopErr)
+		if !fellBack && res.CrossAllowed && fbProv != nil && fbProv.Name() == "llama_server" {
+			if _, err := llm.ResolveRuntimeContext(ctx, fbProv, fallbackModel, true); err == nil {
+				fallbackHistory, fallbackAccounting = c.assembleAttemptHistory(ctx, req, "cross_tier_fallback", fbProv, fallbackModel, false, true)
+				fallbackPrepared = true
+			}
+		}
 		fromWindow, _ := c.knownContextWindowFor(isCloud, selectedModel)
 		fallbackWindow, fallbackWindowKnown := c.knownContextWindowFor(fbCloud, fallbackModel)
 		c.logRoute("fallback.consider", routinglog.Event{
@@ -763,6 +778,7 @@ func (c *Core) makeLoopSink(sink EventSink, failures *failurelog.Writer, convers
 			// tight-context fallback. Log it here so the routing log records what
 			// was actually sent rather than the messages-only assembly estimate.
 			c.logRoute("request.budget", routinglog.Event{
+				"model": ev.Model, "provider": ev.Provider, "runtime_instance_id": ev.RuntimeInstanceID,
 				"conversation_id":          conversationID,
 				"message_tokens":           ev.MessageTokens,
 				"system_tokens":            ev.SystemTokens,
@@ -774,6 +790,7 @@ func (c *Core) makeLoopSink(sink EventSink, failures *failurelog.Writer, convers
 			})
 			if rs, ok := sink.(RequestAccountingSink); ok {
 				rs.RecordRequestAccounting(RequestAccounting{
+					Model: ev.Model, Provider: ev.Provider, RuntimeInstanceID: ev.RuntimeInstanceID,
 					MessageTokens:          ev.MessageTokens,
 					SystemTokens:           ev.SystemTokens,
 					ToolSchemaTokens:       ev.ToolSchemaTokens,

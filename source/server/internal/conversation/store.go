@@ -170,6 +170,8 @@ type Compaction struct {
 // Model records the model whose window the snapshot was measured against, so a
 // snapshot taken under a different route can be recognized instead of trusted.
 type ContextUsage struct {
+	Provider           string
+	RuntimeInstanceID  string
 	ConversationID     string
 	TokensUsed         int // the sent (compacted) size
 	RawTokens          int // the uncompacted size
@@ -392,6 +394,8 @@ func Open(path string) (Store, error) {
 	// Migrate pre-existing DBs that predate the recap columns. ALTER fails
 	// with "duplicate column name" once applied — ignore that case.
 	for _, alter := range []string{
+		`ALTER TABLE conversation_context_usage ADD COLUMN provider TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE conversation_context_usage ADD COLUMN runtime_instance_id TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE conversations ADD COLUMN recap TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE conversations ADD COLUMN recap_updated_at INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE conversations ADD COLUMN title_source TEXT NOT NULL DEFAULT 'user'`,
@@ -1000,11 +1004,11 @@ func (s *sqliteStore) GetContextUsage(ctx context.Context, conversationID string
 	err := s.db.QueryRowContext(ctx,
 		`SELECT tokens_used, raw_tokens, message_tokens, system_tokens, tool_schema_tokens,
 		        output_reserve, estimated_request, context_window, window_known,
-		        model, source, computed_at
+		        model, source, computed_at, provider, runtime_instance_id
 		 FROM conversation_context_usage WHERE conversation_id = ?`, conversationID).
 		Scan(&u.TokensUsed, &u.RawTokens, &u.MessageTokens, &u.SystemTokens, &u.ToolSchemaTokens,
 			&u.OutputReserve, &u.EstimatedRequest, &u.ContextWindow, &windowKnown,
-			&u.Model, &u.Source, &computed)
+			&u.Model, &u.Source, &computed, &u.Provider, &u.RuntimeInstanceID)
 	if err == sql.ErrNoRows {
 		// No snapshot yet. Report "unknown", never zero usage — a confident 0
 		// on a large conversation is exactly the bug this cache fixes.
@@ -1058,8 +1062,8 @@ func (s *sqliteStore) SaveContextUsage(ctx context.Context, u ContextUsage) erro
 		INSERT INTO conversation_context_usage
 			(conversation_id, tokens_used, raw_tokens, message_tokens, system_tokens,
 			 tool_schema_tokens, output_reserve, estimated_request, context_window,
-			 window_known, model, source, computed_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 window_known, model, source, computed_at, provider, runtime_instance_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(conversation_id) DO UPDATE SET
 			tokens_used=excluded.tokens_used,
 			raw_tokens=excluded.raw_tokens,
@@ -1072,10 +1076,11 @@ func (s *sqliteStore) SaveContextUsage(ctx context.Context, u ContextUsage) erro
 			window_known=excluded.window_known,
 			model=excluded.model,
 			source=excluded.source,
-			computed_at=excluded.computed_at`,
+			computed_at=excluded.computed_at,
+ provider=excluded.provider, runtime_instance_id=excluded.runtime_instance_id`,
 		u.ConversationID, u.TokensUsed, u.RawTokens, u.MessageTokens, u.SystemTokens,
 		u.ToolSchemaTokens, u.OutputReserve, u.EstimatedRequest, u.ContextWindow,
-		windowKnown, u.Model, u.Source, computed.Unix())
+		windowKnown, u.Model, u.Source, computed.Unix(), u.Provider, u.RuntimeInstanceID)
 	return err
 }
 

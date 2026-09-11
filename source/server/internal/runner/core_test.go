@@ -411,6 +411,7 @@ func TestCore_InvalidContextTextDoesNotCrossTierFallback(t *testing.T) {
 
 func TestCore_ContextOverflowCanFallbackToLargerKnownWindow(t *testing.T) {
 	cloudSpy := &spyProvider{}
+	primary := &confirmedRuntimeProvider{Provider: &contextOverflowProvider{}, window: 8192}
 	deps := buildDeps(&contextOverflowProvider{})
 	deps.Config = &fakeConfig{cfg: config.Config{
 		LocusMode:   "open_primary",
@@ -418,7 +419,7 @@ func TestCore_ContextOverflowCanFallbackToLargerKnownWindow(t *testing.T) {
 		LlamaServer: config.LlamaServerConfig{ContextSize: contextOverridePtr(8_192)},
 	}}
 	deps.Providers = &fakeResolver{
-		prov:       &contextOverflowProvider{},
+		prov: primary, open: primary,
 		cloud:      cloudSpy,
 		isCloud:    false,
 		isCloudSet: true,

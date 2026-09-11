@@ -38,15 +38,18 @@ const (
 )
 
 type LoopEvent struct {
-	Kind        LoopEventKind
-	ToolUseID   string
-	ToolName    string
-	ArgsJSON    string
-	Tier        string
-	Destructive bool // display-only ⚠ hint (MCP destructiveHint); never affects gating
-	Summary     string
-	Detail      string
-	IsError     bool
+	Model             string
+	Provider          string
+	RuntimeInstanceID string
+	Kind              LoopEventKind
+	ToolUseID         string
+	ToolName          string
+	ArgsJSON          string
+	Tier              string
+	Destructive       bool // display-only ⚠ hint (MCP destructiveHint); never affects gating
+	Summary           string
+	Detail            string
+	IsError           bool
 	// StartLine mirrors Result.StartLine on tool_exec_complete events: the
 	// 1-based line where a file edit/write began (0 = not applicable).
 	StartLine int
@@ -399,6 +402,15 @@ func fenceDenialMessage(profileName, toolName string, tier llm.Permission) strin
 }
 
 func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) {
+	capacity, err := llm.ResolveRuntimeContext(ctx, in.Provider, in.Model, true)
+	if err != nil {
+		return ToolLoopResult{}, err
+	}
+	if capacity.Window > 0 {
+		in.ContextWindow = capacity.Window
+		in.ContextWindowKnown = true
+		ctx = llm.WithRuntimeContext(ctx, capacity)
+	}
 	ctx = agenttools.WithWorkDir(ctx, in.WorkDir)
 	ctx = agenttools.WithConversationID(ctx, in.ConversationID)
 	if !in.Provider.Capabilities().SupportsTools {
@@ -557,7 +569,8 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (ToolLoopResult, error) 
 			return ToolLoopResult{Iterations: iter + 1, History: hist, InputTokens: lastIn, OutputTokens: lastOut, LastRequestBudget: budget}, budget.OverflowError()
 		}
 		emit(LoopEvent{
-			Kind:                   LoopRequestAccounting,
+			Kind:  LoopRequestAccounting,
+			Model: in.Model, Provider: in.Provider.Name(), RuntimeInstanceID: llm.ExpectedRuntimeContext(ctx).InstanceID,
 			MessageTokens:          budget.MessageTokens,
 			SystemTokens:           budget.SystemTokens,
 			ToolSchemaTokens:       budget.ToolTokens,

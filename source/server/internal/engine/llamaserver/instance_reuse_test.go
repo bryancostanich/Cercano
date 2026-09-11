@@ -36,6 +36,7 @@ func TestChat_OllamaStyleNameReusesWarmInstance(t *testing.T) {
 			Runtime:  runtimeName,
 			ModelID:  "llama_server:0123456789ab",
 			State:    localruntime.InstanceRunning,
+			Context:  confirmedTestCapacity(),
 			Endpoint: server.URL,
 		}},
 	}

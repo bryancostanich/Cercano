@@ -161,6 +161,10 @@ func (e *Engine) Target(spec Spec) (modelbudget.Target, error) {
 	if err != nil {
 		return modelbudget.Target{}, err
 	}
+	return e.targetForSelection(sel, spec), nil
+}
+
+func (e *Engine) targetForSelection(sel inference.Selection, spec Spec) modelbudget.Target {
 	tier := spec.Tier
 	if tier == "" {
 		tier = config.TierEveryday
@@ -181,7 +185,25 @@ func (e *Engine) Target(spec Spec) (modelbudget.Target, error) {
 		Model:    model,
 		Tier:     string(tier),
 		IsCloud:  sel.IsCloud,
-	}, nil
+	}
+}
+
+// PreparedTarget resolves capacity before the caller constructs a prompt.
+func (e *Engine) PreparedTarget(ctx context.Context, spec Spec) (modelbudget.Target, error) {
+	sel, err := inference.Select(e.modeFn(), spec.Role, e.providersFn())
+	if err != nil {
+		return modelbudget.Target{}, err
+	}
+	target := e.targetForSelection(sel, spec)
+	capacity, err := llm.ResolveRuntimeContext(ctx, sel.Provider, target.Model, true)
+	if err != nil {
+		return target, err
+	}
+	if capacity.Window > 0 {
+		target.ContextWindow = capacity.Window
+		target.ContextWindowKnown = true
+	}
+	return target, nil
 }
 
 // Dispatch executes spec and returns a Result.
@@ -241,6 +263,11 @@ func (e *Engine) Dispatch(ctx context.Context, spec Spec) (Result, error) {
 	// tagging stay disjoint from the caller's conversation.
 	ctx = llm.WithSessionID(ctx, "oneshot-"+newDispatchID())
 
+	capacity, prepErr := llm.ResolveRuntimeContext(ctx, sel.Provider, model, true)
+	if prepErr != nil {
+		return Result{}, prepErr
+	}
+	ctx = llm.WithRuntimeContext(ctx, capacity)
 	// Optionally prepend project context (OneShot only).
 	prompt := spec.Prompt
 	if spec.WantsProjectContext && spec.WorkDir != "" && e.ctxLoader != nil {

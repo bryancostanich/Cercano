@@ -120,9 +120,12 @@ func InstallCapabilities(svc tools.Catalog, d CapDeps) {
 			if e == nil {
 				return modelbudget.Target{}, fmt.Errorf("dispatch engine not configured")
 			}
-			target, err := e.Target(spec)
+			target, err := e.PreparedTarget(ctx, spec)
 			if err != nil {
 				return modelbudget.Target{}, err
+			}
+			if !target.IsCloud && target.Provider == "llama_server" {
+				return target, nil
 			}
 			if !target.IsCloud && d.Config != nil {
 				window := modelwindow.LocalRuntimeWindow(*d.Config, target.Model)

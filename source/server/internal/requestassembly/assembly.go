@@ -82,6 +82,9 @@ func WindowForTarget(target Target) (int, bool) {
 	if target.ContextWindow > 0 {
 		return target.ContextWindow, target.ContextWindowKnown
 	}
+	if target.Provider == "llama_server" {
+		return 0, false
+	}
 	mw := contextmeter.ModelWindowFor(target.Model)
 	return mw.Tokens, mw.Known
 }

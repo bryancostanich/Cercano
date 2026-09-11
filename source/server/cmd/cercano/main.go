@@ -377,6 +377,14 @@ func startGRPCServer(cfg config.Config, bindAddr string, events *crashlog.Writer
 			// temperature 0 reproduced exactly and kept every proposal anchor.
 			greedy := engine.Greedy()
 			localSummaryWindow := modelwindow.LocalRuntimeWindow(cfg, summarizerModel)
+			if cfg.OpenRuntime == "llama_server" {
+				capacity, err := llamaEng.RuntimeContext(ctx, summarizerModel, true)
+				if err != nil {
+					return compaction.StructuredSummary{}, err
+				}
+				localSummaryWindow = capacity.Window
+				ctx = llm.WithRuntimeContext(ctx, capacity)
+			}
 			parseLogged := func(output, via string) compaction.StructuredSummary {
 				s := compaction.ParseSummary(output)
 				if s.IsEmpty() {
@@ -485,7 +493,13 @@ func startGRPCServer(cfg config.Config, bindAddr string, events *crashlog.Writer
 			budgetPct = compactedBudgetDefaultPct
 		}
 		budgetWindow := modelwindow.LocalRuntimeWindow(cfg, openChatModel(cfg))
-		if budgetWindow <= 0 {
+		if cfg.OpenRuntime == "llama_server" {
+			capacity, err := llamaEng.RuntimeContext(context.Background(), openChatModel(cfg), false)
+			if err == nil {
+				budgetWindow = capacity.Window
+			}
+		}
+		if budgetWindow <= 0 && cfg.OpenRuntime != "llama_server" {
 			budgetWindow = contextmeter.ModelMax(openChatModel(cfg))
 		}
 		budgetTokens := int(float64(budgetWindow) * budgetPct)
@@ -706,10 +720,6 @@ func startGRPCServer(cfg config.Config, bindAddr string, events *crashlog.Writer
 	}()
 
 	llamaEng.SetFailureLog(srv.FailureLog())
-	llamaEng.SetContextWindowResolver(func(model string) int {
-		llamaCfg := srv.ConfigSnapshot().LlamaServer
-		return localModelContextWindow(llamaCfg.ContextOverride(), llamaCfg.ContextSize != nil, model)
-	})
 
 	// Native tool-loop local provider — follows the configured runtime.
 	// Under llama_server/mistralrs the provider resolves/warms instances through
@@ -2141,17 +2151,4 @@ func resumeInterruptedDownloads(cfg config.Config, manager localruntime.Manager,
 			Message: fmt.Sprintf("resuming %d interrupted download(s) on startup", len(triggered)),
 		})
 	}
-}
-
-func localModelContextWindow(configured int, configExplicit bool, model string) int {
-	if !configExplicit {
-		bare := strings.TrimSpace(model)
-		if i := strings.LastIndex(bare, ":"); i >= 0 && i+1 < len(bare) {
-			bare = bare[i+1:]
-		}
-		if n := runtimellama.ModelContextOverride(bare, uint64(sysram.Total())); n > 0 {
-			return n
-		}
-	}
-	return configured
 }

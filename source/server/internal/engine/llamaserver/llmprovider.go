@@ -76,6 +76,13 @@ func (p *LLMProvider) clientFor(ctx context.Context, req llm.ChatRequest) (*open
 	if err != nil {
 		return nil, req, err
 	}
+	capacity, err := p.eng.RuntimeContext(ctx, req.Model, false)
+	if err != nil {
+		return nil, req, err
+	}
+	if err := llm.CheckRuntimeContext(ctx, capacity); err != nil {
+		return nil, req, err
+	}
 	if model == "" {
 		model = "default"
 	}

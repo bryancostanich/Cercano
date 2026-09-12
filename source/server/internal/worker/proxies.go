@@ -25,13 +25,20 @@ type sender struct {
 	stream proto.Worker_RunTurnServer
 	done   chan struct{}
 	once   sync.Once
+
+	// Accounting has one separate low-priority slot. Admission never waits for
+	// stream I/O; delivery/acknowledgment retries belong to the background owner.
+	accounting   chan *proto.WorkerToHost
+	accountingMu sync.Mutex
+	closed       bool
 }
 
 func newSender(stream proto.Worker_RunTurnServer) *sender {
 	s := &sender{
-		ch:     make(chan *proto.WorkerToHost, sendBufSize),
-		stream: stream,
-		done:   make(chan struct{}),
+		ch:         make(chan *proto.WorkerToHost, sendBufSize),
+		accounting: make(chan *proto.WorkerToHost, 1),
+		stream:     stream,
+		done:       make(chan struct{}),
 	}
 	go s.run()
 	return s
@@ -39,13 +46,59 @@ func newSender(stream proto.Worker_RunTurnServer) *sender {
 
 func (s *sender) run() {
 	defer close(s.done)
-	for msg := range s.ch {
-		if err := s.stream.Send(msg); err != nil {
-			// Stream closed — drain remaining messages without sending.
-			for range s.ch {
-			}
-			return
+	failed := false
+	send := func(msg *proto.WorkerToHost) {
+		if !failed {
+			failed = s.stream.Send(msg) != nil
 		}
+	}
+	drainAccounting := func() {
+		select {
+		case msg := <-s.accounting:
+			send(msg)
+		default:
+		}
+	}
+	for {
+		// Already queued control/event work always precedes accounting. A control
+		// message arriving during Send can wait behind at most one accounting frame.
+		select {
+		case msg, ok := <-s.ch:
+			if !ok {
+				drainAccounting()
+				return
+			}
+			send(msg)
+			continue
+		default:
+		}
+		select {
+		case msg, ok := <-s.ch:
+			if !ok {
+				drainAccounting()
+				return
+			}
+			send(msg)
+		case msg := <-s.accounting:
+			send(msg)
+		}
+	}
+}
+
+// trySendAccounting is bounded admission, NOT delivery or persistence success.
+// Only a background delivery owner should call it with an already bounded frame.
+// False means retain the observation for retry; never silently drop it.
+func (s *sender) trySendAccounting(msg *proto.WorkerToHost) bool {
+	s.accountingMu.Lock()
+	defer s.accountingMu.Unlock()
+	if s.closed {
+		return false
+	}
+	select {
+	case s.accounting <- msg:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -57,7 +110,12 @@ func (s *sender) send(msg *proto.WorkerToHost) {
 // close shuts down the sender and waits for the goroutine to finish flushing.
 // Safe to call multiple times (sync.Once).
 func (s *sender) close() {
-	s.once.Do(func() { close(s.ch) })
+	s.once.Do(func() {
+		s.accountingMu.Lock()
+		s.closed = true
+		close(s.ch)
+		s.accountingMu.Unlock()
+	})
 	<-s.done
 }
 

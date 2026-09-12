@@ -651,16 +651,11 @@ func startGRPCServer(cfg config.Config, bindAddr string, events *crashlog.Writer
 	// keeping the server's stored providers raw so the dispatch engine can wrap
 	// them per-dispatch without double-counting.
 	// agentCollector is hoisted so the coproc engine sink can reference it below.
-	var agentCollector *telemetry.Collector
 	agentTelemetryPath := filepath.Join(filepath.Dir(config.DefaultPath()), "telemetry.db")
-	agentTelemetryStore, err := telemetry.NewSQLiteStore(agentTelemetryPath)
+	agentCollector, closeAgentTelemetry, err := startAgentTelemetry(agentTelemetryPath, generateSessionID())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[WARN] Failed to initialize agent telemetry: %v\n", err)
 	} else {
-		agentCollector = telemetry.NewCollector(agentTelemetryStore, 256)
-		agentCollector.SetSessionID(generateSessionID())
-		defer agentCollector.Close()
-		defer agentTelemetryStore.Close()
 		srv.SetUsageSink(server.UsageEventSink(agentCollector.Emit))
 	}
 
@@ -804,6 +799,10 @@ func startGRPCServer(cfg config.Config, bindAddr string, events *crashlog.Writer
 		mcpCancel()
 		mcpMgr.Stop()
 		srv.Shutdown()
+		// Usage producers have stopped; drain before closing the database.
+		if closeAgentTelemetry != nil {
+			closeAgentTelemetry()
+		}
 	}
 
 	return lis.Addr().String(), cleanup, nil

@@ -39,6 +39,11 @@ func inspectFixture(t *testing.T, d VisionDeps) (*countingProvider, *countingPro
 		d.Mode = func() locus.Mode { return locus.DefaultMode }
 	}
 	store, svc := BuildVision(d)
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	_ = open
 	img := store.Add("conv", "image/png", []byte{0x89, 0x50, 0x4e, 0x47, 1, 2, 3})
 	if img.Rejected || img.Attachment == nil {
@@ -96,6 +101,11 @@ func TestCloudVision_UnconfirmedFallsBackToOpen(t *testing.T) {
 		CloudVisionConfirmed: func(string) bool { return false },
 		Mode:                 func() locus.Mode { return locus.DefaultMode },
 	})
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	img := store.Add("conv", "image/png", []byte{0x89, 0x50, 0x4e, 0x47, 1, 2, 3})
 	if _, err := svc.Inspect(context.Background(), "conv", img.Attachment.ID, "q"); err != nil {
 		t.Fatalf("inspect: %v", err)
@@ -116,6 +126,11 @@ func TestCloudVision_OpenOnlyNeverRoutesCloud(t *testing.T) {
 		CloudVisionModel:     func() (string, bool) { return "confirmed/model", true },
 		CloudVisionConfirmed: func(string) bool { return true },
 		Mode:                 func() locus.Mode { return locus.OpenOnly },
+	})
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Error(err)
+		}
 	})
 	img := store.Add("conv", "image/png", []byte{0x89, 0x50, 0x4e, 0x47, 1, 2, 3})
 	_, _ = svc.Inspect(context.Background(), "conv", img.Attachment.ID, "q")

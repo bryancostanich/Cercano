@@ -10,6 +10,11 @@ import (
 
 func TestExportImage_ReturnsLiveAttachmentBytes(t *testing.T) {
 	store := visionattach.NewStore()
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	data := []byte("fake png bytes")
 	added := store.Add("conv1", "image/png", data)
 	if added.Attachment == nil || added.Rejected {
@@ -37,6 +42,11 @@ func TestExportImage_ReturnsLiveAttachmentBytes(t *testing.T) {
 
 func TestExportImage_BlankConversationIDFindsUniqueImageID(t *testing.T) {
 	store := visionattach.NewStore()
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	data := []byte("fake png bytes")
 	added := store.Add("conv1", "image/png", data)
 	s := &Server{visionStore: store}
@@ -54,6 +64,11 @@ func TestExportImage_BlankConversationIDFindsUniqueImageID(t *testing.T) {
 
 func TestExportImage_BlankConversationIDAmbiguous(t *testing.T) {
 	store := visionattach.NewStore()
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	a := store.Add("convA", "image/png", []byte("same")).Attachment
 	b := store.Add("convB", "image/png", []byte("same")).Attachment
 	if a.ID != b.ID {
@@ -68,7 +83,13 @@ func TestExportImage_BlankConversationIDAmbiguous(t *testing.T) {
 }
 
 func TestExportImage_MissIsNotError(t *testing.T) {
-	s := &Server{visionStore: visionattach.NewStore()}
+	store := visionattach.NewStore()
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	s := &Server{visionStore: store}
 	resp, err := s.ExportImage(t.Context(), &proto.ExportImageRequest{
 		ConversationId: "conv1",
 		ImageId:        "img_missing_1",
@@ -92,5 +113,27 @@ func TestExportImage_NilStoreIsMiss(t *testing.T) {
 	}
 	if resp.GetFound() {
 		t.Fatal("expected found=false with nil store")
+	}
+}
+
+func TestServerShutdownClosesImageStore(t *testing.T) {
+	store := visionattach.NewStore()
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	added := store.Add("conv", "image/png", []byte("pixels"))
+	if added.Rejected {
+		t.Fatal(added.RejectReason)
+	}
+	s := &Server{visionStore: store}
+	s.Shutdown()
+	if !store.Add("conv", "image/png", []byte("new")).Rejected {
+		t.Fatal("shutdown left store open")
+	}
+	resp, err := s.ExportImage(t.Context(), &proto.ExportImageRequest{ConversationId: "conv", ImageId: added.Attachment.ID})
+	if err != nil || resp.GetFound() {
+		t.Fatalf("export after shutdown: %v, %v", resp, err)
 	}
 }

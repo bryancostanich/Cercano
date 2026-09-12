@@ -49,6 +49,11 @@ func textResp(s string) llm.ChatResponse {
 func storeWithImage(t *testing.T, convID string) (*visionattach.Store, string) {
 	t.Helper()
 	s := visionattach.NewStore()
+	t.Cleanup(func() {
+		if err := s.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	res := s.Add(convID, "image/png", []byte{0x89, 0x50, 0x4e, 0x47, 1, 2, 3})
 	if res.Rejected || res.Attachment == nil {
 		t.Fatalf("store.Add rejected: %+v", res)

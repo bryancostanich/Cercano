@@ -29,7 +29,7 @@ const ImagePlaceholderText = "[image]"
 // frozen boundary from the content behind it. Pure: input is not mutated.
 //
 // This is deliberately NOT the inspect_image placeholder used on the send path
-// (see internal/visionattach): that store is in-memory and holds only images
+// (see internal/visionattach): that store indexes temporary files in memory and holds only images
 // from the current process lifetime, so historical turns would be rewritten to
 // reference ids that resolve to nothing.
 func StripImagesForSummary(msgs []llm.Message) ([]llm.Message, int) {

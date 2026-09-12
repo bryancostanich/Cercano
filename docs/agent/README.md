@@ -242,7 +242,7 @@ Layered abstraction. The shared `Provider` interface exposes `Chat`, `StreamChat
 - `internal/llm/anthropic/` — uses `github.com/anthropics/anthropic-sdk-go` v1.51. Custom User-Agent RoundTripper for Meridian fingerprint compatibility.
 - `internal/llm/ollama/` — uses `github.com/ollama/ollama/api`.
 
-The internal `Block` type carries text / `tool_use` / `tool_result` / `image` and is the lingua franca. Each adapter translates SDK types ↔ `Block`. Image translation is plumbed at the provider layer ([vision-input.md](vision-input.md)), but the inbound path (CLI image attach) is not yet implemented.
+The internal `Block` type carries text / `tool_use` / `tool_result` / `image` and is the lingua franca. Each adapter translates SDK types ↔ `Block`. Image translation is plumbed at the provider layer ([vision-input.md](vision-input.md)); live attachments can also be inspected through `inspect_image`.
 
 **Cloud resilience.** Every adapter normalizes its wire errors into provider-agnostic classes (`quota`, `busy`, `auth`, `invalid_request`, `network`, `unknown` — `llm.Error`), and a single engine (`internal/inference/resilience`) owns the retry/failover policy: busy gets one narrated same-provider retry, quota/auth/network fail over to the backup profile immediately, invalid requests surface. Actions are narrated to the user in-band ("anthropic quota reached — switching to openai") and logged server-side. SDK-internal and transport-level retries are deliberately disabled — the engine is the only retry layer. See [cloud-failover-audit.md](cloud-failover-audit.md).
 
@@ -318,7 +318,8 @@ The decision is **agent-side**. The CLI just renders the `PermissionRequired` st
 
 - **`/tool` invoking W/X-tier** requires `/bypass` mode. The unary `InvokeTool` RPC can't stream a confirm prompt back to the CLI. Model-driven tool calls in normal chat flow always go through the gate correctly.
 - **Inline tool-call expand/collapse keybind** isn't implemented yet. Tool entries render folded; scroll your terminal to see args/results.
-- **Image input** is not yet implemented. Vision support is plumbed at the provider layer and adapters support images, but there is no CLI/inbound path to attach images to messages.
+- **Image attachment storage:** `inspect_image` uses private temporary files under the operating system's temporary directory (Go `os.TempDir()`, not a hard-coded Unix or Windows path). The store retains only metadata and reads image bytes on demand; it has no cumulative per-conversation image-count or byte cap. `Store.Clear` removes a conversation’s files; server shutdown and worker-turn completion close their owned stores. Missing/unreadable files produce lookup misses, and failed writes produce an omitted-image placeholder. Reattaching identical bytes restores a missing file under the same live ID.
+- **Image lifetime:** attachment IDs are indexed in memory and do not survive agent restarts. Temporary storage is not durable history: OS cleanup can remove files, and crashes may leave orphan files for OS cleanup. Payloads still occupy memory while being ingested or inspected; this change removes long-lived payload retention in the attachment store, not provider/request limits or other copies elsewhere in the message pipeline.
 
 ### Subscription authentication recovery
 

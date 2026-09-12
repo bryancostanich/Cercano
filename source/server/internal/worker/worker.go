@@ -147,6 +147,14 @@ func (w *WorkerServer) runTurn(stream proto.Worker_RunTurnServer, authRecovery b
 		return status.Errorf(codes.Internal, "worker: build deps: %v", buildErr)
 	}
 
+	if closer, ok := deps.VisionStore.(interface{ Close() error }); ok {
+		defer func() {
+			if err := closer.Close(); err != nil {
+				log.Printf("[vision] worker temporary attachment cleanup: %v", err)
+			}
+		}()
+	}
+
 	// Decode history.
 	history := make([]llm.Message, 0, len(start.GetHistory()))
 	for _, pm := range start.GetHistory() {

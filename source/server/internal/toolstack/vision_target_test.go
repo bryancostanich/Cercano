@@ -30,6 +30,11 @@ func TestImageTargetUsesConfirmedOwnBackupBeforeLocal(t *testing.T) {
 				t.Fatalf("target=%+v available=%v", target, ok)
 			}
 			store, service := BuildVision(VisionDeps{CloudTarget: func() (visioninspect.Resolved, bool) { return ResolveCloudVision(chain) }, OpenProvider: func() inference.Provider { return local }, OpenVisionModel: func() (string, bool) { return "local-image", true }, Mode: func() locus.Mode { return locus.CloudPrimary }})
+			t.Cleanup(func() {
+				if err := store.Close(); err != nil {
+					t.Error(err)
+				}
+			})
 			image := store.Add("conv", "image/png", []byte{0x89, 0x50, 0x4e, 0x47, 1, 2, 3})
 			if image.Rejected || image.Attachment == nil {
 				t.Fatal("fixture rejected")

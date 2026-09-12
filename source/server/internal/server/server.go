@@ -526,6 +526,11 @@ func (s *Server) Shutdown() {
 		sd.Shutdown()
 	}
 	s.stopRuntimeInstances()
+	if s.visionStore != nil {
+		if err := s.visionStore.Close(); err != nil {
+			log.Printf("[vision] temporary attachment cleanup: %v", err)
+		}
+	}
 }
 
 func (s *Server) stopRuntimeInstances() {
@@ -3697,7 +3702,7 @@ func (s *Server) GetPermissionMode(ctx context.Context, req *proto.GetPermission
 
 // ExportImage implements proto.AgentServer — returns the raw bytes of an image
 // the user attached to a live conversation, looked up by its per-conversation
-// attachment ID. It reads directly from the in-memory vision attachment store
+// attachment ID. It reads directly from the temporary-file-backed vision attachment store
 // without touching the placeholder/rewrite or inspect_image paths. A miss
 // (unknown ID, or after restart/resume when the store is empty) is reported as
 // found=false, not an error, so callers can prompt the user to reattach.

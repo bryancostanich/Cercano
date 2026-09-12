@@ -13,6 +13,11 @@ func b64(s string) string { return base64.StdEncoding.EncodeToString([]byte(s)) 
 
 func TestRewriteImagesToPlaceholders_ReplacesAndRegisters(t *testing.T) {
 	store := visionattach.NewStore()
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	msgs := []llm.Message{{Role: llm.RoleUser, Blocks: []llm.Block{
 		{Type: llm.BlockText, Text: "look at this:"},
 		{Type: llm.BlockImage, MediaType: "image/png", ImageData: b64("PNGBYTES")},
@@ -47,6 +52,11 @@ func TestRewriteImagesToPlaceholders_ReplacesAndRegisters(t *testing.T) {
 
 func TestRewriteImagesToPlaceholders_CopyOnWrite(t *testing.T) {
 	store := visionattach.NewStore()
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	msgs := []llm.Message{{Role: llm.RoleUser, Blocks: []llm.Block{
 		{Type: llm.BlockImage, MediaType: "image/png", ImageData: b64("x")},
 	}}}
@@ -70,6 +80,11 @@ func TestRewriteImagesToPlaceholders_NilStoreOrBlankConv(t *testing.T) {
 
 func TestRewriteImagesToPlaceholders_URLOnlyImageOmitted(t *testing.T) {
 	store := visionattach.NewStore()
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	msgs := []llm.Message{{Role: llm.RoleUser, Blocks: []llm.Block{
 		{Type: llm.BlockImage, ImageURL: "https://example/x.png"}, // no inline bytes
 	}}}
@@ -82,24 +97,32 @@ func TestRewriteImagesToPlaceholders_URLOnlyImageOmitted(t *testing.T) {
 	}
 }
 
-func TestRewriteImagesToPlaceholders_CapRejectionOmits(t *testing.T) {
-	store := visionattach.NewStore().WithCaps(1, 0)
+func TestRewriteImagesToPlaceholders_StorageFailureOmits(t *testing.T) {
+	store := visionattach.NewStore()
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
 	msgs := []llm.Message{{Role: llm.RoleUser, Blocks: []llm.Block{
 		{Type: llm.BlockImage, MediaType: "image/png", ImageData: b64("first")},
-		{Type: llm.BlockImage, MediaType: "image/png", ImageData: b64("second")},
 	}}}
 	out := RewriteImagesToPlaceholders(store, "c", msgs)
-	b := out[0].Blocks
-	if !strings.Contains(b[0].Text, "inspect_image") {
-		t.Errorf("first image should get a real placeholder: %q", b[0].Text)
-	}
-	if !strings.Contains(b[1].Text, "omitted") || !strings.Contains(b[1].Text, "limit") {
-		t.Errorf("second image should be an omitted/limit placeholder: %q", b[1].Text)
+	if text := out[0].Blocks[0].Text; !strings.Contains(text, "image omitted: attachment store is closed") {
+		t.Fatalf("expected storage failure placeholder, got %q", text)
 	}
 }
 
 func TestRewriteImagesToPlaceholders_NoImagesUnchanged(t *testing.T) {
 	store := visionattach.NewStore()
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	msgs := []llm.Message{{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: "hi"}}}}
 	out := RewriteImagesToPlaceholders(store, "c", msgs)
 	if len(out[0].Blocks) != 1 || out[0].Blocks[0].Text != "hi" {

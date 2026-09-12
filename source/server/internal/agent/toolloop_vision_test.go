@@ -90,6 +90,11 @@ func (t imageTool) Execute(context.Context, json.RawMessage) (*agenttools.Result
 // resolve it.
 func TestRunToolLoop_RewritesImagesWhenVisionStoreSet(t *testing.T) {
 	store := visionattach.NewStore()
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	prov := &capturingProvider{}
 
 	_, err := RunToolLoop(t.Context(), ToolLoopInput{
@@ -133,6 +138,11 @@ func TestRunToolLoop_RewritesImagesWhenVisionStoreSet(t *testing.T) {
 
 func TestRunToolLoop_RewritesHistoricalImagesWhenVisionStoreSet(t *testing.T) {
 	store := visionattach.NewStore()
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	prov := &capturingProvider{}
 	largeEncodedImage := b64(strings.Repeat("OLDPNG", 4096))
 
@@ -187,6 +197,11 @@ func TestRunToolLoop_RewritesToolResultImagesBeforeNextProviderCall(t *testing.T
 		} {
 			t.Run(string(permission)+"/"+tc.name, func(t *testing.T) {
 				store := visionattach.NewStore()
+				t.Cleanup(func() {
+					if err := store.Close(); err != nil {
+						t.Error(err)
+					}
+				})
 				largeEncodedImage := b64(strings.Repeat("TOOLPNG", 4096))
 				prov := &captureEveryProvider{textOnly: tc.textOnly, scripts: [][]llm.Block{
 					{{Type: llm.BlockToolUse, ToolUseID: "call_1", ToolName: "screenshot", ToolInput: []byte(`{}`)}},

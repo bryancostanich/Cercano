@@ -8,6 +8,11 @@ import (
 
 func TestAdd_StoresAndLooksUp(t *testing.T) {
 	s := NewStore()
+	t.Cleanup(func() {
+		if err := s.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	res := s.Add("conv1", "image/png", []byte("alpha"))
 	if res.Rejected || res.Deduped || res.Attachment == nil {
 		t.Fatalf("unexpected add result: %+v", res)
@@ -27,6 +32,11 @@ func TestAdd_StoresAndLooksUp(t *testing.T) {
 
 func TestAdd_DedupsIdenticalBytes(t *testing.T) {
 	s := NewStore()
+	t.Cleanup(func() {
+		if err := s.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	a := s.Add("c", "image/png", []byte("same"))
 	b := s.Add("c", "image/png", []byte("same"))
 	if b.Deduped != true || b.Attachment == nil {
@@ -42,6 +52,11 @@ func TestAdd_DedupsIdenticalBytes(t *testing.T) {
 
 func TestAdd_UniqueIDsForDistinctImages(t *testing.T) {
 	s := NewStore()
+	t.Cleanup(func() {
+		if err := s.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	a := s.Add("c", "image/png", []byte("one"))
 	b := s.Add("c", "image/png", []byte("two"))
 	if a.Attachment.ID == b.Attachment.ID {
@@ -52,38 +67,39 @@ func TestAdd_UniqueIDsForDistinctImages(t *testing.T) {
 	}
 }
 
-func TestAdd_RejectsImageCountCap(t *testing.T) {
-	s := NewStore().WithCaps(2, 0)
-	s.Add("c", "image/png", []byte("a"))
-	s.Add("c", "image/png", []byte("b"))
-	res := s.Add("c", "image/png", []byte("c"))
-	if !res.Rejected || res.Attachment != nil {
-		t.Fatalf("third add should be rejected by count cap: %+v", res)
+func TestAdd_NoConversationCountCap(t *testing.T) {
+	s := NewStore()
+	t.Cleanup(func() {
+		if err := s.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	for i := 0; i < 100; i++ {
+		data := []byte(fmt.Sprintf("image-%d", i))
+		res := s.Add("c", "image/png", data)
+		if res.Rejected || res.Attachment == nil {
+			t.Fatalf("image %d: %+v", i, res)
+		}
+		if len(res.Attachment.Data) != 0 {
+			t.Fatal("Add retained bytes")
+		}
+		got, ok := s.Lookup("c", res.Attachment.ID)
+		if !ok || string(got.Data) != string(data) {
+			t.Fatalf("lookup %d failed", i)
+		}
 	}
-	if !strings.Contains(res.RejectReason, "attachment limit") {
-		t.Errorf("reject reason = %q", res.RejectReason)
-	}
-	if s.Count("c") != 2 {
-		t.Errorf("count = %d, want 2 (rejected image not stored)", s.Count("c"))
-	}
-}
-
-func TestAdd_RejectsByteCap(t *testing.T) {
-	s := NewStore().WithCaps(0, 8)
-	if r := s.Add("c", "image/png", []byte("12345")); r.Attachment == nil {
-		t.Fatalf("first add within byte cap should succeed: %+v", r)
-	}
-	res := s.Add("c", "image/png", []byte("6789")) // 5+4 > 8
-	if !res.Rejected {
-		t.Fatalf("second add should exceed byte cap: %+v", res)
-	}
-	if !strings.Contains(res.RejectReason, "size limit") {
-		t.Errorf("reject reason = %q", res.RejectReason)
+	if s.Count("c") != 100 {
+		t.Fatal("unexpected count")
 	}
 }
 
 func TestAdd_RejectsEmptyAndBlankConv(t *testing.T) {
 	s := NewStore()
+	t.Cleanup(func() {
+		if err := s.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	if r := s.Add("", "image/png", []byte("x")); !r.Rejected {
 		t.Error("blank conversation id should be rejected")
 	}
@@ -94,6 +110,11 @@ func TestAdd_RejectsEmptyAndBlankConv(t *testing.T) {
 
 func TestConversationsAreIsolated(t *testing.T) {
 	s := NewStore()
+	t.Cleanup(func() {
+		if err := s.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	// Distinct bytes per conversation so we can prove lookups never cross.
 	a := s.Add("convA", "image/png", []byte("alpha-bytes"))
 	b := s.Add("convB", "image/png", []byte("bravo-bytes"))
@@ -125,6 +146,11 @@ func TestConversationsAreIsolated(t *testing.T) {
 
 func TestLookupAny_UniqueMatch(t *testing.T) {
 	s := NewStore()
+	t.Cleanup(func() {
+		if err := s.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	att := s.Add("conv1", "image/png", []byte("alpha")).Attachment
 
 	got, convID, ok, ambiguous := s.LookupAny(att.ID)
@@ -135,6 +161,11 @@ func TestLookupAny_UniqueMatch(t *testing.T) {
 
 func TestLookupAny_Miss(t *testing.T) {
 	s := NewStore()
+	t.Cleanup(func() {
+		if err := s.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	s.Add("conv1", "image/png", []byte("alpha"))
 
 	got, convID, ok, ambiguous := s.LookupAny("img_missing_1")
@@ -145,6 +176,11 @@ func TestLookupAny_Miss(t *testing.T) {
 
 func TestLookupAny_Ambiguous(t *testing.T) {
 	s := NewStore()
+	t.Cleanup(func() {
+		if err := s.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	a := s.Add("convA", "image/png", []byte("same")).Attachment
 	b := s.Add("convB", "image/png", []byte("same")).Attachment
 	if a.ID != b.ID {
@@ -159,6 +195,11 @@ func TestLookupAny_Ambiguous(t *testing.T) {
 
 func TestLookup_MissAfterClear(t *testing.T) {
 	s := NewStore()
+	t.Cleanup(func() {
+		if err := s.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	a := s.Add("c", "image/png", []byte("bye"))
 	s.Clear("c")
 	if _, ok := s.Lookup("c", a.Attachment.ID); ok {
@@ -171,6 +212,11 @@ func TestLookup_MissAfterClear(t *testing.T) {
 
 func TestLookup_UnknownID(t *testing.T) {
 	s := NewStore()
+	t.Cleanup(func() {
+		if err := s.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	s.Add("c", "image/png", []byte("x"))
 	if _, ok := s.Lookup("c", "img_deadbeef_9"); ok {
 		t.Error("unknown id should miss")
@@ -184,6 +230,11 @@ func TestLookup_UnknownID(t *testing.T) {
 // are recognizable, but ordinals keep them conversation-unique.
 func TestID_ShapeStable(t *testing.T) {
 	s := NewStore()
+	t.Cleanup(func() {
+		if err := s.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	att := s.Add("c", "image/png", []byte("pixels")).Attachment
 	if want := fmt.Sprintf("img_%s_1", att.Hash[:6]); att.ID != want {
 		t.Errorf("id = %q, want %q", att.ID, want)

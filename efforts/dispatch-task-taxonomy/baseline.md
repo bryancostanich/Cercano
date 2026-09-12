@@ -131,3 +131,15 @@ Fresh verification:
 - `go test ./internal/dispatch -run 'TestTaskTaxonomy(Unknown|Excluded|Explicit)' -count=1` — PASS. Unknown class no longer obtains a valid destination from config. Explicit boundary validation still needs review because injected assignment callbacks can bypass config; no claim of complete invocation-boundary enforcement.
 
 Phase 2 remains partial; next is explicit invocation-boundary validation and remaining settings/snapshot acceptance review. Redirect-aware runtime integration and Routing UI remain pending. No build, live inference, interactive smoke check or full server suite was run.
+
+## Explicit invocation identity validation — 2026-09-12
+
+Added TestTaskTaxonomyUnknownRejectedBeforeAssignmentCallbacks covering candidate TaskFor and engine assignment callbacks across Target, PreparedTarget, one-shot Dispatch and agentic Dispatch. Before the fix all eight cases failed: invalid identity reached the callback, budgeting succeeded, one-shot inference reached the fake provider, and agentic execution reached runner-availability checking. Added shared engine.resolve validation using config.ValidTask before assignment callbacks; invalid explicit classes now return an identifiable error without consulting those callbacks or invoking inference. Empty-class behavior is deliberately unchanged in this unit.
+
+Verification in source/server:
+- `go test ./internal/dispatch -run TestTaskTaxonomyUnknownRejectedBeforeAssignmentCallbacks -count=1` — eight failures before the guard.
+- `go test ./internal/dispatch -count=1 -skip '^TestTaskTaxonomyMissingClassUsesDefaultDispatch$'` — PASS after the guard, including the eight new cases. The single known missing-class reproduction is explicitly excluded, not fixed or claimed passing.
+- `go test ./pkg/config ./internal/routingwire ./pkg/agentclient -count=1` — PASS complete packages.
+- `go test ./internal/server ./internal/worker -run 'Test(TaskTaxonomy|DestinationRedirect|RoutingSettingsAtomicPresence)' -count=1` — PASS.
+
+The optional model-facing class selector remains a Phase 4 task; this validation secures the existing engine Spec boundary. Runtime redirect selection and ordinary missing-class routing remain Phase 3 work. No push, live inference, build or full-server test run.

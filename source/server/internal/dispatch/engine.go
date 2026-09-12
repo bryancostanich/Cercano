@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 
 	"cercano/source/server/internal/agenttools"
 	projectctx "cercano/source/server/internal/context"
@@ -339,6 +340,11 @@ func (e *Engine) resolve(spec Spec, mode locus.Mode, candidates inference.Tiers)
 	var err error
 	tier := spec.Tier
 	if spec.RoutingTask != "" {
+		// Validate identity before injectable assignment callbacks can give an
+		// unknown class valid routing intent. All three entry points share this guard.
+		if !config.ValidTask(spec.RoutingTask) {
+			return sel, tier, "", fmt.Errorf("dispatch: unknown routing task %q", spec.RoutingTask)
+		}
 		assignment := (config.Config{}).TaskAssignment(spec.RoutingTask)
 		if candidates.TaskFor != nil {
 			assignment = candidates.TaskFor(spec.RoutingTask)

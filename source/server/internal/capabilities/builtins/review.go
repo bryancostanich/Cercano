@@ -60,20 +60,20 @@ func (reviewCap) Execute(ctx context.Context, call *capabilities.Call) (*capabil
 	var spec dispatch.Spec
 	if len(a.Tools) == 0 {
 		spec = dispatch.Spec{
-			Mode:    dispatch.OneShot,
-			Role:    dispatch.RoleMain,
-			Tier:    config.TierEveryday,
-			Prompt:  prompt,
-			WorkDir: call.WorkDir,
+			Mode:        dispatch.OneShot,
+			Role:        dispatch.RoleMain,
+			RoutingTask: config.TaskReview,
+			Prompt:      prompt,
+			WorkDir:     call.WorkDir,
 		}
 	} else {
 		spec = dispatch.Spec{
-			Mode:    dispatch.Agentic,
-			Role:    dispatch.RoleMain,
-			Tier:    config.TierEveryday,
-			Task:    prompt,
-			Tools:   a.Tools,
-			WorkDir: call.WorkDir,
+			Mode:        dispatch.Agentic,
+			Role:        dispatch.RoleMain,
+			RoutingTask: config.TaskReview,
+			Task:        prompt,
+			Tools:       a.Tools,
+			WorkDir:     call.WorkDir,
 		}
 	}
 

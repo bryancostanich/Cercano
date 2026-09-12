@@ -1490,3 +1490,7 @@ func (m *mockAgentClient) ReauthenticateCloud(context.Context, *proto.CloudReaut
 func (m *mockAgentClient) ResolveAuthentication(context.Context, *proto.AuthenticationDecisionRequest, ...grpc.CallOption) (*proto.AuthenticationDecisionResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "not used by MCP")
 }
+
+func (m *mockAgentClient) UpdateRoutingAssignments(context.Context, *proto.UpdateRoutingAssignmentsRequest, ...grpc.CallOption) (*proto.UpdateRoutingAssignmentsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "not used in MCP fixture")
+}

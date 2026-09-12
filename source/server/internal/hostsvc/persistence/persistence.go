@@ -1409,7 +1409,7 @@ func (x *svc) SuggestNextPrompt(ctx context.Context, req *proto.SuggestNextPromp
 
 	res, err := e.Dispatch(ctx, dispatch.Spec{
 		Mode:        dispatch.OneShot,
-		Tier:        config.TierFastLightText,
+		RoutingTask: config.TaskReconnaissance,
 		Role:        dispatch.RoleCoproc,
 		Prompt:      prompt,
 		Source:      "suggest_next_prompt",

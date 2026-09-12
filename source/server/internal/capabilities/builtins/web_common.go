@@ -52,6 +52,7 @@ func (m *dispatchModelCaller) Budget(ctx context.Context, outputReserve int) (mo
 	target, err := m.call.Svc.DispatchTarget(ctx, dispatch.Spec{
 		Mode:          dispatch.OneShot,
 		Role:          dispatch.RoleCoproc,
+		RoutingTask:   config.TaskResearch,
 		Tier:          m.tier,
 		WorkDir:       m.call.WorkDir,
 		ModelOverride: m.model,
@@ -78,6 +79,7 @@ func (m *dispatchModelCaller) callModel(ctx context.Context, prompt string, disa
 	res, err := m.call.Svc.Dispatch(ctx, dispatch.Spec{
 		Mode:                 dispatch.OneShot,
 		Role:                 dispatch.RoleCoproc,
+		RoutingTask:          config.TaskResearch,
 		Tier:                 m.tier,
 		Prompt:               prompt,
 		DisableThinking:      disableThinking,

@@ -3672,6 +3672,7 @@ func (s *Server) mapRequest(req *proto.ProcessRequestRequest) *agent.Request {
 		DirectOpen:      req.DirectOpen,
 		ModelOverride:   req.ModelOverride,
 		Coproc:          req.Coproc,
+		RoutingTask:     req.GetRoutingTask(),
 		DisableThinking: req.GetDisableThinking(),
 		Images:          mapInlineImages(req.GetImages()),
 	}

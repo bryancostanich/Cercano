@@ -201,12 +201,12 @@ func runTestAndReviewAndFinalize(
 		if call.Svc.Dispatch != nil {
 			prompt := buildReviewPrompt(sig, feature, trunk)
 			res, err := call.Svc.Dispatch(ctx, dispatch.Spec{
-				Mode:    dispatch.OneShot,
-				Role:    dispatch.RoleMain,
-				Tier:    config.TierEveryday,
-				Source:  "gitflow:land-review",
-				Prompt:  prompt,
-				WorkDir: call.WorkDir,
+				Mode:        dispatch.OneShot,
+				Role:        dispatch.RoleMain,
+				RoutingTask: config.TaskGitLand,
+				Source:      "gitflow:land-review",
+				Prompt:      prompt,
+				WorkDir:     call.WorkDir,
 			})
 			if err != nil {
 				return nil, fmt.Errorf("git_land: review dispatch: %w", err)

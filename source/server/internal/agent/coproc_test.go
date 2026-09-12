@@ -56,7 +56,12 @@ func newDispatchCoprocAgent(modeStr string, localProv, cloudProv *fakeLLMProvide
 		m, _ := locus.ParseMode(modeStr)
 		return m
 	}
-	eng := dispatch.NewEngine(func() dispatch.Providers { return dispatch.Providers{Open: dLocal, Cloud: dCloud} }, modeFn, nil)
+	// This fixture explicitly assigns Default dispatch to Primary so the
+	// mode/fallback controls exercise Primary policy, not retired Coproc policy.
+	routing := config.Config{TaskAssignments: map[config.Task]config.TaskAssignment{config.TaskDispatch: {Destination: config.DestinationPrimary, Quality: config.CostPremium}}}
+	eng := dispatch.NewEngine(func() dispatch.Providers {
+		return dispatch.Providers{Open: dLocal, Cloud: dCloud, TaskFor: routing.TaskAssignment}
+	}, modeFn, nil)
 	eng.SetModelFor(func(isCloud bool, _ config.Tier) string {
 		if isCloud {
 			return cloudModel
@@ -147,7 +152,7 @@ func TestCoprocOpenPrimaryFallsBackToCloud(t *testing.T) {
 	if r.Notice == "" {
 		t.Errorf("local_primary fallback: expected non-empty Notice, got empty (caller won't know it fell back)")
 	}
-	if !strings.Contains(r.Notice, "preferred co-processor tier unavailable") {
+	if !strings.Contains(r.Notice, "preferred main tier unavailable") {
 		t.Errorf("local_primary fallback: Notice missing expected text: %q", r.Notice)
 	}
 }

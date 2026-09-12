@@ -95,7 +95,7 @@ func (deepResearchCap) Execute(ctx context.Context, call *capabilities.Call) (*c
 	activity.Started(fmt.Sprintf("deep research start: topic=%q depth=%s phase=%s", a.Topic, defaultLabel(a.Depth, "standard"), defaultLabel(a.Phase, "all")))
 	activity.Prompt(fmt.Sprintf("Topic: %s\nIntent: %s", a.Topic, a.Intent))
 
-	model := &dispatchModelCaller{call: call, source: "deep_research", model: a.Model, tier: config.TierFastLightText}
+	model := &dispatchModelCaller{call: call, source: "deep_research", model: a.Model}
 	scriptPath, err := searchScriptPath()
 	if err != nil {
 		return nil, fmt.Errorf("deep_research: search script: %w", err)

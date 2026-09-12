@@ -21,7 +21,7 @@ func (classifyCap) Surfaces() capabilities.Surface {
 }
 func (classifyCap) WantsProjectContext() bool { return true }
 func (classifyCap) Description() string {
-	return "Classify text or a file into categories using the local co-processor. Args: {text?: string, file_path?: string, categories?: string}."
+	return "Classify text or a file into categories using the configured Reconnaissance task route. Args: {text?: string, file_path?: string, categories?: string}."
 }
 func (classifyCap) Schema() capabilities.Schema {
 	return capabilities.Schema(`{
@@ -65,5 +65,5 @@ func (classifyCap) Execute(ctx context.Context, call *capabilities.Call) (*capab
 	}
 
 	prompt := fmt.Sprintf("Classify the following text. %s\n\nRespond with exactly this format:\nCategory: <category>\nConfidence: <high/medium/low>\nReasoning: <one sentence explanation>\n\nText:\n%s", categoryInstruction, content)
-	return runCoproc(ctx, call, "classify", prompt, content)
+	return runTextAnalysis(ctx, call, "classify", prompt, content)
 }

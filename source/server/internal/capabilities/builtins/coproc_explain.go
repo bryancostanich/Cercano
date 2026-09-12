@@ -21,7 +21,7 @@ func (explainCap) Surfaces() capabilities.Surface {
 }
 func (explainCap) WantsProjectContext() bool { return true }
 func (explainCap) Description() string {
-	return "Explain code or text using the local co-processor. Describes what it does, key components, and how they interact. Args: {text?: string, file_path?: string}."
+	return "Explain code or text using the configured Reconnaissance task route. Describes what it does, key components, and how they interact. Args: {text?: string, file_path?: string}."
 }
 func (explainCap) Schema() capabilities.Schema {
 	return capabilities.Schema(`{
@@ -58,5 +58,5 @@ func (explainCap) Execute(ctx context.Context, call *capabilities.Call) (*capabi
 	}
 
 	prompt := fmt.Sprintf("Explain the following code or text. Describe what it does, its key components, and how they interact. Be concise and focus on what a developer needs to understand to work with this code.\n\nCode:\n%s", content)
-	return runCoproc(ctx, call, "explain", prompt, content)
+	return runTextAnalysis(ctx, call, "explain", prompt, content)
 }

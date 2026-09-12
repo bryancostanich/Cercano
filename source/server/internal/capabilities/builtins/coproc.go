@@ -10,18 +10,18 @@ import (
 	"cercano/source/server/pkg/config"
 )
 
-// runCoproc runs a fixed co-processor prompt through the one-shot dispatch engine,
+// runTextAnalysis runs a fixed co-processor prompt through the one-shot dispatch engine,
 // recording usage (with the cloud-tokens-saved metric) at the provider boundary.
 // source is the per-tool telemetry label (e.g. "summarize"); content is the raw
 // input used to estimate tokens avoided.
-func runCoproc(ctx context.Context, call *capabilities.Call, source, prompt, content string) (*capabilities.Result, error) {
+func runTextAnalysis(ctx context.Context, call *capabilities.Call, source, prompt, content string) (*capabilities.Result, error) {
 	if call.Svc.Dispatch == nil {
 		return nil, errors.New("co-processor engine not available")
 	}
 	res, err := call.Svc.Dispatch(ctx, dispatch.Spec{
 		Mode:                 dispatch.OneShot,
 		Role:                 dispatch.RoleCoproc,
-		Tier:                 config.TierFastLightText,
+		RoutingTask:          config.TaskReconnaissance,
 		Prompt:               prompt,
 		WorkDir:              call.WorkDir,
 		WantsProjectContext:  true,

@@ -21,7 +21,7 @@ func (summarizeCap) Surfaces() capabilities.Surface {
 }
 func (summarizeCap) WantsProjectContext() bool { return true }
 func (summarizeCap) Description() string {
-	return "Summarize text or a file using the local co-processor. Args: {text?: string, file_path?: string, max_length?: string}."
+	return "Summarize text or a file using the configured Reconnaissance task route. Args: {text?: string, file_path?: string, max_length?: string}."
 }
 func (summarizeCap) Schema() capabilities.Schema {
 	return capabilities.Schema(`{
@@ -68,5 +68,5 @@ func (summarizeCap) Execute(ctx context.Context, call *capabilities.Call) (*capa
 	}
 
 	prompt := fmt.Sprintf("Summarize the following text in %s. Focus on the most important information. Output only the summary, no preamble.\n\nText to summarize:\n%s", lengthInstruction, content)
-	return runCoproc(ctx, call, "summarize", prompt, content)
+	return runTextAnalysis(ctx, call, "summarize", prompt, content)
 }

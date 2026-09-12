@@ -1255,13 +1255,15 @@ type ProcessRequestRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Input string                 `protobuf:"bytes,1,opt,name=input,proto3" json:"input,omitempty"` // User input or query
 	// Field 2 removed (was CloudProviderConfig provider_config)
-	WorkDir              string         `protobuf:"bytes,3,opt,name=work_dir,json=workDir,proto3" json:"work_dir,omitempty"`                      // Optional working directory for agentic tasks
-	FileName             string         `protobuf:"bytes,4,opt,name=file_name,json=fileName,proto3" json:"file_name,omitempty"`                   // Optional filename for agentic tasks
-	ConversationId       string         `protobuf:"bytes,5,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"` // Optional conversation ID for multi-turn history
-	DirectOpen           bool           `protobuf:"varint,6,opt,name=direct_open,json=directOpen,proto3" json:"direct_open,omitempty"`            // Skip SmartRouter, go directly to the open-weight provider
-	ModelOverride        string         `protobuf:"bytes,7,opt,name=model_override,json=modelOverride,proto3" json:"model_override,omitempty"`    // Use this model instead of the configured default (temporary, per-request)
-	Coproc               bool           `protobuf:"varint,8,opt,name=coproc,proto3" json:"coproc,omitempty"`                                      // Route per Locus Mode's co-processor tier (local/cloud)
-	Images               []*InlineImage `protobuf:"bytes,9,rep,name=images,proto3" json:"images,omitempty"`                                       // user-attached images, spliced in at "[image N]" markers in input
+	WorkDir        string `protobuf:"bytes,3,opt,name=work_dir,json=workDir,proto3" json:"work_dir,omitempty"`                      // Optional working directory for agentic tasks
+	FileName       string `protobuf:"bytes,4,opt,name=file_name,json=fileName,proto3" json:"file_name,omitempty"`                   // Optional filename for agentic tasks
+	ConversationId string `protobuf:"bytes,5,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"` // Optional conversation ID for multi-turn history
+	DirectOpen     bool   `protobuf:"varint,6,opt,name=direct_open,json=directOpen,proto3" json:"direct_open,omitempty"`            // Skip SmartRouter, go directly to the open-weight provider
+	ModelOverride  string `protobuf:"bytes,7,opt,name=model_override,json=modelOverride,proto3" json:"model_override,omitempty"`    // Use this model instead of the configured default (temporary, per-request)
+	// Deprecated: Marked as deprecated in agent.proto.
+	Coproc               bool           `protobuf:"varint,8,opt,name=coproc,proto3" json:"coproc,omitempty"`                              // Legacy one-shot request; ordinary task routing applies.
+	RoutingTask          string         `protobuf:"bytes,13,opt,name=routing_task,json=routingTask,proto3" json:"routing_task,omitempty"` // Explicit task class for one-shot requests; empty uses Default dispatch.
+	Images               []*InlineImage `protobuf:"bytes,9,rep,name=images,proto3" json:"images,omitempty"`                               // user-attached images, spliced in at "[image N]" markers in input
 	SupportsAuthRecovery bool           `protobuf:"varint,10,opt,name=supports_auth_recovery,json=supportsAuthRecovery,proto3" json:"supports_auth_recovery,omitempty"`
 	DebugMode            bool           `protobuf:"varint,12,opt,name=debug_mode,json=debugMode,proto3" json:"debug_mode,omitempty"` // advertisement only; does not grant permissions
 	// One-shot co-processor policy; false preserves the model default.
@@ -1342,11 +1344,19 @@ func (x *ProcessRequestRequest) GetModelOverride() string {
 	return ""
 }
 
+// Deprecated: Marked as deprecated in agent.proto.
 func (x *ProcessRequestRequest) GetCoproc() bool {
 	if x != nil {
 		return x.Coproc
 	}
 	return false
+}
+
+func (x *ProcessRequestRequest) GetRoutingTask() string {
+	if x != nil {
+		return x.RoutingTask
+	}
+	return ""
 }
 
 func (x *ProcessRequestRequest) GetImages() []*InlineImage {
@@ -16098,7 +16108,7 @@ const file_agent_proto_rawDesc = "" +
 	"\x06detail\x18\v \x01(\tR\x06detail\x12\x1d\n" +
 	"\n" +
 	"start_line\x18\f \x01(\x05R\tstartLine\x12\x19\n" +
-	"\bis_error\x18\r \x01(\bR\aisError\"\x9a\x03\n" +
+	"\bis_error\x18\r \x01(\bR\aisError\"\xc1\x03\n" +
 	"\x15ProcessRequestRequest\x12\x14\n" +
 	"\x05input\x18\x01 \x01(\tR\x05input\x12\x19\n" +
 	"\bwork_dir\x18\x03 \x01(\tR\aworkDir\x12\x1b\n" +
@@ -16106,8 +16116,9 @@ const file_agent_proto_rawDesc = "" +
 	"\x0fconversation_id\x18\x05 \x01(\tR\x0econversationId\x12\x1f\n" +
 	"\vdirect_open\x18\x06 \x01(\bR\n" +
 	"directOpen\x12%\n" +
-	"\x0emodel_override\x18\a \x01(\tR\rmodelOverride\x12\x16\n" +
-	"\x06coproc\x18\b \x01(\bR\x06coproc\x12*\n" +
+	"\x0emodel_override\x18\a \x01(\tR\rmodelOverride\x12\x1a\n" +
+	"\x06coproc\x18\b \x01(\bB\x02\x18\x01R\x06coproc\x12!\n" +
+	"\frouting_task\x18\r \x01(\tR\vroutingTask\x12*\n" +
 	"\x06images\x18\t \x03(\v2\x12.agent.InlineImageR\x06images\x124\n" +
 	"\x16supports_auth_recovery\x18\n" +
 	" \x01(\bR\x14supportsAuthRecovery\x12\x1d\n" +

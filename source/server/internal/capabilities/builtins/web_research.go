@@ -79,7 +79,7 @@ func (researchCap) Execute(ctx context.Context, call *capabilities.Call) (*capab
 		return nil, fmt.Errorf("research: search script: %w", err)
 	}
 	searcher := web.NewSearcher(config.VenvPython(), scriptPath)
-	model := &dispatchModelCaller{call: call, source: "research", tier: config.TierFastLightText}
+	model := &dispatchModelCaller{call: call, source: "research"}
 	pipeline := web.NewResearchPipeline(model, searcher, web.NewFetcher())
 
 	activity := newActivityReporter(call, "research", "research")

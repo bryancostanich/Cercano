@@ -25,7 +25,7 @@ func TestResearchQueryRPCPolicyDoesNotLeakOrLoseUsage(t *testing.T) {
 	if err := proto.Unmarshal(data, &query); err != nil {
 		t.Fatal(err)
 	}
-	if !query.GetDisableThinking() || !query.GetCoproc() || query.GetModelOverride() != "chosen-model" {
+	if !query.GetDisableThinking() || query.GetRoutingTask() != "research" || query.GetCoproc() || query.GetModelOverride() != "chosen-model" {
 		t.Fatalf("query=%v", &query)
 	}
 	if _, err := model.Call(context.Background(), "synthesis"); err != nil {

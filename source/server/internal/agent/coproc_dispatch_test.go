@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"cercano/source/server/internal/dispatch"
+	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/locus"
 	"cercano/source/server/pkg/config"
 )
@@ -34,8 +35,8 @@ func TestCoprocDispatchOpenPick(t *testing.T) {
 	}
 }
 
-// TestCoprocDispatchCloudPrimaryKeepsLocal verifies cloud_primary coproc stays local.
-func TestCoprocDispatchCloudPrimaryKeepsLocal(t *testing.T) {
+// TestLegacyOneShotAssignedPrimaryUsesCloud verifies cloud_primary coproc stays local.
+func TestLegacyOneShotAssignedPrimaryUsesCloud(t *testing.T) {
 	local := &fakeLLMProvider{name: "ollama", out: "local response"}
 	cloud := &fakeLLMProvider{name: "anthropic", out: "cloud response"}
 	a := newDispatchCoprocAgent("cloud_primary", local, cloud)
@@ -44,11 +45,11 @@ func TestCoprocDispatchCloudPrimaryKeepsLocal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if r.RoutingMetadata.IsCloud {
-		t.Errorf("cloud_primary coproc: IsCloud=true, want false (coproc prefers local)")
+	if !r.RoutingMetadata.IsCloud {
+		t.Errorf("saved Primary assignment should use cloud")
 	}
-	if r.RoutingMetadata.ModelName != "ollama" {
-		t.Errorf("ModelName=%q, want %q", r.RoutingMetadata.ModelName, "ollama")
+	if r.RoutingMetadata.ModelName != "anthropic" {
+		t.Errorf("ModelName=%q, want %q", r.RoutingMetadata.ModelName, "anthropic")
 	}
 }
 
@@ -62,7 +63,7 @@ func TestCoprocDispatchFallbackNotice(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(r.Notice, "preferred co-processor tier unavailable") {
+	if !strings.Contains(r.Notice, "preferred main tier unavailable") {
 		t.Errorf("Notice missing expected text: %q", r.Notice)
 	}
 	if !r.RoutingMetadata.IsCloud {
@@ -87,7 +88,7 @@ func TestCoprocDispatchNoProviderError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when no provider available")
 	}
-	if !strings.Contains(err.Error(), "no") || !strings.Contains(err.Error(), "provider available for co-processor work") {
+	if !strings.Contains(err.Error(), "destination secondary unavailable") {
 		t.Errorf("unexpected error message: %v", err)
 	}
 }
@@ -136,5 +137,28 @@ func TestCoprocDispatchTokensPopulated(t *testing.T) {
 	}
 	if r.InputTokens == 0 || r.OutputTokens == 0 {
 		t.Errorf("tokens not propagated: input=%d output=%d", r.InputTokens, r.OutputTokens)
+	}
+}
+
+func TestLegacyOneShotUsesDefaultDispatchClass(t *testing.T) {
+	local := &fakeLLMProvider{name: "local", out: "local"}
+	secondary := &fakeLLMProvider{name: "secondary", out: "secondary"}
+	eng := dispatch.NewEngine(func() dispatch.Providers {
+		return dispatch.Providers{Open: local, Destinations: map[config.Destination]inference.Candidate{config.DestinationSecondary: {Provider: secondary, IsCloud: true}}}
+	}, func() locus.Mode { return locus.CloudPrimary }, nil)
+	eng.SetDestinationModelFor(func(sel inference.Selection, tier config.Tier) string {
+		if tier != config.TierMostCapable {
+			t.Errorf("tier=%s", tier)
+		}
+		return sel.Provider.Name()
+	})
+	a := NewAgent(&fakeCoprocRouter{}, nil)
+	a.SetDispatchEngine(eng)
+	res, err := a.ProcessRequest(context.Background(), &Request{Input: "fixture", Coproc: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.RoutingMetadata.ModelName != "secondary" || !res.RoutingMetadata.IsCloud {
+		t.Fatalf("legacy request bypassed Default dispatch: %+v", res)
 	}
 }

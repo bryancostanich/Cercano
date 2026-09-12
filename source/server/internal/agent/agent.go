@@ -11,6 +11,7 @@ import (
 	"cercano/source/server/internal/conversation"
 	"cercano/source/server/internal/dispatch"
 	"cercano/source/server/internal/locus"
+	"cercano/source/server/pkg/config"
 )
 
 // ProgressFunc defines a callback for progress updates.
@@ -427,8 +428,8 @@ func (a *Agent) RenameConversation(ctx context.Context, conversationID, title st
 
 // ProcessRequest orchestrates the flow: Route -> Classify -> Execute Strategy.
 func (a *Agent) ProcessRequest(ctx context.Context, req *Request) (*Response, error) {
-	if req.Coproc {
-		return a.processCoproc(ctx, req)
+	if req.Coproc || req.RoutingTask != "" {
+		return a.processOneShot(ctx, req)
 	}
 
 	// Load conversation history
@@ -530,12 +531,16 @@ func (a *Agent) ProcessRequest(ctx context.Context, req *Request) (*Response, er
 	return res, nil
 }
 
-// processCoproc serves a one-shot co-processor request on the tier chosen by
-// the active Locus Mode, routed through the dispatch.Engine on inference.Provider.
-func (a *Agent) processCoproc(ctx context.Context, req *Request) (*Response, error) {
+// processOneShot serves classified one-shot requests and translates the legacy
+// Coproc wire flag to ordinary Default dispatch without a separate routing policy.
+func (a *Agent) processOneShot(ctx context.Context, req *Request) (*Response, error) {
 	augmentedInput, originalInput := a.loadHistory(ctx, req)
 	if a.engine == nil {
 		return nil, fmt.Errorf("co-processor dispatch engine not configured")
+	}
+	task := config.Task(req.RoutingTask)
+	if task == "" {
+		task = config.TaskDispatch
 	}
 	res, err := a.engine.Dispatch(ctx, dispatch.Spec{
 		DisableThinking: req.DisableThinking,
@@ -543,7 +548,8 @@ func (a *Agent) processCoproc(ctx context.Context, req *Request) (*Response, err
 		Role:            dispatch.RoleCoproc,
 		Prompt:          augmentedInput,
 		ModelOverride:   req.ModelOverride,
-		Source:          "coproc",
+		Source:          "oneshot",
+		RoutingTask:     task,
 		ConversationID:  req.ConversationID,
 		// WantsProjectContext intentionally false: loadHistory already prepended context.
 	})

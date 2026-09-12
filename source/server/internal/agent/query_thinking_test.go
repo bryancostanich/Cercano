@@ -22,7 +22,11 @@ func (p *queryPolicyProvider) Chat(ctx context.Context, r llm.ChatRequest) (llm.
 
 func TestCoprocQueryPolicyReachesProviderWithoutLeaking(t *testing.T) {
 	p := &queryPolicyProvider{fakeLLMProvider: fakeLLMProvider{name: "fixture", out: "query"}}
-	engine := dispatch.NewEngine(func() dispatch.Providers { return dispatch.Providers{Open: p} }, func() locus.Mode { return locus.OpenOnly }, nil)
+	engine := dispatch.NewEngine(func() dispatch.Providers {
+		return dispatch.Providers{Open: p, TaskFor: func(config.Task) config.TaskAssignment {
+			return config.TaskAssignment{Destination: config.DestinationLocal, Quality: config.CostStandard}
+		}}
+	}, func() locus.Mode { return locus.OpenOnly }, nil)
 	engine.SetModelFor(func(bool, config.Tier) string { return "model" })
 	a := NewAgent(&fakeCoprocRouter{}, nil)
 	a.SetDispatchEngine(engine)

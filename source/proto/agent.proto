@@ -410,7 +410,8 @@ message ProcessRequestRequest {
   string conversation_id = 5; // Optional conversation ID for multi-turn history
   bool direct_open = 6; // Skip SmartRouter, go directly to the open-weight provider
   string model_override = 7; // Use this model instead of the configured default (temporary, per-request)
-  bool coproc = 8; // Route per Locus Mode's co-processor tier (local/cloud)
+  bool coproc = 8 [deprecated = true]; // Legacy one-shot request; ordinary task routing applies.
+  string routing_task = 13; // Explicit task class for one-shot requests; empty uses Default dispatch.
   repeated InlineImage images = 9; // user-attached images, spliced in at "[image N]" markers in input
   bool supports_auth_recovery = 10;
  bool debug_mode = 12; // advertisement only; does not grant permissions

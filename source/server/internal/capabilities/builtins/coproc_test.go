@@ -20,7 +20,7 @@ func TestRunCoprocForwardsSpecFields(t *testing.T) {
 			},
 		},
 	}
-	res, err := runCoproc(context.Background(), call, "summarize", "do the thing", "input content")
+	res, err := runTextAnalysis(context.Background(), call, "summarize", "do the thing", "input content")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +54,7 @@ func TestRunCoprocForwardsSpecFields(t *testing.T) {
 }
 
 func TestRunCoprocNilDispatchErrors(t *testing.T) {
-	_, err := runCoproc(context.Background(), &capabilities.Call{Svc: capabilities.Services{}}, "summarize", "x", "x")
+	_, err := runTextAnalysis(context.Background(), &capabilities.Call{Svc: capabilities.Services{}}, "summarize", "x", "x")
 	if err == nil {
 		t.Fatal("expected error when Dispatch is nil")
 	}

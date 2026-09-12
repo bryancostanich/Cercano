@@ -28,13 +28,19 @@ func (dispatchCap) Description() string {
 	return "Run a sub-agent: hand off an open-ended task to a bounded tool-use loop over a granted set of tools (default: read-only tools). Include a concise human-facing `intent` when asking for approval if it clarifies why the delegation is needed. Returns the sub-agent's final result. Tool names passed in `tools` must be the plain registered names (e.g. \"Read\", \"Glob\") — do NOT include any host/MCP prefix like \"mcp__oc__\". Prefer scoped tools such as git_info, git_status, git_diff_stat, git_push, and github_issue_close over Bash inside delegated workflows. For a direct user request to push/publish the current branch, prefer calling git_push directly so the confirmation prompt authorizes the actual push attempt. Granting write-capable tools (Edit, Write, Bash, git_*, github_issue_close) escalates this call to a confirm prompt; one approval authorizes the sub-agent's whole toolset for the run."
 }
 func (dispatchCap) Schema() capabilities.Schema {
+	classes := []config.Task{}
+	for _, d := range config.TaskDefinitions() {
+		classes = append(classes, d.Task)
+	}
+	keys, _ := json.Marshal(classes)
 	return capabilities.Schema(`{
 		"type": "object",
 		"required": ["task"],
 		"properties": {
-			"task":            {"type": "string", "description": "Open-ended instruction for the sub-agent tool loop."},
+			"class": {"type":"string", "enum":` + string(keys) + `, "description":"Optional task class; omitted uses Default dispatch."},
+ "task":            {"type": "string", "description": "Open-ended instruction for the sub-agent tool loop."},
 			"tools":           {"type": "array", "items": {"type": "string"}, "description": "Tool or capability names to grant, using the plain registered names (e.g. \"Read\", \"Glob\", \"Grep\", \"Bash\") — no host or MCP prefix. Omit to default to read-only tools."},
-			"tier":            {"type": "string", "enum": ["light", "standard", "deep"], "description": "Omit to use the saved dispatch quality (Premium by default). Explicit light selects Economy, standard selects Standard, and deep selects Premium. The saved dispatch destination controls placement, subject to locality policy. Prefer explicit light for routine recon/tracing/extraction."},
+			"tier":            {"type": "string", "enum": ["light", "standard", "deep"], "description": "Omit to use the saved dispatch quality (Premium by default). An optional class selects the saved task routing; omitted class uses Default dispatch. Explicit light selects Economy, standard selects Standard, and deep selects Premium. The saved dispatch destination controls placement, subject to locality policy. Prefer explicit light for routine recon/tracing/extraction."},
 			"cwd":             {"type": "string", "description": "Optional absolute project working directory for the sub-agent. Use this for git/GitHub workflows so scoped tools run in the intended repository."},
 			"path":            {"type": "string", "description": "Alias for cwd."},
 			"intent":          {"type": "string", "description": "Optional concise human-facing reason for the delegation, shown in permission prompts."},
@@ -45,6 +51,7 @@ func (dispatchCap) Schema() capabilities.Schema {
 
 type dispatchArgs struct {
 	Task           string   `json:"task"`
+	Class          string   `json:"class"`
 	Tools          []string `json:"tools"`
 	Tier           string   `json:"tier"`
 	Cwd            string   `json:"cwd"`
@@ -86,15 +93,18 @@ func (dispatchCap) Execute(ctx context.Context, call *capabilities.Call) (*capab
 	if workDir == "" {
 		workDir = call.WorkDir
 	}
+	task := config.Task(strings.TrimSpace(a.Class))
+	if task == "" {
+		task = config.TaskDispatch
+	}
+	if !config.ValidTask(task) {
+		return nil, fmt.Errorf("dispatch: unknown task class %q", task)
+	}
 	res, err := call.Svc.Dispatch(ctx, dispatch.Spec{
 		Mode: dispatch.Agentic,
-		// RoleCoproc, not RoleMain: a delegated sub-agent is offloadable work,
-		// so its location must resolve like co-processor work — the user's locus
-		// mode decides open vs cloud. RoleMain forced it to resolve like the main
-		// thread (cloud under cloud_primary), which defeated the whole point of
-		// delegating recon off the frontier tier.
+		// Task class, not legacy role, owns routing.
 		Role:           dispatch.RoleCoproc,
-		RoutingTask:    config.TaskDispatch,
+		RoutingTask:    task,
 		Tier:           tierForDispatch(a.Tier),
 		Task:           a.Task,
 		Tools:          a.Tools,

@@ -61,7 +61,8 @@ func TestResearchQueryPolicyThroughDispatchAndHTTP(t *testing.T) {
 	}))
 	defer server.Close()
 	provider := &queryHTTPProvider{Client: openaiadapter.NewClient(openaiadapter.Config{Backend: "llama_server", Model: "fixture", BaseURL: server.URL + "/v1"})}
-	engine := dispatch.NewEngine(func() dispatch.Providers { return dispatch.Providers{Open: provider} }, func() locus.Mode { return locus.OpenOnly }, nil)
+	routing := config.Config{TaskAssignments: map[config.Task]config.TaskAssignment{config.TaskResearch: {Destination: config.DestinationLocal, Quality: config.CostPremium}}}
+	engine := dispatch.NewEngine(func() dispatch.Providers { return dispatch.Providers{Open: provider, TaskFor: routing.TaskAssignment} }, func() locus.Mode { return locus.OpenOnly }, nil)
 	engine.SetModelFor(func(bool, config.Tier) string { return "fixture" })
 	caller := &dispatchModelCaller{call: &capabilities.Call{Svc: capabilities.Services{Dispatch: engine.Dispatch, DispatchTarget: engine.PreparedTarget}}, source: "research", tier: config.TierFastLightText}
 	pipeline := web.NewResearchPipeline(caller, querySearchFixture{}, queryFetchFixture{})

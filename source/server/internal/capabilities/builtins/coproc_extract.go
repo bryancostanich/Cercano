@@ -21,7 +21,7 @@ func (extractCap) Surfaces() capabilities.Surface {
 }
 func (extractCap) WantsProjectContext() bool { return true }
 func (extractCap) Description() string {
-	return "Extract specific information from text or a file using the local co-processor. Args: {query: string, text?: string, file_path?: string}."
+	return "Extract specific information from text or a file using the configured Reconnaissance task route. Args: {query: string, text?: string, file_path?: string}."
 }
 func (extractCap) Schema() capabilities.Schema {
 	return capabilities.Schema(`{
@@ -64,5 +64,5 @@ func (extractCap) Execute(ctx context.Context, call *capabilities.Call) (*capabi
 	}
 
 	prompt := fmt.Sprintf("Extract the following from the text below: %s\n\nRules:\n- Output ONLY the extracted content, no commentary\n- Preserve the original formatting of extracted sections\n- If nothing matches, respond with \"No matching content found.\"\n\nText:\n%s", a.Query, content)
-	return runCoproc(ctx, call, "extract", prompt, content)
+	return runTextAnalysis(ctx, call, "extract", prompt, content)
 }

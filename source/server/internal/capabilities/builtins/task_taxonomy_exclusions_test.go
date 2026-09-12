@@ -8,17 +8,17 @@ import (
 	"cercano/source/server/pkg/config"
 )
 
-// These producer controls freeze the existing excluded callers' model intent.
+// These producer controls cover migrated text analysis and explicit local intent.
 // Effective routing under redirects still needs coverage once redirects exist.
 func TestTaskTaxonomyExcludedProducerIntent(t *testing.T) {
 	t.Run("coprocessor", func(t *testing.T) {
 		svc, got := fakeDispatch(t, "ok")
-		_, err := runCoproc(context.Background(), callWith(t, svc, nil), "summarize", "summarize this", "text")
+		_, err := runTextAnalysis(context.Background(), callWith(t, svc, nil), "summarize", "summarize this", "text")
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got.Mode != dispatch.OneShot || got.Role != dispatch.RoleCoproc || got.Tier != config.TierFastLightText || got.ModelOverride != "" || got.RoutingTask != "" {
-			t.Fatalf("excluded coprocessor intent changed: %+v", got)
+		if got.Mode != dispatch.OneShot || got.Role != dispatch.RoleCoproc || got.Tier != "" || got.ModelOverride != "" || got.RoutingTask != config.TaskReconnaissance {
+			t.Fatalf("text analysis not classified as Reconnaissance: %+v", got)
 		}
 	})
 	for _, model := range []string{"", "explicit-local-model"} {

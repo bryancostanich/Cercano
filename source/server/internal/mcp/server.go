@@ -680,22 +680,6 @@ func (s *Server) handleFetch(ctx context.Context, request *gomcp.CallToolRequest
 	return s.maybeNudge(args.ProjectDir, result), nil, nil
 }
 
-// grpcModelCaller adapts the gRPC client to the web.ModelCaller interface.
-type grpcModelCaller struct {
-	client proto.AgentClient
-}
-
-func (g *grpcModelCaller) Call(ctx context.Context, prompt string) (string, error) {
-	resp, err := g.client.ProcessRequest(ctx, &proto.ProcessRequestRequest{
-		Input:  prompt,
-		Coproc: true,
-	})
-	if err != nil {
-		return "", err
-	}
-	return resp.Output, nil
-}
-
 // grpcModelCallerWithTokens is like grpcModelCaller but accumulates token counts
 // from multiple calls for telemetry reporting.
 type grpcModelCallerWithTokens struct {
@@ -720,7 +704,7 @@ func (g *grpcModelCallerWithTokens) CallQuery(ctx context.Context, prompt string
 func (g *grpcModelCallerWithTokens) callModel(ctx context.Context, prompt string, disableThinking bool) (string, error) {
 	resp, err := g.client.ProcessRequest(ctx, &proto.ProcessRequestRequest{
 		Input:           prompt,
-		Coproc:          true,
+		RoutingTask:     string(config.TaskResearch),
 		ModelOverride:   g.modelOverride,
 		DisableThinking: disableThinking,
 	})
@@ -843,10 +827,10 @@ func (s *Server) handleInit(ctx context.Context, request *gomcp.CallToolRequest,
 	builder := projectctx.NewBuilder()
 	prompt, filesSummary := builder.BuildPrompt(files, args.Context)
 
-	// Send to co-processor (locus-resolved tier)
+	// Classify project-context extraction as Reconnaissance.
 	resp, err := s.grpcClient.ProcessRequest(ctx, &proto.ProcessRequestRequest{
-		Input:  prompt,
-		Coproc: true,
+		Input:       prompt,
+		RoutingTask: string(config.TaskReconnaissance),
 	})
 	if err != nil {
 		return nil, nil, formatGRPCError(err, "cercano_init")
@@ -958,8 +942,8 @@ func (s *Server) handleDocument(ctx context.Context, request *gomcp.CallToolRequ
 		prompt = s.withContext(args.ProjectDir, prompt)
 
 		resp, err := s.grpcClient.ProcessRequest(ctx, &proto.ProcessRequestRequest{
-			Input:  prompt,
-			Coproc: true,
+			Input:       prompt,
+			RoutingTask: string(config.TaskMechanicalDevelopment),
 		})
 		if err != nil {
 			skipped = append(skipped, fmt.Sprintf("%s (inference error)", sym.Name))

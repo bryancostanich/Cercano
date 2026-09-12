@@ -110,3 +110,10 @@ Added value-only, presence-aware `llm.TokenUsage` alongside unchanged legacy con
 
 
 OpenAI presence blocker verified: `go test ./internal/llm/openai -run TestSDKUsagePresenceProbe -v -count=1` passes, demonstrating Chat missing `usage` decodes identically to reported all-zero usage, and stream missing `completion_tokens` decodes identically to reported zero. `ClientConfig` exposes HTTPDoer but no public response-decoder hook; Chat responses expose headers, not raw response JSON. Correct field-presence recovery therefore requires intervening before SDK decoding. A maintained SDK patch or provider-client migration broadens dependency ownership/compatibility work; a second raw-body decoder adds parallel parsing and memory/performance risks on the inference path. Do not label ambiguous counters known. Escalate dependency/client scope before implementing that replacement; existing normalized records and Anthropic slice are checkpointed as `8e5d30089b44`.
+
+
+### Brief revision — user-approved SDK retention
+
+The user clarified that existing token counting must remain separate from measured usage and approved keeping the current SDK with conservative unknown semantics. This supersedes the previous dependency scope escalation: do not migrate/fork the SDK or add a parallel raw-body parser. Positive plain-integer SDK counts are unambiguous; zeros remain unknown when presence was erased. The blocker is resolved by this reporting limitation, not by widening scope.
+
+Implemented OpenAI Chat/stream normalized usage, preserving legacy counters and inclusive input/output semantics. Cache-read/reasoning are subsets, not added again. Cumulative snapshots merge without summing; stream errors retain prior normalized usage. `go test ./internal/llm/openai ./internal/llm ./internal/usage` passes with synthetic Chat/SSE fixtures, missing/ambiguous-zero/negative tests, and positive cache-breakdown tests. Delegation failed validation without edits; direct implementation used. No production database, dependency, or context-estimation behavior changed.

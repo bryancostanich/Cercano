@@ -100,3 +100,8 @@ Test fresh and existing databases, preservation of legacy rows, cutover isolatio
 ## Status
 
 Approved by the user in conversation. The execution plan is captured separately in plan.md and requires its own approval before implementation. Detailed transport verification, writer ownership, adapter normalization, and query-interface work are phased in that plan; any newly discovered architectural choice must return for approval before implementation.
+
+
+## Approved clarification — SDK usage ambiguity
+
+The user approved retaining the existing OpenAI SDK and deferring dependency migration. Record unambiguous provider usage; when SDK decoding erases field presence, mark ambiguous zero counters unknown rather than treating them as measured zero. Retain our token counting for context estimation separately, never substitute it into consumed-usage totals. Surface this precision limitation in reporting. This clarification removes SDK migration as a prerequisite; it does not waive coverage, persistence health, or lifecycle requirements.

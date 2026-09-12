@@ -23,6 +23,7 @@ import (
 // change that emits ToolUseStop+ToolUseStart). A pending-event queue lets Next()
 // drain them one at a time without re-calling Recv().
 type streamReader struct {
+	usage  llm.TokenUsage
 	stream *goopenai.ChatCompletionStream
 
 	// pending events to return before the next Recv()
@@ -46,7 +47,7 @@ type streamReader struct {
 	// and flush at index-change / EOF.
 	openToolID      string
 	openToolName    string
-	openToolStarted bool          // EventToolUseStart already emitted for the open index
+	openToolStarted bool            // EventToolUseStart already emitted for the open index
 	openToolArgs    strings.Builder // arg fragments buffered before Start was emitted
 
 	// captured from the final usage chunk
@@ -122,6 +123,7 @@ func (r *streamReader) Next() (llm.StreamEvent, bool, error) {
 			r.pending = append(r.pending, llm.StreamEvent{
 				Type:         llm.EventMessageStop,
 				StopReason:   r.stopReason,
+				Usage:        r.usage,
 				InputTokens:  r.inputTokens,
 				OutputTokens: r.outputTokens,
 			})
@@ -132,7 +134,7 @@ func (r *streamReader) Next() (llm.StreamEvent, bool, error) {
 			if r.normalize != nil {
 				err = r.normalize(err)
 			}
-			return llm.StreamEvent{}, false, err
+			return llm.StreamEvent{Usage: r.usage}, false, err
 		}
 
 		// Emit EventMessageStart once (InputTokens unknown until end for OpenAI).
@@ -143,6 +145,7 @@ func (r *streamReader) Next() (llm.StreamEvent, bool, error) {
 
 		// Capture usage from the final non-[DONE] chunk.
 		if chunk.Usage != nil {
+			r.usage = r.usage.Merge(normalizedUsage(*chunk.Usage))
 			r.inputTokens = chunk.Usage.PromptTokens
 			r.outputTokens = chunk.Usage.CompletionTokens
 		}

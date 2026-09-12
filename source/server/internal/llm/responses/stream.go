@@ -16,6 +16,7 @@ import (
 // reasoning item's output_item.done and is surfaced as EventReasoning in stream
 // order, so collectStream assembles a BlockReasoning before the function_call.
 type streamReader struct {
+	usage    llm.TokenUsage
 	rc       io.ReadCloser
 	br       *bufio.Reader
 	provider string
@@ -58,16 +59,16 @@ type streamItem struct {
 func (s *streamReader) Next() (llm.StreamEvent, bool, error) {
 	for len(s.pending) == 0 {
 		if s.failure != nil {
-			return llm.StreamEvent{}, false, s.failure
+			return llm.StreamEvent{Usage: s.usage}, false, s.failure
 		}
 		if s.done {
-			return llm.StreamEvent{}, false, nil
+			return llm.StreamEvent{Usage: s.usage}, false, nil
 		}
 		data, err := s.readFrame()
 		if err == io.EOF {
 			s.done = true
 			if data == "" {
-				return llm.StreamEvent{}, false, nil
+				return llm.StreamEvent{Usage: s.usage}, false, nil
 			}
 		} else if err != nil {
 			// A mid-stream read failure bypasses the request-round-trip
@@ -75,10 +76,10 @@ func (s *streamReader) Next() (llm.StreamEvent, bool, error) {
 			// otherwise a dropped connection surfaces raw as ErrUnknown
 			// instead of the transient ErrNetwork it is.
 			if llm.IsNetworkError(err) {
-				return llm.StreamEvent{}, false,
+				return llm.StreamEvent{Usage: s.usage}, false,
 					&llm.Error{Class: llm.ErrNetwork, Provider: s.provider, Err: err}
 			}
-			return llm.StreamEvent{}, false, err
+			return llm.StreamEvent{Usage: s.usage}, false, err
 		}
 		if data == "" {
 			continue
@@ -125,6 +126,9 @@ func (s *streamReader) dispatch(data string) {
 	if err := json.Unmarshal([]byte(data), &env); err != nil {
 		return // ignore unparseable frames
 	}
+	if env.Response != nil {
+		s.usage = s.usage.Merge(env.Response.Usage.normalized())
+	}
 	switch env.Type {
 	case "response.created":
 		s.pending = append(s.pending, llm.StreamEvent{Type: llm.EventMessageStart})
@@ -147,12 +151,12 @@ func (s *streamReader) dispatch(data string) {
 			s.pending = append(s.pending, llm.StreamEvent{Type: llm.EventReasoning, ReasoningID: env.Item.ID, ReasoningData: env.Item.EncryptedContent})
 		}
 	case "response.completed":
-		ev := llm.StreamEvent{Type: llm.EventMessageStop}
+		ev := llm.StreamEvent{Type: llm.EventMessageStop, Usage: s.usage}
 		if env.Response != nil {
 			ev.StopReason = env.Response.Status
 			if env.Response.Usage != nil {
-				ev.InputTokens = env.Response.Usage.InputTokens
-				ev.OutputTokens = env.Response.Usage.OutputTokens
+				ev.InputTokens = int(s.usage.Input.Value)
+				ev.OutputTokens = int(s.usage.Output.Value)
 			}
 		}
 		s.pending = append(s.pending, ev)

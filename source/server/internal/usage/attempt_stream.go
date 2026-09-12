@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 
 	"cercano/source/server/internal/llm"
 )
@@ -40,6 +41,7 @@ func (a *Attempt) TrackStream(inner llm.StreamReader) llm.StreamReader {
 }
 
 type attemptReader struct {
+	stopSeen  atomic.Bool
 	inner     llm.StreamReader
 	attempt   *Attempt
 	closeOnce sync.Once
@@ -58,10 +60,16 @@ func (r *attemptReader) Next() (llm.StreamEvent, bool, error) {
 		r.attempt.Finish(errorOutcome(err))
 	case ev.Type == llm.EventError:
 		r.attempt.Finish(errorOutcome(ev.Err))
-	case ev.Type == llm.EventMessageStop:
-		r.attempt.Finish(Completed)
 	case !ok:
-		r.attempt.Finish(Interrupted) // EOF without terminal framing
+		if r.stopSeen.Load() {
+			r.attempt.Finish(Completed)
+		} else {
+			r.attempt.Finish(Interrupted)
+		}
+	case ev.Type == llm.EventMessageStop:
+		// Some adapters emit logical message stop before usage metadata. Drain to
+		// EOF before finalizing; explicit early Close remains interrupted.
+		r.stopSeen.Store(true)
 	}
 	return ev, ok, err
 }

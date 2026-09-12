@@ -11,6 +11,7 @@ import (
 
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
+	"cercano/source/server/internal/usage"
 )
 
 type Config struct {
@@ -165,18 +166,26 @@ func (c *Client) Chat(ctx context.Context, req ChatRequest) (ChatResponse, error
 	if req.Temperature != nil && c.tempDeprecated.Load(req.Model) {
 		req.Temperature = nil
 	}
-	resp, err := c.sdk.Messages.New(ctx, c.buildParams(req))
+	resp, err := c.chatOnce(ctx, req)
 	if err != nil && req.Temperature != nil && isTemperatureDeprecated(err) {
 		c.tempDeprecated.Store(req.Model)
 		req.Temperature = nil
-		resp, err = c.sdk.Messages.New(ctx, c.buildParams(req))
+		resp, err = c.chatOnce(ctx, req)
 	}
+	return resp, err
+}
+
+func (c *Client) chatOnce(ctx context.Context, req ChatRequest) (out ChatResponse, err error) {
+	params := c.buildParams(req)
+	a := usage.StartAttempt(ctx, c.Name(), string(params.Model))
+	defer func() { a.FinishResponse(out, err) }()
+	resp, err := c.sdk.Messages.New(ctx, params)
 	if err != nil {
 		return ChatResponse{}, c.normalize(err)
 	}
 	var counts usageCounts
 	counts.message(resp.Usage)
-	out := ChatResponse{
+	out = ChatResponse{
 		Usage:        counts.snapshot(),
 		StopReason:   string(resp.StopReason),
 		InputTokens:  int(resp.Usage.InputTokens),
@@ -190,6 +199,8 @@ func (c *Client) Chat(ctx context.Context, req ChatRequest) (ChatResponse, error
 }
 
 func (c *Client) StreamChat(ctx context.Context, req ChatRequest) (llm.StreamReader, error) {
-	st := c.sdk.Messages.NewStreaming(ctx, c.buildParams(req))
-	return &streamReader{stream: st, blockKind: map[int64]string{}, normalize: c.normalize}, nil
+	params := c.buildParams(req)
+	a := usage.StartAttempt(ctx, c.Name(), string(params.Model))
+	st := c.sdk.Messages.NewStreaming(ctx, params)
+	return a.TrackStream(&streamReader{stream: st, blockKind: map[int64]string{}, normalize: c.normalize}), nil
 }

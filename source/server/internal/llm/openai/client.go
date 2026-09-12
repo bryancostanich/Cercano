@@ -12,6 +12,7 @@ import (
 
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
+	"cercano/source/server/internal/usage"
 )
 
 // Config holds the OpenAI client configuration.
@@ -215,7 +216,7 @@ func logRequestDiagnostics(req llm.ChatRequest, wire goopenai.ChatCompletionRequ
 }
 
 // Chat sends a non-streaming chat completion request and returns mapped blocks + usage.
-func (c *Client) Chat(ctx context.Context, req llm.ChatRequest) (llm.ChatResponse, error) {
+func (c *Client) Chat(ctx context.Context, req llm.ChatRequest) (out llm.ChatResponse, err error) {
 	if !c.supportsVision {
 		req.Messages, _ = stripImagesForTextOnly(req.Messages)
 	}
@@ -228,12 +229,14 @@ func (c *Client) Chat(ctx context.Context, req llm.ChatRequest) (llm.ChatRespons
 	}
 	wire := c.buildRequest(req, false)
 	logRequestDiagnostics(req, wire, c.backend, false)
+	a := usage.StartAttempt(ctx, c.Name(), wire.Model)
+	defer func() { a.FinishResponse(out, err) }()
 	resp, err := c.api.CreateChatCompletion(c.requestContext(ctx, req), wire)
 	if err != nil {
 		log.Printf("[openai] request failed: conv=%s request_id=%s backend=%s model=%s stream=false error=%v", req.ConversationID, req.RequestID, c.backend, wire.Model, err)
 		return llm.ChatResponse{}, c.normalize(err)
 	}
-	out := llm.ChatResponse{
+	out = llm.ChatResponse{
 		Usage:        normalizedUsage(resp.Usage),
 		InputTokens:  resp.Usage.PromptTokens,
 		OutputTokens: resp.Usage.CompletionTokens,
@@ -261,12 +264,14 @@ func (c *Client) StreamChat(ctx context.Context, req llm.ChatRequest) (llm.Strea
 	}
 	wire := c.buildRequest(req, true)
 	logRequestDiagnostics(req, wire, c.backend, true)
+	a := usage.StartAttempt(ctx, c.Name(), wire.Model)
 	stream, err := c.api.CreateChatCompletionStream(c.requestContext(ctx, req), wire)
 	if err != nil {
 		log.Printf("[openai] request failed: conv=%s request_id=%s backend=%s model=%s stream=true error=%v", req.ConversationID, req.RequestID, c.backend, wire.Model, err)
+		a.FinishResponse(llm.ChatResponse{}, c.normalize(err))
 		return nil, c.normalize(err)
 	}
 	r := newStreamReader(stream)
 	r.normalize = c.normalize
-	return r, nil
+	return a.TrackStream(r), nil
 }

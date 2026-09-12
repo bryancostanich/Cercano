@@ -88,8 +88,14 @@ type outputContent struct {
 }
 
 type usage struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
+	InputTokens  *int64 `json:"input_tokens"`
+	OutputTokens *int64 `json:"output_tokens"`
+	InputDetails struct {
+		CachedTokens *int64 `json:"cached_tokens"`
+	} `json:"input_tokens_details"`
+	OutputDetails struct {
+		ReasoningTokens *int64 `json:"reasoning_tokens"`
+	} `json:"output_tokens_details"`
 }
 
 type apiError struct {

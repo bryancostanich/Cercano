@@ -48,6 +48,7 @@ func TestAttemptStreamTerminals(t *testing.T) {
 			r := a.TrackStream(inner)
 			r.Next()
 			r.Next()
+			r.Next() // drain trailing metadata/EOF before successful finalization
 			last := got[len(got)-1]
 			if last.Outcome != tc.want || last.Tokens.Input != llm.ReportedTokens(11) {
 				t.Fatalf("terminal=%+v", last)
@@ -83,5 +84,23 @@ func TestAttemptResponseErrorPreservesUsage(t *testing.T) {
 	a.FinishResponse(llm.ChatResponse{Model: "actual", Usage: llm.TokenUsage{Input: llm.ReportedTokens(11), Output: llm.ReportedTokens(0)}}, errors.New("failed"))
 	if last.Outcome != Failed || last.Model != "actual" || !last.Tokens.TotalsKnown() {
 		t.Fatalf("error response=%+v", last)
+	}
+}
+
+// Bedrock sends MessageStop before a separate metadata/usage frame. A logical
+// message stop must not freeze accounting before the stream has been drained.
+func TestAttemptUsageAfterMessageStop(t *testing.T) {
+	var last AttemptObservation
+	ctx := WithAttempts(context.Background(), func(o AttemptObservation) bool { last = o; return true }, Attribution{})
+	inner := &attemptScript{reads: []attemptScriptRead{
+		{event: llm.StreamEvent{Type: llm.EventMessageStop}, ok: true},
+		{event: llm.StreamEvent{Type: llm.EventMessageStop, Usage: llm.TokenUsage{Input: llm.ReportedTokens(11), Output: llm.ReportedTokens(7)}}, ok: true},
+	}}
+	r := StartAttempt(ctx, "bedrock", "fake").TrackStream(inner)
+	r.Next()
+	r.Next()
+	r.Next()
+	if last.Outcome != Completed || last.Tokens.Input != llm.ReportedTokens(11) || last.Tokens.Output != llm.ReportedTokens(7) {
+		t.Fatalf("trailing metadata lost: %+v", last)
 	}
 }

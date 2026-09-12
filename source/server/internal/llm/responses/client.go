@@ -14,6 +14,7 @@ import (
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/llm/httpx"
+	accounting "cercano/source/server/internal/usage"
 )
 
 const defaultBaseURL = "https://api.openai.com/v1"
@@ -306,7 +307,7 @@ func (c *Client) Chat(ctx context.Context, req llm.ChatRequest) (llm.ChatRespons
 	return resp, err
 }
 
-func (c *Client) chatOnce(ctx context.Context, req llm.ChatRequest) (llm.ChatResponse, error) {
+func (c *Client) chatOnce(ctx context.Context, req llm.ChatRequest) (out llm.ChatResponse, err error) {
 	// The ChatGPT-account codex backend rejects non-streaming requests
 	// ("Stream must be set to true"). For that route, run the streaming path and
 	// aggregate it into the non-streaming ChatResponse shape.
@@ -322,6 +323,8 @@ func (c *Client) chatOnce(ctx context.Context, req llm.ChatRequest) (llm.ChatRes
 	if err != nil {
 		return llm.ChatResponse{}, err
 	}
+	a := accounting.StartAttempt(ctx, c.Name(), built.Model)
+	defer func() { a.FinishResponse(out, err) }()
 	httpResp, err := c.do(ctx, built)
 	if err != nil {
 		return llm.ChatResponse{}, err
@@ -338,10 +341,11 @@ func (c *Client) chatOnce(ctx context.Context, req llm.ChatRequest) (llm.ChatRes
 	if err := json.Unmarshal(body, &r); err != nil {
 		return llm.ChatResponse{}, fmt.Errorf("responses: decode: %w", err)
 	}
-	out := llm.ChatResponse{Blocks: blocksFromOutput(r.Output), StopReason: r.Status, Model: r.Model}
+	out = llm.ChatResponse{Blocks: blocksFromOutput(r.Output), StopReason: r.Status, Model: r.Model}
 	if r.Usage != nil {
-		out.InputTokens = r.Usage.InputTokens
-		out.OutputTokens = r.Usage.OutputTokens
+		out.Usage = r.Usage.normalized()
+		out.InputTokens = int(out.Usage.Input.Value)
+		out.OutputTokens = int(out.Usage.Output.Value)
 	}
 	return out, nil
 }
@@ -368,18 +372,22 @@ func (c *Client) streamOnce(ctx context.Context, req llm.ChatRequest) (llm.Strea
 	if err != nil {
 		return nil, err
 	}
+	a := accounting.StartAttempt(ctx, c.Name(), built.Model)
 	httpResp, err := c.do(ctx, built)
 	if err != nil {
+		a.FinishResponse(llm.ChatResponse{}, err)
 		return nil, err
 	}
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
 		body, _ := io.ReadAll(httpResp.Body)
 		httpResp.Body.Close()
-		return nil, c.normalizeHTTP(httpResp, body)
+		err := c.normalizeHTTP(httpResp, body)
+		a.FinishResponse(llm.ChatResponse{}, err)
+		return nil, err
 	}
 	reader := newStreamReader(httpResp.Body, c.Name())
 	reader.normalizeAuth = c.normalizeStreamAuthentication
-	return reader, nil
+	return a.TrackStream(reader), nil
 }
 
 func (c *Client) normalizeStreamAuthentication(err error) error {

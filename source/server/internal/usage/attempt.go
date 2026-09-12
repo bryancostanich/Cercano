@@ -74,6 +74,11 @@ var attemptProcessID = func() string {
 	return hex.EncodeToString(b[:])
 }()
 
+// NewIdentity supplies a process-unique stable accounting record identity.
+func NewIdentity() string {
+	return attemptProcessID + "-" + strconv.FormatUint(attemptSequence.Add(1), 10)
+}
+
 // Attempt owns one physical call. Retrying adapters must StartAttempt again for
 // every request; SDK retries require instrumentation inside the SDK retry loop.
 type Attempt struct {
@@ -88,7 +93,7 @@ func StartAttempt(ctx context.Context, provider, model string) *Attempt {
 		return nil
 	}
 	a := &Attempt{sink: config.sink, observation: AttemptObservation{
-		ID:       attemptProcessID + "-" + strconv.FormatUint(attemptSequence.Add(1), 10),
+		ID:       NewIdentity(),
 		Revision: 1, Attribution: config.attribution, Provider: provider, Model: model,
 		StartedAt: time.Now().UTC(), Outcome: Started,
 	}}

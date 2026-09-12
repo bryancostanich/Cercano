@@ -10,6 +10,7 @@ import (
 
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
+	"cercano/source/server/internal/usage"
 )
 
 type Config struct {
@@ -42,7 +43,7 @@ func (c *Client) Capabilities() inference.Capabilities {
 	}
 }
 
-func (c *Client) Chat(ctx context.Context, req ChatRequest) (ChatResponse, error) {
+func (c *Client) Chat(ctx context.Context, req ChatRequest) (out ChatResponse, err error) {
 	msgs := make([]api.Message, 0, len(req.Messages)+1)
 	if req.System != "" {
 		msgs = append(msgs, api.Message{Role: "system", Content: req.System})
@@ -68,15 +69,20 @@ func (c *Client) Chat(ctx context.Context, req ChatRequest) (ChatResponse, error
 		Tools:    toolsToOllama(req.Tools),
 		Options:  opts,
 	}
+	a := usage.StartAttempt(ctx, c.Name(), freq.Model)
+	defer func() { a.FinishResponse(out, err) }()
 	var got *api.ChatResponse
-	err := c.api.Chat(ctx, freq, func(r api.ChatResponse) error {
+	err = c.api.Chat(ctx, freq, func(r api.ChatResponse) error {
 		got = &r
+		out.Usage = out.Usage.Merge(normalizedUsage(r))
+		out.Model = r.Model
 		return nil
 	})
 	if err != nil {
-		return ChatResponse{}, err
+		return out, err
 	}
-	out := ChatResponse{
+	out = ChatResponse{
+		Usage:        out.Usage,
 		StopReason:   "end_turn",
 		InputTokens:  got.PromptEvalCount,
 		OutputTokens: got.EvalCount,

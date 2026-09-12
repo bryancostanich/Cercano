@@ -43,7 +43,7 @@ func mapStreamEvent(ev types.ConverseStreamOutput) (llm.StreamEvent, bool) {
 	case *types.ConverseStreamOutputMemberMessageStop:
 		return llm.StreamEvent{Type: llm.EventMessageStop, StopReason: string(e.Value.StopReason)}, true
 	case *types.ConverseStreamOutputMemberMetadata:
-		se := llm.StreamEvent{Type: llm.EventMessageStop}
+		se := llm.StreamEvent{Type: llm.EventMessageStop, Usage: normalizedUsage(e.Value.Usage)}
 		if e.Value.Usage != nil {
 			se.InputTokens = int(aws.ToInt32(e.Value.Usage.InputTokens))
 			se.OutputTokens = int(aws.ToInt32(e.Value.Usage.OutputTokens))
@@ -56,6 +56,7 @@ func mapStreamEvent(ev types.ConverseStreamOutput) (llm.StreamEvent, bool) {
 // streamReader pulls SDK Converse stream events off the channel and runs each
 // through mapStreamEvent. Pull-based, no background goroutine.
 type streamReader struct {
+	usage  llm.TokenUsage
 	es     *bedrockruntime.ConverseStreamEventStream
 	events <-chan types.ConverseStreamOutput
 	queued []llm.StreamEvent
@@ -70,11 +71,12 @@ func (r *streamReader) Next() (llm.StreamEvent, bool, error) {
 		ev, ok := <-r.events
 		if !ok {
 			if err := r.es.Err(); err != nil {
-				return llm.StreamEvent{}, false, err
+				return llm.StreamEvent{Usage: r.usage}, false, err
 			}
-			return llm.StreamEvent{}, false, nil
+			return llm.StreamEvent{Usage: r.usage}, false, nil
 		}
 		if se, emit := mapStreamEvent(ev); emit {
+			r.usage = r.usage.Merge(se.Usage)
 			r.queued = append(r.queued, se)
 		}
 	}

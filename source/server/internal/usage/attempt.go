@@ -152,3 +152,10 @@ func (a *Attempt) Finish(outcome Outcome) {
 	a.mu.Unlock()
 	a.sink(snapshot)
 }
+
+// AttemptsEnabled lets adapters avoid installing optional SDK hooks when no
+// accounting sink is attached to the request context.
+func AttemptsEnabled(ctx context.Context) bool {
+	config, _ := ctx.Value(attemptContextKey{}).(attemptContext)
+	return config.sink != nil
+}

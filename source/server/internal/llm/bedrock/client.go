@@ -11,6 +11,7 @@ import (
 
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
+	"cercano/source/server/internal/usage"
 )
 
 // Config holds the Bedrock client configuration.
@@ -81,17 +82,22 @@ func (c *Client) Chat(ctx context.Context, req llm.ChatRequest) (llm.ChatRespons
 	if err != nil {
 		return llm.ChatResponse{}, err
 	}
+	m := &attemptMiddleware{model: modelOr(c.model, req.Model)}
+	var opts []func(*bedrockruntime.Options)
+	if usage.AttemptsEnabled(ctx) {
+		opts = append(opts, m.option)
+	}
 	out, err := c.api.Converse(ctx, &bedrockruntime.ConverseInput{
 		ModelId:         aws.String(modelOr(c.model, req.Model)),
 		Messages:        msgs,
 		System:          systemBlocks(req.System),
 		ToolConfig:      toolsToConverse(req.Tools),
 		InferenceConfig: inferenceConfig(req),
-	})
+	}, opts...)
 	if err != nil {
 		return llm.ChatResponse{}, fmt.Errorf("bedrock: converse: %w", err)
 	}
-	resp := llm.ChatResponse{StopReason: string(out.StopReason)}
+	resp := llm.ChatResponse{Model: m.model, Usage: normalizedUsage(out.Usage), StopReason: string(out.StopReason)}
 	if m, ok := out.Output.(*types.ConverseOutputMemberMessage); ok {
 		resp.Blocks = blocksFromConverse(m.Value)
 	}
@@ -108,15 +114,20 @@ func (c *Client) StreamChat(ctx context.Context, req llm.ChatRequest) (llm.Strea
 	if err != nil {
 		return nil, err
 	}
+	m := &attemptMiddleware{model: modelOr(c.model, req.Model)}
+	var opts []func(*bedrockruntime.Options)
+	if usage.AttemptsEnabled(ctx) {
+		opts = append(opts, m.option)
+	}
 	out, err := c.api.ConverseStream(ctx, &bedrockruntime.ConverseStreamInput{
 		ModelId:         aws.String(modelOr(c.model, req.Model)),
 		Messages:        msgs,
 		System:          systemBlocks(req.System),
 		ToolConfig:      toolsToConverse(req.Tools),
 		InferenceConfig: inferenceConfig(req),
-	})
+	}, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("bedrock: converse stream: %w", err)
 	}
-	return newStreamReader(out.GetStream()), nil
+	return m.streamAttempt.TrackStream(newStreamReader(out.GetStream())), nil
 }

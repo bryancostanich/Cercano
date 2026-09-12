@@ -128,3 +128,7 @@ func TestAgenticDispatch_MidLoopStartupFailureContinuesWithoutReplay(t *testing.
 		t.Fatalf("wrong result/attribution: %+v", res)
 	}
 }
+
+func (localThenStartupFailure) RuntimeContext(context.Context, string, bool) (llm.RuntimeContext, error) {
+	return llm.RuntimeContext{Window: 65536, InstanceID: "startup-fixture"}, nil
+}

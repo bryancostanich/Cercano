@@ -46,9 +46,9 @@ func TestResolveWindow_FallsBackToNameTable(t *testing.T) {
 // headroom the running process cannot serve.
 func TestResolveWindow_LocalRuntimeCeilingWins(t *testing.T) {
 	c := cfg.Config{LocusMode: "open_primary", OpenRuntime: "llama_server"}
-	c.LlamaServer.ContextSize = 8192
-	c.LlamaServer.ContextSizeSet = true
+	c.LlamaServer.ContextSize = contextOverridePtr(8192)
 	x := windowSvc(t, c, func(string) (int, bool) { return 1_048_576, true })
+	x.SetLocalContextWindow(func(string) (int, bool) { return 8192, true })
 	window, known := x.resolveWindow("some-local-model")
 	if window != 8192 || !known {
 		t.Fatalf("resolveWindow = %d/%v, want the launched 8192/true", window, known)
@@ -61,5 +61,16 @@ func TestResolveWindow_NilResolverKeepsPreviousBehavior(t *testing.T) {
 	window, known := x.resolveWindow("claude-sonnet-4-6")
 	if window != 200_000 || !known {
 		t.Fatalf("resolveWindow = %d/%v, want 200000/true", window, known)
+	}
+}
+
+func contextOverridePtr(n int) *int { return &n }
+
+func TestResolveWindowUnknownRuntimeDoesNotUseConfig(t *testing.T) {
+	c := cfg.Config{LocusMode: "open_only", OpenRuntime: "llama_server"}
+	c.LlamaServer.ContextSize = contextOverridePtr(131072)
+	x := windowSvc(t, c, nil)
+	if n, known := x.resolveWindow("qwen3"); n != 0 || known {
+		t.Fatalf("unconfirmed window=%d/%v", n, known)
 	}
 }

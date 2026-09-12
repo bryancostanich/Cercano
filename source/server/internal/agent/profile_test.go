@@ -81,7 +81,6 @@ func TestIsSessionControlTool(t *testing.T) {
 		"suggest_autonomous",
 		"request_autonomous_execution",
 		"request_autonomous_exit",
-		"complete_autonomous_review",
 		"auto_exit",
 	}
 	for _, name := range control {

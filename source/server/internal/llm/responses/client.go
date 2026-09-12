@@ -184,14 +184,17 @@ func (c *Client) do(ctx context.Context, body request) (*http.Response, error) {
 // token source and identifies the client the way the codex backend expects;
 // otherwise it uses the static API key.
 func (c *Client) authorize(ctx context.Context, req *http.Request) error {
+	if c.route == RouteChatGPT && c.tokens == nil {
+		return &llm.Error{Class: llm.ErrCredential, Provider: c.Name(), Err: &llm.CredentialError{Class: llm.ErrCredential, Provider: c.Name(), Method: llm.AuthSubscription, Reason: llm.CredentialSource}}
+	}
 	if c.tokens != nil {
 		access, accountID, err := c.tokens.Token(ctx)
 		if err != nil {
-			// A failing token source (logged-out ChatGPT subscription, refresh
-			// rejected) is an auth-class failure: the resilience engine fails
-			// it over rather than retrying a credential that won't heal.
-			return &llm.Error{Class: llm.ErrAuth, Provider: c.Name(),
-				Err: fmt.Errorf("responses: chatgpt auth: %w", err)}
+			profile := ""
+			if source, ok := c.tokens.(interface{ CredentialProfile() string }); ok {
+				profile = source.CredentialProfile()
+			}
+			return llm.NormalizeCredentialFailure(err, c.Name(), profile)
 		}
 		req.Header.Set("Authorization", "Bearer "+access)
 		if accountID != "" {
@@ -248,14 +251,24 @@ func (c *Client) normalizeHTTP(resp *http.Response, body []byte) error {
 	msg := strings.ToLower(inner.Error())
 	quotaMarked := code == "insufficient_quota" || typ == "insufficient_quota" ||
 		strings.Contains(msg, "quota") || strings.Contains(msg, "usage limit")
-	if overflow, used, limit := llm.DetectContextOverflow(inner.Error()); overflow {
+	if overflow, used, limit := llm.DetectContextOverflow(inner.Error()); overflow && resp.StatusCode != http.StatusUnauthorized && resp.StatusCode != http.StatusForbidden {
 		ne.Class = llm.ErrContextOverflow
 		ne.Used, ne.Limit = used, limit
 		return ne
 	}
 	switch {
-	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
+	case resp.StatusCode == http.StatusUnauthorized:
 		ne.Class = llm.ErrAuth
+		if c.tokens != nil {
+			profile := ""
+			if source, ok := c.tokens.(interface{ CredentialProfile() string }); ok {
+				profile = source.CredentialProfile()
+			}
+			ne.Class = llm.ErrLoginRequired
+			ne.Err = &llm.CredentialError{Class: ne.Class, Provider: c.Name(), Profile: profile, Method: llm.AuthSubscription, Reason: llm.CredentialRejected, Cause: inner}
+		}
+	case resp.StatusCode == http.StatusForbidden:
+		ne.Class = llm.ErrPermission
 	case resp.StatusCode == http.StatusTooManyRequests:
 		if quotaMarked || ne.RetryAfter >= httpx.QuotaRetryAfterFloor {
 			ne.Class = llm.ErrQuota
@@ -268,6 +281,9 @@ func (c *Client) normalizeHTTP(resp *http.Response, body []byte) error {
 		ne.Class = llm.ErrInvalidRequest
 	default:
 		ne.Class = llm.ErrUnknown
+	}
+	if ne.Class == llm.ErrAuth || ne.Class == llm.ErrPermission {
+		ne.Err = llm.SafeAuthenticationDiagnostic(ne.Class, ne.Err)
 	}
 	return ne
 }
@@ -361,5 +377,18 @@ func (c *Client) streamOnce(ctx context.Context, req llm.ChatRequest) (llm.Strea
 		httpResp.Body.Close()
 		return nil, c.normalizeHTTP(httpResp, body)
 	}
-	return newStreamReader(httpResp.Body, c.Name()), nil
+	reader := newStreamReader(httpResp.Body, c.Name())
+	reader.normalizeAuth = c.normalizeStreamAuthentication
+	return reader, nil
+}
+
+func (c *Client) normalizeStreamAuthentication(err error) error {
+	if llm.ClassOf(err) != llm.ErrAuth || c.tokens == nil {
+		return err
+	}
+	profile := ""
+	if source, ok := c.tokens.(interface{ CredentialProfile() string }); ok {
+		profile = source.CredentialProfile()
+	}
+	return &llm.Error{Class: llm.ErrLoginRequired, Provider: c.Name(), Err: &llm.CredentialError{Class: llm.ErrLoginRequired, Provider: c.Name(), Profile: profile, Method: llm.AuthSubscription, Reason: llm.CredentialRejected, Cause: err}}
 }

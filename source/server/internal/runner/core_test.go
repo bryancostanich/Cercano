@@ -27,7 +27,6 @@ import (
 	"cercano/source/server/internal/agenttools"
 	engine "cercano/source/server/internal/engine"
 	"cercano/source/server/internal/failurelog"
-	cfgsvc "cercano/source/server/internal/hostsvc/config"
 	permissions "cercano/source/server/internal/hostsvc/permissions"
 	providers "cercano/source/server/internal/hostsvc/providers"
 	"cercano/source/server/internal/inference"
@@ -297,7 +296,7 @@ func (c *fakeConfig) Get() config.Config                               { return 
 func (c *fakeConfig) Path() string                                     { return "" }
 func (c *fakeConfig) Secrets() secrets.Store                           { return nil }
 func (c *fakeConfig) ActiveProfile() (config.CloudProfile, bool)       { return config.CloudProfile{}, false }
-func (c *fakeConfig) Set(_ config.Config)                              {}
+func (c *fakeConfig) Set(_ config.Config) error                        { return nil }
 func (c *fakeConfig) SetPath(_ string)                                 {}
 func (c *fakeConfig) SetSecrets(_ secrets.Store)                       {}
 func (c *fakeConfig) SetActiveProfile(_ string) bool                   { return false }
@@ -305,7 +304,7 @@ func (c *fakeConfig) UpsertProfile(_ config.CloudProfile) (bool, bool) { return 
 func (c *fakeConfig) RemoveProfile(_ string) (bool, bool)              { return false, false }
 func (c *fakeConfig) SetBackupProfile(_ string) bool                   { return false }
 func (c *fakeConfig) ProfileInfo(_ string) (bool, bool)                { return false, false }
-func (c *fakeConfig) Mutate(_ func(*config.Config))                    {}
+func (c *fakeConfig) Mutate(_ func(*config.Config)) error              { return nil }
 func (c *fakeConfig) SetCloudModel(_ string)                           {}
 func (c *fakeConfig) Persist()                                         {}
 
@@ -332,7 +331,7 @@ func (p *fakePerms) StartWatcher(_ context.Context, _ string) error { return nil
 // ---------------------------------------------------------------------------
 
 var _ providers.Resolver = (*fakeResolver)(nil)
-var _ cfgsvc.Service = (*fakeConfig)(nil)
+var _ ConfigReader = (*fakeConfig)(nil)
 var _ permissions.Broker = (*fakePerms)(nil)
 var _ TurnHistory = (*fakeTurnHistory)(nil)
 var _ ToolSvc = (*fakeToolSvc)(nil)
@@ -412,14 +411,15 @@ func TestCore_InvalidContextTextDoesNotCrossTierFallback(t *testing.T) {
 
 func TestCore_ContextOverflowCanFallbackToLargerKnownWindow(t *testing.T) {
 	cloudSpy := &spyProvider{}
+	primary := &confirmedRuntimeProvider{Provider: &contextOverflowProvider{}, window: 8192}
 	deps := buildDeps(&contextOverflowProvider{})
 	deps.Config = &fakeConfig{cfg: config.Config{
 		LocusMode:   "open_primary",
 		OpenRuntime: "llama_server",
-		LlamaServer: config.LlamaServerConfig{ContextSize: 8_192, ContextSizeSet: true},
+		LlamaServer: config.LlamaServerConfig{ContextSize: contextOverridePtr(8_192)},
 	}}
 	deps.Providers = &fakeResolver{
-		prov:       &contextOverflowProvider{},
+		prov: primary, open: primary,
 		cloud:      cloudSpy,
 		isCloud:    false,
 		isCloudSet: true,
@@ -736,7 +736,7 @@ func TestBuildSystemPrompt_SignalsActiveProfile(t *testing.T) {
 	}
 
 	autonomous := BuildSystemPrompt(d, "", agent.AutonomousProfile())
-	for _, want := range []string{"AUTONOMOUS MODE", "autonomous-run protocol", "approved run brief", "visible progress", "progress beacons", "capture_decision", "checkpoint boundary is not a pause boundary", "request_autonomous_exit", "complete_autonomous_review"} {
+	for _, want := range []string{"AUTONOMOUS MODE", "autonomous-run protocol", "approved run brief", "visible progress", "progress beacons", "capture_decision", "checkpoint boundary is not a pause boundary", "request_autonomous_exit", "do not replay settled decisions"} {
 		if !strings.Contains(autonomous, want) {
 			t.Fatalf("autonomous-profile prompt should contain %q; got:\n%s", want, autonomous)
 		}

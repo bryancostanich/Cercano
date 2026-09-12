@@ -44,6 +44,8 @@ type Spec struct {
 	ConversationID      string
 	Source              string
 	ModelOverride       string // advisory model name within locus bounds
+	// DisableThinking is a one-shot generation policy, not a global setting.
+	DisableThinking bool
 
 	// Tier names the model-taxonomy tier this dispatch runs on. Empty
 	// defaults by role: RoleMain → everyday, RoleCoproc → fast_light_text.
@@ -168,17 +170,34 @@ func (e *Engine) Target(spec Spec) (modelbudget.Target, error) {
 	if err != nil {
 		return modelbudget.Target{}, err
 	}
+	return dispatchTarget(context.Background(), sel, tier, model, spec), nil
+}
+func dispatchTarget(ctx context.Context, sel inference.Selection, tier config.Tier, model string, spec Spec) modelbudget.Target {
 	intent := tier
 	if spec.ModelOverride != "" {
 		tier = ""
 	}
-	route := inference.TargetForCall(sel.Provider, inference.Call{Model: model, Tier: string(tier), FallbackTier: string(intent)})
-	return modelbudget.Target{
-		Provider: route.Provider, Profile: route.Profile, Destination: route.Destination, ContextWindow: route.ContextWindow, ContextWindowKnown: route.ContextWindowKnown,
-		Model:   route.Model,
-		Tier:    string(tier),
-		IsCloud: sel.IsCloud,
-	}, nil
+	route := inference.TargetForContext(ctx, sel.Provider, inference.Call{Model: model, Tier: string(tier), FallbackTier: string(intent)})
+	return modelbudget.Target{Provider: route.Provider, Profile: route.Profile, Destination: route.Destination, ContextWindow: route.ContextWindow, ContextWindowKnown: route.ContextWindowKnown, Model: route.Model, Tier: string(tier), IsCloud: sel.IsCloud}
+}
+
+// PreparedTarget uses the same destination snapshot as dispatch, then prepares
+// runtime-confirmed Local capacity before the caller builds its prompt.
+func (e *Engine) PreparedTarget(ctx context.Context, spec Spec) (modelbudget.Target, error) {
+	sel, tier, model, err := e.resolve(spec, e.modeFn(), e.providersFn())
+	if err != nil {
+		return modelbudget.Target{}, err
+	}
+	target := dispatchTarget(ctx, sel, tier, model, spec)
+	capacity, err := llm.ResolveRuntimeContext(ctx, sel.Provider, target.Model, true)
+	if err != nil {
+		return target, err
+	}
+	if capacity.Window > 0 {
+		target.ContextWindow = capacity.Window
+		target.ContextWindowKnown = true
+	}
+	return target, nil
 }
 
 // Dispatch executes spec and returns a Result.
@@ -219,6 +238,11 @@ func (e *Engine) Dispatch(ctx context.Context, spec Spec) (Result, error) {
 	// tagging stay disjoint from the caller's conversation.
 	ctx = llm.WithSessionID(ctx, "oneshot-"+newDispatchID())
 
+	capacity, prepErr := llm.ResolveRuntimeContext(ctx, sel.Provider, model, true)
+	if prepErr != nil {
+		return Result{}, prepErr
+	}
+	ctx = llm.WithRuntimeContext(ctx, capacity)
 	// Optionally prepend project context (OneShot only).
 	prompt := spec.Prompt
 	if spec.WantsProjectContext && spec.WorkDir != "" && e.ctxLoader != nil {
@@ -227,10 +251,11 @@ func (e *Engine) Dispatch(ctx context.Context, spec Spec) (Result, error) {
 
 	// 4. Build chat request.
 	req := llm.ChatRequest{
-		Model:        model,
-		Tier:         string(spec.EffectiveTier()),
-		FallbackTier: string(spec.FallbackTier),
-		System:       spec.System,
+		Model:           model,
+		Tier:            string(spec.Tier),
+		FallbackTier:    string(spec.FallbackTier),
+		System:          spec.System,
+		DisableThinking: spec.DisableThinking,
 		Messages: []llm.Message{
 			{
 				Role: llm.RoleUser,

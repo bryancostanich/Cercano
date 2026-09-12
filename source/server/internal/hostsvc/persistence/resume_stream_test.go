@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -109,14 +110,23 @@ func (f viewportResumeFakeAgent) IsCompacting(string) bool  { return false }
 func (f viewportResumeFakeAgent) ScheduleCompaction(string) {}
 
 type viewportResumeFakeStream struct {
+	mu     sync.Mutex
 	ctx    context.Context
 	events []*proto.ResumeConversationViewportFirstEvent
 }
 
 func (s *viewportResumeFakeStream) Send(ev *proto.ResumeConversationViewportFirstEvent) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.events = append(s.events, ev)
 	return nil
 }
+func (s *viewportResumeFakeStream) snapshot() []*proto.ResumeConversationViewportFirstEvent {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]*proto.ResumeConversationViewportFirstEvent(nil), s.events...)
+}
+
 func (s *viewportResumeFakeStream) SetHeader(metadata.MD) error  { return nil }
 func (s *viewportResumeFakeStream) SendHeader(metadata.MD) error { return nil }
 func (s *viewportResumeFakeStream) SetTrailer(metadata.MD)       {}
@@ -149,26 +159,27 @@ func TestViewportFirstResumeStreamsTailBeforeHydrationAndBackfillsOlder(t *testi
 	}()
 
 	deadline := time.After(2 * time.Second)
-	for len(stream.events) < 3 {
+	for len(stream.snapshot()) < 3 {
 		select {
 		case <-deadline:
-			t.Fatalf("timed out waiting for tail/backfill events; got %d", len(stream.events))
+			t.Fatalf("timed out waiting for tail/backfill events; got %d", len(stream.snapshot()))
 		default:
 			time.Sleep(10 * time.Millisecond)
 		}
 	}
-	if stream.events[0].GetKind() != proto.ResumeConversationViewportFirstEvent_TAIL {
-		t.Fatalf("first event kind = %v, want tail", stream.events[0].GetKind())
+	events := stream.snapshot()
+	if events[0].GetKind() != proto.ResumeConversationViewportFirstEvent_TAIL {
+		t.Fatalf("first event kind = %v, want tail", events[0].GetKind())
 	}
-	if got := stream.events[0].GetTurns(); len(got) != 2 || got[0].GetContent() != "turn-4" || got[1].GetContent() != "turn-5" {
+	if got := events[0].GetTurns(); len(got) != 2 || got[0].GetContent() != "turn-4" || got[1].GetContent() != "turn-5" {
 		t.Fatalf("tail turns = %+v, want turn-4/turn-5", got)
 	}
-	if stream.events[0].GetStartIndex() != 4 || stream.events[0].GetTotalTurns() != 6 {
-		t.Fatalf("tail range = %d/%d, want 4/6", stream.events[0].GetStartIndex(), stream.events[0].GetTotalTurns())
+	if events[0].GetStartIndex() != 4 || events[0].GetTotalTurns() != 6 {
+		t.Fatalf("tail range = %d/%d, want 4/6", events[0].GetStartIndex(), events[0].GetTotalTurns())
 	}
-	for _, ev := range stream.events[:3] {
+	for _, ev := range events[:3] {
 		if ev.GetKind() == proto.ResumeConversationViewportFirstEvent_HYDRATION_COMPLETE {
-			t.Fatalf("hydration completed before test released it: events=%v", stream.events)
+			t.Fatalf("hydration completed before test released it: events=%v", events)
 		}
 	}
 	close(hydrateWait)
@@ -180,7 +191,8 @@ func TestViewportFirstResumeStreamsTailBeforeHydrationAndBackfillsOlder(t *testi
 	case <-time.After(2 * time.Second):
 		t.Fatal("stream did not finish after hydration release")
 	}
-	last := stream.events[len(stream.events)-1]
+	events = stream.snapshot()
+	last := events[len(events)-1]
 	if last.GetKind() != proto.ResumeConversationViewportFirstEvent_HYDRATION_COMPLETE {
 		t.Fatalf("last event kind = %v, want hydration complete", last.GetKind())
 	}

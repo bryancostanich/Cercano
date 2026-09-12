@@ -40,12 +40,12 @@ import (
 	"cercano/source/server/internal/chatgptauth"
 	"cercano/source/server/internal/cloudfactory"
 	cfgsvc "cercano/source/server/internal/hostsvc/config"
+	"cercano/source/server/internal/hostsvc/credentials"
 	"cercano/source/server/internal/hostsvc/permissions"
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/modelmetadata"
 	"cercano/source/server/internal/runner"
-	"cercano/source/server/internal/secrets"
 	pkgcfg "cercano/source/server/pkg/config"
 	proto "cercano/source/server/pkg/proto"
 )
@@ -58,7 +58,6 @@ type workerRunner struct {
 	persist runner.TurnHistory
 	cfg     cfgsvc.Service
 	perms   permissions.Broker
-	secrets secrets.Store
 
 	// openTierModel resolves the EFFECTIVE open model id for a tier on the
 	// active runtime (override-else-catalog-default), so the ConfigSnapshot
@@ -73,16 +72,7 @@ type workerRunner struct {
 	// routing means "do not send". nil on dial-injected test runners.
 	modelEvidence func(ctx context.Context, cfg pkgcfg.Config) modelmetadata.Snapshot
 
-	// srcMu guards the per-profile token-source caches below. Reusing one
-	// Source per profile is what makes the sources' single-flight refresh
-	// actually apply: a fresh Source per credential request gives each
-	// concurrent caller its own mutex, and Anthropic/OpenAI refresh tokens
-	// rotate (single-use), so racing refreshes invalidate each other.
-	srcMu    sync.Mutex
-	anthSrcs map[string]*anthropicauth.Source
-	chatSrcs map[string]*chatgptauth.Source
-	// anthFlow/chatFlow configure the token endpoints for the cached sources.
-	// The zero value targets the real endpoints; tests override them.
+	// Test endpoint overrides; refresh ownership belongs to cfg.Credentials().
 	anthFlow anthropicauth.Flow
 	chatFlow chatgptauth.Flow
 
@@ -122,12 +112,11 @@ type EnsureSubagentFunc func(ctx context.Context, id, parentID, projectDir, mode
 // The caller supplies the host-side services the runner needs to:
 //   - pre-assemble history + project context (persist),
 //   - build the ConfigSnapshot + permission mode (cfg, perms),
-//   - answer CredentialRequests from the worker (cfg + st).
+//   - answer CredentialRequests through the shared config credential service.
 func NewWorkerRunner(
 	persist runner.TurnHistory,
 	cfg cfgsvc.Service,
 	perms permissions.Broker,
-	st secrets.Store,
 	ensureSubagent EnsureSubagentFunc,
 	setProfile func(ctx context.Context, convID, name string) error,
 	openProvider func() inference.Provider,
@@ -143,7 +132,6 @@ func NewWorkerRunner(
 		persist:        persist,
 		cfg:            cfg,
 		perms:          perms,
-		secrets:        st,
 		ensureSubagent: ensureSubagent,
 		setProfile:     setProfile,
 		openProvider:   openProvider,
@@ -203,10 +191,9 @@ func NewWorkerRunnerWithDial(
 	persist runner.TurnHistory,
 	cfg cfgsvc.Service,
 	perms permissions.Broker,
-	st secrets.Store,
 	dial DialFunc,
 ) runner.TurnRunner {
-	return newWorkerRunnerWithDial(persist, cfg, perms, st, dial)
+	return newWorkerRunnerWithDial(persist, cfg, perms, dial)
 }
 
 // newWorkerRunnerWithDial builds a workerRunner with an injected dial function
@@ -215,14 +202,12 @@ func newWorkerRunnerWithDial(
 	persist runner.TurnHistory,
 	cfg cfgsvc.Service,
 	perms permissions.Broker,
-	st secrets.Store,
 	dial dialFunc,
 ) *workerRunner {
 	return &workerRunner{
 		persist: persist,
 		cfg:     cfg,
 		perms:   perms,
-		secrets: st,
 		dial:    dial,
 	}
 }
@@ -257,6 +242,13 @@ func (w *workerRunner) RunTurn(
 
 	// ── 3. Build ConfigSnapshot + permission mode ──────────────────────────
 	cfg := w.cfg.Get()
+	needsAuthProtocol := req.AuthRecovery != nil
+	for _, profile := range cfg.CloudProfiles {
+		if (profile.Name == cfg.ActiveCloudProfile || profile.Name == cfg.BackupCloudProfile) && cloudfactory.IsSubscription(profile) {
+			needsAuthProtocol = true
+		}
+	}
+
 	// Resolve the active runtime's effective open tier models host-side (the
 	// worker cannot see the catalog); the snapshot carries them as overrides.
 	snap := SnapshotConfig(cfg, "", w.resolveOpenTiers()) // no credential — worker fetches on demand
@@ -329,7 +321,13 @@ func (w *workerRunner) RunTurn(
 
 	// ── 6. Open bidi stream and send StartTurn ────────────────────────────
 	client := proto.NewWorkerClient(conn)
-	stream, err := client.RunTurn(ctx)
+	var err error
+	var stream proto.Worker_RunTurnClient
+	if needsAuthProtocol {
+		stream, err = client.RunTurnWithAuthentication(ctx)
+	} else {
+		stream, err = client.RunTurn(ctx)
+	}
 	if err != nil {
 		return runner.Result{}, fmt.Errorf("workerRunner: open stream: %w", err)
 	}
@@ -372,6 +370,9 @@ func (w *workerRunner) RunTurn(
 				turnHealthy = true
 				return result, nil
 			}
+			if needsAuthProtocol && status.Code(recvErr) == codes.Unimplemented {
+				return runner.Result{}, status.Error(codes.FailedPrecondition, "worker does not support authentication recovery; update the worker")
+			}
 			// Worker crashed or the stream died before TurnDone.
 			// Kill is already deferred via cleanupFn; return Unavailable.
 			if errors.Is(recvErr, context.Canceled) || errors.Is(recvErr, context.DeadlineExceeded) {
@@ -387,6 +388,10 @@ func (w *workerRunner) RunTurn(
 				sink.Emit(UnmarshalEvent(m.Event))
 			}
 
+		case *proto.WorkerToHost_RequestAccounting:
+			if accountingSink, ok := sink.(runner.RequestAccountingSink); ok {
+				accountingSink.RecordRequestAccounting(unmarshalRequestAccounting(m.RequestAccounting))
+			}
 		case *proto.WorkerToHost_PermRequest:
 			// Answer in a goroutine so a slow human decision doesn't block Recv.
 			pr := m.PermRequest
@@ -415,6 +420,23 @@ func (w *workerRunner) RunTurn(
 				}
 			}()
 
+		case *proto.WorkerToHost_AuthRequest:
+			request := m.AuthRequest
+			go func() {
+				response := &proto.WorkerAuthenticationResponse{Id: request.GetId()}
+				if req.AuthRecovery == nil || request.GetChallenge() == nil {
+					response.Error = "authentication recovery unavailable"
+				} else {
+					c := request.GetChallenge()
+					choice, e := req.AuthRecovery(ctx, llm.AuthChallenge{Provider: c.GetProvider(), Profile: c.GetProfileName(), Reason: c.GetReason(), Fallback: c.GetFallback(), RetrySafe: c.GetRetrySafe()})
+					if e != nil {
+						response.Error = "authentication recovery canceled"
+					} else {
+						response.Decision = string(choice)
+					}
+				}
+				safeSend(&proto.HostToWorker{Msg: &proto.HostToWorker_AuthResponse{AuthResponse: response}})
+			}()
 		case *proto.WorkerToHost_CredRequest:
 			// Answer credential requests off the drain path (in a goroutine) so
 			// a slow keychain/OAuth resolve doesn't stall the event stream.
@@ -425,7 +447,8 @@ func (w *workerRunner) RunTurn(
 				token, account, credErr := w.resolveCredential(ctx, cfg, profileName)
 				resp := &proto.CredentialResponse{Id: id}
 				if credErr != nil {
-					resp.Error = credErr.Error()
+					resp.Error = "credential resolution failed"
+					resp.Failure = marshalCredentialFailure(credErr, profileName)
 				} else {
 					resp.Token = token
 					resp.Account = account
@@ -530,7 +553,7 @@ func (w *workerRunner) resolveCredential(ctx context.Context, cfg pkgcfg.Config,
 		return "", "", fmt.Errorf("credential: profile %q not found", profileName)
 	}
 
-	st := w.secrets
+	st := w.cfg.Secrets()
 	if st == nil {
 		return "", "", fmt.Errorf("credential: secrets store not configured")
 	}
@@ -554,45 +577,22 @@ func (w *workerRunner) resolveCredential(ctx context.Context, cfg pkgcfg.Config,
 		return access, "", nil
 	}
 
-	// Static-key route: read the API key from the secrets store.
+	// Preserve typed, sanitized failures across worker transport. An absent key
+	// is valid for a configured proxy, but not a canonical direct vendor endpoint.
 	key, err := st.Get(profileName)
-	if err != nil {
-		return "", "", fmt.Errorf("credential: get key for profile %q: %w", profileName, err)
+	if validation := cloudfactory.ValidateStaticCredential(prof, key, err); validation != nil {
+		return "", "", validation
 	}
 	return key, "", nil
 }
 
-// anthropicSource returns the cached Anthropic token source for a profile,
-// creating it on first use. Reusing one Source per profile keeps its
-// single-flight refresh effective across concurrent credential requests.
-func (w *workerRunner) anthropicSource(profile string) *anthropicauth.Source {
-	w.srcMu.Lock()
-	defer w.srcMu.Unlock()
-	if s, ok := w.anthSrcs[profile]; ok {
-		return s
-	}
-	if w.anthSrcs == nil {
-		w.anthSrcs = make(map[string]*anthropicauth.Source)
-	}
-	s := anthropicauth.NewSource(w.secrets, profile, w.anthFlow)
-	w.anthSrcs[profile] = s
-	return s
+// Token sources are views of the one host credential owner. Rebuilding a
+// provider or requesting a worker credential cannot create a competing cache.
+func (w *workerRunner) anthropicSource(profile string) *credentials.AnthropicSource {
+	return w.cfg.Credentials().Anthropic(profile, w.anthFlow)
 }
-
-// chatgptSource returns the cached ChatGPT token source for a profile,
-// creating it on first use. See anthropicSource for why the instance is reused.
-func (w *workerRunner) chatgptSource(profile string) *chatgptauth.Source {
-	w.srcMu.Lock()
-	defer w.srcMu.Unlock()
-	if s, ok := w.chatSrcs[profile]; ok {
-		return s
-	}
-	if w.chatSrcs == nil {
-		w.chatSrcs = make(map[string]*chatgptauth.Source)
-	}
-	s := chatgptauth.NewSource(w.secrets, profile, w.chatFlow)
-	w.chatSrcs[profile] = s
-	return s
+func (w *workerRunner) chatgptSource(profile string) *credentials.ChatGPTSource {
+	return w.cfg.Credentials().ChatGPT(profile, w.chatFlow)
 }
 
 // testDialUnix returns a dialFunc that dials a bufconn listener via the given
@@ -686,6 +686,18 @@ func (w *workerRunner) serveOpenInference(ctx context.Context, req *proto.OpenIn
 	if prov == nil {
 		fail(fmt.Errorf("open inference unavailable: open provider not configured"))
 		return
+	}
+	if req.GetContextOnly() {
+		capacity, err := llm.ResolveRuntimeContext(ctx, prov, req.GetRequest().GetModel(), req.GetPrepareContext())
+		if err != nil {
+			fail(err)
+			return
+		}
+		emit(&proto.OpenInferenceEvent{ContextTokens: int64(capacity.Window), ContextInstanceId: capacity.InstanceID, Kind: &proto.OpenInferenceEvent_Done{Done: true}})
+		return
+	}
+	if req.GetExpectedInstanceId() != "" {
+		ctx = llm.WithRuntimeContext(ctx, llm.RuntimeContext{Window: int(req.GetExpectedContextTokens()), InstanceID: req.GetExpectedInstanceId()})
 	}
 	chatReq, err := UnmarshalChatRequest(req.GetRequest())
 	if err != nil {

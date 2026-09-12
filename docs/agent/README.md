@@ -260,6 +260,21 @@ Bounded autonomous loop. Per iteration:
 6. Execute the allowed tools. Each result becomes a `tool_result` block, fed back as a user message.
 7. Track guards: 3 consecutive iterations of all-errored calls aborts; `MaxToolLoopIterations = 10` caps total round-trips; user denial of any confirm is a hard turn-end.
 
+### Autonomous run completion
+
+Autonomous mode records meaningful decisions as an audit trail, not a queue for
+retroactive approval. When the approved brief is satisfied, the agent presents
+results, verification, and remaining limitations, then calls
+`request_autonomous_exit`. One confirmation marks the run completed and leaves
+autonomous mode; declining leaves it active. Settled decisions are not replayed.
+New high-risk choices and unresolved blockers must be raised when they arise.
+
+The former `complete_autonomous_review` tool is retired. New runs transition
+straight from `running` to `completed`; persisted `review_pending` runs from older
+versions can finish through the same completion action. Their decision history
+is preserved. Completion-record writes precede the profile change, with rollback
+of the record if the profile change fails.
+
 ### Built-in tools (`internal/agenttools/`)
 
 Names match Claude's training (Read, Write, Edit, LS, Glob, Grep, Bash) to keep Claude's internal planning concise:
@@ -304,3 +319,15 @@ The decision is **agent-side**. The CLI just renders the `PermissionRequired` st
 - **`/tool` invoking W/X-tier** requires `/bypass` mode. The unary `InvokeTool` RPC can't stream a confirm prompt back to the CLI. Model-driven tool calls in normal chat flow always go through the gate correctly.
 - **Inline tool-call expand/collapse keybind** isn't implemented yet. Tool entries render folded; scroll your terminal to see args/results.
 - **Image input** is not yet implemented. Vision support is plumbed at the provider layer and adapters support images, but there is no CLI/inbound path to attach images to messages.
+
+### Subscription authentication recovery
+
+Expired Claude or ChatGPT subscription login pauses the affected request before either cloud-provider failover or cloud/local fallback. Authentication is a structured failure with a named profile, not a string matched from a routing notice. Ordinary transient failures retain their retry policy; API-key rejection and permission denial do not open subscription login.
+
+The configuration service owns one shared credential service for host providers, workers, refresh, and interactive login. Refresh writes are generation-checked, login attempts are single-use, and reauthentication does not rewrite profile configuration or active selection. A successful login wakes current requests waiting on that provider/profile; canceled requests stay canceled.
+
+Interactive clients explicitly opt into the authentication gate. `ReauthenticateCloud` performs credential-only login, while `ResolveAuthentication` handles explicit fallback or cancellation. These are distinct from onboarding and tool permission approval. Older servers/workers fail closed when they do not support recovery; subscription workers must be upgraded with the host.
+
+Explicit fallback is authorized only for the owning user turn. It switches at an inference boundary, without replaying completed tools, and does not change default routing. If response events have already escaped, the agent does not silently replay them: login repairs credentials, then the interrupted response requires an explicit fresh request.
+
+See the [audit specification](../../efforts/cloud-auth-failover-audit/spec.md) and [verification map](../../efforts/cloud-auth-failover-audit/verification.md) for invariants, compatibility behavior, and tests.

@@ -20,6 +20,8 @@ import (
 	"net/url"
 	"strconv"
 	"time"
+
+	"cercano/source/server/internal/llm/httpx"
 )
 
 // codexClientID is the Codex CLI's public OAuth client — the only client
@@ -253,7 +255,7 @@ func (f Flow) tokenRequest(ctx context.Context, form url.Values) (*TokenSet, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("chatgpt token request: HTTP %d", resp.StatusCode)
+		return nil, httpx.OAuthFailure(resp)
 	}
 	var tr tokenResponse
 	if err := json.NewDecoder(resp.Body).Decode(&tr); err != nil {

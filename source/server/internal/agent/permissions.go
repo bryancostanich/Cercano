@@ -65,7 +65,6 @@ func isHumanHandoffTool(toolName string) bool {
 		"suggest_autonomous",
 		"request_autonomous_execution",
 		"request_autonomous_exit",
-		"complete_autonomous_review",
 		"auto_exit",
 		"restart_agent":
 		return true

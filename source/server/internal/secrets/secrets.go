@@ -6,7 +6,9 @@
 package secrets
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"sync"
 
 	"github.com/99designs/keyring"
@@ -45,6 +47,9 @@ func OpenKeychain() (Store, error) {
 func (s *keyringStore) Get(profile string) (string, error) {
 	item, err := s.kr.Get(profile)
 	if err != nil {
+		if errors.Is(err, keyring.ErrKeyNotFound) {
+			return "", fmt.Errorf("secrets: key not found: %w", fs.ErrNotExist)
+		}
 		return "", err
 	}
 	return string(item.Data), nil
@@ -75,7 +80,7 @@ func (s *memoryStore) Get(profile string) (string, error) {
 	defer s.mu.Unlock()
 	v, ok := s.m[profile]
 	if !ok {
-		return "", fmt.Errorf("secrets: key %q not found", profile)
+		return "", fmt.Errorf("secrets: key %q not found: %w", profile, fs.ErrNotExist)
 	}
 	return v, nil
 }

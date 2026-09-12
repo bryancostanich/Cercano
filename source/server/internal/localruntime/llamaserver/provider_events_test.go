@@ -49,7 +49,7 @@ func TestStart_ReuseWritesDurableEvent(t *testing.T) {
 	if err := os.WriteFile(modelPath, []byte("stub"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	p := NewProvider(config.LlamaServerConfig{ModelDirs: []string{dir}, Binary: modelPath})
+	p := NewProvider(config.LlamaServerConfig{ContextSize: contextOverridePtr(8192), ModelDirs: []string{dir}, Binary: modelPath})
 	log, read := newTestEventLog(t)
 	p.SetEventLog(log)
 
@@ -104,7 +104,7 @@ func TestStart_SpawnWritesDurableEventWithModelSize(t *testing.T) {
 	// Binary is a real executable that starts and exits quickly. The
 	// spawn event is written after cmd.Start succeeds, so an exec-format
 	// failure would not exercise it.
-	p := NewProvider(config.LlamaServerConfig{ModelDirs: []string{dir}, Binary: "/usr/bin/false"})
+	p := NewProvider(config.LlamaServerConfig{ContextSize: contextOverridePtr(8192), ModelDirs: []string{dir}, Binary: "/usr/bin/false"})
 	log, read := newTestEventLog(t)
 	p.SetEventLog(log)
 
@@ -130,7 +130,7 @@ func TestStart_SpawnWritesDurableEventWithModelSize(t *testing.T) {
 // TestProviderEvent_NilLogIsNoOp: providers are constructed without a log
 // in tests and in MCP embedded mode. That must stay silent, not panic.
 func TestProviderEvent_NilLogIsNoOp(t *testing.T) {
-	p := NewProvider(config.LlamaServerConfig{})
+	p := NewProvider(config.LlamaServerConfig{ContextSize: contextOverridePtr(8192)})
 	defer func() {
 		if r := recover(); r != nil {
 			t.Fatalf("event with nil log panicked: %v", r)
@@ -144,7 +144,7 @@ func TestProviderEvent_NilLogIsNoOp(t *testing.T) {
 // there, routine subprocess chatter would bury the lifecycle records the
 // log exists for. This pins the separation.
 func TestProviderEvent_DoesNotCaptureSubprocessOutput(t *testing.T) {
-	p := NewProvider(config.LlamaServerConfig{})
+	p := NewProvider(config.LlamaServerConfig{ContextSize: contextOverridePtr(8192)})
 	log, read := newTestEventLog(t)
 	p.SetEventLog(log)
 

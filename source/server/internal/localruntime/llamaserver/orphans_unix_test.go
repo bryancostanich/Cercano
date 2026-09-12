@@ -330,8 +330,9 @@ func TestStartProcess_RegistersAndUnregistersPID(t *testing.T) {
 		registry: &pidRegistry{dir: dir},
 	}
 	p.running["inst"] = &managedInstance{
-		model:  localruntime.ModelRecord{Path: "/models/fake.gguf"},
-		record: localruntime.InstanceRecord{ID: "inst", State: localruntime.InstanceStarting},
+		plannedContext: PlannedContext{Tokens: 8192, Source: "config"},
+		model:          localruntime.ModelRecord{Path: "/models/fake.gguf"},
+		record:         localruntime.InstanceRecord{ID: "inst", State: localruntime.InstanceStarting},
 	}
 
 	// /bin/sleep rejects the llama-server flags and exits immediately —

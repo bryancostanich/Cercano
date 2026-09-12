@@ -153,3 +153,16 @@ func CurrentRoute(sel inference.Selection, model string) (inference.Selection, s
 	}
 	return sel, model
 }
+
+func (p *startupFallback) RuntimeContext(ctx context.Context, model string, prepare bool) (llm.RuntimeContext, error) {
+	capacity, err := llm.ResolveRuntimeContext(ctx, p.local, model, prepare)
+	if err == nil || !prepare || !p.canFallback(ctx, err) {
+		return capacity, err
+	}
+	window := contextmeter.ModelWindowFor(p.model)
+	if !window.Known || window.Tokens <= 0 {
+		return llm.RuntimeContext{}, err
+	}
+	p.switchToCloud()
+	return llm.RuntimeContext{Window: window.Tokens}, nil
+}

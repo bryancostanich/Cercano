@@ -258,6 +258,12 @@ service Agent {
   // messages+subscription cloud profile.
   rpc StartClaudeLogin(StartClaudeLoginRequest) returns (stream StartClaudeLoginEvent);
 
+  // Credential-only reauthentication of an existing subscription profile.
+  // Separate from onboarding so an old server fails with Unimplemented rather
+  // than ignoring a new flag and silently rewriting or activating a profile.
+  rpc ReauthenticateCloud(CloudReauthenticationRequest) returns (stream CloudLoginEvent);
+  rpc ResolveAuthentication(AuthenticationDecisionRequest) returns (AuthenticationDecisionResponse);
+
   // ExportImage returns the raw bytes of an image the user attached to a live
   // conversation, looked up by its per-conversation attachment ID (e.g.
   // "img_7f3a9c_1"). The attachment store is in-memory only, so a miss is
@@ -304,6 +310,7 @@ message StreamProcessResponse {
     SubAgentEvent     sub_agent_event = 11;
     RolloverOffered   rollover_offered = 12;
     TaskChange        task_change = 13;
+    AuthenticationRequired authentication_required = 14;
   }
 }
 
@@ -405,6 +412,9 @@ message ProcessRequestRequest {
   string model_override = 7; // Use this model instead of the configured default (temporary, per-request)
   bool coproc = 8; // Route per Locus Mode's co-processor tier (local/cloud)
   repeated InlineImage images = 9; // user-attached images, spliced in at "[image N]" markers in input
+  bool supports_auth_recovery = 10;
+  // One-shot co-processor policy; false preserves the model default.
+  bool disable_thinking = 11;
 }
 
 // InlineImage is one user-attached image. Index matches the "[image <Index>]"
@@ -640,6 +650,10 @@ message RuntimeInstance {
   int32 last_exit_code = 12;
   string last_error = 13;
   string log_path = 14;
+  int64 planned_context_tokens = 15;
+  string planned_context_source = 16;
+  int64 confirmed_context_tokens = 17;
+  string context_confirmed_at = 18;
 }
 
 message RuntimeEndpoint {
@@ -1580,6 +1594,7 @@ service Worker {
   // needed); worker sends WorkerToHost (WorkerEvent, PermissionRequest,
   // PersistTurn, TurnDone, TurnError).
   rpc RunTurn (stream HostToWorker) returns (stream WorkerToHost) {}
+  rpc RunTurnWithAuthentication (stream HostToWorker) returns (stream WorkerToHost) {}
 }
 
 // HostToWorker is the host→worker envelope.
@@ -1591,6 +1606,7 @@ message HostToWorker {
     CredentialResponse     cred_response    = 4;
     OpenInferenceEvent     open_event       = 5;
     SessionProfileResponse profile_response = 6;
+    WorkerAuthenticationResponse auth_response = 7;
   }
 }
 
@@ -1606,6 +1622,8 @@ message WorkerToHost {
     EnsureSubagentConversation ensure_subagent = 7;
     OpenInferenceRequest     open_request    = 8;
     SessionProfileRequest    profile_request = 9;
+ RuntimeRequestAccounting request_accounting = 10;
+    WorkerAuthenticationRequest auth_request = 11;
   }
 }
 
@@ -1880,6 +1898,7 @@ message CredentialResponse {
   string token   = 2; // API key or fresh access token, per the profile's auth flavor
   string error   = 3;
   string account = 4; // ChatGPT account ID (non-empty for subscription route; empty for static-key routes)
+  CredentialFailure failure = 5;
 }
 
 // OpenInferenceRequest asks the host to run an open-model chat on the worker's
@@ -1890,6 +1909,10 @@ message CredentialResponse {
 message OpenInferenceRequest {
   uint64         id      = 1;
   LLMChatRequest request = 2;
+  bool context_only = 3;
+  bool prepare_context = 4;
+  string expected_instance_id = 5;
+  int64 expected_context_tokens = 6;
 }
 
 // LLMChatRequest mirrors llm.ChatRequest for the open-inference proxy.
@@ -1904,8 +1927,9 @@ message LLMChatRequest {
   // optional so pointer semantics survive the wire: absent = provider
   // default, present 0 = greedy decoding (the summarizer's requirement).
   optional double     temperature      = 8;
- string tier = 9;
- string fallback_tier = 10;
+  bool disable_thinking = 9;
+  string fallback_tier = 10;
+  string tier = 11;
 }
 
 // LLMTool mirrors llm.Tool (the model-facing fields; Permission is agent-side).
@@ -1919,6 +1943,8 @@ message LLMTool {
 // routed by request id. Terminates with done=true or a non-empty error.
 message OpenInferenceEvent {
   uint64 id = 1;
+  int64 context_tokens = 5;
+  string context_instance_id = 6;
   oneof kind {
     LLMStreamEvent event = 2;
     string         error = 3;
@@ -1964,3 +1990,73 @@ message CloudProfileStructure {
  string region = 6;
  string aws_profile = 7;
 }
+
+// Numeric request accounting and the actual serving target; no prompt content.
+message RuntimeRequestAccounting {
+ string model = 1;
+ string provider = 2;
+ string runtime_instance_id = 3;
+ int64 message_tokens = 4;
+ int64 system_tokens = 5;
+ int64 tool_schema_tokens = 6;
+ int64 output_reserve_tokens = 7;
+ int64 estimated_request_tokens = 8;
+ int64 context_window = 9;
+ bool context_window_known = 10;
+}
+
+
+message CloudReauthenticationRequest {
+  string profile_name = 1;
+  // Client correlation only; it does not authorize credential commits.
+  string attempt_id = 2;
+}
+message CloudLoginEvent {
+  string profile_name = 1;
+  string provider = 2;
+  string attempt_id = 3;
+  string authorize_url = 4;
+  string verification_url = 5;
+  string user_code = 6;
+  bool done = 7;
+  bool ok = 8;
+  string error = 9;
+}
+
+
+// Safe classification only: no raw error body, cause, token or endpoint URL.
+message CredentialFailure {
+ string class = 1;
+ string provider = 2;
+ string profile_name = 3;
+ string method = 4;
+ string reason = 5;
+}
+
+
+message AuthenticationRequired {
+ string conversation_id = 1;
+ string request_id = 2;
+ string provider = 3;
+ string profile_name = 4;
+ string reason = 5;
+ string fallback = 6;
+ bool retry_safe = 7;
+ bool resolved = 8;
+}
+message AuthenticationDecisionRequest {
+ string conversation_id = 1;
+ string request_id = 2;
+ string decision = 3; // fallback or cancel; login completion comes from the credential service
+}
+message WorkerAuthenticationRequest {
+ uint64 id = 1;
+ AuthenticationRequired challenge = 2;
+}
+message WorkerAuthenticationResponse {
+ uint64 id = 1;
+ string decision = 2;
+ string error = 3;
+}
+
+message AuthenticationDecisionResponse {}

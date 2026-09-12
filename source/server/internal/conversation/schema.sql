@@ -81,6 +81,8 @@ CREATE TABLE IF NOT EXISTS conversation_compaction (
 -- model's window the snapshot was computed against, so a stale snapshot taken
 -- under a different route can be identified rather than trusted blindly.
 CREATE TABLE IF NOT EXISTS conversation_context_usage (
+    provider TEXT NOT NULL DEFAULT '',
+    runtime_instance_id TEXT NOT NULL DEFAULT '',
     conversation_id     TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
     tokens_used         INTEGER NOT NULL DEFAULT 0,
     raw_tokens          INTEGER NOT NULL DEFAULT 0,

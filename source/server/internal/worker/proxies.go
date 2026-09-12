@@ -235,7 +235,12 @@ type streamCredentialSource struct {
 	sndr    *sender
 	nextID  atomic.Uint64
 	mu      sync.Mutex
-	pending map[uint64]chan credResult
+	pending map[uint64]credentialWaiter
+}
+
+type credentialWaiter struct {
+	profile string
+	result  chan credResult
 }
 
 type credResult struct {
@@ -247,7 +252,7 @@ type credResult struct {
 func newStreamCredentialSource(sndr *sender) *streamCredentialSource {
 	return &streamCredentialSource{
 		sndr:    sndr,
-		pending: make(map[uint64]chan credResult),
+		pending: make(map[uint64]credentialWaiter),
 	}
 }
 
@@ -258,7 +263,7 @@ func (c *streamCredentialSource) Fetch(ctx context.Context, profileName string) 
 	ch := make(chan credResult, 1)
 
 	c.mu.Lock()
-	c.pending[id] = ch
+	c.pending[id] = credentialWaiter{profile: profileName, result: ch}
 	c.mu.Unlock()
 
 	defer func() {
@@ -283,16 +288,22 @@ func (c *streamCredentialSource) Fetch(ctx context.Context, profileName string) 
 // deliver routes a CredentialResponse to the pending Fetch with matching ID.
 func (c *streamCredentialSource) deliver(resp *proto.CredentialResponse) {
 	c.mu.Lock()
-	ch, ok := c.pending[resp.GetId()]
+	waiter, ok := c.pending[resp.GetId()]
+	delete(c.pending, resp.GetId())
 	c.mu.Unlock()
 	if !ok {
 		return // stale or unmatched; ignore
 	}
 	var err error
-	if e := resp.GetError(); e != "" {
-		err = fmt.Errorf("%s", e)
+	if resp.GetFailure() != nil || resp.GetError() != "" {
+		err = unmarshalCredentialFailure(resp.GetFailure(), waiter.profile)
 	}
-	ch <- credResult{token: resp.GetToken(), account: resp.GetAccount(), err: err}
+	result := credResult{token: resp.GetToken(), account: resp.GetAccount(), err: err}
+	if err != nil {
+		result.token = ""
+		result.account = ""
+	}
+	waiter.result <- result
 }
 
 // ─── streamTokenSource ────────────────────────────────────────────────────────
@@ -419,3 +430,6 @@ func (h *preloadedHistory) LoadProjectContext(_ string) string {
 func (h *preloadedHistory) PersistTurn(_ context.Context, _ string, m llm.Message) {
 	h.pf.persist(m)
 }
+
+func (s *streamTokenSource) CredentialProfile() string          { return s.profileName }
+func (s *anthropicStreamTokenSource) CredentialProfile() string { return s.profileName }

@@ -133,6 +133,12 @@ func (c *Core) contextWindowFor(isCloud bool, model string) int {
 }
 
 func (c *Core) knownContextWindowFor(isCloud bool, model string) (int, bool) {
+	if !isCloud && c.d.Providers != nil && c.d.Providers.Open() != nil && c.d.Providers.Open().Name() == "llama_server" {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		capacity, err := llm.ResolveRuntimeContext(ctx, c.d.Providers.Open(), model, false)
+		return capacity.Window, err == nil && capacity.Window > 0
+	}
 	if c.d.Config != nil && !isCloud {
 		// Local runtimes remain authoritative for local execution: the launched
 		// --ctx-size is a hard ceiling no provider metadata can override.
@@ -256,7 +262,7 @@ func (c *Core) RunTurn(
 		startFields["open_runtime"] = cfgSnap.OpenRuntime
 		startFields["mistralrs_enabled"] = cfgSnap.MistralRS.Enabled
 		startFields["mistralrs_max_seq_len"] = cfgSnap.MistralRS.MaxSeqLen
-		startFields["llama_server_context_size"] = cfgSnap.LlamaServer.ContextSize
+		startFields["llama_server_context_override"] = cfgSnap.LlamaServer.ContextSize
 		addCloudProfileFields(startFields, "active", cfgSnap, cfgSnap.ActiveCloudProfile)
 		addCloudProfileFields(startFields, "backup", cfgSnap, cfgSnap.BackupCloudProfile)
 	}
@@ -315,6 +321,9 @@ func (c *Core) RunTurn(
 		IsCloud: isCloud,
 	})
 
+	// Prepare local capacity before history budgeting. A refusal is also
+	// returned by runLoop, preserving its normal cross-tier fallback path.
+	_, _ = llm.ResolveRuntimeContext(ctx, provider, selectedModel, true)
 	// 2. Assemble conversation history before crash-resilient user persistence.
 	// The tool loop receives the current user input separately; if assembly runs
 	// after PersistTurn below, the current user turn is duplicated in the model
@@ -338,7 +347,7 @@ func (c *Core) RunTurn(
 		fbProv = nil
 	}
 	fallbackModel := c.d.Providers.MainModel(fbCloud)
-	if fbProv != nil {
+	if fbProv != nil && fbProv.Name() != "llama_server" {
 		fallbackPrepared = true
 		fallbackHistory, fallbackAccounting = c.assembleAttemptHistory(ctx, req, "cross_tier_fallback", fbProv, fallbackModel, assignment.Quality.CapabilityTier(), fbCloud, !fbCloud)
 	}
@@ -466,6 +475,15 @@ func (c *Core) RunTurn(
 		"model":           selectedModel,
 		"is_cloud":        isCloud,
 	})
+	if req.AuthRecovery != nil && isCloud && !fellBack && res.CrossAllowed && fbProv != nil {
+		window, known := c.knownContextWindowFor(fbCloud, fallbackModel)
+		provider = &authenticationFallback{primary: provider, fallback: fbProv, model: fallbackModel, window: window, windowKnown: known, onSelect: func() {
+			fellBack = true
+			selectedModel = fallbackModel
+			isCloud = fbCloud
+			sink.Emit(Event{Kind: EventRouteSelected, Model: fallbackModel, IsCloud: fbCloud})
+		}}
+	}
 	result, loopErr := c.runLoop(ctx, req, provider, selectedModel, string(assignment.Quality.CapabilityTier()), isCloud,
 		loopSink, requester, convHistory, onTextDelta, onTurn, wdGate, wdTurnEnd, gateRegistry, permStore, profile, false)
 	c.logRoute("loop.result", routinglog.Event{
@@ -522,6 +540,12 @@ func (c *Core) RunTurn(
 	var fallbackNotice string
 	if loopErr != nil && !replayUnsafe.Load() && ctx.Err() == nil && !errors.Is(loopErr, context.Canceled) {
 		failedProvider := failedProviderName(provider, loopErr)
+		if !fellBack && res.CrossAllowed && fbProv != nil && fbProv.Name() == "llama_server" {
+			if _, err := llm.ResolveRuntimeContext(ctx, fbProv, fallbackModel, true); err == nil {
+				fallbackHistory, fallbackAccounting = c.assembleAttemptHistory(ctx, req, "cross_tier_fallback", fbProv, fallbackModel, assignment.Quality.CapabilityTier(), false, true)
+				fallbackPrepared = true
+			}
+		}
 		fromWindow, _ := c.knownContextWindowFor(isCloud, selectedModel)
 		fallbackWindow, fallbackWindowKnown := c.knownContextWindowFor(fbCloud, fallbackModel)
 		c.logRoute("fallback.consider", routinglog.Event{
@@ -643,6 +667,7 @@ func (c *Core) runLoop(
 	profile agent.Profile,
 	tightContextFallback bool,
 ) (agent.ToolLoopResult, error) {
+	ctx = llm.WithAuthRecovery(ctx, req.AuthRecovery)
 	maxIterations := 0
 	contextWindow := 0
 	contextWindowKnown := false
@@ -650,7 +675,7 @@ func (c *Core) runLoop(
 		cfgSnap := c.d.Config.Get()
 		maxIterations = cfgSnap.ToolLoop.MaxIterations
 		contextWindow, contextWindowKnown = c.knownContextWindowFor(isCloud, model)
-		if route := inference.TargetForCall(provider, inference.Call{Model: model, Tier: tier}); route.Profile != "" {
+		if route := inference.TargetForContext(ctx, provider, inference.Call{Model: model, Tier: tier}); route.Profile != "" {
 			contextWindow, contextWindowKnown = route.ContextWindow, route.ContextWindowKnown
 		}
 		if contextWindow == 0 {
@@ -799,6 +824,7 @@ func (c *Core) makeLoopSink(sink EventSink, failures *failurelog.Writer, convers
 			// tight-context fallback. Log it here so the routing log records what
 			// was actually sent rather than the messages-only assembly estimate.
 			c.logRoute("request.budget", routinglog.Event{
+				"model": ev.Model, "provider": ev.Provider, "runtime_instance_id": ev.RuntimeInstanceID,
 				"conversation_id":          conversationID,
 				"message_tokens":           ev.MessageTokens,
 				"system_tokens":            ev.SystemTokens,
@@ -810,6 +836,7 @@ func (c *Core) makeLoopSink(sink EventSink, failures *failurelog.Writer, convers
 			})
 			if rs, ok := sink.(RequestAccountingSink); ok {
 				rs.RecordRequestAccounting(RequestAccounting{
+					Model: ev.Model, Provider: ev.Provider, RuntimeInstanceID: ev.RuntimeInstanceID,
 					MessageTokens:          ev.MessageTokens,
 					SystemTokens:           ev.SystemTokens,
 					ToolSchemaTokens:       ev.ToolSchemaTokens,
@@ -821,17 +848,8 @@ func (c *Core) makeLoopSink(sink EventSink, failures *failurelog.Writer, convers
 			}
 
 		case agent.LoopNotice:
-			// Resilience-engine narration ("anthropic quota reached — switching
-			// to openai"). Logged so backup-served/retried turns are visible in
-			// the server log, and forwarded on the progress channel so the CLI
-			// shows it as the live status line. Auth failures carry a marker so
-			// capable clients can raise an actionable re-auth prompt.
 			fmt.Fprintf(os.Stderr, "[resilience] %s\n", ev.Summary)
-			text := "⚠ " + ev.Summary
-			if strings.Contains(strings.ToLower(ev.Summary), "anthropic auth failed") {
-				text = "cercano:reauth-required provider=anthropic profile=claude | " + text
-			}
-			sink.Emit(Event{Kind: EventProgress, Text: text})
+			sink.Emit(Event{Kind: EventProgress, Text: "⚠ " + ev.Summary})
 
 		case agent.LoopWatchdogChallenge:
 			sink.Emit(Event{
@@ -948,7 +966,7 @@ func profileStateSignal(p agent.Profile) string {
 	case "plan":
 		return "<planning-mode>\nYou are currently IN PLANNING MODE (a read-only exploration fence is active). You may read the codebase and author the effort's spec.md and plan.md, but write/exec tools on other files are unavailable until the plan is approved. Do NOT call suggest_plan again — you are already planning; proceed to investigate and author the spec. When the plan is ready, call request_plan_approval to hand off to execution; to abandon planning, call plan_exit.\n</planning-mode>"
 	case "autonomous":
-		return "<autonomous-mode>\nYou are currently IN AUTONOMOUS MODE. Follow the autonomous-run protocol. Work against the approved run brief: pursue the goal, satisfy the done_when items, honor constraints, and pay attention to review_points. Keep visible progress: emit concise user-visible progress beacons before meaningful phases, long or noisy tool batches, verification, checkpointing, and major slice transitions, then continue working in the same turn. For meaningful in-scope forks, use the design-decision protocol, call capture_decision with the real options/trade-offs/hack flags/counterarguments/reversibility, then continue without asking. Stop mid-run only for high-risk boundary cases: effectively irreversible choices, scope expansion, security/permission/data-loss semantics, destructive operations, push/merge/migration/user-data changes, or when you cannot identify a clean preferred option. A checkpoint boundary is not a pause boundary: after checkpointing a solved unit, continue to the next unsatisfied done_when item or necessary implementation slice instead of ending with a status report. When the brief is satisfied, call request_autonomous_exit to begin final decision review. Walk the user through captured decisions one by one; if they accept, call complete_autonomous_review to mark the run completed and leave autonomous mode.\n</autonomous-mode>"
+		return "<autonomous-mode>\nYou are currently IN AUTONOMOUS MODE. Follow the autonomous-run protocol. Work against the approved run brief: pursue the goal, satisfy the done_when items, honor constraints, and pay attention to review_points. Keep visible progress: emit concise user-visible progress beacons before meaningful phases, long or noisy tool batches, verification, checkpointing, and major slice transitions, then continue working in the same turn. For meaningful in-scope forks, use the design-decision protocol, call capture_decision with the real options/trade-offs/hack flags/counterarguments/reversibility, then continue without asking. Stop mid-run only for high-risk boundary cases: effectively irreversible choices, scope expansion, security/permission/data-loss semantics, destructive operations, push/merge/migration/user-data changes, or when you cannot identify a clean preferred option. A checkpoint boundary is not a pause boundary: after checkpointing a solved unit, continue to the next unsatisfied done_when item or necessary implementation slice instead of ending with a status report. When the brief is satisfied, present a concise completion summary, verification results, and remaining limitations, then call request_autonomous_exit. One approval completes the run and leaves autonomous mode. Captured decisions are an audit trail: do not replay settled decisions or ask for renewed acceptance. Raise unresolved blockers or new high-risk choices when they arise, not at completion.\n</autonomous-mode>"
 	default:
 		return fmt.Sprintf("<active-profile>\nYou are currently in the %q capability profile, which fences off some tools. Tools outside the profile are unavailable this turn.\n</active-profile>", p.Name)
 	}

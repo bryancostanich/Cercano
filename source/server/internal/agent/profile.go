@@ -116,7 +116,6 @@ func IsSessionControlTool(toolName string) bool {
 		"suggest_autonomous",
 		"request_autonomous_execution",
 		"request_autonomous_exit",
-		"complete_autonomous_review",
 		"auto_exit":
 		return true
 	default:

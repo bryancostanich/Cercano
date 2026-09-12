@@ -43,6 +43,8 @@ type dispatchModelCaller struct {
 	tier   config.Tier // taxonomy tier the pipeline's model calls run on
 }
 
+var _ web.QueryModelCaller = (*dispatchModelCaller)(nil)
+
 func (m *dispatchModelCaller) Budget(ctx context.Context, outputReserve int) (modelbudget.Budget, error) {
 	if m.call.Svc.DispatchTarget == nil {
 		return modelbudget.Budget{}, errors.New(m.source + ": dispatch target budgeting not available")
@@ -62,6 +64,14 @@ func (m *dispatchModelCaller) Budget(ctx context.Context, outputReserve int) (mo
 }
 
 func (m *dispatchModelCaller) Call(ctx context.Context, prompt string) (string, error) {
+	return m.callModel(ctx, prompt, false)
+}
+
+func (m *dispatchModelCaller) CallQuery(ctx context.Context, prompt string) (string, error) {
+	return m.callModel(ctx, prompt, true)
+}
+
+func (m *dispatchModelCaller) callModel(ctx context.Context, prompt string, disableThinking bool) (string, error) {
 	if m.call.Svc.Dispatch == nil {
 		return "", errors.New(m.source + ": dispatch engine not available")
 	}
@@ -70,6 +80,7 @@ func (m *dispatchModelCaller) Call(ctx context.Context, prompt string) (string, 
 		Role:                 dispatch.RoleCoproc,
 		Tier:                 m.tier,
 		Prompt:               prompt,
+		DisableThinking:      disableThinking,
 		WorkDir:              m.call.WorkDir,
 		ModelOverride:        m.model,
 		Source:               m.source,

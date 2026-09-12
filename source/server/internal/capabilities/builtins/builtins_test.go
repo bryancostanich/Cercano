@@ -10,12 +10,12 @@ func TestRegister_Count(t *testing.T) {
 	reg := capabilities.NewRegistry(capabilities.Services{})
 	Register(reg)
 	all := reg.All()
-	if len(all) != 48 {
+	if len(all) != 47 {
 		names := make([]string, len(all))
 		for i, c := range all {
 			names[i] = c.Name()
 		}
-		t.Fatalf("expected 48 capabilities, got %d: %v", len(all), names)
+		t.Fatalf("expected 47 capabilities, got %d: %v", len(all), names)
 	}
 }
 
@@ -89,5 +89,16 @@ func TestCapabilitySynonyms_DispatchWorkflow(t *testing.T) {
 	}
 	if len(got) != 1 || got[0] != "workflow" {
 		t.Errorf("dispatch synonyms = %v, want [workflow]", got)
+	}
+}
+
+func TestAutonomousCompletionHasNoSecondReviewTool(t *testing.T) {
+	reg := capabilities.NewRegistry(capabilities.Services{})
+	Register(reg)
+	if _, ok := reg.Get("complete_autonomous_review"); ok {
+		t.Fatal("obsolete review tool registered")
+	}
+	if _, ok := reg.Get("request_autonomous_exit"); !ok {
+		t.Fatal("completion tool missing")
 	}
 }

@@ -45,14 +45,14 @@ func (suggestPlanCap) Surfaces() capabilities.Surface {
 }
 
 func (suggestPlanCap) Description() string {
-	return "Propose entering planning mode for a request that is large, ambiguous, or multi-step enough to benefit from a written plan before any changes are made. Call this instead of diving in when the work would span multiple files or phases, when the approach is genuinely uncertain, or when the user would likely want to review a plan first. The user is shown a y/n/d/c prompt to approve; on approval the session enters a read-only exploration mode where you investigate and write an effort spec and plan (spec.md / plan.md) before touching anything. Pass a short `reason` describing why planning would help — it is shown to the user in the prompt. Do NOT call this for small, clear, single-file changes."
+	return "Default to direct execution for clear, bounded requests: routine bug fixes, text/UI tweaks, straightforward features, mechanical edits, and their tests, even across multiple files. File count or multiple steps alone do not justify planning mode. Resolve narrow uncertainty with brief inspection or a focused question, not a planning proposal. Suggest planning only for substantial work where a reviewed design materially reduces risk, such as consequential architecture tradeoffs, migrations with rollout decisions, or complex cross-subsystem sequencing, or when the user explicitly asks for a formal plan. The user is shown a y/n/d/c prompt to approve; on approval the session enters a read-only exploration mode where you investigate and write an effort spec and plan (spec.md / plan.md) before implementation. Pass a short reason identifying the consequential design, scope, or sequencing issue that warrants planning; do not cite file count alone."
 }
 
 func (suggestPlanCap) Schema() capabilities.Schema {
 	return capabilities.Schema(`{
 		"type": "object",
 		"properties": {
-			"reason": {"type": "string", "description": "Short, human-facing reason planning would help (shown in the approval prompt), e.g. \"spans 4 files across parser and codegen; approach is uncertain\"."},
+			"reason": {"type": "string", "description": "Short, human-facing reason a reviewed plan would materially reduce risk (shown in the approval prompt), e.g. \"database migration requires compatibility and rollout decisions\"."},
 			"effort": {"type": "string", "description": "Optional short slug for the effort directory under efforts/, e.g. \"migrate-config-loader\". If omitted, one is derived during generation."}
 		}
 	}`)

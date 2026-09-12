@@ -4,6 +4,9 @@ import "strings"
 
 // RegisterBasics installs the minimal V0 commands: /help, /quit, /clear.
 func RegisterBasics(r *Registry) {
+	r.Register(Command{Name: "search", Help: "Search readable messages in this conversation: /search [text] (Ctrl+F).", Handler: func(args []string) Result {
+		return Result{Kind: ResultSearchConversation, Text: strings.Join(args, " ")}
+	}})
 	r.Register(Command{
 		Name:    "quit",
 		Aliases: []string{"exit"},

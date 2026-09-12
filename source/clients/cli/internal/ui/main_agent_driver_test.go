@@ -3,23 +3,19 @@ package ui
 import (
 	"errors"
 	"reflect"
-	"strings"
 	"testing"
 
 	"cercano/source/server/pkg/agentclient"
 )
 
-func TestStreamMsgToEventMapsReauthProgress(t *testing.T) {
-	msg := streamMsgToEvent(agentclient.StreamMsg{Type: agentclient.TypeProgress, Note: "cercano:reauth-required provider=anthropic profile=claude | ⚠ anthropic auth failed — switching to openai-responses"})
-	reauth, ok := msg.(reauthRequiredMsg)
-	if !ok {
-		t.Fatalf("want reauthRequiredMsg, got %T", msg)
+func TestStreamMsgToEventUsesTypedAuthentication(t *testing.T) {
+	request := agentclient.AuthenticationRequired{Provider: "openai-responses", Profile: "work", RequestID: "id", ConversationID: "conv"}
+	msg := streamMsgToEvent(agentclient.StreamMsg{Type: agentclient.TypeAuthentication, Authentication: &request})
+	if actual, ok := msg.(authenticationRequiredMsg); !ok || actual.request != request {
+		t.Fatalf("lost auth metadata: %+v", msg)
 	}
-	if reauth.provider != "anthropic" || reauth.profile != "claude" {
-		t.Fatalf("bad reauth metadata: %+v", reauth)
-	}
-	if !strings.Contains(reauth.note, "auth failed") {
-		t.Fatalf("reauth note should keep display text, got %q", reauth.note)
+	if _, ok := streamMsgToEvent(agentclient.StreamMsg{Type: agentclient.TypeProgress, Note: "cercano:reauth-required provider=anthropic profile=claude"}).(chatProgressMsg); !ok {
+		t.Fatal("prose triggered login")
 	}
 }
 

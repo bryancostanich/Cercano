@@ -197,6 +197,10 @@ func (m *InMemoryManager) SetEndpoints(endpoints []EndpointRecord) {
 // observers. A first-seen instance (no prior record) starts from
 // InstanceUnknown, which may transition to anything.
 func (m *InMemoryManager) UpdateInstance(instance InstanceRecord) {
+	if instance.State != InstanceRunning && instance.State != InstanceHealthy {
+		instance.Context.ConfirmedTokens = 0
+		instance.Context.ConfirmedAt = time.Time{}
+	}
 	if instance.ID == "" {
 		return
 	}

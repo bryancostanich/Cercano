@@ -95,9 +95,8 @@ func (e Event) Notice() string {
 // Options configures the engine. Zero values give: no backup, silent events,
 // 500ms default retry wait, 2s cap, 1h quota cooldown.
 type Options struct {
-	// PrimaryUnavailable is immutable construction-time availability; rebuilding
-	// after credential/profile edits restores the preferred attempt.
-	PrimaryUnavailable bool
+	PrimaryBlocked     bool // credential/configuration failures must reach their gate, not automatic fallback
+	PrimaryUnavailable bool // construction failure, excluding actionable credential failures
 	// PrimaryModelFor maps a capability-tier name to the primary vendor's model
 	// for that tier. When set, tiered requests are normalized before the first
 	// primary attempt, so a stale or foreign request Model cannot leak across
@@ -107,6 +106,8 @@ type Options struct {
 	// Backup, when non-nil, serves calls the primary failed in a way a
 	// different vendor could plausibly serve.
 	Backup inference.Provider
+	// BackupLabel identifies the configured profile in authentication prompts.
+	BackupLabel string
 	// BackupModelFor maps a capability-tier name to the backup vendor's model
 	// for that tier (experience-preserving rewrite); called with "" for
 	// untiered requests, where it must return the backup profile's default
@@ -134,10 +135,12 @@ const (
 // Provider is the engine. It impersonates the primary everywhere except the
 // moment of a decision, which is narrated via EventNotice / OnEvent.
 type Provider struct {
+	primaryBlocked     bool
 	primaryUnavailable bool
 	primary            inference.Provider
 	primaryModelFor    func(tier string) string
 	backup             inference.Provider
+	backupLabel        string
 	backupModelFor     func(tier string) string
 	onEvent            func(Event)
 	retryWait          time.Duration
@@ -155,10 +158,12 @@ type Provider struct {
 // New builds the engine around primary.
 func New(primary inference.Provider, opts Options) *Provider {
 	p := &Provider{
-		primary:            primary,
 		primaryUnavailable: opts.PrimaryUnavailable,
+		primaryBlocked:     opts.PrimaryBlocked,
+		primary:            primary,
 		primaryModelFor:    opts.PrimaryModelFor,
 		backup:             opts.Backup,
+		backupLabel:        opts.BackupLabel,
 		backupModelFor:     opts.BackupModelFor,
 		onEvent:            opts.OnEvent,
 		retryWait:          opts.RetryWait,
@@ -265,9 +270,7 @@ func (p *Provider) primaryRequest(req inference.Call) inference.Call {
 	if p.primaryModelFor == nil || req.Tier == "" {
 		return req
 	}
-	if model := p.primaryModelFor(req.Tier); model != "" {
-		req.Model = model
-	}
+	req.Model = p.primaryModelFor(req.Tier)
 	return req
 }
 
@@ -291,13 +294,25 @@ func (p *Provider) backupRequest(req inference.Call) inference.Call {
 // there is no user-visible stream on this path.
 func (p *Provider) Chat(ctx context.Context, req inference.Call) (inference.Result, error) {
 	req = p.primaryRequest(req)
+	attempts := make(map[string]bool)
+	if llm.AuthFallbackSelected(ctx, p) {
+		if !p.authenticationBackupAllowed(req) {
+			return inference.Result{}, incompatibleAuthFallback()
+		}
+		r, e, _ := p.chatAuth(ctx, p.backup, p.backupRequest(req), false, attempts)
+		return r, llm.SelectedAuthFallbackFailure(e)
+	}
 	if p.useBackup(req) {
-		return p.backupChat(ctx, req)
+		r, e, _ := p.chatAuth(ctx, p.backup, p.backupRequest(req), false, attempts)
+		return r, e
 	}
 	if req.Tier != "" && p.primaryModelFor != nil && req.Model == "" {
 		return inference.Result{}, fmt.Errorf("primary model unavailable for tier %q", req.Tier)
 	}
-	resp, err := p.primary.Chat(ctx, req)
+	resp, err, terminal := p.chatAuth(ctx, p.primary, req, true, attempts)
+	if terminal {
+		return resp, err
+	}
 	if err == nil || ctx.Err() != nil {
 		return resp, err
 	}
@@ -308,7 +323,10 @@ func (p *Provider) Chat(ctx context.Context, req inference.Call) (inference.Resu
 		if !p.sleep(ctx, ev.Wait) {
 			return resp, err
 		}
-		resp, err = p.primary.Chat(ctx, req)
+		resp, err, terminal = p.chatAuth(ctx, p.primary, req, true, attempts)
+		if terminal {
+			return resp, err
+		}
 		if err == nil || ctx.Err() != nil {
 			return resp, err
 		}
@@ -324,7 +342,8 @@ func (p *Provider) Chat(ctx context.Context, req inference.Call) (inference.Resu
 	}
 	p.emit(Event{Action: ActionFailover, Stage: "chat", Class: class,
 		From: eventFrom(p.primary.Name(), err), To: p.backup.Name(), Err: err})
-	return p.backupChat(ctx, req)
+	r, e, _ := p.chatAuth(ctx, p.backup, p.backupRequest(req), false, attempts)
+	return r, e
 }
 
 // StreamChat runs the streaming policy. Decisions are narrated in-band: the
@@ -333,17 +352,17 @@ func (p *Provider) Chat(ctx context.Context, req inference.Call) (inference.Resu
 // waits, not after.
 func (p *Provider) StreamChat(ctx context.Context, req inference.Call) (inference.Stream, error) {
 	req = p.primaryRequest(req)
-	if p.useBackup(req) {
-		return p.backupStream(ctx, req)
-	}
-	if req.Tier != "" && p.primaryModelFor != nil && req.Model == "" {
+	if !p.useBackup(req) && req.Tier != "" && p.primaryModelFor != nil && req.Model == "" {
 		return nil, fmt.Errorf("primary model unavailable for tier %q", req.Tier)
 	}
-	r := &reader{ctx: ctx, p: p, req: req}
-	inner, err := p.primary.StreamChat(ctx, req)
+	if llm.AuthFallbackSelected(ctx, p) && !p.authenticationBackupAllowed(req) {
+		return nil, incompatibleAuthFallback()
+	}
+	r := &reader{ctx: ctx, p: p, req: p.primaryRequest(req), authAttempts: make(map[string]bool), failedOver: p.useBackup(req) || llm.AuthFallbackSelected(ctx, p), authFallback: llm.AuthFallbackSelected(ctx, p)}
+	inner, err := r.open()
 	if err != nil {
 		if !r.decide("stream_dial", err) {
-			return nil, err
+			return nil, r.failure(err)
 		}
 		return r, nil
 	}
@@ -365,9 +384,12 @@ type reader struct {
 	queue   []llm.StreamEvent                // injected notices to deliver first
 	attempt func() (llm.StreamReader, error) // deferred action set by decide()
 
-	emitted    bool // a real event was delivered; recovery is off the table
-	retried    bool // the one busy retry has been used
-	failedOver bool // already on the backup; never cascade
+	emitted      bool // a real event was delivered; recovery is off the table
+	retried      bool // the one busy retry has been used
+	failedOver   bool // already on the backup; never cascade
+	authAttempts map[string]bool
+	terminalErr  error
+	authFallback bool
 }
 
 func (r *reader) Next() (llm.StreamEvent, bool, error) {
@@ -385,7 +407,7 @@ func (r *reader) Next() (llm.StreamEvent, bool, error) {
 				if r.decide("stream_dial", err) {
 					continue
 				}
-				return llm.StreamEvent{}, false, err
+				return llm.StreamEvent{}, false, r.failure(err)
 			}
 			r.inner = inner
 			continue
@@ -394,7 +416,25 @@ func (r *reader) Next() (llm.StreamEvent, bool, error) {
 			return llm.StreamEvent{}, false, nil
 		}
 		ev, ok, err := r.inner.Next()
+		authErr := err
+		if authErr == nil && ok && ev.Type == llm.EventError {
+			authErr = ev.Err
+		}
+		if llm.ClassOf(authErr) == llm.ErrLoginRequired {
+			if r.decide("stream_auth", authErr) {
+				continue
+			}
+			return llm.StreamEvent{}, false, r.failure(authErr)
+		}
 		if r.emitted || r.failedOver {
+			if r.authFallback {
+				if err != nil {
+					return llm.StreamEvent{}, false, r.failure(err)
+				}
+				if ok && ev.Type == llm.EventError {
+					return llm.StreamEvent{}, false, r.failure(ev.Err)
+				}
+			}
 			return ev, ok, err
 		}
 		switch {
@@ -402,7 +442,7 @@ func (r *reader) Next() (llm.StreamEvent, bool, error) {
 			if r.decide("stream_first", err) {
 				continue
 			}
-			return llm.StreamEvent{}, false, err
+			return llm.StreamEvent{}, false, r.failure(err)
 		case ok && ev.Type == llm.EventError:
 			streamErr := ev.Err
 			if streamErr == nil {
@@ -415,7 +455,7 @@ func (r *reader) Next() (llm.StreamEvent, bool, error) {
 			if r.decide("stream_first", streamErr) {
 				continue
 			}
-			return llm.StreamEvent{}, false, streamErr
+			return llm.StreamEvent{}, false, r.failure(streamErr)
 		default:
 			// First real event (or a clean immediate end): the stream is live.
 			r.emitted = true
@@ -437,6 +477,41 @@ func (r *reader) decide(stage string, err error) bool {
 	}
 	class := llm.ClassOf(err)
 	p := r.p
+	if class == llm.ErrLoginRequired {
+		fallback := ""
+		if !r.failedOver && p.authenticationBackupAllowed(r.req) {
+			fallback = p.authenticationBackupName()
+		}
+		choice, recoveryErr := requestAuth(r.ctx, err, fallback, !r.emitted, r.authAttempts)
+		if recoveryErr != nil {
+			r.terminalErr = recoveryErr
+			return false
+		}
+		switch choice {
+		case llm.AuthLogin:
+			if r.emitted {
+				r.terminalErr = &llm.CredentialError{Class: llm.ErrCredential, Reason: "login completed; partial response requires an explicit fresh request"}
+				return false
+			}
+			r.attempt = r.open
+			return true
+		case llm.AuthFallback:
+			if !r.failedOver && p.authenticationBackupAllowed(r.req) {
+				r.failedOver = true
+				r.authFallback = true
+				llm.SelectAuthFallback(r.ctx, p)
+				r.ctx = llm.WithExternalAuthFallback(r.ctx, "")
+				r.attempt = r.open
+				return true
+			}
+			r.terminalErr = &llm.AuthFallbackRequest{Cause: err}
+			return false
+		}
+		return false
+	}
+	if r.failedOver {
+		return false
+	}
 	if llm.Retryable(class) && !r.retried {
 		r.retried = true
 		ev := Event{Action: ActionRetry, Stage: stage, Class: class,
@@ -477,62 +552,25 @@ func (r *reader) Close() error {
 	return nil
 }
 
-// A configured resolver returning empty means this backup cannot satisfy the
-// requested intent. Never reuse the originating profile's model in that case.
-func (p *Provider) backupUnavailable(req inference.Call) error {
-	if req.FallbackTier != "" {
-		req.Tier = req.FallbackTier
+func (r *reader) open() (llm.StreamReader, error) {
+	if r.failedOver {
+		return r.p.backupStream(r.ctx, r.req)
 	}
-	if p.backupModelFor != nil && p.backupModelFor(req.Tier) == "" {
-		return fmt.Errorf("backup model unavailable for requested tier %q", req.Tier)
-	}
-	if req.Tier == "vision" {
-		target := inference.TargetForCall(p.backup, p.backupRequest(req))
-		if target.Profile != "" && (!target.VisionKnown || !target.SupportsVision) {
-			return fmt.Errorf("backup image capability is unconfirmed")
-		}
-	}
-	return nil
+	return r.p.primary.StreamChat(r.ctx, r.req)
 }
-func (p *Provider) backupChat(ctx context.Context, req inference.Call) (inference.Result, error) {
-	if err := p.backupUnavailable(req); err != nil {
-		return inference.Result{}, err
+func (r *reader) failure(err error) error {
+	if r.terminalErr != nil {
+		return r.terminalErr
 	}
-	return p.backup.Chat(ctx, p.backupRequest(req))
-}
-func (p *Provider) backupStream(ctx context.Context, req inference.Call) (inference.Stream, error) {
-	if err := p.backupUnavailable(req); err != nil {
-		return nil, err
+	if r.authFallback {
+		return llm.SelectedAuthFallbackFailure(err)
 	}
-	return p.backup.StreamChat(ctx, p.backupRequest(req))
+	return err
 }
 
-func (p *Provider) TargetFor(model, tier string) llm.ServingRoute {
-	return p.TargetForCall(inference.Call{Model: model, Tier: tier})
-}
-func (p *Provider) useBackup(req inference.Call) bool {
-	if p.backup == nil {
-		return false
+func (p *Provider) authenticationBackupName() string {
+	if p.backupLabel != "" {
+		return p.backupLabel + " (" + p.backup.Name() + ")"
 	}
-	if p.primaryUnavailable || p.quotaCoolingDown() || (req.Tier != "" && p.primaryModelFor != nil && p.primaryModelFor(req.Tier) == "") {
-		return true
-	}
-	if req.Tier == "vision" {
-		target := inference.TargetForCall(p.primary, p.primaryRequest(req))
-		if target.Profile != "" && (!target.VisionKnown || !target.SupportsVision) {
-			return true
-		}
-	}
-	return false
-}
-
-func (p *Provider) TargetForCall(req inference.Call) llm.ServingRoute {
-	if p.useBackup(req) {
-		if p.backupUnavailable(req) != nil {
-			req.Model = ""
-			return inference.TargetForCall(p.backup, req)
-		}
-		return inference.TargetForCall(p.backup, p.backupRequest(req))
-	}
-	return inference.TargetForCall(p.primary, p.primaryRequest(req))
+	return p.backup.Name()
 }

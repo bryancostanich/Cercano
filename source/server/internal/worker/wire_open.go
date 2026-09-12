@@ -31,13 +31,14 @@ func MarshalChatRequest(req llm.ChatRequest) (*proto.LLMChatRequest, error) {
 	return &proto.LLMChatRequest{
 		Model: req.Model,
 		Tier:  req.Tier, FallbackTier: req.FallbackTier,
-		System:         req.System,
-		Messages:       msgs,
-		Tools:          tools,
-		ToolChoiceType: string(req.ToolChoice.Type),
-		ToolChoiceName: req.ToolChoice.Name,
-		MaxTokens:      int32(req.MaxTokens),
-		Temperature:    req.Temperature,
+		System:          req.System,
+		Messages:        msgs,
+		Tools:           tools,
+		ToolChoiceType:  string(req.ToolChoice.Type),
+		ToolChoiceName:  req.ToolChoice.Name,
+		MaxTokens:       int32(req.MaxTokens),
+		Temperature:     req.Temperature,
+		DisableThinking: req.DisableThinking,
 	}, nil
 }
 
@@ -68,8 +69,9 @@ func UnmarshalChatRequest(p *proto.LLMChatRequest) (llm.ChatRequest, error) {
 			Type: llm.ToolChoiceType(p.GetToolChoiceType()),
 			Name: p.GetToolChoiceName(),
 		},
-		MaxTokens:   int(p.GetMaxTokens()),
-		Temperature: p.Temperature, // optional double → pointer round-trips presence
+		MaxTokens:       int(p.GetMaxTokens()),
+		Temperature:     p.Temperature, // optional double → pointer round-trips presence
+		DisableThinking: p.GetDisableThinking(),
 	}, nil
 }
 

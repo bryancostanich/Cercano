@@ -153,3 +153,10 @@ func (r *recordingProvider) TaskAssignmentFor(task config.Task) (config.TaskAssi
 }
 
 func (r *recordingProvider) TaskModelFor() (string, bool) { return inference.TaskModelFor(r.inner) }
+func (r *recordingProvider) RuntimeContext(ctx context.Context, model string, prepare bool) (llm.RuntimeContext, error) {
+	return llm.ResolveRuntimeContext(ctx, r.inner, model, prepare)
+}
+
+func (p *recordingProvider) TargetForContext(ctx context.Context, req inference.Call) llm.ServingRoute {
+	return inference.TargetForContext(ctx, p.inner, req)
+}

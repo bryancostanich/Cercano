@@ -2217,6 +2217,16 @@ func instanceValue(instance agentclient.RuntimeInstance) string {
 
 func instanceHint(instance agentclient.RuntimeInstance) string {
 	parts := nonEmptyParts(shortID(instance.ID))
+	if instance.Runtime == "llama_server" {
+		switch {
+		case (instance.State == "running" || instance.State == "healthy") && instance.ConfirmedContextTokens > 0 && !instance.ContextConfirmedAt.IsZero():
+			parts = append(parts, fmt.Sprintf("context:%d confirmed (server)", instance.ConfirmedContextTokens))
+		case instance.PlannedContextTokens > 0:
+			parts = append(parts, fmt.Sprintf("context:%d planned (%s); unconfirmed", instance.PlannedContextTokens, instance.PlannedContextSource))
+		default:
+			parts = append(parts, "context:unknown")
+		}
+	}
 	if !instance.StartedAt.IsZero() {
 		parts = append(parts, "started "+relativeTime(instance.StartedAt))
 	}

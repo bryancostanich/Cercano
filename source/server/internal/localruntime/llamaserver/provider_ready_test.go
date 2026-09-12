@@ -48,6 +48,9 @@ func TestWaitReadyFailsFastWhenInstanceDied(t *testing.T) {
 func TestFinishReadinessFlipsStartingToRunning(t *testing.T) {
 	var hits atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if capacityFixture(w, r) {
+			return
+		}
 		if hits.Add(1) < 3 {
 			w.WriteHeader(http.StatusServiceUnavailable) // still loading
 			return
@@ -61,7 +64,7 @@ func TestFinishReadinessFlipsStartingToRunning(t *testing.T) {
 		running: map[string]*managedInstance{},
 	}
 	p.running["slow"] = &managedInstance{record: localruntime.InstanceRecord{
-		ID:    "slow",
+		ID: "slow", Endpoint: server.URL,
 		State: localruntime.InstanceStarting,
 	}}
 

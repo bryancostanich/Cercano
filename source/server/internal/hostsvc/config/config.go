@@ -5,8 +5,10 @@
 package config
 
 import (
+	"context"
 	"sync"
 
+	"cercano/source/server/internal/hostsvc/credentials"
 	"cercano/source/server/internal/secrets"
 	cfg "cercano/source/server/pkg/config"
 )
@@ -17,11 +19,13 @@ type Service interface {
 	Get() cfg.Config
 	Path() string
 	Secrets() secrets.Store
+	Credentials() *credentials.Service
+	BeginCloudLogin(context.Context, cfg.CloudProfile, bool, bool) (*CloudLogin, error)
 	ActiveProfile() (cfg.CloudProfile, bool)
 
 	// Full-state writes (replace entire config; no notify — caller persists
 	// and broadcasts as needed)
-	Set(c cfg.Config)
+	Set(c cfg.Config) error
 
 	// Initialization (no persist, no notify)
 	SetPath(path string)
@@ -38,11 +42,12 @@ type Service interface {
 	SetDestinationProfiles(destination cfg.Destination, preferred, backup string) error
 	SetTaskAssignment(task cfg.Task, assignment *cfg.TaskAssignment) error
 
-	// Mutate applies fn to the live config under the write lock. It does NOT
+	// Mutate applies fn to an isolated candidate under the write lock, validates it,
+	// and commits only valid state. It does NOT
 	// persist to disk and does NOT notify — use Persist() and/or Set()
 	// explicitly when those side-effects are needed. Intended for targeted
 	// in-place patches (rebuildCloud CloudModel write-back, tests).
-	Mutate(fn func(*cfg.Config))
+	Mutate(fn func(*cfg.Config)) error
 
 	// CloudModel mirror write (rebuildCloud write-back only; no notify, no persist)
 	SetCloudModel(model string)
@@ -52,15 +57,16 @@ type Service interface {
 }
 
 type svc struct {
-	mu      sync.RWMutex
-	current cfg.Config
-	path    string
-	store   secrets.Store
+	mu          sync.RWMutex
+	current     cfg.Config
+	path        string
+	store       secrets.Store
+	credentials *credentials.Service
 }
 
 // New returns a Service initialized with the given path, config, and secrets.
 func New(path string, c cfg.Config, st secrets.Store) Service {
-	return &svc{path: path, current: c.Clone(), store: st}
+	return &svc{path: path, current: c.Clone(), store: st, credentials: credentials.New(st)}
 }
 
 // Get returns a deep copy of the current config. The returned snapshot shares
@@ -82,10 +88,13 @@ func (s *svc) Path() string {
 
 func (s *svc) Secrets() secrets.Store {
 	s.mu.RLock()
-	st := s.store
-	s.mu.RUnlock()
-	return st
+	defer s.mu.RUnlock()
+	if s.store == nil {
+		return nil
+	}
+	return s.credentials
 }
+func (s *svc) Credentials() *credentials.Service { return s.credentials }
 
 func (s *svc) ActiveProfile() (cfg.CloudProfile, bool) {
 	s.mu.RLock()
@@ -101,11 +110,16 @@ func (s *svc) ActiveProfile() (cfg.CloudProfile, bool) {
 // Set replaces the entire config (deep-cloning the incoming value so the
 // caller retaining c cannot later mutate shared state). Does NOT persist and
 // does NOT notify — caller handles those.
-func (s *svc) Set(c cfg.Config) {
+func (s *svc) Set(c cfg.Config) error {
+	if err := c.LlamaServer.Validate(); err != nil {
+		return err
+	}
 	clone := c.Clone()
 	s.mu.Lock()
+	s.cancelChangedLogins(clone.CloudProfiles)
 	s.current = clone
 	s.mu.Unlock()
+	return nil
 }
 
 func (s *svc) SetPath(path string) {
@@ -116,13 +130,19 @@ func (s *svc) SetPath(path string) {
 
 func (s *svc) SetSecrets(st secrets.Store) {
 	s.mu.Lock()
-	s.store = st
+	if st != s.credentials {
+		s.credentials.ReplaceStore(st)
+		s.store = st
+	}
 	s.mu.Unlock()
 }
 
 func (s *svc) SetActiveProfile(name string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.setActiveProfileLocked(name)
+}
+func (s *svc) setActiveProfileLocked(name string) bool {
 	if _, ok := profileByName(s.current.CloudProfiles, name); !ok {
 		return false
 	}
@@ -140,10 +160,14 @@ func (s *svc) UpsertProfile(p cfg.CloudProfile) (replaced bool, isActive bool) {
 	p = p.Clone()
 	for i, existing := range s.current.CloudProfiles {
 		if existing.Name == name {
+			if !existing.Equal(p) {
+				s.credentials.CancelLogin(name)
+			}
 			s.current.CloudProfiles[i] = p
 			return true, name == s.current.ActiveCloudProfile
 		}
 	}
+	s.credentials.CancelLogin(name)
 	s.current.CloudProfiles = append(s.current.CloudProfiles, p)
 	return false, name == s.current.ActiveCloudProfile
 }
@@ -155,6 +179,7 @@ func (s *svc) RemoveProfile(name string) (existed, wasActive bool) {
 	if !ok {
 		return false, false
 	}
+	s.credentials.CancelLogin(name)
 	kept := s.current.CloudProfiles[:0]
 	for _, p := range s.current.CloudProfiles {
 		if p.Name != name {
@@ -197,10 +222,17 @@ func (s *svc) ProfileInfo(name string) (exists bool, isActive bool) {
 	return ok, s.current.ActiveCloudProfile == name
 }
 
-func (s *svc) Mutate(fn func(*cfg.Config)) {
+func (s *svc) Mutate(fn func(*cfg.Config)) error {
 	s.mu.Lock()
-	fn(&s.current)
-	s.mu.Unlock()
+	defer s.mu.Unlock()
+	candidate := s.current.Clone()
+	fn(&candidate)
+	if err := candidate.LlamaServer.Validate(); err != nil {
+		return err
+	}
+	s.cancelChangedLogins(candidate.CloudProfiles)
+	s.current = candidate.Clone()
+	return nil
 }
 
 func (s *svc) SetCloudModel(model string) {

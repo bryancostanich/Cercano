@@ -25,11 +25,12 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+
+	"cercano/source/server/internal/llm/httpx"
 )
 
 // DefaultClientID is Claude Code's public OAuth client id (from a live
@@ -242,8 +243,7 @@ func (f Flow) tokenRequest(ctx context.Context, body map[string]string) (*TokenS
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 300))
-		return nil, fmt.Errorf("anthropic token request: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(snippet)))
+		return nil, httpx.OAuthFailure(resp)
 	}
 	var tr tokenResponse
 	if err := json.NewDecoder(resp.Body).Decode(&tr); err != nil {

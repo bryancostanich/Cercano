@@ -38,15 +38,18 @@ const (
 )
 
 type LoopEvent struct {
-	Kind        LoopEventKind
-	ToolUseID   string
-	ToolName    string
-	ArgsJSON    string
-	Tier        string
-	Destructive bool // display-only ⚠ hint (MCP destructiveHint); never affects gating
-	Summary     string
-	Detail      string
-	IsError     bool
+	Model             string
+	Provider          string
+	RuntimeInstanceID string
+	Kind              LoopEventKind
+	ToolUseID         string
+	ToolName          string
+	ArgsJSON          string
+	Tier              string
+	Destructive       bool // display-only ⚠ hint (MCP destructiveHint); never affects gating
+	Summary           string
+	Detail            string
+	IsError           bool
 	// StartLine mirrors Result.StartLine on tool_exec_complete events: the
 	// 1-based line where a file edit/write began (0 = not applicable).
 	StartLine int
@@ -410,6 +413,15 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (returned ToolLoopResult
 		}
 	}()
 
+	capacity, err := llm.ResolveRuntimeContext(ctx, in.Provider, in.Model, true)
+	if err != nil {
+		return ToolLoopResult{}, err
+	}
+	if capacity.Window > 0 {
+		in.ContextWindow = capacity.Window
+		in.ContextWindowKnown = true
+		ctx = llm.WithRuntimeContext(ctx, capacity)
+	}
 	ctx = agenttools.WithWorkDir(ctx, in.WorkDir)
 	ctx = agenttools.WithConversationID(ctx, in.ConversationID)
 	if !in.Provider.Capabilities().SupportsTools {
@@ -529,11 +541,21 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (returned ToolLoopResult
 	}
 
 	for iter := 0; unlimitedIters || iter < maxIters; iter++ {
-		target := inference.TargetForCall(in.Provider, inference.Call{Model: requestedModel, Tier: in.Tier, FallbackTier: in.FallbackTier})
-		if target.Profile != "" {
+		target := inference.TargetForContext(ctx, in.Provider, inference.Call{Model: requestedModel, Tier: in.Tier, FallbackTier: in.FallbackTier})
+		if target.Profile != "" || target.Destination == "local" {
 			in.Model = target.Model
 			in.ContextWindow = target.ContextWindow
 			in.ContextWindowKnown = target.ContextWindowKnown
+		}
+		// Authentication can select Local at a live inference boundary. Prepare
+		// that actual serving instance before budgeting the next iteration.
+		if in.Provider.Name() == "llama_server" {
+			capacity, err := llm.ResolveRuntimeContext(ctx, in.Provider, in.Model, true)
+			if err != nil {
+				return ToolLoopResult{}, err
+			}
+			in.ContextWindow, in.ContextWindowKnown = capacity.Window, true
+			ctx = llm.WithRuntimeContext(ctx, capacity)
 		}
 
 		// Tool results can add image blocks after the initial user/history rewrite.
@@ -575,7 +597,8 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (returned ToolLoopResult
 			return ToolLoopResult{Iterations: iter + 1, History: hist, InputTokens: lastIn, OutputTokens: lastOut, LastRequestBudget: budget}, budget.OverflowError()
 		}
 		emit(LoopEvent{
-			Kind:                   LoopRequestAccounting,
+			Kind:  LoopRequestAccounting,
+			Model: in.Model, Provider: in.Provider.Name(), RuntimeInstanceID: llm.ExpectedRuntimeContext(ctx).InstanceID,
 			MessageTokens:          budget.MessageTokens,
 			SystemTokens:           budget.SystemTokens,
 			ToolSchemaTokens:       budget.ToolTokens,

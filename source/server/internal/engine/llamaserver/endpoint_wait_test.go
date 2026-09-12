@@ -91,6 +91,7 @@ func startingInstance(state localruntime.InstanceState, lastErr string) localrun
 		Runtime:   runtimeName,
 		ModelID:   "llama_server:model-a",
 		State:     state,
+		Context:   confirmedTestCapacity(),
 		Endpoint:  "http://127.0.0.1:4242",
 		LastError: lastErr,
 		StartedAt: time.Now(),

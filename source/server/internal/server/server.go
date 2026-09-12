@@ -55,6 +55,7 @@ import (
 	"cercano/source/server/internal/mistralrscompat"
 	"cercano/source/server/internal/modelevidence"
 	"cercano/source/server/internal/modelmetadata"
+	"cercano/source/server/internal/modelwindow"
 	"cercano/source/server/internal/ollamacatalog"
 	"cercano/source/server/internal/openmodels"
 	"cercano/source/server/internal/protocols"
@@ -103,6 +104,7 @@ type McpManager interface {
 
 // Server is the gRPC server for the Agent service.
 type Server struct {
+	authenticationWaiters sync.Map
 	proto.UnimplementedAgentServer
 	agent       *agent.Agent
 	providerSvc providers.Resolver // owns cloud/open providers, router, coordinator, registry, catalogManager
@@ -218,6 +220,7 @@ func (s *Server) persistTurnContextUsage(conv string, acct runnersvc.RequestAcco
 		return
 	}
 	s.persistSvc.RecordTurnContextUsage(context.Background(), conv, persistsvc.TurnContextUsage{
+		Model: acct.Model, Provider: acct.Provider, RuntimeInstanceID: acct.RuntimeInstanceID,
 		MessageTokens:          acct.MessageTokens,
 		SystemTokens:           acct.SystemTokens,
 		ToolSchemaTokens:       acct.ToolSchemaTokens,
@@ -1043,6 +1046,9 @@ func NewServer(a *agent.Agent, router RouterCloudUpdater, coordinator *loop.ADKC
 	)
 	// The meter denominator must be the same capacity the runner budgeted
 	// against, or the UI reports a percentage of a window that was never used.
+	s.persistSvc.SetLocalRuntimeContext(func(model string) (llm.RuntimeContext, error) {
+		return llm.ResolveRuntimeContext(context.Background(), s.providerSvc.Open(), model, false)
+	})
 	s.persistSvc.SetCloudContextWindow(s.cloudContextWindow)
 	// Construct the tool catalog service. permBroker is not yet wired here
 	// (SetPermissions is called by the caller after construction), so it is
@@ -1060,10 +1066,7 @@ func NewServer(a *agent.Agent, router RouterCloudUpdater, coordinator *loop.ADKC
 	// return 0 to disable the guard (the provider's own overflow error remains
 	// the backstop).
 	//
-	// The window is NOT simply config.LlamaServer.ContextSize: a catalog model
-	// may pin its own --ctx-size, which wins at launch because per-model flags
-	// are appended last. Resolving it here keeps sub-agents from inheriting a
-	// phantom ceiling and rejecting work the server would have accepted.
+	// Config edits do not alter an already-serving runtime window.
 	s.toolSvc.SetContextWindowResolver(func(model string, isCloud bool) int {
 		if isCloud {
 			// A cloud sub-agent's window is knowable when the provider
@@ -1075,8 +1078,15 @@ func NewServer(a *agent.Agent, router RouterCloudUpdater, coordinator *loop.ADKC
 			}
 			return 0
 		}
-		llamaCfg := s.cfgSvc.Get().LlamaServer
-		return localModelContextWindow(llamaCfg.ContextSize, llamaCfg.ContextSizeSet, model)
+		cfg := s.cfgSvc.Get()
+		if cfg.OpenRuntime == "llama_server" {
+			capacity, err := llm.ResolveRuntimeContext(context.Background(), s.providerSvc.Open(), model, false)
+			if err != nil {
+				return 0
+			}
+			return capacity.Window
+		}
+		return modelwindow.LocalRuntimeWindow(cfg, model)
 	})
 	// Wire the in-process turn runner with nil Perms (permBroker not yet set).
 	// Rebuilt in SetPermissions once the broker is wired. workerRunner stays nil
@@ -1154,10 +1164,9 @@ func (s *Server) SelectExecutionMode() {
 	// Production default ("worker" or empty): arm worker-process execution. The
 	// in-process runner stays as the fallback for MCP-involving turns.
 	s.workerRunner = worker.NewWorkerRunner(
-		s.persistSvc,       // pre-assembles history + project context
-		s.cfgSvc,           // builds the ConfigSnapshot
-		s.permBroker,       // permission mode + decisions
-		s.cfgSvc.Secrets(), // resolves credentials for the worker's CredentialRequests
+		s.persistSvc, // pre-assembles history + project context
+		s.cfgSvc,     // builds the ConfigSnapshot
+		s.permBroker, // permission mode + decisions
 		func(ctx context.Context, id, parentID, projectDir, model string, grantedTools []string) error {
 			st := s.persistSvc.Store()
 			if st == nil {
@@ -1585,7 +1594,9 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 
 		// Commit the profile mutations before rebuilding so rebuildCloudLocked
 		// reads the updated profile from cfgSvc.
-		s.cfgSvc.Set(c)
+		if err := s.cfgSvc.Set(c); err != nil {
+			return nil, grpcstatus.Error(codes.InvalidArgument, err.Error())
+		}
 		c = s.cfgSvc.Get() // re-snapshot so subsequent reads are consistent
 
 		if err := s.rebuildCloudLocked(); err != nil {
@@ -1733,7 +1744,9 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 	}
 
 	// Commit all config mutations to the service and persist.
-	s.cfgSvc.Set(c)
+	if err := s.cfgSvc.Set(c); err != nil {
+		return nil, grpcstatus.Error(codes.InvalidArgument, err.Error())
+	}
 	s.applyRuntimeEndpoints(c)
 	s.cfgSvc.Persist()
 
@@ -2788,20 +2801,24 @@ func mapRuntimeInstances(instances []localruntime.InstanceRecord) []*proto.Runti
 
 func mapRuntimeInstance(instance localruntime.InstanceRecord) *proto.RuntimeInstance {
 	return &proto.RuntimeInstance{
-		Id:           instance.ID,
-		Runtime:      instance.Runtime,
-		ModelId:      instance.ModelID,
-		State:        instance.State.String(),
-		Pid:          int32(instance.PID),
-		Address:      instance.Address,
-		Port:         int32(instance.Port),
-		Endpoint:     instance.Endpoint,
-		StartedAt:    formatRuntimeTime(instance.StartedAt),
-		ReadyAt:      formatRuntimeTime(instance.ReadyAt),
-		RestartCount: int32(instance.RestartCount),
-		LastExitCode: int32(instance.LastExitCode),
-		LastError:    instance.LastError,
-		LogPath:      instance.LogPath,
+		PlannedContextTokens:   int64(instance.Context.PlannedTokens),
+		PlannedContextSource:   instance.Context.PlannedSource,
+		ConfirmedContextTokens: int64(instance.Context.ConfirmedTokens),
+		ContextConfirmedAt:     formatRuntimeTime(instance.Context.ConfirmedAt),
+		Id:                     instance.ID,
+		Runtime:                instance.Runtime,
+		ModelId:                instance.ModelID,
+		State:                  instance.State.String(),
+		Pid:                    int32(instance.PID),
+		Address:                instance.Address,
+		Port:                   int32(instance.Port),
+		Endpoint:               instance.Endpoint,
+		StartedAt:              formatRuntimeTime(instance.StartedAt),
+		ReadyAt:                formatRuntimeTime(instance.ReadyAt),
+		RestartCount:           int32(instance.RestartCount),
+		LastExitCode:           int32(instance.LastExitCode),
+		LastError:              instance.LastError,
+		LogPath:                instance.LogPath,
 	}
 }
 
@@ -2974,31 +2991,6 @@ func buildToolLoopSystem(env loopEnv, steering, dirSnapshot, projectContext stri
 
 // buildSystemPrompt gathers live environment grounding for workDir and renders
 // the tool-loop system prompt.
-// localModelContextWindow resolves the context window a local model is really
-// served with, applying the catalog's per-model --ctx-size override on top of
-// the configured value. The model ID arrives in routing form
-// ("llama_server:catalog:<id>"), while the catalog is keyed by the bare ID.
-func localModelContextWindow(configured int, configExplicit bool, model string) int {
-	if configExplicit && configured > 0 {
-		return configured
-	}
-	if model == "" {
-		return configured
-	}
-	bare := model
-	if i := strings.LastIndex(bare, ":"); i >= 0 {
-		bare = bare[i+1:]
-	}
-	total := sysram.Total()
-	if total < 0 {
-		total = 0
-	}
-	if n := llamaserver.ModelContextOverride(bare, uint64(total)); n > 0 {
-		return n
-	}
-	return configured
-}
-
 func (s *Server) buildSystemPrompt(workDir string) string {
 	env := loopEnv{
 		WorkDir:  workDir,
@@ -3206,6 +3198,10 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 		Images:         mapInlineImages(req.GetImages()),
 		WorkDir:        req.GetWorkDir(),
 		Gen:            turnGen,
+	}
+
+	if req.GetSupportsAuthRecovery() {
+		runReq.AuthRecovery = s.authenticationRequester(convID, sink)
 	}
 
 	// turnResult carries RunTurn's return values from the goroutine to the
@@ -3467,6 +3463,13 @@ func isTurnCancellation(err error) bool {
 // did the same).
 func sendRunnerEvent(stream streamResponseSender, ev runnersvc.Event) error {
 	switch ev.Kind {
+	case runnersvc.EventAuthentication:
+		if ev.Authentication == nil {
+			return nil
+		}
+		a := ev.Authentication
+		return stream.Send(&proto.StreamProcessResponse{Payload: &proto.StreamProcessResponse_AuthenticationRequired{AuthenticationRequired: &proto.AuthenticationRequired{ConversationId: a.ConversationID, RequestId: a.RequestID, Provider: a.Challenge.Provider, ProfileName: a.Challenge.Profile, Reason: a.Challenge.Reason, Fallback: a.Challenge.Fallback, RetrySafe: a.Challenge.RetrySafe, Resolved: a.Resolved}}})
+
 	case runnersvc.EventProgress:
 		return stream.Send(&proto.StreamProcessResponse{
 			Payload: &proto.StreamProcessResponse_Progress{
@@ -3653,14 +3656,15 @@ func mapInlineImages(in []*proto.InlineImage) []agent.InlineImage {
 
 func (s *Server) mapRequest(req *proto.ProcessRequestRequest) *agent.Request {
 	return &agent.Request{
-		Input:          req.Input,
-		WorkDir:        req.WorkDir,
-		FileName:       req.FileName,
-		ConversationID: req.ConversationId,
-		DirectOpen:     req.DirectOpen,
-		ModelOverride:  req.ModelOverride,
-		Coproc:         req.Coproc,
-		Images:         mapInlineImages(req.GetImages()),
+		Input:           req.Input,
+		WorkDir:         req.WorkDir,
+		FileName:        req.FileName,
+		ConversationID:  req.ConversationId,
+		DirectOpen:      req.DirectOpen,
+		ModelOverride:   req.ModelOverride,
+		Coproc:          req.Coproc,
+		DisableThinking: req.GetDisableThinking(),
+		Images:          mapInlineImages(req.GetImages()),
 	}
 }
 

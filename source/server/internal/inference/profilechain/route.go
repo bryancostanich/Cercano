@@ -69,3 +69,7 @@ func (s *routeStream) Next() (llm.StreamEvent, bool, error) {
 	}
 	return event, ok, err
 }
+
+func (p *routeProvider) RuntimeContext(ctx context.Context, model string, prepare bool) (llm.RuntimeContext, error) {
+	return llm.ResolveRuntimeContext(ctx, p.Provider, model, prepare)
+}

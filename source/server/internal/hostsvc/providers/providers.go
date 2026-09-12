@@ -11,7 +11,6 @@ package providers
 import (
 	"cercano/source/server/internal/modelmetadata"
 	"context"
-	"fmt"
 	"log"
 	"sync"
 	"sync/atomic"
@@ -373,11 +372,12 @@ func (p *service) rebuildCloud() error {
 func (p *service) buildProfile(prof cfg.CloudProfile) (inference.Provider, error) {
 	st := p.cfgSvc.Secrets()
 	key := ""
-	if st != nil {
-		key, _ = st.Get(prof.Name)
+	var keyErr error
+	if st != nil && !cloudfactory.IsSubscription(prof) && prof.Flavor != cloudfactory.FlavorBedrock {
+		key, keyErr = st.Get(prof.Name)
 	}
-	if key == "" && prof.BaseURL == "" && prof.Flavor != cloudfactory.FlavorBedrock {
-		return nil, fmt.Errorf("no API key for profile %s", prof.Name)
+	if err := cloudfactory.ValidateStaticCredential(prof, key, keyErr); err != nil {
+		return nil, err
 	}
 	confirmed := p.modelSupportsVision
 	if p.profileModelEvidence != nil {
@@ -387,10 +387,10 @@ func (p *service) buildProfile(prof cfg.CloudProfile) (inference.Provider, error
 	}
 	opts := cloudfactory.Options{ModelSupportsVision: confirmed}
 	if prof.Flavor == cloudfactory.FlavorResponses && prof.Route == cloudfactory.RouteChatGPT {
-		opts.TokenSource = chatgptauth.NewSource(st, prof.Name, chatgptauth.Flow{})
+		opts.TokenSource = p.cfgSvc.Credentials().ChatGPT(prof.Name, chatgptauth.Flow{})
 	}
 	if prof.Flavor == cloudfactory.FlavorMessages && prof.Route == cloudfactory.RouteSubscription {
-		opts.AnthropicTokenSource = anthropicauth.NewSource(st, prof.Name, anthropicauth.Flow{})
+		opts.AnthropicTokenSource = p.cfgSvc.Credentials().Anthropic(prof.Name, anthropicauth.Flow{})
 	}
 	provider, err := cloudfactory.BuildCloudProvider(prof, key, opts)
 	if err != nil {

@@ -154,11 +154,36 @@ func TestLoad_FromFile(t *testing.T) {
 	if cfg.Port != "50052" {
 		t.Errorf("expected default Port, got %q", cfg.Port)
 	}
-	if cfg.LlamaServer.ContextSize != 8192 {
-		t.Errorf("expected default llama-server context size, got %d", cfg.LlamaServer.ContextSize)
+	if cfg.LlamaServer.ContextSize != nil {
+		t.Error("default context must remain automatic")
 	}
-	if cfg.LlamaServer.ContextSizeSet {
-		t.Error("defaulted llama-server context size must not be marked explicit")
+}
+
+func TestSavePreservesAutomaticLlamaServerContext(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("llama_server:\n  enabled: true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Save(cfg, path); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "context_size:") {
+		t.Error("saving automatic context introduced an explicit context_size override")
+	}
+	reloaded, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.LlamaServer.ContextSize != nil {
+		t.Error("automatic context became explicit after save/reload")
 	}
 }
 
@@ -175,8 +200,8 @@ llama_server:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.LlamaServer.ContextSize != 65536 || !cfg.LlamaServer.ContextSizeSet {
-		t.Fatalf("context presence = size %d explicit %v, want 65536/true", cfg.LlamaServer.ContextSize, cfg.LlamaServer.ContextSizeSet)
+	if cfg.LlamaServer.ContextOverride() != 65536 {
+		t.Fatalf("context presence = size %d explicit %v, want 65536/true", cfg.LlamaServer.ContextOverride(), cfg.LlamaServer.ContextSize != nil)
 	}
 }
 

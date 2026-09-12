@@ -106,7 +106,7 @@ func (c *fakeConfig) Get() config.Config                               { return 
 func (c *fakeConfig) Path() string                                     { return "" }
 func (c *fakeConfig) Secrets() secrets.Store                           { return nil }
 func (c *fakeConfig) ActiveProfile() (config.CloudProfile, bool)       { return config.CloudProfile{}, false }
-func (c *fakeConfig) Set(_ config.Config)                              {}
+func (c *fakeConfig) Set(_ config.Config) error                        { return nil }
 func (c *fakeConfig) SetPath(_ string)                                 {}
 func (c *fakeConfig) SetSecrets(_ secrets.Store)                       {}
 func (c *fakeConfig) SetActiveProfile(_ string) bool                   { return false }
@@ -114,7 +114,7 @@ func (c *fakeConfig) UpsertProfile(_ config.CloudProfile) (bool, bool) { return 
 func (c *fakeConfig) RemoveProfile(_ string) (bool, bool)              { return false, false }
 func (c *fakeConfig) SetBackupProfile(_ string) bool                   { return false }
 func (c *fakeConfig) ProfileInfo(_ string) (bool, bool)                { return false, false }
-func (c *fakeConfig) Mutate(_ func(*config.Config))                    {}
+func (c *fakeConfig) Mutate(_ func(*config.Config)) error              { return nil }
 func (c *fakeConfig) SetCloudModel(_ string)                           {}
 func (c *fakeConfig) Persist()                                         {}
 

@@ -28,9 +28,8 @@ type Engine struct {
 	Client  *http.Client
 	Manager localruntime.Manager
 
-	mu                    sync.RWMutex
-	failureLog            *failurelog.Writer
-	contextWindowForModel func(string) int
+	mu         sync.RWMutex
+	failureLog *failurelog.Writer
 }
 
 func NewEngine(manager localruntime.Manager) *Engine {
@@ -51,15 +50,6 @@ func (e *Engine) SetFailureLog(w *failurelog.Writer) {
 	e.mu.Unlock()
 }
 
-// SetContextWindowResolver installs an optional resolver for the effective
-// llama-server context window for a model. The command layer wires this from the
-// same config/catalog logic used by the runner's local context accounting.
-func (e *Engine) SetContextWindowResolver(fn func(string) int) {
-	e.mu.Lock()
-	e.contextWindowForModel = fn
-	e.mu.Unlock()
-}
-
 func (e *Engine) failureWriter() *failurelog.Writer {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
@@ -67,13 +57,11 @@ func (e *Engine) failureWriter() *failurelog.Writer {
 }
 
 func (e *Engine) contextWindow(model string) int {
-	e.mu.RLock()
-	fn := e.contextWindowForModel
-	e.mu.RUnlock()
-	if fn == nil {
+	c, err := e.RuntimeContext(context.Background(), model, false)
+	if err != nil {
 		return 0
 	}
-	return fn(model)
+	return c.Window
 }
 
 func (e *Engine) Complete(ctx context.Context, model, prompt, systemPrompt string, opts engine.GenOptions) (engine.CompletionResult, error) {
@@ -218,6 +206,15 @@ func (e *Engine) chat(ctx context.Context, model string, messages []openAIMessag
 	if err != nil {
 		return chatResult{}, err
 	}
+	if llm.ExpectedRuntimeContext(ctx).InstanceID != "" {
+		capacity, err := e.RuntimeContext(ctx, model, false)
+		if err != nil {
+			return chatResult{}, err
+		}
+		if err := llm.CheckRuntimeContext(ctx, capacity); err != nil {
+			return chatResult{}, err
+		}
+	}
 	if resolvedModel == "" {
 		resolvedModel = "default"
 	}
@@ -288,6 +285,9 @@ func (e *Engine) endpointFor(ctx context.Context, requested string) (endpoint st
 		}
 		switch instance.State {
 		case localruntime.InstanceRunning, localruntime.InstanceHealthy:
+			if !confirmedInstance(instance) {
+				return "", "", false, &llm.LocalStartupError{Provider: runtimeName, Model: requested, Err: errors.New("serving capacity is unconfirmed")}
+			}
 			return instance.Endpoint, modelNameForRequest(selected, requested), selected.SupportsVision, nil
 		case localruntime.InstanceStarting:
 			// Still loading the model — its port isn't open yet, so a
@@ -319,6 +319,16 @@ func (e *Engine) endpointFor(ctx context.Context, requested string) (endpoint st
 	if err != nil {
 		return "", "", false, &llm.LocalStartupError{Provider: runtimeName, Model: requested, Err: err}
 	}
+	if start == nil {
+		return "", "", false, errors.New("runtime returned no instance")
+	}
+	if start.State == localruntime.InstanceStarting {
+		endpoint, err := e.awaitInstanceReady(ctx, start.ID)
+		return endpoint, modelNameForRequest(selected, requested), selected.SupportsVision, err
+	}
+	if !confirmedInstance(*start) {
+		return "", "", false, &llm.LocalStartupError{Provider: runtimeName, Model: requested, Err: errors.New("started runtime has no confirmed capacity")}
+	}
 	if start.Endpoint == "" {
 		return "", "", false, &llm.LocalStartupError{Provider: runtimeName, Model: requested, Err: errors.New("llama-server started without an endpoint")}
 	}
@@ -345,6 +355,9 @@ func (e *Engine) awaitInstanceReady(ctx context.Context, instanceID string) (str
 			found = true
 			switch instance.State {
 			case localruntime.InstanceRunning, localruntime.InstanceHealthy:
+				if !confirmedInstance(instance) {
+					return "", errors.New("ready runtime has no confirmed capacity")
+				}
 				return instance.Endpoint, nil
 			case localruntime.InstanceStarting:
 				// keep waiting

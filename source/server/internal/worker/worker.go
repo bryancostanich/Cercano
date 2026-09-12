@@ -3,6 +3,7 @@ package worker
 import (
 	"cercano/source/server/internal/visioninspect"
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"runtime/debug"
@@ -63,6 +64,9 @@ func NewWithFactories(
 
 // RunTurn is the bidi RPC handler.
 func (w *WorkerServer) RunTurn(stream proto.Worker_RunTurnServer) error {
+	return w.runTurn(stream, false)
+}
+func (w *WorkerServer) runTurn(stream proto.Worker_RunTurnServer, authRecovery bool) error {
 	// First message must be StartTurn.
 	firstMsg, err := stream.Recv()
 	if err != nil {
@@ -103,6 +107,7 @@ func (w *WorkerServer) RunTurn(stream proto.Worker_RunTurnServer) error {
 	// Session profile proxy: session-control capabilities such as suggest_plan
 	// must mutate the host's live profile broker, not a worker-local copy.
 	profileCtl := newStreamSessionProfileController(sndr, start.GetConversationId())
+	authRequest := newStreamAuthentication(sndr)
 
 	// Recv loop: routes incoming HostToWorker messages from the host.
 	recvDone := make(chan struct{})
@@ -114,6 +119,8 @@ func (w *WorkerServer) RunTurn(stream proto.Worker_RunTurnServer) error {
 				return // stream closed or host hung up
 			}
 			switch {
+			case msg.GetAuthResponse() != nil:
+				authRequest.deliver(msg.GetAuthResponse())
 			case msg.GetPermResponse() != nil:
 				permReq.deliver(msg.GetPermResponse())
 			case msg.GetCredResponse() != nil:
@@ -172,6 +179,9 @@ func (w *WorkerServer) RunTurn(stream proto.Worker_RunTurnServer) error {
 		Input:          start.GetInput(),
 		WorkDir:        start.GetWorkDir(),
 		Gen:            start.GetGen(),
+	}
+	if authRecovery {
+		req.AuthRecovery = authRequest.Request
 	}
 	for _, img := range start.GetImages() {
 		req.Images = append(req.Images, agent.InlineImage{
@@ -458,11 +468,18 @@ func buildWorkerProviders(ctx context.Context, cfg pkgcfg.Config, credSource cre
 			return create()
 		}
 		key := ""
-		if credSource != nil {
-			key, _, _ = credSource.Fetch(ctx, prof.Name)
+		var keyErr error
+		if credSource != nil && prof.Flavor != cloudfactory.FlavorBedrock {
+			key, _, keyErr = credSource.Fetch(ctx, prof.Name)
 		}
-		if key == "" && prof.BaseURL == "" && prof.Flavor != cloudfactory.FlavorBedrock {
-			return nil, fmt.Errorf("no credential for profile %q", prof.Name)
+		if keyErr != nil {
+			var typed *llm.CredentialError
+			if errors.As(keyErr, &typed) {
+				return nil, keyErr
+			}
+		}
+		if err := cloudfactory.ValidateStaticCredential(prof, key, keyErr); err != nil {
+			return nil, err
 		}
 		provider, err := cloudfactory.BuildCloudProvider(prof, key, opts)
 		if err != nil {

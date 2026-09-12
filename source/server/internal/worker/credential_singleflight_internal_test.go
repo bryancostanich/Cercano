@@ -11,20 +11,13 @@ import (
 	"time"
 
 	"cercano/source/server/internal/anthropicauth"
+	cfgsvc "cercano/source/server/internal/hostsvc/config"
 	"cercano/source/server/internal/secrets"
+	pkgcfg "cercano/source/server/pkg/config"
 )
 
-// TestWorkerRunner_TokenSourceSingleFlightPerProfile proves that concurrent
-// credential resolutions for one subscription profile perform a single token
-// refresh. anthropicauth.Source is single-flight by construction, but that only
-// holds if the workerRunner reuses one Source per profile — a fresh Source per
-// request gives each caller its own mutex, and Anthropic's refresh tokens
-// rotate, so racing refreshes invalidate each other.
-//
-// The refresh endpoint holds every request open until released, so if N
-// independent Sources each refresh, N requests pile up on the server; a shared
-// Source lets exactly one caller refresh while the rest block on its mutex and
-// then read the freshly-persisted token.
+// Multiple worker source views share the host credential owner. This preserves
+// single-flight refresh without relying on cached adapter pointer identity.
 func TestWorkerRunner_TokenSourceSingleFlightPerProfile(t *testing.T) {
 	store := secrets.NewMemory()
 	expired := anthropicauth.TokenSet{Access: "old", Refresh: "r", ExpiresAt: time.Now().Add(-time.Hour)}
@@ -45,7 +38,7 @@ func TestWorkerRunner_TokenSourceSingleFlightPerProfile(t *testing.T) {
 	defer srv.Close()
 
 	w := &workerRunner{
-		secrets:  store,
+		cfg:      cfgsvc.New("", pkgcfg.Config{}, store),
 		anthFlow: anthropicauth.Flow{TokenURL: srv.URL},
 	}
 
@@ -57,7 +50,7 @@ func TestWorkerRunner_TokenSourceSingleFlightPerProfile(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			// Mirror resolveCredential: acquire the per-profile source, then Token().
+			// Mirror resolveCredential: obtain a fresh view of the shared owner.
 			_, _ = w.anthropicSource("sub-1").Token(context.Background())
 		}()
 	}
@@ -71,22 +64,19 @@ func TestWorkerRunner_TokenSourceSingleFlightPerProfile(t *testing.T) {
 	}
 }
 
-// TestWorkerRunner_TokenSourceCachedPerProfile pins the caching contract both
-// accessors rely on: same profile returns the same instance; different profiles
-// get distinct instances.
-func TestWorkerRunner_TokenSourceCachedPerProfile(t *testing.T) {
-	w := &workerRunner{secrets: secrets.NewMemory()}
-
-	if a, b := w.anthropicSource("p1"), w.anthropicSource("p1"); a != b {
-		t.Error("anthropicSource returned a new instance for the same profile")
+// Provider views are intentionally replaceable; service ownership, not pointer
+// identity of source adapters, is the synchronization contract.
+func TestWorkerRunner_TokenSourcesUseConfigOwner(t *testing.T) {
+	cfg := cfgsvc.New("", pkgcfg.Config{}, secrets.NewMemory())
+	w := &workerRunner{cfg: cfg}
+	if err := anthropicauth.Save(cfg.Secrets(), "p1", anthropicauth.TokenSet{Access: "fresh", ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
 	}
-	if a, b := w.anthropicSource("p1"), w.anthropicSource("p2"); a == b {
-		t.Error("anthropicSource shared one instance across different profiles")
-	}
-	if a, b := w.chatgptSource("c1"), w.chatgptSource("c1"); a != b {
-		t.Error("chatgptSource returned a new instance for the same profile")
-	}
-	if a, b := w.chatgptSource("c1"), w.chatgptSource("c2"); a == b {
-		t.Error("chatgptSource shared one instance across different profiles")
+	for _, view := range []interface {
+		Token(context.Context) (string, error)
+	}{w.anthropicSource("p1"), cfg.Credentials().Anthropic("p1", anthropicauth.Flow{})} {
+		if token, err := view.Token(context.Background()); err != nil || token != "fresh" {
+			t.Fatalf("token=%q err=%v", token, err)
+		}
 	}
 }

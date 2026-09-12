@@ -18,6 +18,12 @@ type ModelCaller interface {
 	Call(ctx context.Context, prompt string) (string, error)
 }
 
+// QueryModelCaller optionally supplies a short-task policy for query
+// generation. Synthesis continues to use ModelCaller.Call unchanged.
+type QueryModelCaller interface {
+	CallQuery(ctx context.Context, prompt string) (string, error)
+}
+
 // SearchProvider abstracts the search backend. Implemented by Searcher (DDG);
 // mockable for tests.
 type SearchProvider interface {
@@ -81,7 +87,11 @@ func (p *ResearchPipeline) CraftQueries(ctx context.Context, question string) ([
 
 Question: %s`, question)
 
-	resp, err := p.model.Call(ctx, prompt)
+	call := p.model.Call
+	if queryModel, ok := p.model.(QueryModelCaller); ok {
+		call = queryModel.CallQuery
+	}
+	resp, err := call(ctx, prompt)
 	if err != nil {
 		return nil, fmt.Errorf("query crafting failed: %w", err)
 	}

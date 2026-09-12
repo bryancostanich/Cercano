@@ -56,3 +56,7 @@ func (p *visionGuard) ModelEvidence(model string) modelmetadata.Evidence {
 	}
 	return p.evidence(model)
 }
+
+func (p *visionGuard) RuntimeContext(ctx context.Context, model string, prepare bool) (llm.RuntimeContext, error) {
+	return llm.ResolveRuntimeContext(ctx, p.Provider, model, prepare)
+}

@@ -38,6 +38,7 @@ func TestEmbed_CallsEmbeddingsEndpoint(t *testing.T) {
 			Runtime:  runtimeName,
 			ModelID:  "llama_server:nomic",
 			State:    localruntime.InstanceRunning,
+			Context:  confirmedTestCapacity(),
 			Endpoint: server.URL,
 		}},
 	}
@@ -75,6 +76,7 @@ func TestEmbed_EmptyDataErrors(t *testing.T) {
 			Runtime:  runtimeName,
 			ModelID:  "m",
 			State:    localruntime.InstanceRunning,
+			Context:  confirmedTestCapacity(),
 			Endpoint: server.URL,
 		}},
 	}

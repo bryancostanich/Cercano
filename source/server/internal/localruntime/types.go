@@ -133,7 +133,17 @@ type ModelRecord struct {
 	ContextSize int
 }
 
+// ContextCapacity belongs to the containing model/process instance. Planned
+// tokens are not permission to infer; only positive confirmed tokens are usable.
+type ContextCapacity struct {
+	PlannedTokens   int
+	PlannedSource   string
+	ConfirmedTokens int
+	ConfirmedAt     time.Time
+}
+
 type InstanceRecord struct {
+	Context      ContextCapacity
 	ID           string
 	Runtime      string
 	ModelID      string

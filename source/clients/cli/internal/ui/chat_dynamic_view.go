@@ -32,10 +32,11 @@ func (c *chatView) refreshVisibleDynamicUnits(top, height int) bool {
 		if !u.dynamic {
 			continue
 		}
-		if u.startLine >= bottom {
-			break
-		}
-		if u.startLine+u.lineCount <= top {
+		outside := u.startLine >= bottom || u.startLine+u.lineCount <= top
+		// Search needs updated readable messages outside the viewport, but not
+		// off-screen tool output or a full rebuild of unchanged history.
+		searchable := c.search != nil && u.kind == unitEntry && u.startEntry >= 0 && u.startEntry < len(c.entries) && searchableEntry(c.entries[u.startEntry])
+		if outside && !searchable {
 			continue
 		}
 		lines, rows := c.renderDynamicUnit(u)

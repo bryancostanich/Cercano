@@ -3,6 +3,7 @@ package builtins
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -166,7 +167,7 @@ func TestAutoExit_LeavesAutonomousProfile(t *testing.T) {
 	}
 }
 
-func TestRequestAutonomousExit_EntersReviewPendingAndKeepsAutonomousProfile(t *testing.T) {
+func TestRequestAutonomousExit_CompletesWithoutDecisionReplay(t *testing.T) {
 	store, err := conversation.Open(":memory:")
 	if err != nil {
 		t.Fatalf("open store: %v", err)
@@ -186,50 +187,13 @@ func TestRequestAutonomousExit_EntersReviewPendingAndKeepsAutonomousProfile(t *t
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if entered != "" {
-		t.Fatalf("request_autonomous_exit should keep autonomous profile active during review; EnterProfile called with %q", entered)
-	}
-	for _, want := range []string{"ready for final review", "Summary: done", "Verification: targeted tests passed", "Captured decisions to review", "storage shape", "complete_autonomous_review"} {
-		if !strings.Contains(res.Text, want) {
-			t.Fatalf("result missing %q: %q", want, res.Text)
-		}
-	}
-	run, err := store.GetAutonomyRun(ctx, "conv")
-	if err != nil {
-		t.Fatalf("GetAutonomyRun: %v", err)
-	}
-	if run.State != "review_pending" {
-		t.Fatalf("run.State = %q, want review_pending", run.State)
-	}
-	if !strings.Contains(run.ReviewJSON, "targeted tests passed") {
-		t.Fatalf("review json missing verification: %q", run.ReviewJSON)
-	}
-}
-
-func TestCompleteAutonomousReview_MarksCompletedAndLeavesProfile(t *testing.T) {
-	store, err := conversation.Open(":memory:")
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	defer store.Close()
-	ctx := context.Background()
-	if err := store.EnsureConversation(ctx, "conv", "/proj", "model"); err != nil {
-		t.Fatalf("EnsureConversation: %v", err)
-	}
-	if err := store.SaveAutonomyRun(ctx, conversation.AutonomyRun{ConversationID: "conv", State: "review_pending", BriefJSON: `{"goal":"ship"}`, ReviewJSON: `{"summary":"done"}`}); err != nil {
-		t.Fatalf("SaveAutonomyRun: %v", err)
-	}
-	var entered string
-	svc := capabilities.Services{Conversations: store, EnterProfile: func(convID, name string) error { entered = name; return nil }}
-	res, err := CompleteAutonomousReview().Execute(ctx, &capabilities.Call{ConversationID: "conv", Args: []byte(`{"summary":"decisions accepted"}`), Svc: svc})
-	if err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
 	if entered != "default" {
-		t.Fatalf("EnterProfile called with %q, want default", entered)
+		t.Fatalf("exit should leave autonomous mode, got profile %q; result: %s", entered, res.Text)
 	}
-	if !strings.Contains(res.Text, "decision review complete") || !strings.Contains(res.Text, "decisions accepted") {
-		t.Fatalf("unexpected result: %q", res.Text)
+	for _, unwanted := range []string{"storage shape", "Captured decisions", "complete_autonomous_review", "one by one"} {
+		if strings.Contains(res.Text, unwanted) {
+			t.Fatalf("exit replays decisions: %s", res.Text)
+		}
 	}
 	run, err := store.GetAutonomyRun(ctx, "conv")
 	if err != nil {
@@ -238,112 +202,118 @@ func TestCompleteAutonomousReview_MarksCompletedAndLeavesProfile(t *testing.T) {
 	if run.State != "completed" {
 		t.Fatalf("run.State = %q, want completed", run.State)
 	}
-	if !strings.Contains(run.ReviewJSON, "completed_at") || !strings.Contains(run.ReviewJSON, "decisions accepted") {
-		t.Fatalf("review json not completed: %q", run.ReviewJSON)
+	if !strings.Contains(run.ReviewJSON, "targeted tests passed") {
+		t.Fatalf("review json missing verification: %q", run.ReviewJSON)
 	}
 }
 
-func TestAutonomousStateMachineRejectsInvalidTransitions(t *testing.T) {
-	store, err := conversation.Open(":memory:")
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	defer store.Close()
-	ctx := context.Background()
-	const conv = "conv-invalid"
-	if err := store.EnsureConversation(ctx, conv, "/proj", "model"); err != nil {
-		t.Fatalf("EnsureConversation: %v", err)
-	}
-	svc := capabilities.Services{Conversations: store, EnterProfile: func(string, string) error { return nil }}
-
-	if _, err := CaptureDecision().Execute(ctx, &capabilities.Call{ConversationID: conv, Args: minimalDecisionArgs("too early"), Svc: svc}); err == nil || !strings.Contains(err.Error(), "no active autonomous run") {
-		t.Fatalf("capture without active run should fail, got %v", err)
-	}
-	if _, err := RequestAutonomousExit().Execute(ctx, &capabilities.Call{ConversationID: conv, Args: []byte(`{"summary":"done"}`), Svc: svc}); err == nil || !strings.Contains(err.Error(), "no active autonomous run") {
-		t.Fatalf("request exit without active run should fail, got %v", err)
-	}
-	if _, err := CompleteAutonomousReview().Execute(ctx, &capabilities.Call{ConversationID: conv, Args: []byte(`{"summary":"accepted"}`), Svc: svc}); err == nil || !strings.Contains(err.Error(), "no active autonomous run") {
-		t.Fatalf("complete review without active run should fail, got %v", err)
-	}
-
-	running, err := store.CreateAutonomyRun(ctx, conversation.AutonomyRun{ConversationID: conv, State: "running", BriefJSON: `{"goal":"ship"}`, DecisionsJSON: "[]", ReviewJSON: "{}"})
-	if err != nil {
-		t.Fatalf("CreateAutonomyRun: %v", err)
-	}
-	if _, err := CompleteAutonomousReview().Execute(ctx, &capabilities.Call{ConversationID: conv, Args: []byte(`{"summary":"accepted"}`), Svc: svc}); err == nil || !strings.Contains(err.Error(), "want review_pending") {
-		t.Fatalf("complete review while running should fail, got %v", err)
-	}
-	got, err := store.GetActiveAutonomyRun(ctx, conv)
-	if err != nil {
-		t.Fatalf("GetActiveAutonomyRun: %v", err)
-	}
-	if got.RunID != running.RunID || got.State != "running" {
-		t.Fatalf("invalid transition should leave state unchanged: %+v", got)
-	}
-
-	if _, err := RequestAutonomousExit().Execute(ctx, &capabilities.Call{ConversationID: conv, Args: []byte(`{"summary":"done"}`), Svc: svc}); err != nil {
-		t.Fatalf("request exit valid transition: %v", err)
-	}
-	if _, err := CaptureDecision().Execute(ctx, &capabilities.Call{ConversationID: conv, Args: minimalDecisionArgs("too late"), Svc: svc}); err == nil || !strings.Contains(err.Error(), "want running") {
-		t.Fatalf("capture during review_pending should fail, got %v", err)
+func TestRequestAutonomousExit_LegacyAndEmptyLedger(t *testing.T) {
+	for _, state := range []string{"running", "review_pending"} {
+		t.Run(state, func(t *testing.T) {
+			store, call := completionTestCall(t, state)
+			before, _ := store.GetActiveAutonomyRun(context.Background(), "conv")
+			res, err := RequestAutonomousExit().Execute(context.Background(), call)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res.Text != "Autonomous run completed. Left autonomous mode." {
+				t.Fatal(res.Text)
+			}
+			after, err := store.GetAutonomyRun(context.Background(), "conv")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if after.State != "completed" || after.DecisionsJSON != before.DecisionsJSON || !strings.Contains(after.ReviewJSON, "completed_at") {
+				t.Fatalf("unexpected completion: %+v", after)
+			}
+			if _, err := RequestAutonomousExit().Execute(context.Background(), call); err == nil {
+				t.Fatal("completed run must not complete again")
+			}
+		})
 	}
 }
 
-func TestAutonomousLifecycle_StartCaptureReviewComplete(t *testing.T) {
+func completionTestCall(t *testing.T, state string) (conversation.Store, *capabilities.Call) {
+	t.Helper()
 	store, err := conversation.Open(":memory:")
 	if err != nil {
-		t.Fatalf("open store: %v", err)
+		t.Fatal(err)
 	}
-	defer store.Close()
+	t.Cleanup(func() { store.Close() })
 	ctx := context.Background()
-	const conv = "conv-lifecycle"
-	if err := store.EnsureConversation(ctx, conv, "/proj", "model"); err != nil {
-		t.Fatalf("EnsureConversation: %v", err)
+	if err := store.EnsureConversation(ctx, "conv", "/proj", "model"); err != nil {
+		t.Fatal(err)
 	}
-	var active string
-	svc := capabilities.Services{
-		Conversations: store,
-		EnterProfile:  func(convID, name string) error { active = name; return nil },
+	if _, err := store.CreateAutonomyRun(ctx, conversation.AutonomyRun{ConversationID: "conv", State: state, BriefJSON: `{"goal":"ship"}`, DecisionsJSON: "[]", ReviewJSON: `{"legacy_detail":"preserved"}`}); err != nil {
+		t.Fatal(err)
 	}
+	return store, &capabilities.Call{ConversationID: "conv", Args: []byte(`{"summary":"done","verification":"tests passed"}`), Svc: capabilities.Services{Conversations: store, EnterProfile: func(string, string) error { return nil }}}
+}
 
-	if _, err := SuggestAutonomous().Execute(ctx, &capabilities.Call{ConversationID: conv, Args: []byte(`{"reason":"integration flow","goal":"ship lifecycle","done_when":["review completes"],"constraints":["do not push"],"review_points":["decision logging"]}`), Svc: svc}); err != nil {
-		t.Fatalf("suggest_autonomous: %v", err)
+func TestRequestAutonomousExit_FailuresPreserveActiveRun(t *testing.T) {
+	for _, state := range []string{"running", "review_pending"} {
+		for _, failure := range []string{"missing broker", "profile error", "write error", "bad args", "missing verification"} {
+			t.Run(state+"/"+failure, func(t *testing.T) {
+				store, call := completionTestCall(t, state)
+				ctx := context.Background()
+				before, _ := store.GetActiveAutonomyRun(ctx, "conv")
+				switched := false
+				call.Svc.EnterProfile = func(string, string) error { switched = true; return nil }
+				switch failure {
+				case "missing broker":
+					call.Svc.EnterProfile = nil
+				case "profile error":
+					call.Svc.EnterProfile = func(string, string) error { return fmt.Errorf("profile unavailable") }
+				case "write error":
+					call.Svc.Conversations = completionWriteFailure{Store: store}
+				case "bad args":
+					call.Args = []byte("{")
+				case "missing verification":
+					call.Args = []byte(`{"summary":"done"}`)
+				}
+				if _, err := RequestAutonomousExit().Execute(ctx, call); err == nil {
+					t.Fatal("expected failure")
+				}
+				after, err := store.GetActiveAutonomyRun(ctx, "conv")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if after.State != before.State || after.ReviewJSON != before.ReviewJSON || switched {
+					t.Fatalf("failed exit changed state: %+v, switched=%v", after, switched)
+				}
+			})
+		}
 	}
-	if active != "autonomous" {
-		t.Fatalf("active after start = %q, want autonomous", active)
-	}
+}
 
-	if _, err := CaptureDecision().Execute(ctx, &capabilities.Call{ConversationID: conv, Args: minimalDecisionArgs("choose lifecycle shape"), Svc: svc}); err != nil {
-		t.Fatalf("capture_decision: %v", err)
+type completionWriteFailure struct{ conversation.Store }
+
+func (completionWriteFailure) UpdateAutonomyRun(context.Context, conversation.AutonomyRun) error {
+	return fmt.Errorf("write unavailable")
+}
+
+func TestAutonomousLifecycle_StartCaptureComplete(t *testing.T) {
+	store, call := completionTestCall(t, "running")
+	ctx := context.Background()
+	call.Args = minimalDecisionArgs("choose lifecycle shape")
+	if _, err := CaptureDecision().Execute(ctx, call); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := RequestAutonomousExit().Execute(ctx, &capabilities.Call{ConversationID: conv, Args: []byte(`{"summary":"done","verification":"targeted tests passed"}`), Svc: svc}); err != nil {
-		t.Fatalf("request_autonomous_exit: %v", err)
+	before, _ := store.GetActiveAutonomyRun(ctx, "conv")
+	active := "autonomous"
+	call.Svc.EnterProfile = func(_ string, name string) error { active = name; return nil }
+	call.Args = []byte(`{"summary":"done","verification":"tests passed"}`)
+	if _, err := RequestAutonomousExit().Execute(ctx, call); err != nil {
+		t.Fatal(err)
 	}
-	if active != "autonomous" {
-		t.Fatalf("active after request exit = %q, want still autonomous", active)
-	}
-	run, err := store.GetAutonomyRun(ctx, conv)
+	run, err := store.GetAutonomyRun(ctx, "conv")
 	if err != nil {
-		t.Fatalf("GetAutonomyRun review_pending: %v", err)
+		t.Fatal(err)
 	}
-	if run.State != "review_pending" {
-		t.Fatalf("state after request exit = %q, want review_pending", run.State)
+	if active != "default" || run.State != "completed" || run.DecisionsJSON != before.DecisionsJSON {
+		t.Fatalf("unexpected completion: %+v profile=%s", run, active)
 	}
-	if !strings.Contains(run.DecisionsJSON, "choose lifecycle shape") {
-		t.Fatalf("decision not retained through review request: %q", run.DecisionsJSON)
-	}
-
-	if _, err := CompleteAutonomousReview().Execute(ctx, &capabilities.Call{ConversationID: conv, Args: []byte(`{"summary":"accepted"}`), Svc: svc}); err != nil {
-		t.Fatalf("complete_autonomous_review: %v", err)
-	}
-	if active != "default" {
-		t.Fatalf("active after complete = %q, want default", active)
-	}
-	run, err = store.GetAutonomyRun(ctx, conv)
-	if err != nil {
-		t.Fatalf("GetAutonomyRun completed: %v", err)
-	}
-	if run.State != "completed" || !strings.Contains(run.ReviewJSON, "accepted") {
-		t.Fatalf("run not completed with review summary: state=%q review=%q", run.State, run.ReviewJSON)
+	if _, err := CaptureDecision().Execute(ctx, call); err == nil {
+		t.Fatal("capture after completion should fail")
 	}
 }

@@ -2,7 +2,6 @@ package ui
 
 import (
 	"context"
-	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -40,7 +39,7 @@ type chatStreamMsg struct {
 // from a canceled turn are identifiable.
 func (d *mainAgentDriver) Submit(ctx context.Context, gen int, input string, images []agentclient.InlineImage) (tea.Cmd, context.CancelFunc, error) {
 	ctx, cancel := context.WithCancel(ctx)
-	ch, err := d.agent.StreamChat(ctx, d.convID, input, d.workDir, images...)
+	ch, err := d.agent.StreamChatWithRecovery(ctx, d.convID, input, d.workDir, images...)
 	if err != nil {
 		cancel()
 		return nil, nil, err
@@ -62,39 +61,16 @@ func (d *mainAgentDriver) Submit(ctx context.Context, gen int, input string, ima
 // Telemetry-bearing events (chatStatusMsg from RouteSelected, chatDoneMsg) carry
 // their payloads so the host can fold them into the footer; transcript fields
 // ride the same events for chatView.Apply. permissionRequiredMsg is host-routed.
-func parseReauthRequiredProgress(note string) (reauthRequiredMsg, bool) {
-	const prefix = "cercano:reauth-required "
-	if !strings.HasPrefix(note, prefix) {
-		return reauthRequiredMsg{}, false
-	}
-	meta, display, ok := strings.Cut(strings.TrimPrefix(note, prefix), " | ")
-	if !ok {
-		display = note
-	}
-	msg := reauthRequiredMsg{note: normalizeProgress(display)}
-	for _, field := range strings.Fields(meta) {
-		key, val, ok := strings.Cut(field, "=")
-		if !ok {
-			continue
-		}
-		switch key {
-		case "provider":
-			msg.provider = val
-		case "profile":
-			msg.profile = val
-		}
-	}
-	return msg, true
-}
-
 func streamMsgToEvent(sm agentclient.StreamMsg) tea.Msg {
 	switch sm.Type {
 	case agentclient.TypeToken:
 		return chatAssistantDeltaMsg{token: sm.Token}
-	case agentclient.TypeProgress:
-		if msg, ok := parseReauthRequiredProgress(sm.Note); ok {
-			return msg
+	case agentclient.TypeAuthentication:
+		if sm.Authentication != nil {
+			return authenticationRequiredMsg{request: *sm.Authentication}
 		}
+		return chatProgressMsg{}
+	case agentclient.TypeProgress:
 		return chatProgressMsg{note: normalizeProgress(sm.Note)}
 	case agentclient.TypeRouteSelected:
 		return chatStatusMsg{model: sm.RouteModel, cloud: sm.RouteCloud}

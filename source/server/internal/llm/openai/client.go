@@ -158,6 +158,11 @@ func (c *Client) buildRequest(req llm.ChatRequest, stream bool) goopenai.ChatCom
 		Tools:    toolsToOpenAI(req.Tools),
 		Stream:   stream,
 	}
+	// llama-server exposes this model-template option. Never send the
+	// non-standard field to cloud or other OpenAI-compatible backends.
+	if req.DisableThinking && c.backend == "llama_server" {
+		r.ChatTemplateKwargs = map[string]any{"enable_thinking": false}
+	}
 	if stream {
 		// Request usage on the final chunk so InputTokens/OutputTokens are
 		// available for EventMessageStop.

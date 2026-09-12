@@ -15,6 +15,9 @@ type ChatRequest struct {
 	Tools      []Tool
 	ToolChoice ToolChoice
 	MaxTokens  int
+	// DisableThinking opts a short task out of local model reasoning. Only
+	// supporting adapters honor it; false preserves the model default.
+	DisableThinking bool
 	// ConversationID and RequestID are diagnostic-only correlation fields. They
 	// are never sent to providers; adapters use them to connect model-loop logs
 	// with provider-bound HTTP request/error logs.

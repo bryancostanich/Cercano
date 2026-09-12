@@ -12,23 +12,22 @@ func localCfg(mode string, ctxSize int) config.Config {
 	var c config.Config
 	c.LocusMode = mode
 	c.OpenRuntime = "llama_server"
-	c.LlamaServer.ContextSize = ctxSize
-	c.LlamaServer.ContextSizeSet = true
+	c.LlamaServer.ContextSize = contextOverridePtr(ctxSize)
 	return c
 }
 
 // The whole point of the change: the local denominator comes from config, so
 // editing context_size moves the meter with no code change. Asserting across a
 // range (rather than one golden number) is what proves it is not hardcoded.
-func TestMeterWindowTracksConfiguredContextSize(t *testing.T) {
+func TestMeterWindowDoesNotTreatConfigAsServingCapacity(t *testing.T) {
 	const model = "llama_server:catalog:glm-4.5-air-q4_k_m"
 	for _, size := range []int{4096, 8192, 16384, 32768, 131072} {
 		got := MeterWindow(localCfg("open_primary", size), model)
-		if got.Tokens != size {
-			t.Errorf("context_size=%d: window = %d, want %d", size, got.Tokens, size)
+		if got.Tokens != 0 {
+			t.Errorf("context_size=%d: window = %d, want 0", size, got.Tokens)
 		}
-		if !got.Known {
-			t.Errorf("context_size=%d: Known = false, want true (config is authoritative)", size)
+		if got.Known {
+			t.Errorf("context_size=%d: Known = false, want unknown (config is not serving evidence)", size)
 		}
 	}
 }
@@ -43,8 +42,8 @@ func TestMeterWindowLocalIgnoresPublishedDefault(t *testing.T) {
 		t.Fatalf("precondition: ModelWindowFor = %+v, want {128000 false}", pub)
 	}
 	got := MeterWindow(localCfg("open_only", 16384), model)
-	if got.Tokens != 16384 {
-		t.Errorf("window = %d, want 16384 (configured), not the 128000 default", got.Tokens)
+	if got.Tokens != 0 {
+		t.Errorf("window = %d, want unknown (0) (configured), not the 128000 default", got.Tokens)
 	}
 }
 
@@ -58,8 +57,8 @@ func TestMeterWindowLocalBeatsKnownFamilyWindow(t *testing.T) {
 		t.Fatalf("precondition: KnownModelMax = (%d,%v), want (262144,true)", pub, ok)
 	}
 	got := MeterWindow(localCfg("open_primary", 16384), model)
-	if got.Tokens != 16384 {
-		t.Errorf("window = %d, want 16384: the runtime serves the configured size", got.Tokens)
+	if got.Tokens != 0 {
+		t.Errorf("window = %d, want unknown (0): the runtime serves the configured size", got.Tokens)
 	}
 }
 
@@ -87,5 +86,16 @@ func TestMeterWindowLocalFallsBackWhenConfigEmpty(t *testing.T) {
 	}
 	if got.Tokens != 200_000 {
 		t.Errorf("window = %d, want the published 200000 fallback", got.Tokens)
+	}
+}
+
+func contextOverridePtr(n int) *int { return &n }
+
+func TestOtherRuntimeRetainsLegacyExplicitWindowPolicy(t *testing.T) {
+	c := config.Config{OpenRuntime: "ollama"}
+	c.LlamaServer.ContextSize = contextOverridePtr(16384)
+	c.MistralRS.MaxSeqLen = 8192
+	if n := LocalRuntimeWindow(c, "model"); n != 16384 {
+		t.Fatalf("changed other-runtime legacy policy: got %d want 16384", n)
 	}
 }

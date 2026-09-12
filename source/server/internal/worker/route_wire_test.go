@@ -54,3 +54,27 @@ func TestServingRouteSurvivesStreamAndWorkerBoundaries(t *testing.T) {
 		t.Fatal("worker proxy lost override fallback intent")
 	}
 }
+
+func TestMergedChatWirePreservesThinkingAndRoutingIndependently(t *testing.T) {
+	request := llm.ChatRequest{Model: "custom", Tier: "vision", FallbackTier: "most_capable", DisableThinking: true}
+	wire, err := MarshalChatRequest(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := pb.Marshal(wire)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded proto.LLMChatRequest
+	if err := pb.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	got, err := UnmarshalChatRequest(&decoded)
+	if err != nil || !got.DisableThinking || got.Tier != "vision" || got.FallbackTier != "most_capable" {
+		t.Fatalf("wire fields collided: %+v %v", got, err)
+	}
+	descriptor := decoded.ProtoReflect().Descriptor().Fields()
+	if descriptor.ByName("disable_thinking").Number() != 9 || descriptor.ByName("fallback_tier").Number() != 10 || descriptor.ByName("tier").Number() != 11 {
+		t.Fatal("merged wire field numbers changed")
+	}
+}

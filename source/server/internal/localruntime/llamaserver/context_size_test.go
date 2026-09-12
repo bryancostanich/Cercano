@@ -11,7 +11,6 @@ func TestEffectiveContextSize_Precedence(t *testing.T) {
 		ConfigContextSize:  8192,
 		ProfileContextSize: 65536,
 		ModelExtraArgs:     []string{"--jinja", "--ctx-size", "32768"},
-		DefaultContextSize: 4096,
 	}
 	if got := EffectiveContextSize(in); got != 65536 {
 		t.Fatalf("profile context = %d, want 65536", got)
@@ -25,21 +24,17 @@ func TestEffectiveContextSize_Precedence(t *testing.T) {
 
 func TestEffectiveContextSize_ModelOverrideLegacyFallback(t *testing.T) {
 	got := EffectiveContextSize(ContextSizeInput{
-		ConfigContextSize:  8192,
-		ModelExtraArgs:     []string{"--jinja", "--ctx-size", "32768", "--cache-type-k", "q8_0"},
-		DefaultContextSize: 4096,
+		ConfigContextSize: 8192,
+		ModelExtraArgs:    []string{"--jinja", "--ctx-size", "32768", "--cache-type-k", "q8_0"},
 	})
 	if got != 32768 {
 		t.Fatalf("EffectiveContextSize = %d, want legacy model override 32768", got)
 	}
 }
 
-func TestEffectiveContextSize_FallsBackToDefaultThenConfig(t *testing.T) {
-	if got := EffectiveContextSize(ContextSizeInput{ConfigContextSize: 16384, DefaultContextSize: 8192}); got != 8192 {
-		t.Fatalf("with default context = %d, want 8192", got)
-	}
-	if got := EffectiveContextSize(ContextSizeInput{ConfigContextSize: 16384}); got != 16384 {
-		t.Fatalf("without default context = %d, want config fallback 16384", got)
+func TestEffectiveContextSize_NoImplicitFallback(t *testing.T) {
+	if got := EffectiveContextSize(ContextSizeInput{ConfigContextSize: 16384}); got != 0 {
+		t.Fatalf("implicit fallback = %d", got)
 	}
 }
 
@@ -61,8 +56,8 @@ func TestEffectiveContextSize_IgnoresMalformed(t *testing.T) {
 		{"--ctx-size", "0"},       // non-positive
 		{"--ctx-size", "-1"},
 	} {
-		if got := EffectiveContextSize(ContextSizeInput{ConfigContextSize: 16384, ModelExtraArgs: args}); got != 16384 {
-			t.Fatalf("EffectiveContextSize(%v) = %d, want config fallback 16384", args, got)
+		if got := EffectiveContextSize(ContextSizeInput{ConfigContextSize: 16384, ModelExtraArgs: args}); got != 0 {
+			t.Fatalf("EffectiveContextSize(%v) = %d, want unknown (0)", args, got)
 		}
 	}
 }
@@ -81,7 +76,7 @@ func TestModelContextOverride_ProfileEntry(t *testing.T) {
 }
 
 func TestArgsFor_NoDuplicateCtxSizeWhenModelPinsLegacy(t *testing.T) {
-	provider := NewProvider(config.LlamaServerConfig{Host: "127.0.0.1", ContextSize: 16384})
+	provider := NewProvider(config.LlamaServerConfig{Host: "127.0.0.1"})
 	model := provider.modelRecord("/models/glm.gguf", fakeFileInfo{size: 42})
 	model.ExtraArgs = []string{"--jinja", "--ctx-size", "32768"}
 
@@ -98,7 +93,7 @@ func TestArgsFor_NoDuplicateCtxSizeWhenModelPinsLegacy(t *testing.T) {
 }
 
 func TestArgsFor_ProfileCtxBeatsLegacyModelPin(t *testing.T) {
-	provider := NewProvider(config.LlamaServerConfig{Host: "127.0.0.1", ContextSize: 8192})
+	provider := NewProvider(config.LlamaServerConfig{Host: "127.0.0.1"})
 	model := provider.modelRecord("/models/glm.gguf", fakeFileInfo{size: 42})
 	model.ContextSize = 131072
 	model.ExtraArgs = []string{"--jinja", "--ctx-size", "32768"}
@@ -109,7 +104,7 @@ func TestArgsFor_ProfileCtxBeatsLegacyModelPin(t *testing.T) {
 }
 
 func TestArgsFor_ExplicitConfigBeatsProfileCtx(t *testing.T) {
-	provider := NewProvider(config.LlamaServerConfig{Host: "127.0.0.1", ContextSize: 65536, ContextSizeSet: true})
+	provider := NewProvider(config.LlamaServerConfig{Host: "127.0.0.1", ContextSize: contextOverridePtr(65536)})
 	model := provider.modelRecord("/models/glm.gguf", fakeFileInfo{size: 42})
 	model.ContextSize = 131072
 	model.ExtraArgs = []string{"--jinja"}
@@ -119,13 +114,13 @@ func TestArgsFor_ExplicitConfigBeatsProfileCtx(t *testing.T) {
 	assertSingleCtxSize(t, args, 65536)
 }
 
-func TestArgsFor_EmitsDefaultConfigCtxSizeWhenNoOverride(t *testing.T) {
-	provider := NewProvider(config.LlamaServerConfig{Host: "127.0.0.1", ContextSize: 16384})
+func TestArgsFor_EmitsExplicitConfigCtxSize(t *testing.T) {
+	provider := NewProvider(config.LlamaServerConfig{Host: "127.0.0.1", ContextSize: contextOverridePtr(16384)})
 	model := provider.modelRecord("/models/test.gguf", fakeFileInfo{size: 42})
 	model.ExtraArgs = []string{"--jinja"}
 
 	args := provider.argsFor(provider.snapshot(), model, 8123)
-	assertSingleCtxSize(t, args, 8192)
+	assertSingleCtxSize(t, args, 16384)
 }
 
 func assertSingleCtxSize(t *testing.T, args []string, want int) {
@@ -147,3 +142,5 @@ func countFlag(args []string, flag string) int {
 	}
 	return n
 }
+
+func contextOverridePtr(n int) *int { return &n }

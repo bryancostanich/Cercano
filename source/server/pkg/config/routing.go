@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 )
 
@@ -219,4 +220,16 @@ func (c *Config) SetTaskAssignment(task Task, assignment *TaskAssignment) error 
 	}
 	*c = next
 	return nil
+}
+
+// Equal compares profile configuration by value. Empty sparse overrides are
+// equivalent to omission; neither form should invalidate an unchanged login.
+func (p CloudProfile) Equal(other CloudProfile) bool {
+	if len(p.TierOverrides) == 0 {
+		p.TierOverrides = nil
+	}
+	if len(other.TierOverrides) == 0 {
+		other.TierOverrides = nil
+	}
+	return reflect.DeepEqual(p, other)
 }

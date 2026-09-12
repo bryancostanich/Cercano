@@ -3,6 +3,7 @@ package inference
 import (
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/pkg/config"
+	"context"
 )
 
 // WithTaskAssignment keeps main-loop quality tied to the same immutable routing
@@ -46,4 +47,12 @@ func TaskModelFor(provider Provider) (string, bool) {
 		return scoped.TaskModelFor()
 	}
 	return "", false
+}
+
+func (p *assignedProvider) TargetForContext(ctx context.Context, req Call) llm.ServingRoute {
+	return TargetForContext(ctx, p.Provider, req)
+}
+
+func (p *assignedProvider) RuntimeContext(ctx context.Context, model string, prepare bool) (llm.RuntimeContext, error) {
+	return llm.ResolveRuntimeContext(ctx, p.Provider, model, prepare)
 }

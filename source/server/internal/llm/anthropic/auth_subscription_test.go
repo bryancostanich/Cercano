@@ -2,6 +2,7 @@ package anthropic
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -93,7 +94,7 @@ func TestSubscriptionAuth_NilTokenSource_Errors(t *testing.T) {
 	defer srv.Close()
 	c := NewClient(Config{BaseURL: srv.URL, Route: "subscription"})
 	if _, err := c.Chat(t.Context(), ChatRequest{Model: "claude", MaxTokens: 10}); err == nil ||
-		!strings.Contains(err.Error(), "subscription") {
+		llm.ClassOf(err) != llm.ErrCredential {
 		t.Fatalf("want a subscription token-source error, got %v", err)
 	}
 }
@@ -105,7 +106,7 @@ func TestSubscriptionAuth_TokenError_Propagates(t *testing.T) {
 	defer srv.Close()
 	c := NewClient(Config{BaseURL: srv.URL, Route: "subscription", TokenSource: stubTokens{err: io.ErrUnexpectedEOF}})
 	if _, err := c.Chat(t.Context(), ChatRequest{Model: "claude", MaxTokens: 10}); err == nil ||
-		!strings.Contains(err.Error(), "subscription token") {
+		!errors.Is(err, io.ErrUnexpectedEOF) || llm.ClassOf(err) != llm.ErrCredential {
 		t.Fatalf("want a propagated subscription token error, got %v", err)
 	}
 }

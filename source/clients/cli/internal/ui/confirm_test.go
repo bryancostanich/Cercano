@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"cercano/source/server/pkg/agentclient"
 	"strings"
 	"testing"
 
@@ -21,16 +22,16 @@ func minimalModel() Model {
 
 func TestReauthRequiredRaisesReusableConfirmPrompt(t *testing.T) {
 	m := modelWithContextView()
-	msg := reauthRequiredMsg{provider: "anthropic", profile: "claude", note: "anthropic auth failed — switching to openai-responses"}
+	msg := authenticationRequiredMsg{request: agentclient.AuthenticationRequired{Provider: "anthropic", Profile: "work", RequestID: "id"}}
 	m2, _ := m.routeChatMsg(msg)
 	if m2.pendingConfirm == nil {
 		t.Fatal("reauth should raise pendingConfirm")
 	}
 	out := stripAnsiCSI(m2.renderConfirmRequest(m2.pendingConfirm))
-	if !strings.Contains(out, "Claude sign-in expired") {
+	if !strings.Contains(out, "anthropic login required") {
 		t.Fatalf("prompt missing title: %q", out)
 	}
-	if !strings.Contains(out, "[y]es re-auth") || !strings.Contains(out, "[n]o dismiss") || !strings.Contains(out, "[d]etails") {
+	if !strings.Contains(out, "[y] log in") || !strings.Contains(out, "[n] cancel") || !strings.Contains(out, "[d] details") {
 		t.Fatalf("prompt missing custom hints: %q", out)
 	}
 }
@@ -196,7 +197,7 @@ func TestRenderConfirmPrompt_RequestAutonomousExit_ShowsCompletionDetailsAsBlock
 		Args:       `{"summary":"done","verification":"targeted tests passed"}`,
 		Permission: "X",
 	}))
-	for _, want := range []string{"Autonomous run complete — review completion details?", "Summary\n    done", "Verification\n    targeted tests passed"} {
+	for _, want := range []string{"Autonomous run complete — exit autonomous mode?", "Summary\n    done", "Verification\n    targeted tests passed"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("request_autonomous_exit prompt missing %q: %q", want, s)
 		}
@@ -229,23 +230,6 @@ func TestRenderConfirmPrompt_RequestAutonomousExit_WrapsLongPayloadsWithoutEllip
 	}
 	if strings.Contains(s, "…") {
 		t.Errorf("request_autonomous_exit summary and verification should wrap instead of truncate: %q", s)
-	}
-}
-
-func TestRenderConfirmPrompt_CompleteAutonomousReview_AsksToExit(t *testing.T) {
-	m := minimalModel()
-	s := stripAnsiCSI(m.renderConfirmPrompt(&pendingToolCall{
-		Name:       "complete_autonomous_review",
-		Args:       `{"summary":"decisions accepted"}`,
-		Permission: "X",
-	}))
-	for _, want := range []string{"Final autonomous review accepted", "Summary: decisions accepted"} {
-		if !strings.Contains(s, want) {
-			t.Errorf("complete_autonomous_review prompt missing %q: %q", want, s)
-		}
-	}
-	if strings.Contains(s, "DESTRUCTIVE") || strings.Contains(s, "⚠") {
-		t.Errorf("complete_autonomous_review must not be DESTRUCTIVE/⚠: %q", s)
 	}
 }
 

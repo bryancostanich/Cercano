@@ -276,8 +276,8 @@ type OpenRequest struct {
 // ConfigRequest is the input schema for the cercano_config tool.
 type ConfigRequest struct {
 	Action        string `json:"action" jsonschema:"get (list available Ollama models) or set (change configuration)"`
-	OpenRuntime  string `json:"local_runtime,omitempty" jsonschema:"Local runtime to use for generation (ollama or llama_server)"`
-	OpenModel    string `json:"local_model,omitempty" jsonschema:"Local model name to set (use action 'get' to see available models)"`
+	OpenRuntime   string `json:"local_runtime,omitempty" jsonschema:"Local runtime to use for generation (ollama or llama_server)"`
+	OpenModel     string `json:"local_model,omitempty" jsonschema:"Local model name to set (use action 'get' to see available models)"`
 	CloudProvider string `json:"cloud_provider,omitempty" jsonschema:"Cloud provider to set (google or anthropic)"`
 	CloudModel    string `json:"cloud_model,omitempty" jsonschema:"Cloud model to set"`
 	OllamaURL     string `json:"ollama_url,omitempty" jsonschema:"Ollama endpoint URL (e.g. http://mac-studio.local:11434)"`
@@ -535,8 +535,8 @@ func (s *Server) handleConfig(ctx context.Context, request *gomcp.CallToolReques
 
 	case "set":
 		resp, err := s.grpcClient.UpdateConfig(ctx, &proto.UpdateConfigRequest{
-			OpenRuntime:  args.OpenRuntime,
-			OpenModel:    args.OpenModel,
+			OpenRuntime:   args.OpenRuntime,
+			OpenModel:     args.OpenModel,
 			CloudProvider: args.CloudProvider,
 			CloudModel:    args.CloudModel,
 			OllamaUrl:     args.OllamaURL,
@@ -707,11 +707,22 @@ type grpcModelCallerWithTokens struct {
 	totalCalls    int
 }
 
+var _ web.QueryModelCaller = (*grpcModelCallerWithTokens)(nil)
+
 func (g *grpcModelCallerWithTokens) Call(ctx context.Context, prompt string) (string, error) {
+	return g.callModel(ctx, prompt, false)
+}
+
+func (g *grpcModelCallerWithTokens) CallQuery(ctx context.Context, prompt string) (string, error) {
+	return g.callModel(ctx, prompt, true)
+}
+
+func (g *grpcModelCallerWithTokens) callModel(ctx context.Context, prompt string, disableThinking bool) (string, error) {
 	resp, err := g.client.ProcessRequest(ctx, &proto.ProcessRequestRequest{
-		Input:         prompt,
-		Coproc:        true,
-		ModelOverride: g.modelOverride,
+		Input:           prompt,
+		Coproc:          true,
+		ModelOverride:   g.modelOverride,
+		DisableThinking: disableThinking,
 	})
 	if err != nil {
 		return "", err

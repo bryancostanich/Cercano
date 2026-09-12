@@ -101,6 +101,8 @@ type Service interface {
 	// provider-published context capacity. Nil, or an ok=false answer, keeps the
 	// existing conventional per-family fallback.
 	SetCloudContextWindow(fn func(model string) (int, bool))
+	SetLocalContextWindow(fn func(model string) (int, bool))
+	SetLocalRuntimeContext(fn func(string) (llm.RuntimeContext, error))
 	SetCompactionGenerator(g *compactiongen.Generator)
 	SetContextLoader(l *projectctx.Loader)
 
@@ -136,6 +138,9 @@ type Service interface {
 // prompt and tool-schema costs, so this is the highest-fidelity snapshot the
 // meter can cache.
 type TurnContextUsage struct {
+	Model                  string
+	Provider               string
+	RuntimeInstanceID      string
 	MessageTokens          int
 	SystemTokens           int
 	ToolSchemaTokens       int
@@ -190,7 +195,9 @@ type svc struct {
 
 	// cloudContextWindow resolves a cloud model's provider-published context
 	// capacity for the meter denominator. Nil keeps the conventional fallback.
-	cloudContextWindow func(model string) (int, bool)
+	cloudContextWindow  func(model string) (int, bool)
+	localContextWindow  func(model string) (int, bool)
+	localRuntimeContext func(string) (llm.RuntimeContext, error)
 
 	// Owned fields (moved off Server.struct).
 	retentionSweeper *retention.Sweeper
@@ -314,6 +321,12 @@ func (x *svc) SetCloudContextWindow(fn func(model string) (int, bool)) {
 // with its locus policy rather than duplicating it.
 func (x *svc) resolveWindow(model string) (int, bool) {
 	cfg := x.cfgSvc.Get()
+	if cfg.OpenRuntime == "llama_server" && isLocalLocus(cfg.LocusMode) {
+		if x.localContextWindow == nil {
+			return 0, false
+		}
+		return x.localContextWindow(model)
+	}
 	if n := modelwindow.LocalRuntimeWindow(cfg, model); n > 0 && isLocalLocus(cfg.LocusMode) {
 		return n, true
 	}
@@ -408,7 +421,10 @@ func (x *svc) RecordTurnContextUsage(ctx context.Context, convID string, u TurnC
 		raw = prev.RawTokens
 	}
 
-	model := x.primaryModel()
+	model := u.Model
+	if model == "" {
+		model = x.primaryModel()
+	}
 	window := u.ContextWindow
 	known := u.ContextWindowKnown
 	if window <= 0 {
@@ -416,6 +432,7 @@ func (x *svc) RecordTurnContextUsage(ctx context.Context, convID string, u TurnC
 	}
 
 	usage := conversation.ContextUsage{
+		Provider: u.Provider, RuntimeInstanceID: u.RuntimeInstanceID,
 		ConversationID:     convID,
 		TokensUsed:         u.MessageTokens,
 		RawTokens:          raw,
@@ -971,7 +988,29 @@ func (x *svc) GetContextUsage(ctx context.Context, req *proto.GetContextUsageReq
 	if sent <= 0 {
 		sent = snap.TokensUsed
 	}
-	if snap.ContextWindow > 0 {
+	localSnapshot := snap.Provider == "llama_server" || (snap.Provider == "" && (strings.HasPrefix(snap.Model, "llama_server:") || (x.cfgSvc.Get().OpenRuntime == "llama_server" && isLocalLocus(x.cfgSvc.Get().LocusMode))))
+	runtimeChanged := false
+	if localSnapshot {
+		max = 0
+		resp.ContextWindowKnown = false
+		model := snap.Model
+		if model == "" {
+			model = x.primaryModel()
+		}
+		if x.localRuntimeContext != nil {
+			capacity, err := x.localRuntimeContext(model)
+			if err == nil && capacity.Window > 0 && capacity.InstanceID != "" {
+				max = capacity.Window
+				resp.ContextWindowKnown = true
+			}
+			runtimeChanged = snap.RuntimeInstanceID == "" || snap.RuntimeInstanceID != capacity.InstanceID
+		} else if x.localContextWindow != nil {
+			max, resp.ContextWindowKnown = x.localContextWindow(model)
+			runtimeChanged = true
+		}
+		resp.ModelMax = int32(max)
+	}
+	if snap.ContextWindow > 0 && !localSnapshot {
 		max = snap.ContextWindow
 		resp.ModelMax = int32(max)
 		resp.ContextWindowKnown = snap.ContextWindowKnown
@@ -993,7 +1032,7 @@ func (x *svc) GetContextUsage(ctx context.Context, req *proto.GetContextUsageReq
 	resp.EstimatedRequestTokens = int32(sent)
 	resp.UsageSource = snapshotUsageSource(snap.Source)
 	resp.UsageComputedAt = snap.ComputedAt.Unix()
-	resp.UsageStale = x.snapshotIsStale(ctx, convID, snap)
+	resp.UsageStale = x.snapshotIsStale(ctx, convID, snap) || (localSnapshot && (runtimeChanged || max != snap.ContextWindow || !resp.ContextWindowKnown))
 	return resp, nil
 }
 
@@ -1438,4 +1477,18 @@ func SanitizeSuggestion(s string) string {
 		s = s[:80]
 	}
 	return s
+}
+
+func (x *svc) SetLocalContextWindow(fn func(string) (int, bool)) { x.localContextWindow = fn }
+
+func (x *svc) SetLocalRuntimeContext(fn func(string) (llm.RuntimeContext, error)) {
+	x.localRuntimeContext = fn
+	if fn == nil {
+		x.localContextWindow = nil
+		return
+	}
+	x.localContextWindow = func(model string) (int, bool) {
+		c, err := fn(model)
+		return c.Window, err == nil && c.Window > 0 && c.InstanceID != ""
+	}
 }

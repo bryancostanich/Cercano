@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net"
 	"net/http"
 	"os"
@@ -153,12 +154,14 @@ func (p *Provider) headerIdentity(path string, info os.FileInfo) headerIdentity 
 }
 
 type managedInstance struct {
-	record   localruntime.InstanceRecord
-	model    localruntime.ModelRecord
-	cmd      *exec.Cmd
-	stopping bool
-	adopted  bool
-	ownerPID int
+	launchConfig   config.LlamaServerConfig
+	plannedContext PlannedContext
+	record         localruntime.InstanceRecord
+	model          localruntime.ModelRecord
+	cmd            *exec.Cmd
+	stopping       bool
+	adopted        bool
+	ownerPID       int
 }
 
 func NewProvider(cfg config.LlamaServerConfig) *Provider {
@@ -176,6 +179,7 @@ func NewProvider(cfg config.LlamaServerConfig) *Provider {
 // at construction or via ReloadConfig, so a reloaded config behaves identically
 // to a boot-time one.
 func withDefaults(cfg config.LlamaServerConfig) config.LlamaServerConfig {
+	cfg = (config.Config{LlamaServer: cfg}).Clone().LlamaServer
 	if cfg.Host == "" {
 		cfg.Host = "127.0.0.1"
 	}
@@ -208,7 +212,7 @@ func (p *Provider) ReloadConfig(cfg config.Config) {
 func (p *Provider) snapshot() config.LlamaServerConfig {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	return p.cfg
+	return (config.Config{LlamaServer: p.cfg}).Clone().LlamaServer
 }
 
 func (p *Provider) Name() string { return runtimeName }
@@ -300,7 +304,13 @@ func (p *Provider) Start(ctx context.Context, req localruntime.StartRequest, sin
 		return existing, nil
 	}
 	p.reapBeforeSpawn(ctx, model, binary, sink)
-	projection, err := p.checkMemoryBudget(model)
+	launchConfig := p.snapshot()
+	planned, err := p.planContext(launchConfig, model)
+	if err != nil {
+		p.spawnMu.Unlock()
+		return nil, err
+	}
+	projection, err := p.checkPlannedMemory(model, planned)
 	if err != nil {
 		p.spawnMu.Unlock()
 		p.event(crashlog.EventRefused, err.Error(), crashlog.RuntimeInfo{ModelID: model.ID}, projection.extra())
@@ -318,8 +328,10 @@ func (p *Provider) Start(ctx context.Context, req localruntime.StartRequest, sin
 	id := runtimeName + ":" + shortID(model.Path) + ":" + strconv.Itoa(port)
 	now := time.Now()
 	instance := &managedInstance{
+		launchConfig: launchConfig, plannedContext: planned,
 		model: model,
 		record: localruntime.InstanceRecord{
+			Context:   localruntime.ContextCapacity{PlannedTokens: planned.Tokens, PlannedSource: planned.Source},
 			ID:        id,
 			Runtime:   runtimeName,
 			ModelID:   model.ID,
@@ -404,6 +416,9 @@ func (p *Provider) Start(ctx context.Context, req localruntime.StartRequest, sin
 	}
 
 	p.updateRecord(id, sink, func(record *localruntime.InstanceRecord) {
+		if record.State != localruntime.InstanceStarting || record.Context.ConfirmedTokens <= 0 {
+			return
+		}
 		record.State = localruntime.InstanceRunning
 		record.ReadyAt = time.Now()
 	})
@@ -448,6 +463,13 @@ func (p *Provider) adoptLiveSibling(ctx context.Context, model localruntime.Mode
 	}
 	p.running[id] = inst
 	p.mu.Unlock()
+	if err := p.confirmCapacity(ctx, id, endpoint); err != nil {
+		p.updateRecord(id, sink, func(r *localruntime.InstanceRecord) {
+			r.LastError = err.Error()
+			r.State = localruntime.InstanceFailed
+			invalidateCapacity(r)
+		})
+	}
 	msg := fmt.Sprintf("adopted llama-server sidecar pid %d from owner pid %d for %s", sibling.server.PID, sibling.owner.OwnerPID, model.DisplayName)
 	p.emit(sink, "info", id, model.ID, msg)
 	p.event(crashlog.EventAdopt, msg, crashlog.RuntimeInfo{
@@ -456,7 +478,9 @@ func (p *Provider) adoptLiveSibling(ctx context.Context, model localruntime.Mode
 		PID:        sibling.server.PID,
 		Port:       sibling.server.Port,
 	}, map[string]any{"previous_owner_pid": sibling.owner.OwnerPID})
+	p.mu.RLock()
 	out := inst.record
+	p.mu.RUnlock()
 	return &out, true
 }
 
@@ -471,6 +495,7 @@ func (p *Provider) Stop(_ context.Context, instanceID string) error {
 	cmd := instance.cmd
 	modelID := instance.record.ModelID
 	port := instance.record.Port
+	invalidateCapacity(&instance.record)
 	instance.record.State = localruntime.InstanceStopped
 	if instance.adopted {
 		ownerPID := instance.ownerPID
@@ -552,6 +577,18 @@ func (m memoryProjection) extra() map[string]any {
 }
 
 func (p *Provider) checkMemoryBudget(model localruntime.ModelRecord) (memoryProjection, error) {
+	plan, err := p.planContext(p.snapshot(), model)
+	if err != nil {
+		return memoryProjection{}, err
+	}
+	return p.checkPlannedMemory(model, plan)
+}
+
+func (p *Provider) checkPlannedMemory(model localruntime.ModelRecord, plan PlannedContext, excludeInstance ...string) (memoryProjection, error) {
+	exclude := ""
+	if len(excludeInstance) > 0 {
+		exclude = excludeInstance[0]
+	}
 	totalFn := p.totalRAM
 	if totalFn == nil {
 		totalFn = sysram.Total
@@ -563,20 +600,18 @@ func (p *Provider) checkMemoryBudget(model localruntime.ModelRecord) (memoryProj
 
 	p.pruneDeadAdoptedInstances()
 	projection := memoryProjection{
-		TotalBytes:    totalFn(),
-		ModelBytes:    model.SizeBytes,
-		HeadroomBytes: memoryGuardHeadroomBytes,
-		RegistryBytes: p.registryResidentEstimate(),
-		ContextTokens: EffectiveContextSize(ContextSizeInput{
-			ConfigContextSize:  p.snapshot().ContextSize,
-			ConfigExplicit:     p.snapshot().ContextSizeSet,
-			ProfileContextSize: model.ContextSize,
-			ModelExtraArgs:     model.ExtraArgs,
-			DefaultContextSize: config.Defaults().LlamaServer.ContextSize,
-		}),
+		TotalBytes:     totalFn(),
+		ModelBytes:     model.SizeBytes,
+		HeadroomBytes:  memoryGuardHeadroomBytes,
+		RegistryBytes:  p.registryResidentEstimateExcept(exclude),
+		ContextTokens:  plan.Tokens,
 		CurrentProbeOK: false,
 	}
-	projection.KVBytesPerToken, projection.KVBytes = p.kvEstimate(model, projection.ContextTokens)
+	projection.KVBytesPerToken = plan.KVBytesPerToken
+	if plan.Tokens <= 0 || plan.KVBytesPerToken < 0 || (plan.KVBytesPerToken > 0 && int64(plan.Tokens) > math.MaxInt64/plan.KVBytesPerToken) {
+		return projection, fmt.Errorf("llama-server memory guard: invalid or overflowing context allocation")
+	}
+	projection.KVBytes = plan.KVBytesPerToken * int64(plan.Tokens)
 	current, ok := nonEvictableFn()
 	if ok {
 		projection.CurrentBytes = current
@@ -592,6 +627,12 @@ func (p *Provider) checkMemoryBudget(model localruntime.ModelRecord) (memoryProj
 	} else {
 		projection.CurrentBytes = projection.RegistryBytes
 		projection.FallbackToRegistry = true
+	}
+	if plan.Automatic && (projection.TotalBytes <= 0 || !projection.CurrentProbeOK || projection.ModelBytes <= 0 || projection.KVBytesPerToken <= 0) {
+		return projection, fmt.Errorf("llama-server automatic context memory evidence unavailable; supply an explicit context_size or restore memory probes/metadata")
+	}
+	if projection.CurrentBytes < 0 || projection.ModelBytes < 0 || projection.ModelBytes > math.MaxInt64-projection.KVBytes || projection.CurrentBytes > math.MaxInt64-projection.ModelBytes-projection.KVBytes {
+		return projection, fmt.Errorf("llama-server projected allocation overflows memory accounting")
 	}
 	projection.ProjectedBytes = projection.CurrentBytes + projection.ModelBytes + projection.KVBytes
 	if projection.TotalBytes <= 0 {
@@ -618,35 +659,31 @@ func (p *Provider) checkMemoryBudget(model localruntime.ModelRecord) (memoryProj
 		blockingInstanceSuffix(projection))
 }
 
-func (p *Provider) kvEstimate(model localruntime.ModelRecord, ctxTokens int) (perToken int64, total int64) {
-	if ctxTokens <= 0 || model.Path == "" {
-		return 0, 0
-	}
-	f, err := os.Open(model.Path)
-	if err != nil {
-		return 0, 0
-	}
-	defer f.Close()
-	meta, err := gguf.ParseMeta(io.LimitReader(f, identityHeaderWindow))
-	if err != nil || meta == nil {
-		return 0, 0
-	}
-	perToken = meta.KVBytesPerToken()
-	if perToken <= 0 {
-		return 0, 0
-	}
-	return perToken, perToken * int64(ctxTokens)
-}
+func (p *Provider) registryResidentEstimate() int64 { return p.registryResidentEstimateExcept("") }
 
-func (p *Provider) registryResidentEstimate() int64 {
+func (p *Provider) registryResidentEstimateExcept(exclude string) int64 {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	var total int64
-	for _, inst := range p.running {
+	for id, inst := range p.running {
+		if id == exclude {
+			continue
+		}
 		if !countsTowardMemoryFloor(inst) {
 			continue
 		}
-		total += inst.model.SizeBytes
+		size := inst.model.SizeBytes
+		if inst.plannedContext.KVBytesPerToken > 0 && inst.plannedContext.Tokens > 0 {
+			kv := inst.plannedContext.KVBytesPerToken * int64(inst.plannedContext.Tokens)
+			if kv < 0 || size > math.MaxInt64-kv {
+				return math.MaxInt64
+			}
+			size += kv
+		}
+		if size < 0 || total > math.MaxInt64-size {
+			return math.MaxInt64
+		}
+		total += size
 	}
 	return total
 }
@@ -811,8 +848,18 @@ func (p *Provider) startProcess(instanceID, binary string, sink localruntime.Log
 	if !ok {
 		return fmt.Errorf("llama-server instance %q not found", instanceID)
 	}
-	args := p.argsFor(p.snapshot(), instance.model, instance.record.Port)
+	if instance.plannedContext.Tokens <= 0 {
+		return fmt.Errorf("llama-server launch has no resolved context")
+	}
+	if _, err := p.checkPlannedMemory(instance.model, instance.plannedContext, instanceID); err != nil {
+		return err
+	}
+	cfg := instance.launchConfig
+	n := instance.plannedContext.Tokens
+	cfg.ContextSize = &n
+	args := p.argsFor(cfg, instance.model, instance.record.Port)
 	cmd := exec.Command(binary, args...)
+	cmd.Env = managedEnvironment(os.Environ())
 	cmd.Stdin = nil
 	setProcessGroup(cmd)
 	stdout, err := cmd.StdoutPipe()
@@ -839,6 +886,7 @@ func (p *Provider) startProcess(instanceID, binary string, sink localruntime.Log
 	p.mu.Lock()
 	instance.cmd = cmd
 	instance.record.PID = cmd.Process.Pid
+	invalidateCapacity(&instance.record)
 	instance.record.State = localruntime.InstanceStarting
 	instance.record.StartedAt = time.Now()
 	instance.record.LastError = ""
@@ -875,11 +923,10 @@ func (p *Provider) argsFor(cfg config.LlamaServerConfig, model localruntime.Mode
 		args = append(args, "--embedding")
 	}
 	ctxSize := EffectiveContextSize(ContextSizeInput{
-		ConfigContextSize:  cfg.ContextSize,
-		ConfigExplicit:     cfg.ContextSizeSet,
+		ConfigContextSize:  cfg.ContextOverride(),
+		ConfigExplicit:     cfg.ContextSize != nil,
 		ProfileContextSize: model.ContextSize,
 		ModelExtraArgs:     model.ExtraArgs,
-		DefaultContextSize: config.Defaults().LlamaServer.ContextSize,
 	})
 	if ctxSize > 0 {
 		args = append(args, "--ctx-size", strconv.Itoa(ctxSize))
@@ -890,12 +937,14 @@ func (p *Provider) argsFor(cfg config.LlamaServerConfig, model localruntime.Mode
 	if cfg.GPULayers != "" {
 		args = append(args, "--gpu-layers", cfg.GPULayers)
 	}
-	args = append(args, stripFlag(append([]string(nil), cfg.ExtraArgs...), "--ctx-size")...)
+	configArgs, _, _ := contextArgs(cfg.ExtraArgs)
+	args = append(args, configArgs...)
 	// Per-model launch flags (from the catalog's ExtraArgs) apply last, scoped
 	// to this model only — e.g. GLM-4.5-Air's required "--jinja". Strip legacy
 	// --ctx-size pins here so profile/user context policy cannot be overridden by
 	// a later duplicate flag.
-	args = append(args, stripFlag(append([]string(nil), model.ExtraArgs...), "--ctx-size")...)
+	modelArgs, _, _ := contextArgs(model.ExtraArgs)
+	args = append(args, modelArgs...)
 	return args
 }
 
@@ -921,7 +970,7 @@ func (p *Provider) waitReady(ctx context.Context, instanceID, endpoint string) e
 		if err == nil {
 			if resp.StatusCode == http.StatusOK {
 				resp.Body.Close()
-				return nil
+				return p.confirmCapacity(ctx, instanceID, endpoint)
 			}
 			lastErr = fmt.Errorf("health returned status %d", resp.StatusCode)
 			resp.Body.Close()
@@ -1054,13 +1103,7 @@ func (p *Provider) finishReadiness(instanceID, endpoint string, sink localruntim
 		})
 		return
 	}
-	p.updateRecord(instanceID, sink, func(record *localruntime.InstanceRecord) {
-		if record.State == localruntime.InstanceStarting {
-			record.State = localruntime.InstanceRunning
-			record.ReadyAt = time.Now()
-			record.LastError = ""
-		}
-	})
+	p.updateRecord(instanceID, sink, markInstanceReady)
 	p.emit(sink, "info", instanceID, "", "llama-server finished loading and is ready")
 }
 
@@ -1089,7 +1132,9 @@ func (p *Provider) watch(instanceID, binary string, sink localruntime.LogSink) {
 			return
 		}
 		if instance.stopping {
+			invalidateCapacity(&instance.record)
 			instance.record.State = localruntime.InstanceStopped
+			invalidateCapacity(&instance.record)
 			instance.record.LastExitCode = exitCode
 			record := instance.record
 			p.mu.Unlock()
@@ -1102,6 +1147,7 @@ func (p *Provider) watch(instanceID, binary string, sink localruntime.LogSink) {
 		// here, mutually exclusive with ReloadConfig's write; snapshot()'s RLock
 		// under the held Lock would deadlock.
 		shouldRestart := p.cfg.Restart.Enabled && instance.record.RestartCount < p.cfg.Restart.MaxAttempts
+		invalidateCapacity(&instance.record)
 		instance.record.LastExitCode = exitCode
 		instance.record.LastError = errorString(err)
 		if shouldRestart {
@@ -1121,7 +1167,10 @@ func (p *Provider) watch(instanceID, binary string, sink localruntime.LogSink) {
 
 		p.emit(sink, "warn", instanceID, record.ModelID, "llama-server exited; restarting")
 		time.Sleep(p.restartBackoff())
-		if err := p.startProcess(instanceID, binary, sink); err != nil {
+		p.spawnMu.Lock()
+		restartErr := p.startProcess(instanceID, binary, sink)
+		p.spawnMu.Unlock()
+		if err := restartErr; err != nil {
 			p.updateRecord(instanceID, sink, func(record *localruntime.InstanceRecord) {
 				record.State = localruntime.InstanceFailed
 				record.LastError = err.Error()
@@ -1157,6 +1206,9 @@ func (p *Provider) updateRecord(instanceID string, sink localruntime.LogSink, fn
 		return
 	}
 	fn(&instance.record)
+	if instance.record.State != localruntime.InstanceRunning && instance.record.State != localruntime.InstanceHealthy {
+		invalidateCapacity(&instance.record)
+	}
 	record := instance.record
 	p.mu.Unlock()
 	p.updateSink(sink, record)
@@ -1474,3 +1526,11 @@ func errorString(err error) string {
 // callers map each shard filename to its model ID to match stranded .part
 // files back to the model that owns them.
 func (p *Provider) CatalogModels() []localruntime.ModelRecord { return p.catalogModels() }
+
+func markInstanceReady(record *localruntime.InstanceRecord) {
+	if record.State == localruntime.InstanceStarting && record.Context.ConfirmedTokens > 0 && !record.Context.ConfirmedAt.IsZero() {
+		record.State = localruntime.InstanceRunning
+		record.ReadyAt = time.Now()
+		record.LastError = ""
+	}
+}

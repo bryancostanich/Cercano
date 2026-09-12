@@ -44,6 +44,7 @@ type chatView struct {
 	styles    theme.Styles
 	palette   theme.Palette
 	md        *render.Markdown
+	search    *conversationSearch
 
 	// entries is the authoritative slice of scrollback entries. All host
 	// append/read operations go through the mutation methods below.
@@ -1248,6 +1249,7 @@ func (c *chatView) View() string {
 			line = lines[i]
 		}
 		contentLine := viewportTop + i
+		line = c.renderSearchOnLine(line, contentLine)
 		line = c.renderSelectionOnLine(line, contentLine)
 		// Clamp to the viewport width so an over-wide content line (Glamour
 		// pads prose a few columns past the wrap width) can't push the

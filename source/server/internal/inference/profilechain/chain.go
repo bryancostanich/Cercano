@@ -4,6 +4,7 @@ package profilechain
 import (
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/inference/resilience"
+	"cercano/source/server/internal/llm"
 	"cercano/source/server/pkg/config"
 	"fmt"
 )
@@ -42,18 +43,29 @@ func Build(c config.Config, d config.Destination, build Builder, events ...func(
 	if backup != "" && backup != preferred {
 		if b, ok := c.Profile(backup); ok {
 			b.Model = modelFor(b)("")
-			if provider, err := build(b); err == nil && provider != nil {
+			provider, err := build(b)
+			if err != nil {
+				switch llm.ClassOf(err) {
+				case llm.ErrAuth, llm.ErrCredential, llm.ErrLoginRequired, llm.ErrPermission:
+					provider = &unavailableProvider{err: err}
+				}
+			}
+			if provider != nil {
 				options.Backup = &routeProvider{Provider: provider, profile: b.Name, destination: string(d)}
 				options.BackupModelFor = modelFor(b)
+				options.BackupLabel = b.Name
 			}
 		}
 	}
 	if primaryErr != nil {
-		if options.Backup == nil {
+		class := llm.ClassOf(primaryErr)
+		actionable := class == llm.ErrLoginRequired || class == llm.ErrCredential || class == llm.ErrPermission
+		if options.Backup == nil && !actionable {
 			return nil, primaryErr
 		}
 		primary = &unavailableProvider{err: primaryErr}
-		options.PrimaryUnavailable = true
+		options.PrimaryUnavailable = !actionable
+		options.PrimaryBlocked = actionable
 	}
 	primary = &routeProvider{Provider: primary, profile: p.Name, destination: string(d)}
 	return resilience.New(primary, options), nil

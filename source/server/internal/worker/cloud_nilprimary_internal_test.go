@@ -13,13 +13,13 @@ package worker
 
 import (
 	"context"
-	"errors"
+	"io/fs"
 	"testing"
 
 	pkgcfg "cercano/source/server/pkg/config"
 )
 
-// splitFetcher fails the primary credential fetch but succeeds for the backup —
+// splitFetcher reports an absent primary API key (not a failed store) but succeeds for the backup —
 // the exact condition that built a nil-primary fallback.
 type splitFetcher struct{ backupName string }
 
@@ -27,7 +27,7 @@ func (f *splitFetcher) Fetch(_ context.Context, name string) (string, string, er
 	if name == f.backupName {
 		return "bkp-key", "", nil
 	}
-	return "", "", errors.New("no credential for " + name)
+	return "", "", fs.ErrNotExist
 }
 
 func TestBuildWorkerProviders_PrimaryFetchFail_UsesConfiguredBackupWithoutNilPanic(t *testing.T) {

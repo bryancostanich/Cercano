@@ -57,3 +57,7 @@ func (p *recordingProvider) StreamChat(_ context.Context, req llm.ChatRequest) (
 		{Type: llm.EventMessageStop, StopReason: "end_turn"},
 	}}, nil
 }
+
+func (recordingProvider) RuntimeContext(context.Context, string, bool) (llm.RuntimeContext, error) {
+	return llm.RuntimeContext{Window: 16384, InstanceID: "recording-fixture"}, nil
+}

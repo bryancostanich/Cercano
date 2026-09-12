@@ -51,21 +51,10 @@ type ContextSizeInput struct {
 	ConfigExplicit     bool
 	ProfileContextSize int
 	ModelExtraArgs     []string
-	DefaultContextSize int
 }
 
-// EffectiveContextSize reports the context window llama-server will actually
-// serve for a model, applying the same precedence as launch args:
-//
-//	explicit user config llama_server.context_size
-//	> profile ctx_size
-//	> model extra_args --ctx-size (legacy/backward compatibility)
-//	> default context_size
-//
-// This exists so launch args, the memory guard, tool-loop preflight, and
-// sub-agent preflight all budget against the same window. The earlier
-// model-extra-args-only rule fixed a false 16k ceiling, but it left ctx-size as
-// model-level policy; RAM profiles now own that tuning.
+// EffectiveContextSize returns config/catalog policy only, or zero when unknown.
+// It is not a serving-capacity observation. Managed launch uses PlannedContext.
 func EffectiveContextSize(in ContextSizeInput) int {
 	if in.ConfigExplicit && in.ConfigContextSize > 0 {
 		return in.ConfigContextSize
@@ -76,10 +65,7 @@ func EffectiveContextSize(in ContextSizeInput) int {
 	if n := ctxSizeFromArgs(in.ModelExtraArgs); n > 0 {
 		return n
 	}
-	if in.DefaultContextSize > 0 {
-		return in.DefaultContextSize
-	}
-	return in.ConfigContextSize
+	return 0
 }
 
 // ModelContextOverride returns the profile/model context override for modelID,

@@ -54,3 +54,26 @@ Fresh direct executions from source/server:
 - `go test ./pkg/config -run TestTaskTaxonomy -count=1`: exit 1, expected; all seven new defaults and assignment setters still fail. No production fix has been applied.
 
 Next in Phase 1: finish the scoped caller/wrapper inventory without truncated evidence, remaining contract reproductions, and affected-package baselines before Phase 2. The reproduction remains intentionally failing; this recovery does not claim implementation completion, full regression coverage, or live inference verification.
+
+## Caller inventory and dispatch reproductions — 2026-09-12
+
+Completed the scoped caller inventory in caller-inventory.md, using bounded delegated searches and direct wrapper inspection. Located 12 production dispatch.Spec constructors in 10 files, the workflow alias, research budget/execution wrappers, the shared worker tool service, and the agent guidance updates required. This is not a runtime propagation claim.
+
+Added internal/dispatch/task_taxonomy_repro_test.go. The delegated first draft used nonexistent imports/types/signatures; the initial compile failure was a test-authoring error, not a product failure. Corrected the fixture against existing destination_test.go and engine signatures before recording behavioral evidence. Added explicit cloud flags and a positive TaskDispatch control. A delegated review recommended explicit Mode/Role in the unknown-class case; those are now supplied.
+
+Behavioral results:
+
+- Explicit TaskDispatch honors the saved Secondary/Standard assignment: PASS.
+- Missing-class RoleMain dispatch should honor that same bucket: FAIL; Target resolves legacy model and Dispatch calls Primary rather than Secondary.
+- Unknown explicit routing class should reject before inference: FAIL; Target and Dispatch accept it and Dispatch calls Primary.
+- Legacy co-processor stays Local with its legacy model: PASS. This is a baseline guard, not complete exclusion coverage after redirects.
+
+Root cause: Engine.resolve branches on nonempty RoutingTask without validating it. Empty RoutingTask uses role policy and never consults the saved dispatch assignment. Config.TaskAssignment returns Primary/Premium for unknown tasks. No production fix was applied.
+
+Fresh package baseline command from source/server:
+
+`go test ./pkg/config ./internal/dispatch ./internal/routingwire ./internal/inference ./internal/worker ./internal/capabilities/builtins -skip TestTaskTaxonomy -count=1`
+
+All six packages pass. From source/clients/cli, the five existing cloud-routing draft/navigation tests pass using `go test ./internal/ui -run 'Test(CloudChoicesStayDraftUntilSave|CloudRowNavigationRequiresConfirmation|CloudTabCloseRequiresConfirmation|RoutingDraftAndLocalCatalog|CloudPickerCancellationDoesNotChangeDraft)$' -count=1`.
+
+Remaining Phase 1 work includes redirect/cycle reproductions and stronger excluded-producer/draft-ownership contract coverage. The new dispatch regression file is intentionally red on the current implementation; this checkpoint is a reproduction checkpoint, not a green production change. No live inference, UI interaction, full-suite run, or push was performed.

@@ -327,6 +327,7 @@ func startGRPCServer(cfg config.Config, bindAddr string, events *crashlog.Writer
 		agent.WithContextMeter(meterRegistry, openChatModel(cfg)),
 		agent.WithContextLoader(ctxLoader),
 	}
+	var recapGen *recap.Generator
 	// Living recap: after each turn, a debounced local-model pass updates a
 	// one-line conversation summary. Only when a persistent store exists.
 	if persistentStore != nil {
@@ -349,7 +350,7 @@ func startGRPCServer(cfg config.Config, bindAddr string, events *crashlog.Writer
 			}
 			return resp.Output, nil
 		}
-		recapGen := recap.New(persistentStore, recapComplete, 8*time.Second, 12)
+		recapGen = recap.New(persistentStore, recapComplete, 8*time.Second, 12)
 		agentOpts = append(agentOpts, agent.WithRecapScheduler(recapGen))
 	}
 	// cloudTierModel late-binds the server's live tier→cloud-model resolver
@@ -657,6 +658,13 @@ func startGRPCServer(cfg config.Config, bindAddr string, events *crashlog.Writer
 		fmt.Fprintf(os.Stderr, "[WARN] Failed to initialize agent telemetry: %v\n", err)
 	} else {
 		srv.SetUsageSink(server.UsageEventSink(agentCollector.Emit))
+		srv.SetAttemptSink(agentCollector.EmitAttempt)
+		if recapGen != nil {
+			recapGen.SetAttemptSink(agentCollector.EmitAttempt)
+		}
+		if compGen != nil {
+			compGen.SetAttemptSink(agentCollector.EmitAttempt)
+		}
 	}
 
 	// Open OS keychain and attach it so profile RPCs and rebuildCloud can
@@ -748,6 +756,7 @@ func startGRPCServer(cfg config.Config, bindAddr string, events *crashlog.Writer
 	// RecordUsage false, so they stay MCP-side — no double-counting.
 	if agentCollector != nil {
 		engineDeps.UsageSink = server.UsageEventSink(agentCollector.Emit)
+		engineDeps.AttemptSink = agentCollector.EmitAttempt
 	}
 	coprocEngine := toolstack.NewEngine(engineDeps)
 	orchestrator.SetDispatchEngine(coprocEngine)

@@ -28,6 +28,7 @@ import (
 	"cercano/source/server/internal/capabilities"
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
+	"cercano/source/server/internal/usage"
 	"cercano/source/server/internal/visionattach"
 	"cercano/source/server/pkg/config"
 )
@@ -149,6 +150,7 @@ func (in *Inspector) Inspect(ctx context.Context, convID, imageID, question stri
 		}},
 	}
 
+	ctx = usage.ForOperation(ctx, nil, "vision", convID)
 	callCtx := ctx
 	if in.timeout > 0 {
 		var cancel context.CancelFunc

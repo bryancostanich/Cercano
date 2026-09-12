@@ -4,6 +4,7 @@
 package compactiongen
 
 import (
+	"cercano/source/server/internal/usage"
 	"context"
 	"errors"
 	"fmt"
@@ -34,12 +35,13 @@ const runTimeout = 6 * time.Minute
 
 // Generator debounces compaction per conversation.
 type Generator struct {
-	store     Store
-	summarize compaction.SummarizeFunc
-	cfg       compactor.Config
-	tok       contextmeter.Tokenizer
-	debounce  time.Duration
-	logf      func(string, ...any) // injectable for tests; defaults to stderr
+	attemptSink usage.AttemptSink // guarded by mu
+	store       Store
+	summarize   compaction.SummarizeFunc
+	cfg         compactor.Config
+	tok         contextmeter.Tokenizer
+	debounce    time.Duration
+	logf        func(string, ...any) // injectable for tests; defaults to stderr
 
 	mu       sync.Mutex
 	enabled  bool // guarded by mu — the runtime kill switch
@@ -188,6 +190,7 @@ func (g *Generator) release(conversationID string) {
 }
 
 func (g *Generator) runCompaction(ctx context.Context, conversationID string) error {
+	ctx = g.accountingContext(ctx, conversationID)
 	if !g.claim(conversationID) {
 		// Another pass holds the conversation; reschedule rather than skip so
 		// the debounced backlog isn't silently dropped.
@@ -417,4 +420,17 @@ func (g *Generator) IsCompacting(conversationID string) bool {
 	}
 	_, scheduled := g.timers[conversationID]
 	return scheduled
+}
+
+// SetAttemptSink connects independently scheduled work to the shared usage lane.
+func (g *Generator) SetAttemptSink(sink usage.AttemptSink) {
+	g.mu.Lock()
+	g.attemptSink = sink
+	g.mu.Unlock()
+}
+func (g *Generator) accountingContext(ctx context.Context, conversation string) context.Context {
+	g.mu.Lock()
+	sink := g.attemptSink
+	g.mu.Unlock()
+	return usage.ForOperation(ctx, sink, "compaction", conversation)
 }

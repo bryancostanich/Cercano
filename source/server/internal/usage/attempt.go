@@ -159,3 +159,25 @@ func AttemptsEnabled(ctx context.Context) bool {
 	config, _ := ctx.Value(attemptContextKey{}).(attemptContext)
 	return config.sink != nil
 }
+
+// ForOperation derives fresh work identity while preserving parent attribution.
+// A nil sink inherits the existing context sink; it does not disable accounting.
+// Background entry points supply their configured sink and conversation ID.
+func ForOperation(ctx context.Context, sink AttemptSink, source, conversation string) context.Context {
+	inherited, _ := ctx.Value(attemptContextKey{}).(attemptContext)
+	if sink != nil {
+		inherited.sink = sink
+	}
+	if inherited.sink == nil {
+		return ctx
+	}
+	a := inherited.attribution
+	if source != "" {
+		a.Source = source
+	}
+	if conversation != "" {
+		a.ConversationID = conversation
+	}
+	a.OperationID = NewIdentity()
+	return WithAttempts(ctx, inherited.sink, a)
+}

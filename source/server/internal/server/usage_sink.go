@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"time"
 
 	"cercano/source/server/internal/telemetry"
@@ -39,4 +40,18 @@ func UsageEventSink(emit func(*telemetry.Event)) func(usage.Usage) {
 		}
 		emit(e)
 	}
+}
+
+// SetAttemptSink extends existing telemetry wiring with actual attempt records.
+// Legacy aggregate/context telemetry remains separate and is not added to them.
+func (s *Server) SetAttemptSink(sink usage.AttemptSink) {
+	s.attemptSinkMu.Lock()
+	s.attemptSink = sink
+	s.attemptSinkMu.Unlock()
+}
+func (s *Server) accountingContext(ctx context.Context, source, conversation string) context.Context {
+	s.attemptSinkMu.RLock()
+	sink := s.attemptSink
+	s.attemptSinkMu.RUnlock()
+	return usage.ForOperation(ctx, sink, source, conversation)
 }

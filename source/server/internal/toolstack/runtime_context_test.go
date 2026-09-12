@@ -43,18 +43,18 @@ func TestCapabilityBudgetUsesPreparedRuntimeTarget(t *testing.T) {
 	cfg := config.Config{OpenRuntime: "llama_server", LlamaServer: config.LlamaServerConfig{ContextSize: &n}}
 	toolstack.InstallCapabilities(svc, toolstack.CapDeps{Config: &cfg})
 	services := svc.CapRegistry().Services()
-	target, err := services.DispatchTarget(t.Context(), dispatch.Spec{Role: dispatch.RoleCoproc})
+	target, err := services.DispatchTarget(t.Context(), dispatch.Spec{LocalOffload: true, Role: dispatch.RoleCoproc})
 	if err != nil || target.ContextWindow != 65536 || !target.ContextWindowKnown || target.Model != "large" {
 		t.Fatalf("target=%+v err=%v", target, err)
 	}
 	if selections != 1 || provider.prepares != 1 {
 		t.Fatalf("selection/preparation count=%d/%d", selections, provider.prepares)
 	}
-	target, err = services.DispatchTarget(t.Context(), dispatch.Spec{Role: dispatch.RoleCoproc, ModelOverride: "small"})
+	target, err = services.DispatchTarget(t.Context(), dispatch.Spec{LocalOffload: true, Role: dispatch.RoleCoproc, ModelOverride: "small"})
 	if err != nil || target.ContextWindow != 8192 {
 		t.Fatalf("model override target=%+v %v", target, err)
 	}
-	if _, err := services.DispatchTarget(t.Context(), dispatch.Spec{Role: dispatch.RoleCoproc, ModelOverride: "missing"}); err == nil {
+	if _, err := services.DispatchTarget(t.Context(), dispatch.Spec{LocalOffload: true, Role: dispatch.RoleCoproc, ModelOverride: "missing"}); err == nil {
 		t.Fatal("unknown capacity authorized a research budget")
 	}
 }

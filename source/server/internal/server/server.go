@@ -160,9 +160,11 @@ type Server struct {
 	// addition to providerSvc) so the server can emit an aggregate usage event
 	// for WORKER turns — the worker child's provider is never wrapped by
 	// resolveMainProvider, so no usage would otherwise be recorded.
-	usageSink  func(usage.Usage)
-	routingLog *routinglog.Writer
-	failureLog *failurelog.Writer
+	attemptSinkMu sync.RWMutex
+	attemptSink   usage.AttemptSink
+	usageSink     func(usage.Usage)
+	routingLog    *routinglog.Writer
+	failureLog    *failurelog.Writer
 
 	requestAccountingMu sync.Mutex
 	requestAccounting   map[string]requestAccountingSnapshot
@@ -185,6 +187,7 @@ type Server struct {
 // func the caller must defer. Kept as a thin shim so existing call sites and
 // server-package tests compile without change.
 func (s *Server) beginTurn(parent context.Context, conv string) (context.Context, uint64, func()) {
+	parent = s.accountingContext(parent, "main", conv)
 	return s.turnBroker.BeginTurn(parent, conv)
 }
 
@@ -2879,6 +2882,7 @@ func formatRuntimeTime(t time.Time) string {
 
 // ProcessRequest implements proto.AgentServer (Unary).
 func (s *Server) ProcessRequest(ctx context.Context, req *proto.ProcessRequestRequest) (*proto.ProcessRequestResponse, error) {
+	ctx = s.accountingContext(ctx, "local_tool", req.GetConversationId())
 	fmt.Printf("Received request (Unary): %s\n", req.Input)
 
 	agentReq := s.mapRequest(req)

@@ -4,6 +4,7 @@
 package recap
 
 import (
+	"cercano/source/server/internal/usage"
 	"context"
 	"fmt"
 	"os"
@@ -34,10 +35,11 @@ const (
 
 // Generator debounces recap regeneration per conversation.
 type Generator struct {
-	store    Store
-	complete CompleteFunc
-	debounce time.Duration
-	maxTurns int
+	attemptSink usage.AttemptSink // guarded by mu
+	store       Store
+	complete    CompleteFunc
+	debounce    time.Duration
+	maxTurns    int
 
 	mu     sync.Mutex
 	timers map[string]*time.Timer
@@ -74,7 +76,7 @@ func (g *Generator) Schedule(conversationID string) {
 }
 
 func (g *Generator) regenerate(conversationID string) {
-	ctx, cancel := context.WithTimeout(context.Background(), genTimeout)
+	ctx, cancel := context.WithTimeout(g.accountingContext(context.Background(), conversationID), genTimeout)
 	defer cancel()
 
 	info, err := g.store.Get(ctx, conversationID)
@@ -179,4 +181,17 @@ func firstLine(s string, maxChars int) string {
 		return ln
 	}
 	return ""
+}
+
+// SetAttemptSink connects independently scheduled work to the shared usage lane.
+func (g *Generator) SetAttemptSink(sink usage.AttemptSink) {
+	g.mu.Lock()
+	g.attemptSink = sink
+	g.mu.Unlock()
+}
+func (g *Generator) accountingContext(ctx context.Context, conversation string) context.Context {
+	g.mu.Lock()
+	sink := g.attemptSink
+	g.mu.Unlock()
+	return usage.ForOperation(ctx, sink, "recap", conversation)
 }

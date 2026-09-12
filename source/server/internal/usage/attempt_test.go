@@ -93,3 +93,21 @@ func TestAttemptNilSink(t *testing.T) {
 	a.Observe(llm.TokenUsage{}, nil)
 	a.Finish(Completed)
 }
+
+func TestOperationScopePreservesAttribution(t *testing.T) {
+	var got []AttemptObservation
+	sink := func(a AttemptObservation) bool { got = append(got, a); return true }
+	parent := WithAttempts(t.Context(), sink, Attribution{OperationID: "parent", Source: "main", ConversationID: "conversation", SessionID: "session", WorkerID: "worker"})
+	first := ForOperation(parent, nil, "vision", "")
+	second := ForOperation(parent, nil, "research", "")
+	StartAttempt(first, "provider", "model").Finish(Completed)
+	StartAttempt(second, "provider", "model").Finish(Completed)
+	a, b := got[0].Attribution, got[2].Attribution
+	if a.OperationID == "parent" || a.OperationID == b.OperationID || a.ConversationID != "conversation" || a.SessionID != "session" || a.WorkerID != "worker" || a.Source != "vision" || b.Source != "research" {
+		t.Fatalf("nested attribution: %+v %+v", a, b)
+	}
+	disabled := t.Context()
+	if ForOperation(disabled, nil, "vision", "") != disabled {
+		t.Fatal("disabled accounting allocated a context")
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"sync"
 
 	"cercano/source/server/internal/agenttools"
 	projectctx "cercano/source/server/internal/context"
@@ -128,6 +129,8 @@ type Result struct {
 
 // Engine routes dispatch calls to the appropriate provider.
 type Engine struct {
+	attemptSinkMu       sync.RWMutex
+	attemptSink         usage.AttemptSink
 	providersFn         func() inference.Tiers
 	modeFn              func() locus.Mode
 	ctxLoader           *projectctx.Loader
@@ -214,6 +217,19 @@ func (e *Engine) PreparedTarget(ctx context.Context, spec Spec) (modelbudget.Tar
 
 // Dispatch executes spec and returns a Result.
 func (e *Engine) Dispatch(ctx context.Context, spec Spec) (Result, error) {
+	e.attemptSinkMu.RLock()
+	sink := e.attemptSink
+	e.attemptSinkMu.RUnlock()
+	source := spec.Source
+	if source == "" {
+		if spec.Mode == Agentic {
+			source = "delegation"
+		} else {
+			source = "local_tool"
+		}
+	}
+	ctx = usage.ForOperation(ctx, sink, source, spec.ConversationID)
+
 	spec = defaultTask(spec)
 	// 1. Select provider via locus (providers resolved fresh each dispatch).
 	candidates, mode := e.routingSnapshot()
@@ -434,4 +450,10 @@ func (e *Engine) routingSnapshot() (inference.Tiers, locus.Mode) {
 		return candidates, candidates.Mode
 	}
 	return candidates, e.modeFn()
+}
+
+func (e *Engine) SetAttemptSink(sink usage.AttemptSink) {
+	e.attemptSinkMu.Lock()
+	e.attemptSink = sink
+	e.attemptSinkMu.Unlock()
 }

@@ -478,6 +478,9 @@ func (c *Collector) EnableAccounting(options AccountingOptions) error {
 func (c *Collector) EmitAttempt(a usage.AttemptObservation) bool {
 	c.mu.RLock()
 	attempts := c.attempts
+	if a.Attribution.SessionID == "" {
+		a.Attribution.SessionID = c.sessionID
+	}
 	c.mu.RUnlock()
 	if attempts == nil {
 		return false

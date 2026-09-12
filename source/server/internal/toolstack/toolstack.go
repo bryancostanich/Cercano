@@ -42,6 +42,7 @@ import (
 // and MUST return RAW, unwrapped providers — the engine emits usage itself and
 // conditionally, so already-wrapped providers would double-count.
 type EngineDeps struct {
+	AttemptSink         usage.AttemptSink
 	Providers           func() inference.Tiers
 	LocusMode           func() locus.Mode
 	CtxLoader           *projectctx.Loader
@@ -56,6 +57,7 @@ type EngineDeps struct {
 // the host and worker resolve providers and models the same way.
 func NewEngine(d EngineDeps) *dispatch.Engine {
 	e := dispatch.NewEngine(d.Providers, d.LocusMode, d.CtxLoader)
+	e.SetAttemptSink(d.AttemptSink)
 	e.SetTaskAssignment(d.TaskAssignment)
 	e.SetDestinationModelFor(d.DestinationModelFor)
 	if d.ModelFor != nil {

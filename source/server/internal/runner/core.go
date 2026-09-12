@@ -343,7 +343,11 @@ func (c *Core) RunTurn(
 	if res.Fallback == locus.TierLocal {
 		fbProv, fbCloud = c.d.Providers.Open(), false
 	}
-	if assignment.Destination != config.DestinationPrimary {
+	destination := assignment.Destination
+	if effective, ok := inference.TaskDestination(provider); ok {
+		destination = effective
+	}
+	if destination != config.DestinationPrimary {
 		fbProv = nil
 	}
 	fallbackModel := c.d.Providers.MainModel(fbCloud)

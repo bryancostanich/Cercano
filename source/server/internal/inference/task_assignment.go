@@ -18,9 +18,10 @@ func WithTaskAssignment(provider Provider, task config.Task, assignment config.T
 
 type assignedProvider struct {
 	Provider
-	task       config.Task
-	assignment config.TaskAssignment
-	model      string
+	task        config.Task
+	assignment  config.TaskAssignment
+	model       string
+	destination config.Destination
 }
 
 func (p *assignedProvider) TaskAssignmentFor(task config.Task) (config.TaskAssignment, bool) {
@@ -55,4 +56,22 @@ func (p *assignedProvider) TargetForContext(ctx context.Context, req Call) llm.S
 
 func (p *assignedProvider) RuntimeContext(ctx context.Context, model string, prepare bool) (llm.RuntimeContext, error) {
 	return llm.ResolveRuntimeContext(ctx, p.Provider, model, prepare)
+}
+
+// WithTaskRoute preserves saved task intent and the effective routing policy from
+// the same immutable graph. The policy destination may differ from the physical
+// endpoint when Primary selects a local provider under locus policy.
+func WithTaskRoute(provider Provider, task config.Task, assignment config.TaskAssignment, destination config.Destination, model string) Provider {
+	return &assignedProvider{Provider: provider, task: task, assignment: assignment, destination: destination, model: model}
+}
+func (p *assignedProvider) TaskDestination() (config.Destination, bool) {
+	return p.destination, p.destination != ""
+}
+func TaskDestination(provider Provider) (config.Destination, bool) {
+	if p, ok := provider.(interface {
+		TaskDestination() (config.Destination, bool)
+	}); ok {
+		return p.TaskDestination()
+	}
+	return "", false
 }

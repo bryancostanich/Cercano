@@ -564,7 +564,7 @@ func (r *workerResolver) Main() (inference.Provider, bool, bool, error) {
 	if sel.IsCloud {
 		model = inference.TargetForCall(sel.Provider, inference.Call{Tier: string(assignment.Quality.CapabilityTier())}).Model
 	}
-	return inference.WithTaskAssignment(sel.Provider, pkgcfg.TaskChat, assignment, model), sel.IsCloud, sel.FellBack, nil
+	return inference.WithTaskRoute(sel.Provider, pkgcfg.TaskChat, assignment, sel.PolicyDestination, model), sel.IsCloud, sel.FellBack, nil
 }
 
 func (r *workerResolver) Candidates() inference.Tiers {

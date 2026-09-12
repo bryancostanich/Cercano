@@ -40,6 +40,9 @@ func TestDestinationRedirectProviderGraph(t *testing.T) {
 		if err != nil || !cloud {
 			t.Fatalf("main cloud=%v err=%v", cloud, err)
 		}
+		if effective, ok := inference.TaskDestination(p); !ok || effective != sel.PolicyDestination {
+			t.Fatalf("effective destination=%q", effective)
+		}
 		model, ok := inference.TaskModelFor(p)
 		if !ok || model != wantModel {
 			t.Fatalf("model=%q want %q", model, wantModel)

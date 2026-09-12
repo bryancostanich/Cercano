@@ -193,3 +193,29 @@ func TestStartupFallbackRejectsUnknownOrOversizedCloudRequest(t *testing.T) {
 		}
 	}
 }
+
+func TestClassifiedStartupFallbackFinalPrimary(t *testing.T) {
+	for _, final := range []config.Destination{config.DestinationPrimary, config.DestinationLocal} {
+		t.Run(string(final), func(t *testing.T) {
+			local, cloud := &startupProbeProvider{err: startupFailure()}, &startupProbeProvider{}
+			c := config.Config{SecondaryRedirect: final, TaskAssignments: map[config.Task]config.TaskAssignment{config.TaskDispatch: {Destination: config.DestinationSecondary, Quality: config.CostStandard}}}
+			e := NewEngine(func() inference.Tiers {
+				return inference.Tiers{Open: local, Cloud: cloud, TaskFor: c.TaskAssignment, ResolveDestination: c.ResolveDestination}
+			}, func() locus.Mode { return locus.OpenPrimary }, nil)
+			e.SetModelFor(func(cloud bool, _ config.Tier) string {
+				if cloud {
+					return "claude-sonnet-4-6"
+				}
+				return "glm-local"
+			})
+			_, err := e.Dispatch(context.Background(), Spec{RoutingTask: config.TaskDispatch, Prompt: "fixture"})
+			if final == config.DestinationPrimary {
+				if err != nil || cloud.calls != 1 {
+					t.Fatalf("final Primary fallback calls=%d err=%v", cloud.calls, err)
+				}
+			} else if err == nil || cloud.calls != 0 {
+				t.Fatalf("final Local escaped: %v calls=%d", err, cloud.calls)
+			}
+		})
+	}
+}

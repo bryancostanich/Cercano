@@ -43,17 +43,20 @@ func (p *startupFallback) Capabilities() inference.Capabilities {
 }
 
 func (e *Engine) startupFallback(sel inference.Selection, candidates inference.Tiers, mode locus.Mode, spec Spec, tier config.Tier) inference.Selection {
-	if spec.RoutingTask != "" {
+	if spec.RoutingTask != "" && sel.PolicyDestination != config.DestinationPrimary {
 		return sel
 	}
 	policy := mode.Main()
-	if spec.Role == RoleCoproc {
+	if spec.RoutingTask == "" && spec.Role == RoleCoproc {
 		policy = mode.Coproc()
 	}
-	if sel.IsCloud || !policy.CrossAllowed || policy.Preferred != locus.TierLocal || policy.Fallback != locus.TierCloud || candidates.Cloud == nil || candidates.Cloud.Name() == "NONE" || e.modelFor == nil {
+	if sel.IsCloud || !policy.CrossAllowed || policy.Preferred != locus.TierLocal || policy.Fallback != locus.TierCloud || candidates.Cloud == nil || candidates.Cloud.Name() == "NONE" {
 		return sel
 	}
-	model := e.modelFor(true, tier)
+	model := inference.TargetForCall(candidates.Cloud, inference.Call{Tier: string(tier)}).Model
+	if model == "" && e.modelFor != nil {
+		model = e.modelFor(true, tier)
+	}
 	if model == "" {
 		return sel
 	}

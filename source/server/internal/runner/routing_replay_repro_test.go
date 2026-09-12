@@ -4,6 +4,7 @@ import (
 	"cercano/source/server/internal/agenttools"
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
+	"cercano/source/server/internal/usage"
 	"cercano/source/server/pkg/config"
 	"context"
 	"errors"
@@ -131,5 +132,30 @@ func TestRoutingContractSecondaryChatCannotFallBackToLocal(t *testing.T) {
 	_, err := New(deps).RunTurn(context.Background(), Request{Input: "fixture", ConversationID: "secondary", WorkDir: t.TempDir()}, &captureSink{}, nil, nil)
 	if err == nil || len(local.requests) != 0 {
 		t.Fatalf("Secondary escaped: err=%v Local calls=%d", err, len(local.requests))
+	}
+}
+
+func TestRedirectedChatUsesFinalFallbackPolicy(t *testing.T) {
+	for _, tt := range []struct {
+		name          string
+		origin, final config.Destination
+		fallback      bool
+	}{
+		{"secondary-primary", config.DestinationSecondary, config.DestinationPrimary, true},
+		{"local-primary", config.DestinationLocal, config.DestinationPrimary, true},
+		{"primary-secondary", config.DestinationPrimary, config.DestinationSecondary, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			primary, local := &busyProvider{}, &spyProvider{}
+			assigned := inference.WithTaskRoute(primary, config.TaskChat, config.TaskAssignment{Destination: tt.origin, Quality: config.CostStandard}, tt.final, "fake-cloud-model")
+			p := usage.Wrap(assigned, "main", true, nil)
+			deps := buildDeps(p)
+			deps.Config = &fakeConfig{cfg: config.Config{LocusMode: "cloud_primary"}}
+			deps.Providers = &fakeResolver{prov: p, cloud: primary, open: local, isCloud: true, isCloudSet: true}
+			_, err := New(deps).RunTurn(context.Background(), Request{Input: "fixture", ConversationID: tt.name, WorkDir: t.TempDir()}, &captureSink{}, nil, nil)
+			if (len(local.requests) > 0) != tt.fallback {
+				t.Fatalf("fallback calls=%d err=%v", len(local.requests), err)
+			}
+		})
 	}
 }

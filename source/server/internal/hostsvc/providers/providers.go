@@ -281,7 +281,7 @@ func (p *service) Main() (inference.Provider, bool, bool, error) {
 	if sel.IsCloud {
 		model = inference.TargetForCall(sel.Provider, inference.Call{Tier: string(assignment.Quality.CapabilityTier())}).Model
 	}
-	prov := usage.Wrap(inference.WithTaskAssignment(sel.Provider, cfg.TaskChat, assignment, model), "main", sel.IsCloud, p.usageSink)
+	prov := usage.Wrap(inference.WithTaskRoute(sel.Provider, cfg.TaskChat, assignment, sel.PolicyDestination, model), "main", sel.IsCloud, p.usageSink)
 	return prov, sel.IsCloud, sel.FellBack, nil
 }
 

@@ -68,6 +68,9 @@ func TestDestinationRedirectWorkerExecution(t *testing.T) {
 			if err != nil || !cloud {
 				t.Fatalf("cloud=%v error=%v", cloud, err)
 			}
+			if effective, ok := inference.TaskDestination(prov); !ok || effective != destination {
+				t.Fatalf("effective destination=%q", effective)
+			}
 			model, ok := inference.TaskModelFor(prov)
 			if !ok || model != "final-standard" {
 				t.Fatalf("selected model=%q", model)

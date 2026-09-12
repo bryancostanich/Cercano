@@ -34,12 +34,14 @@ type Candidate struct {
 
 // Selection is the resolved provider for a unit of work.
 type Selection struct {
-	Provider    Provider
-	Destination config.Destination
-	Profile     string
-	IsCloud     bool
-	FellBack    bool
-	Notice      string
+	// PolicyDestination is the final logical route before Primary locus placement.
+	PolicyDestination config.Destination
+	Provider          Provider
+	Destination       config.Destination
+	Profile           string
+	IsCloud           bool
+	FellBack          bool
+	Notice            string
 }
 
 // Router selects an inference provider from typed tiers under locus policy.
@@ -105,6 +107,7 @@ func SelectDestination(mode locus.Mode, destination config.Destination, tiers Ti
 		if err != nil {
 			return Selection{}, err
 		}
+		selected.PolicyDestination = destination
 		selected.Destination = config.DestinationLocal
 		if selected.IsCloud {
 			selected.Destination = destination
@@ -129,5 +132,5 @@ func SelectDestination(mode locus.Mode, destination config.Destination, tiers Ti
 	if (mode == locus.OpenOnly && candidate.IsCloud) || (mode == locus.CloudOnly && !candidate.IsCloud) {
 		return Selection{}, fmt.Errorf("locus mode %q prohibits destination %s placement", mode, destination)
 	}
-	return Selection{Provider: candidate.Provider, Destination: destination, Profile: candidate.Profile, IsCloud: candidate.IsCloud}, nil
+	return Selection{PolicyDestination: destination, Provider: candidate.Provider, Destination: destination, Profile: candidate.Profile, IsCloud: candidate.IsCloud}, nil
 }

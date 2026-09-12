@@ -160,3 +160,7 @@ func (r *recordingProvider) RuntimeContext(ctx context.Context, model string, pr
 func (p *recordingProvider) TargetForContext(ctx context.Context, req inference.Call) llm.ServingRoute {
 	return inference.TargetForContext(ctx, p.inner, req)
 }
+
+func (r *recordingProvider) TaskDestination() (config.Destination, bool) {
+	return inference.TaskDestination(r.inner)
+}

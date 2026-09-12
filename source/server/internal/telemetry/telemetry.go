@@ -559,3 +559,12 @@ func (c *Collector) drain() {
 		}
 	}
 }
+
+func (c *Collector) MarkAccountingIncomplete(reason string) {
+	c.mu.RLock()
+	attempts := c.attempts
+	c.mu.RUnlock()
+	if attempts != nil {
+		attempts.MarkCoverageIncomplete(reason)
+	}
+}

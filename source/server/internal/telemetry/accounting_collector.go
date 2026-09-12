@@ -15,17 +15,18 @@ type AttemptStore interface {
 }
 
 type AccountingHealth struct {
-	Accepted        uint64    `json:"accepted"`
-	Persisted       uint64    `json:"persisted"`
-	Lost            uint64    `json:"lost"`
-	Pending         int       `json:"pending"`
-	Retries         uint64    `json:"retries"`
-	WriteFailures   uint64    `json:"write_failures"`
-	Uncertain       uint64    `json:"uncertain"`
-	OldestPending   time.Time `json:"oldest_pending"`
-	LastPersistence time.Time `json:"last_persistence"`
-	LastError       string    `json:"last_error"`
-	Closed          bool      `json:"closed"`
+	CoverageIncomplete bool      `json:"coverage_incomplete"`
+	Accepted           uint64    `json:"accepted"`
+	Persisted          uint64    `json:"persisted"`
+	Lost               uint64    `json:"lost"`
+	Pending            int       `json:"pending"`
+	Retries            uint64    `json:"retries"`
+	WriteFailures      uint64    `json:"write_failures"`
+	Uncertain          uint64    `json:"uncertain"`
+	OldestPending      time.Time `json:"oldest_pending"`
+	LastPersistence    time.Time `json:"last_persistence"`
+	LastError          string    `json:"last_error"`
+	Closed             bool      `json:"closed"`
 }
 
 type AccountingOptions struct {
@@ -272,7 +273,7 @@ func (c *AccountingCollector) run() {
 		if err == nil {
 			c.health.Persisted += uint64(len(batch))
 			c.health.LastPersistence = time.Now().UTC()
-			if c.health.Lost == 0 && c.health.Uncertain == 0 {
+			if !c.health.CoverageIncomplete && c.health.Lost == 0 && c.health.Uncertain == 0 {
 				c.health.LastError = ""
 			}
 		} else {
@@ -310,9 +311,18 @@ func (c *AccountingCollector) persistHealth() {
 	} else {
 		c.lastHealth = &snapshot
 		c.mu.Lock()
-		if c.health.Lost == 0 && c.health.Uncertain == 0 && (c.health.LastError == "accounting health persistence failed" || c.health.LastError == "accounting initialization failed") {
+		if !c.health.CoverageIncomplete && c.health.Lost == 0 && c.health.Uncertain == 0 && (c.health.LastError == "accounting health persistence failed" || c.health.LastError == "accounting initialization failed") {
 			c.health.LastError = ""
 		}
 		c.mu.Unlock()
 	}
+}
+
+// MarkCoverageIncomplete records a known coverage gap without inventing a count
+// of missing attempts or tokens. It is independent of queue capacity.
+func (c *AccountingCollector) MarkCoverageIncomplete(reason string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.health.CoverageIncomplete = true
+	c.health.LastError = reason
 }

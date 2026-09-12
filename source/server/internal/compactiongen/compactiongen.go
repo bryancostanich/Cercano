@@ -35,6 +35,12 @@ const runTimeout = 6 * time.Minute
 
 // Generator debounces compaction per conversation.
 type Generator struct {
+	rootContext context.Context
+	cancelRoot  context.CancelFunc
+	closed      bool // guarded by mu
+	workers     sync.WaitGroup
+	workersDone chan struct{}
+
 	attemptSink usage.AttemptSink // guarded by mu
 	store       Store
 	summarize   compaction.SummarizeFunc
@@ -67,7 +73,9 @@ type Generator struct {
 }
 
 func New(store Store, summarize compaction.SummarizeFunc, cfg compactor.Config, tok contextmeter.Tokenizer, debounce time.Duration) *Generator {
+	root, cancel := context.WithCancel(context.Background())
 	return &Generator{
+		rootContext: root, cancelRoot: cancel, workersDone: make(chan struct{}),
 		store: store, summarize: summarize, cfg: cfg, tok: tok, debounce: debounce,
 		logf:     func(f string, a ...any) { fmt.Fprintf(os.Stderr, f, a...) },
 		timers:   make(map[string]*time.Timer),
@@ -147,6 +155,9 @@ func (g *Generator) elisionOnly() (func(ctx context.Context, conversationID stri
 func (g *Generator) Schedule(conversationID string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	if g.closed {
+		return
+	}
 	if !g.enabled {
 		return
 	}
@@ -190,6 +201,11 @@ func (g *Generator) release(conversationID string) {
 }
 
 func (g *Generator) runCompaction(ctx context.Context, conversationID string) error {
+	ctx, release, ok := g.startWork(ctx)
+	if !ok {
+		return context.Canceled
+	}
+	defer release()
 	ctx = g.accountingContext(ctx, conversationID)
 	if !g.claim(conversationID) {
 		// Another pass holds the conversation; reschedule rather than skip so
@@ -292,6 +308,13 @@ func (g *Generator) runCompaction(ctx context.Context, conversationID string) er
 // receives one human-readable line per step. Unlike Schedule this ignores the
 // kill switch: it only ever runs as an explicit user action.
 func (g *Generator) Regenerate(ctx context.Context, conversationID string, incremental bool, progress func(string)) (preTokens, postTokens int, err error) {
+	ctx, release, ok := g.startWork(ctx)
+	if !ok {
+		return 0, 0, context.Canceled
+	}
+	defer release()
+	ctx = g.accountingContext(ctx, conversationID)
+
 	if progress == nil {
 		progress = func(string) {}
 	}
@@ -366,6 +389,13 @@ func (g *Generator) Regenerate(ctx context.Context, conversationID string, incre
 // a concurrent Advance can't re-persist the state being cleared. progress
 // (nil-safe) receives one human-readable line per step.
 func (g *Generator) Clear(ctx context.Context, conversationID string, progress func(string)) (preTokens, postTokens int, err error) {
+	ctx, release, ok := g.startWork(ctx)
+	if !ok {
+		return 0, 0, context.Canceled
+	}
+	defer release()
+	ctx = g.accountingContext(ctx, conversationID)
+
 	if progress == nil {
 		progress = func(string) {}
 	}

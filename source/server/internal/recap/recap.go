@@ -35,6 +35,12 @@ const (
 
 // Generator debounces recap regeneration per conversation.
 type Generator struct {
+	rootContext context.Context
+	cancelRoot  context.CancelFunc
+	closed      bool // guarded by mu
+	workers     sync.WaitGroup
+	workersDone chan struct{}
+
 	attemptSink usage.AttemptSink // guarded by mu
 	store       Store
 	complete    CompleteFunc
@@ -49,7 +55,9 @@ type Generator struct {
 // Schedule before generation fires; maxTurns caps how many recent turns feed
 // the prompt.
 func New(store Store, complete CompleteFunc, debounce time.Duration, maxTurns int) *Generator {
+	root, cancel := context.WithCancel(context.Background())
 	return &Generator{
+		rootContext: root, cancelRoot: cancel, workersDone: make(chan struct{}),
 		store:    store,
 		complete: complete,
 		debounce: debounce,
@@ -63,6 +71,9 @@ func New(store Store, complete CompleteFunc, debounce time.Duration, maxTurns in
 func (g *Generator) Schedule(conversationID string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	if g.closed {
+		return
+	}
 	if t, ok := g.timers[conversationID]; ok {
 		t.Reset(g.debounce)
 		return
@@ -76,7 +87,12 @@ func (g *Generator) Schedule(conversationID string) {
 }
 
 func (g *Generator) regenerate(conversationID string) {
-	ctx, cancel := context.WithTimeout(g.accountingContext(context.Background(), conversationID), genTimeout)
+	parent, release, ok := g.startWork(context.Background())
+	if !ok {
+		return
+	}
+	defer release()
+	ctx, cancel := context.WithTimeout(g.accountingContext(parent, conversationID), genTimeout)
 	defer cancel()
 
 	info, err := g.store.Get(ctx, conversationID)

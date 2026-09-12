@@ -2,6 +2,7 @@ package telemetry
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 )
@@ -56,4 +57,30 @@ func TestCollectorCloseContextCanceled(t *testing.T) {
 	// path may wait on a timeout or panic; subsequent Close waits for its exit.
 	_ = c.CloseContext(ctx)
 	c.Close()
+}
+
+func TestProducerCoverageGapSurvivesSuccessfulWrites(t *testing.T) {
+	s := accountingTestStore(t)
+	c := NewCollector(s, 8)
+	if err := c.EnableAccounting(testAccountingOptions()); err != nil {
+		t.Fatal(err)
+	}
+	c.MarkAccountingIncomplete("producer shutdown incomplete")
+	c.EmitAttempt(accountingFixture("known"))
+	c.Close()
+	h := c.AccountingHealth()
+	if !h.CoverageIncomplete || h.Lost != 0 || h.Persisted != 1 || h.LastError == "" {
+		t.Fatalf("coverage gap hidden or fabricated count: %+v", h)
+	}
+	var raw string
+	if err := s.db.QueryRow(`SELECT snapshot FROM accounting_health`).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	var persisted AccountingHealth
+	if err := json.Unmarshal([]byte(raw), &persisted); err != nil {
+		t.Fatal(err)
+	}
+	if !persisted.CoverageIncomplete {
+		t.Fatal("coverage gap not persisted")
+	}
 }

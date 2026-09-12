@@ -808,6 +808,30 @@ func startGRPCServer(cfg config.Config, bindAddr string, events *crashlog.Writer
 		mcpCancel()
 		mcpMgr.Stop()
 		srv.Shutdown()
+		// Independently scheduled producers must stop before accounting drains.
+		producerCtx, cancelProducers := context.WithTimeout(context.Background(), 2*time.Second)
+		for name, closeProducer := range map[string]func(context.Context) error{
+			"recap": func(ctx context.Context) error {
+				if recapGen != nil {
+					return recapGen.Close(ctx)
+				}
+				return nil
+			},
+			"compaction": func(ctx context.Context) error {
+				if compGen != nil {
+					return compGen.Close(ctx)
+				}
+				return nil
+			},
+		} {
+			if err := closeProducer(producerCtx); err != nil {
+				fmt.Fprintf(os.Stderr, "accounting: %s producer shutdown incomplete: %v\n", name, err)
+				if agentCollector != nil {
+					agentCollector.MarkAccountingIncomplete("background producer shutdown incomplete")
+				}
+			}
+		}
+		cancelProducers()
 		// Usage producers have stopped; drain before closing the database.
 		if closeAgentTelemetry != nil {
 			closeAgentTelemetry()

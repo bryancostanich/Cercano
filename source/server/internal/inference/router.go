@@ -17,10 +17,12 @@ const (
 
 // Tiers holds the candidate inference providers; either may be nil/absent.
 type Tiers struct {
-	TaskFor      func(config.Task) config.TaskAssignment
-	Cloud        Provider
-	Open         Provider
-	Destinations map[config.Destination]Candidate
+	// ResolveDestination is captured with TaskFor from the same routing graph.
+	ResolveDestination func(config.Destination) (config.Destination, error)
+	TaskFor            func(config.Task) config.TaskAssignment
+	Cloud              Provider
+	Open               Provider
+	Destinations       map[config.Destination]Candidate
 }
 
 // Candidate retains logical profile identity separately from physical placement.
@@ -91,6 +93,13 @@ func Select(mode locus.Mode, role Role, tiers Tiers) (Selection, error) {
 // SelectDestination never treats Primary backup as Secondary. Explicit Secondary
 // has no cross-destination fallback. Primary keeps the established locus policy.
 func SelectDestination(mode locus.Mode, destination config.Destination, tiers Tiers) (Selection, error) {
+	if tiers.ResolveDestination != nil {
+		final, err := tiers.ResolveDestination(destination)
+		if err != nil {
+			return Selection{}, err
+		}
+		destination = final
+	}
 	if destination == config.DestinationPrimary {
 		selected, err := Select(mode, RoleMain, tiers)
 		if err != nil {

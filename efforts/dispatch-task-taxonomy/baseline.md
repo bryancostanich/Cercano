@@ -158,3 +158,29 @@ Final verification (source/server):
 - `go test ./internal/dispatch -count=1 -skip '^TestTaskTaxonomyMissingClassUsesDefaultDispatch$'` — PASS; the known ordinary missing-class regression is explicitly excluded, not fixed.
 
 Limitations: global redirect runtime integration, ordinary missing-class routing, dedicated Routing UI, and deprecated co-processor migration/removal remain pending. Legacy watchdog.model storage/transport/settings cleanup is not part of this unit; the stored field no longer controls watchdog dispatch. No live inference, build, full server suite, or push.
+
+## Shared runtime redirect selection — 2026-09-12
+
+Rechecked the remaining Phase 2 snapshot/settings coverage and marked the existing implementation complete: snapshots retain both destinations and backups, redirects and all metadata-defined task overrides (including Watchdog); settings tests cover atomicity and resets. Focused config/routingwire/agentclient/server/worker routing tests passed. Existing credential transport behavior was not changed.
+
+Started Phase 3. Two delegation attempts returned no substantive audit/edits; implemented directly. The host reproduction initially lacked fixture credentials; after adding them, `TestDestinationRedirectProviderGraph` failed with `redirect selection: destination local unavailable` despite Local→Secondary configuration. This confirms shared selection ignored the stored redirect.
+
+Added `Tiers.ResolveDestination`, captured alongside TaskFor from the same host published graph or worker configuration. SelectDestination follows the shared config resolver before evaluating existing placement/provider policy. Original task assignments/quality remain intact; Selection reports the final actual provider destination. Both host and worker supply the callback. MainModel/PrimaryModel helpers now resolve effective destination, and worker Chat binds the model from the selected provider's tier-aware serving route (matching host behavior) rather than the source assignment's cloud profile.
+
+Tests added:
+- Inference: all four direct edges, both chains, disabled redirects, cycle/invalid-target rejection, unavailable endpoints without source fallback, and final locality prohibitions.
+- Host: Local→Secondary Chat and then Local→Primary after rebuild; new unbuilt redirect settings cannot change the published graph's selected profile/model; saved task identity/quality retained.
+- Dispatch: Target, PreparedTarget and actual one-shot Dispatch agree for Default dispatch and Watchdog, including explicit quality and enabling/disabling chained redirects between calls.
+- Worker: snapshot→provider assembly→Chat execution for Local→Primary and Local→Secondary; local HTTP fixtures verify final profile model and credential, authentication failover to that destination's own backup model/credential, and no requests to the unused profile.
+
+The first worker fixture asserted unused credentials were never fetched and failed. Inspection confirmed existing API-key provider construction eagerly builds both destination chains (subscription credentials are separately lazy). Removed that over-strong assertion, retaining checks on actual request endpoints and credentials; credential-loading policy was not changed by this unit.
+
+Verification (source/server):
+- `go test ./pkg/config ./internal/routingwire ./pkg/agentclient ./internal/server ./internal/worker -run 'Test(Task|DestinationRedirect|RoutingSettings|RoutingWire|RoutingAssignments)' -count=1` — PASS (Phase 2 check).
+- `go test ./internal/inference ./internal/hostsvc/providers ./internal/runner ./internal/worker -count=1` — PASS complete packages.
+- `go test ./internal/dispatch -count=1 -skip '^TestTaskTaxonomyMissingClassUsesDefaultDispatch$'` — PASS; known missing-class reproduction still excluded explicitly.
+- `go test ./internal/server -run 'Test(DestinationRedirect|ProviderGraph|RoutingContract|TaskTaxonomy|Watchdog)' -count=1` — PASS.
+- `go test ./internal/inference/profilechain ./internal/inference/resilience -count=1` — PASS complete packages.
+- `go test -race ./internal/dispatch ./internal/server ./internal/worker -run '^TestDestinationRedirect' -count=1` — PASS.
+
+Phase 3 remains in progress. Important follow-up: runner/core.go still bases cross-destination fallback eligibility on the ORIGINAL assignment; redirects ending at Primary need their effective destination carried through the main provider/usage wrappers without rewriting saved task intent. Classified dispatch startup fallback is also still suppressed as before. This unit verifies redirect selection and within-destination backup chains, NOT full redirected cross-destination fallback parity. Other pending work includes ordinary missing-class defaults, model/context evidence matrix, complete host/open-model snapshot consistency, agentic redirect coverage, deprecated co-processor migration, and UI cleanup. No live cloud inference, production settings mutation, full-server suite, or push.

@@ -293,7 +293,11 @@ func (p *service) MainModel(isCloud bool) string {
 	c := p.cfgSvc.Get()
 	a := c.TaskAssignment(cfg.TaskChat)
 	if isCloud {
-		name, _ := c.DestinationProfiles(a.Destination)
+		destination, err := c.ResolveDestination(a.Destination)
+		if err != nil {
+			return ""
+		}
+		name, _ := c.DestinationProfiles(destination)
 		if prof, ok := c.Profile(name); ok {
 			return c.ModelProfiles.ResolveCloudModelForTier(prof, a.Quality.CapabilityTier())
 		}
@@ -308,7 +312,11 @@ func (p *service) MainModel(isCloud bool) string {
 func (p *service) PrimaryModel() string {
 	c := p.cfgSvc.Get()
 	a := c.TaskAssignment(cfg.TaskChat)
-	cloud := a.Destination != cfg.DestinationLocal && c.LocusMode != "open_only" && (a.Destination == cfg.DestinationSecondary || c.LocusMode != "open_primary")
+	destination, err := c.ResolveDestination(a.Destination)
+	if err != nil {
+		return ""
+	}
+	cloud := destination != cfg.DestinationLocal && c.LocusMode != "open_only" && (destination == cfg.DestinationSecondary || c.LocusMode != "open_primary")
 	return p.MainModel(cloud)
 }
 
@@ -412,7 +420,7 @@ func (p *service) Candidates() inference.Tiers {
 		primary = state.primary
 		secondary = state.secondary
 	}
-	return inference.Tiers{Cloud: primary, Open: p.Open(), TaskFor: c.TaskAssignment, Destinations: map[cfg.Destination]inference.Candidate{
+	return inference.Tiers{Cloud: primary, Open: p.Open(), TaskFor: c.TaskAssignment, ResolveDestination: c.ResolveDestination, Destinations: map[cfg.Destination]inference.Candidate{
 		cfg.DestinationPrimary:   {Provider: primary, Profile: c.ActiveCloudProfile, IsCloud: true},
 		cfg.DestinationSecondary: {Provider: secondary, Profile: c.SecondaryCloudProfile, IsCloud: true},
 	}}

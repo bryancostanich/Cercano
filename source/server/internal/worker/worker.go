@@ -559,12 +559,17 @@ func (r *workerResolver) Main() (inference.Provider, bool, bool, error) {
 	if err != nil {
 		return nil, false, false, err
 	}
-	return inference.WithTaskAssignment(sel.Provider, pkgcfg.TaskChat, cfg.TaskAssignment(pkgcfg.TaskChat), r.MainModel(sel.IsCloud)), sel.IsCloud, sel.FellBack, nil
+	assignment := candidates.TaskFor(pkgcfg.TaskChat)
+	model := openTierModel(cfg, assignment.Quality.CapabilityTier())
+	if sel.IsCloud {
+		model = inference.TargetForCall(sel.Provider, inference.Call{Tier: string(assignment.Quality.CapabilityTier())}).Model
+	}
+	return inference.WithTaskAssignment(sel.Provider, pkgcfg.TaskChat, assignment, model), sel.IsCloud, sel.FellBack, nil
 }
 
 func (r *workerResolver) Candidates() inference.Tiers {
 	c := r.cfgSvc.Get()
-	return inference.Tiers{Cloud: r.cloudProv, Open: r.openProv, TaskFor: c.TaskAssignment, Destinations: map[pkgcfg.Destination]inference.Candidate{
+	return inference.Tiers{Cloud: r.cloudProv, Open: r.openProv, TaskFor: c.TaskAssignment, ResolveDestination: c.ResolveDestination, Destinations: map[pkgcfg.Destination]inference.Candidate{
 		pkgcfg.DestinationPrimary:   {Provider: r.cloudProv, Profile: c.ActiveCloudProfile, IsCloud: true},
 		pkgcfg.DestinationSecondary: {Provider: r.secondaryProv, Profile: c.SecondaryCloudProfile, IsCloud: true},
 	}}
@@ -573,7 +578,11 @@ func (r *workerResolver) MainModel(isCloud bool) string {
 	c := r.cfgSvc.Get()
 	a := c.TaskAssignment(pkgcfg.TaskChat)
 	if isCloud {
-		name, _ := c.DestinationProfiles(a.Destination)
+		destination, err := c.ResolveDestination(a.Destination)
+		if err != nil {
+			return ""
+		}
+		name, _ := c.DestinationProfiles(destination)
 		if p, ok := c.Profile(name); ok {
 			return c.ModelProfiles.ResolveCloudModelForTier(p, a.Quality.CapabilityTier())
 		}
@@ -584,7 +593,11 @@ func (r *workerResolver) MainModel(isCloud bool) string {
 func (r *workerResolver) PrimaryModel() string {
 	c := r.cfgSvc.Get()
 	a := c.TaskAssignment(pkgcfg.TaskChat)
-	cloud := a.Destination != pkgcfg.DestinationLocal && c.LocusMode != "open_only" && (a.Destination == pkgcfg.DestinationSecondary || c.LocusMode != "open_primary")
+	destination, err := c.ResolveDestination(a.Destination)
+	if err != nil {
+		return ""
+	}
+	cloud := destination != pkgcfg.DestinationLocal && c.LocusMode != "open_only" && (destination == pkgcfg.DestinationSecondary || c.LocusMode != "open_primary")
 	return r.MainModel(cloud)
 }
 func (r *workerResolver) Rebuild() error              { return nil }

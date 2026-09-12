@@ -30,15 +30,15 @@ Objective: make taxonomy, defaults, and redirects consistent across saved config
 - [x] Add persisted Secondary and Local redirect settings with omission meaning own configuration. Support only the approved targets; leave Primary without a redirect control.
 - [x] Implement shared final-destination resolution that preserves the original task assignment and quality, follows chains, and validates cycles before mutation. Keep configured profile bindings separate from effective routing so disabling a redirect restores the saved setup.
 - [x] Extend existing RoutingAssignments transport and client cloning/conversion for redirects; use the established absent-message versus present-complete-draft semantics. Regenerate bindings with the repository's generation workflow.
-- [ ] Carry redirects and all class assignments in worker snapshots, including all profiles needed by effective cloud routes and their backups; keep credentials outside serialized configuration.
-- [ ] Validate complete routing drafts atomically; reject invalid keys/targets/cycles without partial persistence. Verify clearing redirects and class overrides restores defaults.
-- [ ] Run focused config, routingwire, agentclient, server settings, and worker snapshot tests; checkpoint explicit phase paths.
+- [x] Carry redirects and all class assignments in worker snapshots, including all profiles needed by effective cloud routes and their backups; keep credentials outside serialized configuration.
+- [x] Validate complete routing drafts atomically; reject invalid keys/targets/cycles without partial persistence. Verify clearing redirects and class overrides restores defaults.
+- [x] Run focused config, routingwire, agentclient, server settings, and worker snapshot tests; checkpoint explicit phase paths.
 
 ## Phase 3 — Unified effective routing in host and worker
 
 Objective: resolve class and explicit quality, then redirects, then provider/model using a consistent configuration snapshot. Files: internal/dispatch/engine.go and startup_fallback.go; internal/inference/router.go and task_assignment.go; internal/hostsvc/providers/providers.go; internal/server/models_resolve.go; internal/worker/worker.go and worker_dispatch.go; internal/runner and internal/usage wrappers where necessary; cmd/cercano/main.go wiring. Tests: matching budget/execution routes, host/worker parity, provider refresh, model evidence, and fallback restrictions.
 
-- [ ] Integrate shared redirect resolution into classified Chat and dispatch selection using the same candidate/config snapshot that provides task defaults. Do not independently read mutable settings midway through route/model resolution.
+- [~] Integrate shared redirect resolution into classified Chat and dispatch selection using the same candidate/config snapshot that provides task defaults. Do not independently read mutable settings midway through route/model resolution.
 - [ ] Ensure explicit quality overrides work for every dispatch class without changing destination; retain existing explicit model-override semantics within locality bounds.
 - [ ] Resolve model, cloud profile, credentials, backup chain, and model/context evidence from the final destination. Do not use the source destination's models or backups after a redirect.
 - [ ] Make Target, PreparedTarget, Dispatch, host Chat, and worker Chat agree on effective route and quality. Preserve task identity through wrappers, agentic work, and worker transport without confusing free-form task prose with routing class.

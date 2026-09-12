@@ -18,8 +18,15 @@ const (
 type Task string
 
 const (
-	TaskChat     Task = "chat"
-	TaskDispatch Task = "dispatch"
+	TaskChat                  Task = "chat"
+	TaskDispatch              Task = "dispatch"
+	TaskReconnaissance        Task = "reconnaissance"
+	TaskMechanicalDevelopment Task = "mechanical_development"
+	TaskInvestigation         Task = "investigation"
+	TaskImplementation        Task = "implementation"
+	TaskReview                Task = "review"
+	TaskResearch              Task = "research"
+	TaskGitLand               Task = "git_land"
 )
 
 // TaskAssignment never stores a model ID. Zero fields inherit product defaults.
@@ -28,11 +35,55 @@ type TaskAssignment struct {
 	Quality     CostTier    `yaml:"quality,omitempty" json:"quality,omitempty"`
 }
 
-func (c Config) TaskAssignment(task Task) TaskAssignment {
-	a := TaskAssignment{Destination: DestinationPrimary, Quality: CostPremium}
-	if task == TaskDispatch {
-		a.Destination = DestinationSecondary
+// TaskDefinition is shared configuration and UI metadata. Light quality uses
+// the existing persisted economy value; it does not create a new model tier.
+type TaskDefinition struct {
+	Task    Task
+	Label   string
+	Default TaskAssignment
+}
+
+var taskDefinitions = [...]TaskDefinition{
+	{TaskChat, "Chat", TaskAssignment{DestinationPrimary, CostPremium}},
+	{TaskDispatch, "Default dispatch", TaskAssignment{DestinationSecondary, CostPremium}},
+	{TaskReconnaissance, "Reconnaissance", TaskAssignment{DestinationLocal, CostEconomy}},
+	{TaskMechanicalDevelopment, "Mechanical development", TaskAssignment{DestinationLocal, CostStandard}},
+	{TaskInvestigation, "Investigation", TaskAssignment{DestinationSecondary, CostPremium}},
+	{TaskImplementation, "Implementation", TaskAssignment{DestinationSecondary, CostPremium}},
+	{TaskReview, "Review", TaskAssignment{DestinationSecondary, CostPremium}},
+	{TaskResearch, "Research", TaskAssignment{DestinationSecondary, CostPremium}},
+	{TaskGitLand, "Git land", TaskAssignment{DestinationLocal, CostPremium}},
+}
+
+// TaskDefinitions returns ordered metadata by value so callers cannot mutate
+// product defaults while building editable settings drafts.
+func TaskDefinitions() []TaskDefinition {
+	return append([]TaskDefinition(nil), taskDefinitions[:]...)
+}
+
+func taskDefinition(task Task) (TaskDefinition, bool) {
+	for _, def := range taskDefinitions {
+		if def.Task == task {
+			return def, true
+		}
 	}
+	return TaskDefinition{}, false
+}
+
+// ValidTask reports whether a saved or explicit task identity is recognized.
+func ValidTask(task Task) bool {
+	_, ok := taskDefinition(task)
+	return ok
+}
+
+func (c Config) TaskAssignment(task Task) TaskAssignment {
+	def, ok := taskDefinition(task)
+	if !ok {
+		// Invalid identities must not acquire Primary or Default dispatch intent.
+		// Invocation boundaries must reject them using ValidTask.
+		return TaskAssignment{}
+	}
+	a := def.Default
 	if saved, ok := c.TaskAssignments[task]; ok {
 		if saved.Destination != "" {
 			a.Destination = saved.Destination
@@ -56,7 +107,7 @@ func (q CostTier) CapabilityTier() Tier {
 	return ""
 }
 
-// ResolveTask applies only explicit dispatch difficulty to the saved assignment.
+// DispatchDifficultyTier translates an explicit dispatch quality selection.
 // Unknown difficulty preserves the historical Economy behavior.
 func DispatchDifficultyTier(difficulty string) Tier {
 	switch strings.ToLower(strings.TrimSpace(difficulty)) {
@@ -72,7 +123,7 @@ func DispatchDifficultyTier(difficulty string) Tier {
 }
 func (c Config) ResolveTask(task Task, difficulty string) TaskAssignment {
 	assignment := c.TaskAssignment(task)
-	if task == TaskDispatch {
+	if ValidTask(task) && task != TaskChat {
 		if tier := DispatchDifficultyTier(difficulty); tier != "" {
 			assignment.Quality, _ = CostTierForCapability(tier)
 		}
@@ -180,7 +231,7 @@ func (c Config) ValidateRouting() error {
 		}
 	}
 	for task, a := range c.TaskAssignments {
-		if task != TaskChat && task != TaskDispatch {
+		if !ValidTask(task) {
 			return fmt.Errorf("unknown task %q", task)
 		}
 		if a.Destination != "" && a.Destination != DestinationPrimary && a.Destination != DestinationSecondary && a.Destination != DestinationLocal {
@@ -247,7 +298,7 @@ func (c *Config) SetDestinationProfiles(d Destination, preferred, backup string)
 
 func (c *Config) SetTaskAssignment(task Task, assignment *TaskAssignment) error {
 	next := c.Clone()
-	if task != TaskChat && task != TaskDispatch {
+	if !ValidTask(task) {
 		return fmt.Errorf("unknown task %q", task)
 	}
 	if assignment == nil {

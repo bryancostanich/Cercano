@@ -89,3 +89,30 @@ func TestDestinationRedirectWirePresenceAndAtomicity(t *testing.T) {
 		t.Fatal("present empty draft did not clear redirects")
 	}
 }
+
+func TestTaskTaxonomySnapshotRoundTrip(t *testing.T) {
+	c := config.Config{SecondaryRedirect: config.DestinationLocal, TaskAssignments: map[config.Task]config.TaskAssignment{}}
+	for _, def := range config.TaskDefinitions() {
+		c.TaskAssignments[def.Task] = config.TaskAssignment{Quality: config.CostStandard}
+	}
+	raw, err := pb.Marshal(Snapshot(c))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire proto.RoutingSnapshot
+	if err := pb.Unmarshal(raw, &wire); err != nil {
+		t.Fatal(err)
+	}
+	var got config.Config
+	if err := ApplySnapshot(&got, &wire); err != nil {
+		t.Fatal(err)
+	}
+	if got.SecondaryRedirect != c.SecondaryRedirect || len(got.TaskAssignments) != len(c.TaskAssignments) {
+		t.Fatal("routing shape lost")
+	}
+	for task, a := range c.TaskAssignments {
+		if got.TaskAssignments[task] != a || got.TaskAssignment(task) != c.TaskAssignment(task) {
+			t.Fatalf("lost class %q", task)
+		}
+	}
+}

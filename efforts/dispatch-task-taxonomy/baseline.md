@@ -114,3 +114,20 @@ Verification:
 - CLI's same five existing draft/navigation controls — PASS after the transport change.
 
 The seven task classes, runtime destination selection, redirected model/credential/fallback verification, and dedicated Routing UI are NOT implemented in this unit. Known intentionally red taxonomy/dispatch/UI tests remain outstanding; no full-suite pass, binary build, live inference or interactive smoke check is claimed. Phase 2 remains partial. The next task is shared taxonomy metadata/defaults and validation.
+
+## Shared taxonomy metadata and defaults — 2026-09-12
+
+Read-only delegated repository inspection reported main at 6ed0e594 with no overlapping routing.go changes; untracked spec and initial config reproduction were preserved. The delegated implementation failed before inspection/edits; proceeded directly under the user's prior authorization.
+
+Re-ran `go test ./pkg/config -run TestTaskTaxonomy -count=1` before implementation: all seven defaults and setters failed (Primary/Premium fallback and unknown-task errors). Added seven stable Task constants, centralized ordered TaskDefinitions metadata (returned by copy), and shared ValidTask validation. Config assignment defaults, saved-key validation, and setters now use those definitions. Unknown identity lookup returns an empty assignment rather than silently acquiring Primary intent. Explicit dispatch quality applies to the seven classes as well as Default dispatch; Chat retains its existing behavior. No runtime selection or UI code was edited.
+
+Added tests for exact metadata/defaults, copy isolation, sparse per-field overrides, reset, quality/destination independence, invalid update nonmutation, clone and Save/Load. Existing task_taxonomy_repro_test.go was not edited and now passes. Added class-preserving client, protobuf, server settings and worker snapshot tests, including unknown-key atomic rejection and clear-to-default behavior.
+
+Fresh verification:
+- `go test ./pkg/config -count=1` — PASS full package.
+- `go test ./internal/routingwire ./pkg/agentclient -count=1` — PASS both full packages.
+- `go test ./internal/server ./internal/worker -run 'Test(TaskTaxonomy|DestinationRedirect|RoutingSettingsAtomicPresence)' -count=1` — PASS.
+- `go test ./internal/dispatch -run TestTaskTaxonomy -count=1` — FAIL only the known ordinary missing-class Default dispatch reproduction (legacy/Primary used instead of Secondary/Standard).
+- `go test ./internal/dispatch -run 'TestTaskTaxonomy(Unknown|Excluded|Explicit)' -count=1` — PASS. Unknown class no longer obtains a valid destination from config. Explicit boundary validation still needs review because injected assignment callbacks can bypass config; no claim of complete invocation-boundary enforcement.
+
+Phase 2 remains partial; next is explicit invocation-boundary validation and remaining settings/snapshot acceptance review. Redirect-aware runtime integration and Routing UI remain pending. No build, live inference, interactive smoke check or full server suite was run.

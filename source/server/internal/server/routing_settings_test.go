@@ -95,3 +95,43 @@ func TestDestinationRedirectSettingsAtomicity(t *testing.T) {
 		t.Fatal("explicit clear failed")
 	}
 }
+
+func TestTaskTaxonomySettingsAtomicityAndReset(t *testing.T) {
+	s, _ := newTestServer()
+	s.cfgSvc.Set(config.Config{})
+	a := &proto.RoutingAssignments{SecondaryRedirect: "local", Tasks: map[string]*proto.TaskModelAssignment{}}
+	for _, def := range config.TaskDefinitions() {
+		a.Tasks[string(def.Task)] = &proto.TaskModelAssignment{Quality: "standard"}
+	}
+	save := func(want bool) {
+		t.Helper()
+		resp, err := s.UpdateRoutingAssignments(context.Background(), &proto.UpdateRoutingAssignmentsRequest{Assignments: a})
+		if err != nil || resp.GetOk() != want {
+			t.Fatalf("save=%v err=%v", resp, err)
+		}
+	}
+	save(true)
+	view, err := s.GetCloudProviders(context.Background(), &proto.GetCloudProvidersRequest{})
+	if err != nil || len(view.GetAssignments().GetTasks()) != len(config.TaskDefinitions()) {
+		t.Fatalf("view=%v err=%v", view, err)
+	}
+	for _, def := range config.TaskDefinitions() {
+		got := s.cfgSvc.Get().TaskAssignment(def.Task)
+		if got.Destination != def.Default.Destination || got.Quality != config.CostStandard {
+			t.Fatalf("saved %s=%+v", def.Task, got)
+		}
+	}
+	a.Tasks["unknown_class"] = &proto.TaskModelAssignment{Destination: "primary"}
+	a.SecondaryRedirect = "primary"
+	save(false)
+	if c := s.cfgSvc.Get(); c.SecondaryRedirect != config.DestinationLocal || len(c.TaskAssignments) != len(config.TaskDefinitions()) {
+		t.Fatal("invalid class partially mutated config")
+	}
+	a = &proto.RoutingAssignments{}
+	save(true)
+	for _, def := range config.TaskDefinitions() {
+		if got := s.cfgSvc.Get().TaskAssignment(def.Task); got != def.Default {
+			t.Fatalf("reset %s=%+v", def.Task, got)
+		}
+	}
+}

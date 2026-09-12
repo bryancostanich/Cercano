@@ -579,3 +579,19 @@ func TestDestinationRedirectWorkerSnapshot(t *testing.T) {
 		t.Fatalf("worker resolver: %q %v", final, err)
 	}
 }
+
+func TestTaskTaxonomyWorkerSnapshot(t *testing.T) {
+	c := config.Config{SecondaryRedirect: config.DestinationLocal, TaskAssignments: map[config.Task]config.TaskAssignment{}}
+	for _, def := range config.TaskDefinitions() {
+		c.TaskAssignments[def.Task] = config.TaskAssignment{Quality: config.CostStandard}
+	}
+	got := ConfigFromSnapshot(SnapshotConfig(c, "", nil))
+	if got.SecondaryRedirect != c.SecondaryRedirect || len(got.TaskAssignments) != len(c.TaskAssignments) {
+		t.Fatal("worker lost routing shape")
+	}
+	for task, a := range c.TaskAssignments {
+		if got.TaskAssignments[task] != a || got.TaskAssignment(task) != c.TaskAssignment(task) {
+			t.Fatalf("worker lost class %q", task)
+		}
+	}
+}

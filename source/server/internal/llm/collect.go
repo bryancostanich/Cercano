@@ -69,6 +69,9 @@ func CollectStream(ctx context.Context, rdr StreamReader, onText func(string), o
 	}
 	for {
 		ev, ok, err := rdr.Next()
+		// A failing read can still carry the final available usage snapshot.
+		// Retain it before inspecting error/end-of-stream; never sum snapshots.
+		out.Usage = out.Usage.Merge(ev.Usage)
 		if err != nil {
 			return out, err
 		}

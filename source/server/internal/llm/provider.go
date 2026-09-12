@@ -49,6 +49,10 @@ type ServingRoute struct {
 }
 
 type ChatResponse struct {
+	// Usage is normalized consumed-token accounting with explicit presence.
+	// Legacy integer counters remain for existing context-meter consumers.
+	Usage TokenUsage
+
 	Route        *ServingRoute
 	Blocks       []Block
 	StopReason   string

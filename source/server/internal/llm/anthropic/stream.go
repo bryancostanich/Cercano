@@ -8,6 +8,7 @@ import (
 )
 
 type streamReader struct {
+	usage     usageCounts
 	stream    *ssestream.Stream[sdk.MessageStreamEventUnion]
 	blockKind map[int64]string
 	// normalize maps vendor/transport errors into the llm.Error taxonomy; the
@@ -28,7 +29,7 @@ func (s *streamReader) Next() (llm.StreamEvent, bool, error) {
 		if s.normalize != nil {
 			err = s.normalize(err)
 		}
-		return llm.StreamEvent{}, false, err
+		return llm.StreamEvent{Usage: s.usage.snapshot()}, false, err
 	}
 	return llm.StreamEvent{}, false, nil
 }
@@ -38,7 +39,8 @@ func (s *streamReader) Close() error { return s.stream.Close() }
 func (s *streamReader) convert(raw sdk.MessageStreamEventUnion) (llm.StreamEvent, bool) {
 	switch raw.Type {
 	case "message_start":
-		return llm.StreamEvent{Type: llm.EventMessageStart, InputTokens: int(raw.Message.Usage.InputTokens)}, true
+		s.usage.message(raw.Message.Usage)
+		return llm.StreamEvent{Type: llm.EventMessageStart, Usage: s.usage.snapshot(), InputTokens: int(raw.Message.Usage.InputTokens)}, true
 	case "content_block_start":
 		cb := raw.ContentBlock
 		s.blockKind[raw.Index] = cb.Type
@@ -66,9 +68,10 @@ func (s *streamReader) convert(raw sdk.MessageStreamEventUnion) (llm.StreamEvent
 		}
 		return llm.StreamEvent{}, false
 	case "message_delta":
-		return llm.StreamEvent{Type: llm.EventMessageStop, StopReason: string(raw.Delta.StopReason), OutputTokens: int(raw.Usage.OutputTokens)}, true
+		s.usage.delta(raw.Usage)
+		return llm.StreamEvent{Type: llm.EventMessageStop, Usage: s.usage.snapshot(), StopReason: string(raw.Delta.StopReason), OutputTokens: int(raw.Usage.OutputTokens)}, true
 	case "message_stop":
-		return llm.StreamEvent{Type: llm.EventMessageStop}, true
+		return llm.StreamEvent{Type: llm.EventMessageStop, Usage: s.usage.snapshot()}, true
 	}
 	return llm.StreamEvent{}, false
 }

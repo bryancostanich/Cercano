@@ -21,6 +21,10 @@ const (
 )
 
 type StreamEvent struct {
+	// Usage is normalized consumed-token accounting with explicit presence.
+	// Legacy integer counters remain for existing context-meter consumers.
+	Usage TokenUsage
+
 	Route *ServingRoute
 	Type  StreamEventType
 

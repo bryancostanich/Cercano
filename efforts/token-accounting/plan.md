@@ -16,18 +16,18 @@ Transport finding: worker `sender.send` blocks on a shared channel and `sender.r
 
 Objective: establish one recording owner for each actual attempt and distinguish source-confirmed defects from historical hypotheses before changing behavior. Files: source/server/internal/usage/recording_provider.go; internal/server/server.go and usage_sink.go; internal/dispatch/engine.go; internal/inference/profilechain and resilience; internal/worker/worker.go, host.go, wire.go and worker_dispatch.go; internal/mcp/server.go; telemetry/telemetry.go, all under source/server unless otherwise stated. Tests: small fake-provider and fake-store probes covering current missing/error behavior and worker delivery. No live billed calls required.
 
-- [~] Trace provider construction and every inference path, including adapters with internal retries, main, dispatch, local tools, research, vision, and compaction; record a path-to-recording-owner coverage checklist in this plan.
-- [ ] Trace current usage sinks and tool-event writers; identify which are aggregate observations and which duplicate lower-level usage.
+- [x] Trace provider construction and every inference path, including adapters with internal retries, main, dispatch, local tools, research, vision, and compaction; record a path-to-recording-owner coverage checklist in this plan.
+- [x] Trace current usage sinks and tool-event writers; identify which are aggregate observations and which duplicate lower-level usage.
 - [x] Reproduce silent collector overflow and missing failure/early-stream usage with controlled probes before applying fixes.
 - [x] Trace server and worker startup wiring to investigate missing recent accounting; document what is proven and what historical evidence cannot establish.
-- [ ] Identify interception points inside retry/fallback boundaries so physical attempts are separate, without counting wrappers twice.
-- [ ] Confirm existing worker transport can carry background usage delivery without blocking inference or competing unboundedly with control messages. Stop for a human decision if a new transport or durable spool is required; neither is silently authorized by this plan.
+- [x] Identify interception points inside retry/fallback boundaries so physical attempts are separate, without counting wrappers twice.
+- [x] Confirm existing worker transport can carry background usage delivery without blocking inference or competing unboundedly with control messages. Stop for a human decision if a new transport or durable spool is required; neither is silently authorized by this plan.
 
 ## Phase 2 — Define records and normalize provider usage
 
 Objective: make consumed-token semantics explicit before persistence or graphs. Files: source/server/internal/usage, internal/llm/provider.go, stream.go, collect.go, and adapters in anthropic, bedrock, openai, responses, ollama; inference/profilechain and resilience as needed. Tests: adapter fixtures and fake-provider lifecycle tests, including error responses with usage.
 
-- [ ] Introduce stable attempt identity, operation/conversation/session correlation, source-of-work attribution, actual provider/model route, UTC times, lifecycle outcome, and explicit usage availability/completeness.
+- [~] Introduce stable attempt identity, operation/conversation/session correlation, source-of-work attribution, actual provider/model route, UTC times, lifecycle outcome, and explicit usage availability/completeness.
 - [ ] Define normalized input/output totals and optional cache-read, cache-write, and reasoning categories; document each adapter's subset/additive semantics and retain unknown rather than zero where absent.
 - [ ] Extend response and stream envelopes compatibly; preserve partial usage through stream collection and errors.
 - [ ] Record attempt start and terminal observations for non-streaming and streaming calls. Finalize on terminal stream signals or errors as well as Close; make repeated Close and terminal delivery idempotent.
@@ -100,3 +100,10 @@ Objective: demonstrate end-to-end accounting correctness for the changed interfa
 - [ ] Document token definitions, reporting populations, date semantics, tracking start, queue/health diagnostics, shutdown behavior, and hard-crash/provider-usage limitations.
 - [ ] Review the final coverage checklist and disclose any unsupported path or missing provider category; stop rather than claim complete coverage with known uninstrumented paths.
 - [ ] Checkpoint completed work with explicit paths and provide a final summary of changes, verification evidence, remaining limitations, and commits. Never push without an explicit request.
+
+
+### Phase 2 implementation evidence
+
+Added value-only, presence-aware `llm.TokenUsage` alongside unchanged legacy context counters and revisioned `usage.AttemptObservation` with context-carried sink/attribution. Attempt lifecycle helpers preserve counts on errors and early close; concurrent finalization and repeated Close emit one terminal observation. `CollectStream` now merges normalized snapshots before checking errors; its regression first failed with missing 11/7 usage, then passed. These are primitives, not yet production sink wiring or physical-attempt coverage.
+
+`go test -race ./internal/llm ./internal/usage` and `go test ./internal/llm/... ./internal/inference/...` passed before adapter wiring. Anthropic Chat and stream normalization now preserve field presence, cumulative snapshots, cache breakdowns, and reasoning. Input total requires all additive input components to be known: fixture 11 uncached + 3 cache-read + 5 cache-write = 19 input, without adding breakdowns again. Missing cache fields deliberately leave total unknown. `go test ./internal/llm/anthropic ./internal/llm ./internal/usage` passes with synthetic HTTP/SSE tests. OpenAI's current SDK loses per-field presence in integer usage fields; its raw-response preservation still needs investigation before normalization can be honest. Adapter delegation again failed validation without edits; continuing directly.

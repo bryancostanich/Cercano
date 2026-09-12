@@ -174,7 +174,10 @@ func (c *Client) Chat(ctx context.Context, req ChatRequest) (ChatResponse, error
 	if err != nil {
 		return ChatResponse{}, c.normalize(err)
 	}
+	var counts usageCounts
+	counts.message(resp.Usage)
 	out := ChatResponse{
+		Usage:        counts.snapshot(),
 		StopReason:   string(resp.StopReason),
 		InputTokens:  int(resp.Usage.InputTokens),
 		OutputTokens: int(resp.Usage.OutputTokens),

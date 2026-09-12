@@ -79,3 +79,22 @@ func TestCompleteStructurePresence(t *testing.T) {
 		t.Fatal("omitted structure/metadata sent as clears")
 	}
 }
+
+func TestDestinationRedirectClientRoundTrip(t *testing.T) {
+	a := &RoutingAssignments{SecondaryRedirect: "local", LocalRedirect: "primary"}
+	got := assignmentsFromProto(assignmentsToProto(a.Clone()))
+	if got.SecondaryRedirect != "local" || got.LocalRedirect != "primary" {
+		t.Fatal("client roundtrip lost redirects")
+	}
+	got.LocalRedirect = ""
+	if a.LocalRedirect != "primary" {
+		t.Fatal("clone aliases original")
+	}
+	if assignmentsToProto(nil) != nil || assignmentsFromProto(nil) != nil {
+		t.Fatal("absence lost")
+	}
+	cleared := assignmentsFromProto(assignmentsToProto(&RoutingAssignments{}))
+	if cleared == nil || cleared.SecondaryRedirect != "" || cleared.LocalRedirect != "" {
+		t.Fatal("explicit clear lost")
+	}
+}

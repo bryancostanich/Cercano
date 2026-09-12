@@ -357,8 +357,11 @@ type Config struct {
 	SecondaryCloudProfile       string                  `yaml:"secondary_cloud_profile,omitempty"`
 	SecondaryBackupCloudProfile string                  `yaml:"secondary_backup_cloud_profile,omitempty"`
 	TaskAssignments             map[Task]TaskAssignment `yaml:"task_assignments,omitempty"`
-	LocusMode                   string                  `yaml:"locus_mode"` // cloud_only|cloud_primary|open_primary|open_only
-	Port                        string                  `yaml:"port"`
+	// Empty redirects use the destination's own configuration, not fallback.
+	SecondaryRedirect Destination `yaml:"secondary_redirect,omitempty"`
+	LocalRedirect     Destination `yaml:"local_redirect,omitempty"`
+	LocusMode         string      `yaml:"locus_mode"` // cloud_only|cloud_primary|open_primary|open_only
+	Port              string      `yaml:"port"`
 	// ExecutionMode selects how a conversation's turns are executed:
 	//   "worker"     — each turn runs in a dedicated child process ("cercano
 	//                  worker") so a turn that panics/hangs/wedges takes down

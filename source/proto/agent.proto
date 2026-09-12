@@ -1442,6 +1442,9 @@ message RoutingAssignments {
  string secondary = 3;
  string secondary_backup = 4;
  map<string,TaskModelAssignment> tasks = 5;
+ // Empty means own configuration; a present draft replaces both fields.
+ string secondary_redirect = 6;
+ string local_redirect = 7;
 }
 message RoutingSnapshot {
  RoutingAssignments assignments = 1;

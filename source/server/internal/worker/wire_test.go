@@ -555,3 +555,27 @@ func TestSnapshotConfigRoundTrip(t *testing.T) {
 		t.Errorf("ModelProfiles anthropic.Premium: got %q want %q", gmp.Premium.Model, omp.Premium.Model)
 	}
 }
+
+func TestDestinationRedirectWorkerSnapshot(t *testing.T) {
+	c := config.Config{SecondaryRedirect: config.DestinationLocal, LocalRedirect: config.DestinationPrimary,
+		ActiveCloudProfile: "p", BackupCloudProfile: "pb", SecondaryCloudProfile: "s", SecondaryBackupCloudProfile: "sb",
+		CloudProfiles:   []config.CloudProfile{{Name: "p"}, {Name: "pb"}, {Name: "s"}, {Name: "sb"}},
+		TaskAssignments: map[config.Task]config.TaskAssignment{config.TaskDispatch: {Destination: config.DestinationSecondary, Quality: config.CostStandard}},
+	}
+	got := ConfigFromSnapshot(SnapshotConfig(c, "", nil))
+	if got.SecondaryRedirect != c.SecondaryRedirect || got.LocalRedirect != c.LocalRedirect {
+		t.Fatal("worker snapshot lost redirects")
+	}
+	if got.TaskAssignment(config.TaskDispatch) != c.TaskAssignment(config.TaskDispatch) {
+		t.Fatal("worker snapshot changed task intent")
+	}
+	for _, name := range []string{"p", "pb", "s", "sb"} {
+		if _, ok := got.Profile(name); !ok {
+			t.Fatalf("snapshot omitted profile %q", name)
+		}
+	}
+	final, err := got.ResolveDestination(config.DestinationSecondary)
+	if err != nil || final != config.DestinationPrimary {
+		t.Fatalf("worker resolver: %q %v", final, err)
+	}
+}

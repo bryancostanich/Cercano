@@ -10681,8 +10681,11 @@ type RoutingAssignments struct {
 	Secondary       string                          `protobuf:"bytes,3,opt,name=secondary,proto3" json:"secondary,omitempty"`
 	SecondaryBackup string                          `protobuf:"bytes,4,opt,name=secondary_backup,json=secondaryBackup,proto3" json:"secondary_backup,omitempty"`
 	Tasks           map[string]*TaskModelAssignment `protobuf:"bytes,5,rep,name=tasks,proto3" json:"tasks,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// Empty means own configuration; a present draft replaces both fields.
+	SecondaryRedirect string `protobuf:"bytes,6,opt,name=secondary_redirect,json=secondaryRedirect,proto3" json:"secondary_redirect,omitempty"`
+	LocalRedirect     string `protobuf:"bytes,7,opt,name=local_redirect,json=localRedirect,proto3" json:"local_redirect,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *RoutingAssignments) Reset() {
@@ -10748,6 +10751,20 @@ func (x *RoutingAssignments) GetTasks() map[string]*TaskModelAssignment {
 		return x.Tasks
 	}
 	return nil
+}
+
+func (x *RoutingAssignments) GetSecondaryRedirect() string {
+	if x != nil {
+		return x.SecondaryRedirect
+	}
+	return ""
+}
+
+func (x *RoutingAssignments) GetLocalRedirect() string {
+	if x != nil {
+		return x.LocalRedirect
+	}
+	return ""
 }
 
 type RoutingSnapshot struct {
@@ -16817,13 +16834,15 @@ const file_agent_proto_rawDesc = "" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"Q\n" +
 	"\x13TaskModelAssignment\x12 \n" +
 	"\vdestination\x18\x01 \x01(\tR\vdestination\x12\x18\n" +
-	"\aquality\x18\x02 \x01(\tR\aquality\"\xb0\x02\n" +
+	"\aquality\x18\x02 \x01(\tR\aquality\"\x86\x03\n" +
 	"\x12RoutingAssignments\x12\x18\n" +
 	"\aprimary\x18\x01 \x01(\tR\aprimary\x12%\n" +
 	"\x0eprimary_backup\x18\x02 \x01(\tR\rprimaryBackup\x12\x1c\n" +
 	"\tsecondary\x18\x03 \x01(\tR\tsecondary\x12)\n" +
 	"\x10secondary_backup\x18\x04 \x01(\tR\x0fsecondaryBackup\x12:\n" +
-	"\x05tasks\x18\x05 \x03(\v2$.agent.RoutingAssignments.TasksEntryR\x05tasks\x1aT\n" +
+	"\x05tasks\x18\x05 \x03(\v2$.agent.RoutingAssignments.TasksEntryR\x05tasks\x12-\n" +
+	"\x12secondary_redirect\x18\x06 \x01(\tR\x11secondaryRedirect\x12%\n" +
+	"\x0elocal_redirect\x18\a \x01(\tR\rlocalRedirect\x1aT\n" +
 	"\n" +
 	"TasksEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x120\n" +

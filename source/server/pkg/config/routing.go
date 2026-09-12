@@ -122,7 +122,50 @@ func (c Config) ReferencedProfiles() []CloudProfile {
 	return profiles
 }
 
+// ValidateDestinationRedirects rejects unsupported edges and cycles globally,
+// even when the current task does not traverse the invalid edge.
+func (c Config) ValidateDestinationRedirects() error {
+	if d := c.SecondaryRedirect; d != "" && d != DestinationPrimary && d != DestinationLocal {
+		return fmt.Errorf("invalid secondary redirect %q", d)
+	}
+	if d := c.LocalRedirect; d != "" && d != DestinationPrimary && d != DestinationSecondary {
+		return fmt.Errorf("invalid local redirect %q", d)
+	}
+	if c.SecondaryRedirect == DestinationLocal && c.LocalRedirect == DestinationSecondary {
+		return fmt.Errorf("destination redirect cycle: secondary -> local -> secondary")
+	}
+	return nil
+}
+
+// ResolveDestination follows explicit redirects without changing task quality or
+// saved profile bindings. Callers must separately enforce locality and fallback.
+// Excluded legacy callers must not call this resolver.
+func (c Config) ResolveDestination(d Destination) (Destination, error) {
+	if d != DestinationPrimary && d != DestinationSecondary && d != DestinationLocal {
+		return "", fmt.Errorf("invalid destination %q", d)
+	}
+	if err := c.ValidateDestinationRedirects(); err != nil {
+		return "", err
+	}
+	for {
+		var next Destination
+		switch d {
+		case DestinationSecondary:
+			next = c.SecondaryRedirect
+		case DestinationLocal:
+			next = c.LocalRedirect
+		}
+		if next == "" {
+			return d, nil
+		}
+		d = next
+	}
+}
+
 func (c Config) ValidateRouting() error {
+	if err := c.ValidateDestinationRedirects(); err != nil {
+		return err
+	}
 	for _, d := range []Destination{DestinationPrimary, DestinationSecondary} {
 		preferred, backup := c.DestinationProfiles(d)
 		if preferred != "" && preferred == backup {

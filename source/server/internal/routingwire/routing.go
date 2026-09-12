@@ -46,7 +46,7 @@ func DecodeProfile(p *proto.CloudProfileInfo) (config.CloudProfile, error) {
 	return out, err
 }
 func Assignments(c config.Config) *proto.RoutingAssignments {
-	out := &proto.RoutingAssignments{Primary: c.ActiveCloudProfile, PrimaryBackup: c.BackupCloudProfile, Secondary: c.SecondaryCloudProfile, SecondaryBackup: c.SecondaryBackupCloudProfile, Tasks: map[string]*proto.TaskModelAssignment{}}
+	out := &proto.RoutingAssignments{Primary: c.ActiveCloudProfile, PrimaryBackup: c.BackupCloudProfile, Secondary: c.SecondaryCloudProfile, SecondaryBackup: c.SecondaryBackupCloudProfile, SecondaryRedirect: string(c.SecondaryRedirect), LocalRedirect: string(c.LocalRedirect), Tasks: map[string]*proto.TaskModelAssignment{}}
 	for task, a := range c.TaskAssignments {
 		out.Tasks[string(task)] = &proto.TaskModelAssignment{Destination: string(a.Destination), Quality: string(a.Quality)}
 	}
@@ -58,6 +58,7 @@ func ApplyAssignments(c *config.Config, p *proto.RoutingAssignments) {
 	}
 	c.ActiveCloudProfile, c.BackupCloudProfile = p.Primary, p.PrimaryBackup
 	c.SecondaryCloudProfile, c.SecondaryBackupCloudProfile = p.Secondary, p.SecondaryBackup
+	c.SecondaryRedirect, c.LocalRedirect = config.Destination(p.SecondaryRedirect), config.Destination(p.LocalRedirect)
 	c.TaskAssignments = map[config.Task]config.TaskAssignment{}
 	for task, a := range p.Tasks {
 		c.TaskAssignments[config.Task(task)] = config.TaskAssignment{Destination: config.Destination(a.GetDestination()), Quality: config.CostTier(a.GetQuality())}

@@ -65,3 +65,33 @@ func TestProfileSaveReportsAvailabilityAsWarning(t *testing.T) {
 		t.Fatalf("saved choice=%q but response=%+v err=%v", saved, response, err)
 	}
 }
+
+func TestDestinationRedirectSettingsAtomicity(t *testing.T) {
+	s, _ := newTestServer()
+	s.cfgSvc.Set(config.Config{})
+	save := func(a *proto.RoutingAssignments, wantOK bool) {
+		t.Helper()
+		resp, err := s.UpdateRoutingAssignments(context.Background(), &proto.UpdateRoutingAssignmentsRequest{Assignments: a})
+		if err != nil || resp.GetOk() != wantOK {
+			t.Fatalf("response=%v err=%v", resp, err)
+		}
+	}
+	save(&proto.RoutingAssignments{SecondaryRedirect: "local", LocalRedirect: "primary"}, true)
+	save(nil, true)
+	if c := s.cfgSvc.Get(); c.SecondaryRedirect != config.DestinationLocal || c.LocalRedirect != config.DestinationPrimary {
+		t.Fatal("save or absence lost redirects")
+	}
+	for _, bad := range []*proto.RoutingAssignments{
+		{SecondaryRedirect: "local", LocalRedirect: "secondary"},
+		{SecondaryRedirect: "secondary"}, {LocalRedirect: "local"}, {LocalRedirect: "bogus"},
+	} {
+		save(bad, false)
+		if c := s.cfgSvc.Get(); c.SecondaryRedirect != config.DestinationLocal || c.LocalRedirect != config.DestinationPrimary {
+			t.Fatal("invalid draft partially applied")
+		}
+	}
+	save(&proto.RoutingAssignments{}, true)
+	if c := s.cfgSvc.Get(); c.SecondaryRedirect != "" || c.LocalRedirect != "" {
+		t.Fatal("explicit clear failed")
+	}
+}

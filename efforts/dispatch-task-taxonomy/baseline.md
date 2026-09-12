@@ -98,3 +98,19 @@ Remaining Phase 1 gap: configuration has no destination-redirect field or resolv
 ## Approved redirect schema reproductions — 2026-09-12
 
 The user approved two scalar fields (`secondary_redirect`, `local_redirect`) rather than a map. Added compiling config tests for all four direct edges, both chains, omission, cycles, self/unknown targets, nonmutating validation, clone/YAML persistence, and sparse omission. `go test ./pkg/config -run TestDestinationRedirect -count=1` failed before implementation: all nine resolver cases report the missing resolver; all five invalid configurations are accepted; both serialized fields are lost. This closes Phase 1's missing redirect-contract reproduction gap. Redirect-aware exclusion integration and independent UI drafts remain later-phase verification, not established by these tests.
+
+## Redirect configuration and transport implemented — 2026-09-12
+
+Implemented approved SecondaryRedirect/LocalRedirect scalar fields with sparse YAML tags. Config.ResolveDestination validates the complete two-edge graph before following redirects; Primary has no redirect, unknown sources/targets and self/cyclic edges fail. ValidateRouting invokes the same graph validation. Resolution leaves assignments, quality and profile bindings untouched; it does not introduce fallback or enforce execution locality (those belong to later integration).
+
+Extended RoutingAssignments protobuf with fields 6/7, routingwire encoding/application, and agentclient scalar cloning/conversion. Regenerated bindings via `bash source/proto/generate.sh`. Existing complete-draft validation now rejects redirect cycles atomically, and the existing worker RoutingSnapshot path carries both fields and all referenced Primary/Secondary profiles and backups without new credential fields.
+
+Verification:
+- Pre-implementation failures recorded immediately above; the runtime interface assertion in the reproduction was replaced by a direct resolver call after implementation.
+- `go test ./pkg/config ./internal/routingwire ./pkg/agentclient ./internal/server ./internal/worker -run TestDestinationRedirect -count=1` — PASS all five packages.
+- `go test ./pkg/config -run 'Test(DestinationRedirect|Routing|ResolveCloudModelForTier)' -count=1` — PASS, including real Save/Load and clearing persistence.
+- `go test ./internal/routingwire ./pkg/agentclient -count=1` — PASS both complete packages.
+- `go test ./internal/server ./internal/worker -run 'Test(DestinationRedirect|RoutingSettingsAtomicPresence|SnapshotConfigRoundTrip)' -count=1` — PASS.
+- CLI's same five existing draft/navigation controls — PASS after the transport change.
+
+The seven task classes, runtime destination selection, redirected model/credential/fallback verification, and dedicated Routing UI are NOT implemented in this unit. Known intentionally red taxonomy/dispatch/UI tests remain outstanding; no full-suite pass, binary build, live inference or interactive smoke check is claimed. Phase 2 remains partial. The next task is shared taxonomy metadata/defaults and validation.

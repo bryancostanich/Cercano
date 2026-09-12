@@ -24,6 +24,7 @@ func (c *CloudModelChoices) Clone() *CloudModelChoices {
 
 type TaskAssignment struct{ Destination, Quality string }
 type RoutingAssignments struct {
+	SecondaryRedirect, LocalRedirect                   string
 	Primary, PrimaryBackup, Secondary, SecondaryBackup string
 	Tasks                                              map[string]TaskAssignment
 }
@@ -65,7 +66,7 @@ func assignmentsToProto(a *RoutingAssignments) *proto.RoutingAssignments {
 	if a == nil {
 		return nil
 	}
-	out := &proto.RoutingAssignments{Primary: a.Primary, PrimaryBackup: a.PrimaryBackup, Secondary: a.Secondary, SecondaryBackup: a.SecondaryBackup, Tasks: map[string]*proto.TaskModelAssignment{}}
+	out := &proto.RoutingAssignments{Primary: a.Primary, PrimaryBackup: a.PrimaryBackup, Secondary: a.Secondary, SecondaryBackup: a.SecondaryBackup, SecondaryRedirect: a.SecondaryRedirect, LocalRedirect: a.LocalRedirect, Tasks: map[string]*proto.TaskModelAssignment{}}
 	for k, v := range a.Tasks {
 		out.Tasks[k] = &proto.TaskModelAssignment{Destination: v.Destination, Quality: v.Quality}
 	}
@@ -75,7 +76,7 @@ func assignmentsFromProto(a *proto.RoutingAssignments) *RoutingAssignments {
 	if a == nil {
 		return nil
 	}
-	out := &RoutingAssignments{Primary: a.Primary, PrimaryBackup: a.PrimaryBackup, Secondary: a.Secondary, SecondaryBackup: a.SecondaryBackup, Tasks: map[string]TaskAssignment{}}
+	out := &RoutingAssignments{Primary: a.Primary, PrimaryBackup: a.PrimaryBackup, Secondary: a.Secondary, SecondaryBackup: a.SecondaryBackup, SecondaryRedirect: a.SecondaryRedirect, LocalRedirect: a.LocalRedirect, Tasks: map[string]TaskAssignment{}}
 	for k, v := range a.Tasks {
 		out.Tasks[k] = TaskAssignment{Destination: v.GetDestination(), Quality: v.GetQuality()}
 	}

@@ -27,9 +27,9 @@ Objective: make taxonomy, defaults, and redirects consistent across saved config
 
 - [ ] Add shared task keys, validation, labels/default metadata, and approved assignments: reconnaissance Local/Light; mechanical_development Local/Standard; investigation, implementation, review, research Secondary/Premium; git_land Local/Premium.
 - [ ] Preserve saved Chat/dispatch assignments and unset behavior. Reject unknown explicit task classes at configuration and invocation boundaries rather than falling through to Primary or Default dispatch.
-- [ ] Add persisted Secondary and Local redirect settings with omission meaning own configuration. Support only the approved targets; leave Primary without a redirect control.
-- [ ] Implement shared final-destination resolution that preserves the original task assignment and quality, follows chains, and validates cycles before mutation. Keep configured profile bindings separate from effective routing so disabling a redirect restores the saved setup.
-- [ ] Extend existing RoutingAssignments transport and client cloning/conversion for redirects; use the established absent-message versus present-complete-draft semantics. Regenerate bindings with the repository's generation workflow.
+- [x] Add persisted Secondary and Local redirect settings with omission meaning own configuration. Support only the approved targets; leave Primary without a redirect control.
+- [x] Implement shared final-destination resolution that preserves the original task assignment and quality, follows chains, and validates cycles before mutation. Keep configured profile bindings separate from effective routing so disabling a redirect restores the saved setup.
+- [x] Extend existing RoutingAssignments transport and client cloning/conversion for redirects; use the established absent-message versus present-complete-draft semantics. Regenerate bindings with the repository's generation workflow.
 - [ ] Carry redirects and all class assignments in worker snapshots, including all profiles needed by effective cloud routes and their backups; keep credentials outside serialized configuration.
 - [ ] Validate complete routing drafts atomically; reject invalid keys/targets/cycles without partial persistence. Verify clearing redirects and class overrides restores defaults.
 - [ ] Run focused config, routingwire, agentclient, server settings, and worker snapshot tests; checkpoint explicit phase paths.

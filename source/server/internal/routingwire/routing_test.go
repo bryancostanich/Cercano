@@ -62,3 +62,30 @@ func TestSnapshotAbsenceAndInvalidGraph(t *testing.T) {
 		t.Fatal("invalid snapshot applied partially")
 	}
 }
+
+func TestDestinationRedirectWirePresenceAndAtomicity(t *testing.T) {
+	c := config.Config{SecondaryRedirect: config.DestinationLocal, LocalRedirect: config.DestinationPrimary}
+	var got config.Config
+	if err := ApplySnapshot(&got, Snapshot(c)); err != nil {
+		t.Fatal(err)
+	}
+	if got.SecondaryRedirect != c.SecondaryRedirect || got.LocalRedirect != c.LocalRedirect {
+		t.Fatal("snapshot lost redirects")
+	}
+	ApplyAssignments(&got, nil)
+	if got.SecondaryRedirect != c.SecondaryRedirect {
+		t.Fatal("absent draft cleared redirects")
+	}
+	bad := Snapshot(c)
+	bad.Assignments.LocalRedirect = "secondary"
+	if err := ApplySnapshot(&got, bad); err == nil {
+		t.Fatal("cycle accepted")
+	}
+	if got.LocalRedirect != config.DestinationPrimary {
+		t.Fatal("invalid snapshot partially applied")
+	}
+	ApplyAssignments(&got, &proto.RoutingAssignments{})
+	if got.SecondaryRedirect != "" || got.LocalRedirect != "" {
+		t.Fatal("present empty draft did not clear redirects")
+	}
+}

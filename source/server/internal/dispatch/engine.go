@@ -35,6 +35,9 @@ const (
 
 // Spec describes a unit of work to dispatch.
 type Spec struct {
+	// LocalOffload explicitly retains the local tool's pre-existing placement
+	// policy. Ordinary missing-class dispatch never enters this path.
+	LocalOffload        bool
 	Mode                Mode
 	Role                Role
 	RoutingTask         config.Task // explicit task routing; empty preserves legacy role policy
@@ -203,6 +206,7 @@ func (e *Engine) PreparedTarget(ctx context.Context, spec Spec) (modelbudget.Tar
 
 // Dispatch executes spec and returns a Result.
 func (e *Engine) Dispatch(ctx context.Context, spec Spec) (Result, error) {
+	spec = defaultTask(spec)
 	// 1. Select provider via locus (providers resolved fresh each dispatch).
 	mode, candidates := e.modeFn(), e.providersFn()
 	sel, tier, model, err := e.resolve(spec, mode, candidates)
@@ -336,6 +340,10 @@ func (e *Engine) SetDestinationModelFor(fn func(inference.Selection, config.Tier
 }
 
 func (e *Engine) resolve(spec Spec, mode locus.Mode, candidates inference.Tiers) (inference.Selection, config.Tier, string, error) {
+	if spec.LocalOffload && spec.RoutingTask != "" {
+		return inference.Selection{}, "", "", fmt.Errorf("dispatch: local offload cannot carry a task assignment")
+	}
+	spec = defaultTask(spec)
 	var sel inference.Selection
 	var err error
 	tier := spec.Tier
@@ -401,4 +409,11 @@ func (s Spec) EffectiveTier() config.Tier {
 		return s.Tier
 	}
 	return s.FallbackTier
+}
+
+func defaultTask(spec Spec) Spec {
+	if spec.RoutingTask == "" && !spec.LocalOffload {
+		spec.RoutingTask = config.TaskDispatch
+	}
+	return spec
 }

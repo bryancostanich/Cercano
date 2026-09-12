@@ -32,8 +32,7 @@ func TestAgenticDispatch_InvokesRunner(t *testing.T) {
 		return Result{Text: "agentic done", Model: model, IsCloud: sel.IsCloud}, nil
 	})
 
-	res, err := eng.Dispatch(context.Background(), Spec{
-		Mode:  Agentic,
+	res, err := eng.Dispatch(context.Background(), Spec{LocalOffload: true, Mode: Agentic,
 		Role:  RoleCoproc,
 		Task:  "summarise the codebase",
 		Tools: []string{"Grep", "Read"},
@@ -72,8 +71,7 @@ func TestAgenticDispatch_ModelOverride(t *testing.T) {
 		return Result{Text: "ok", Model: model}, nil
 	})
 
-	res, err := eng.Dispatch(context.Background(), Spec{
-		Mode:          Agentic,
+	res, err := eng.Dispatch(context.Background(), Spec{LocalOffload: true, Mode: Agentic,
 		Role:          RoleCoproc,
 		Task:          "task",
 		ModelOverride: "override-model",
@@ -97,7 +95,7 @@ func TestAgenticDispatch_NoRunner(t *testing.T) {
 	eng.SetModelFor(func(isCloud bool, _ config.Tier) string { return "local-model" })
 	// no SetAgenticRunner call
 
-	_, err := eng.Dispatch(context.Background(), Spec{Mode: Agentic, Role: RoleCoproc, Task: "x"})
+	_, err := eng.Dispatch(context.Background(), Spec{LocalOffload: true, Mode: Agentic, Role: RoleCoproc, Task: "x"})
 	if err == nil {
 		t.Fatal("expected error when runner is nil")
 	}
@@ -119,7 +117,7 @@ func TestAgenticDispatch_RunnerError(t *testing.T) {
 		return Result{}, errors.New("runner exploded")
 	})
 
-	_, err := eng.Dispatch(context.Background(), Spec{Mode: Agentic, Role: RoleCoproc, Task: "x"})
+	_, err := eng.Dispatch(context.Background(), Spec{LocalOffload: true, Mode: Agentic, Role: RoleCoproc, Task: "x"})
 	if err == nil || !strings.Contains(err.Error(), "runner exploded") {
 		t.Errorf("expected runner error, got %v", err)
 	}
@@ -142,8 +140,7 @@ func TestAgenticAndOneShotCoexist(t *testing.T) {
 	})
 
 	// OneShot must still work.
-	res, err := eng.Dispatch(context.Background(), Spec{
-		Mode:   OneShot,
+	res, err := eng.Dispatch(context.Background(), Spec{LocalOffload: true, Mode: OneShot,
 		Role:   RoleCoproc,
 		Prompt: "ping",
 	})
@@ -155,8 +152,7 @@ func TestAgenticAndOneShotCoexist(t *testing.T) {
 	}
 
 	// Agentic must also work.
-	res2, err2 := eng.Dispatch(context.Background(), Spec{
-		Mode: Agentic,
+	res2, err2 := eng.Dispatch(context.Background(), Spec{LocalOffload: true, Mode: Agentic,
 		Role: RoleCoproc,
 		Task: "do stuff",
 	})

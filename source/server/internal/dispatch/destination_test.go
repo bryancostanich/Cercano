@@ -93,7 +93,7 @@ func TestSecondaryCannotFallbackAndLegacyCoprocUnchanged(t *testing.T) {
 	}
 	e = NewEngine(provs(candidates), func() locus.Mode { return locus.CloudPrimary }, nil)
 	e.SetModelFor(func(bool, config.Tier) string { return "legacy" })
-	if _, err := e.Dispatch(context.Background(), Spec{Role: RoleCoproc}); err != nil {
+	if _, err := e.Dispatch(context.Background(), Spec{LocalOffload: true, Role: RoleCoproc}); err != nil {
 		t.Fatal(err)
 	}
 	if len(local.calls) != 1 || len(primary.calls)+len(secondary.calls) != 0 {

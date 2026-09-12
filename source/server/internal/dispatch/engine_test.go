@@ -69,9 +69,7 @@ func TestOneShotScopesOwnProviderSession(t *testing.T) {
 
 	parentCtx := llm.WithSessionID(context.Background(), "parent-session-id")
 	for i := 0; i < 2; i++ {
-		if _, err := eng.Dispatch(parentCtx, Spec{
-			Mode: OneShot, Role: RoleCoproc, Prompt: "summarize this", Source: "coproc:summarize",
-		}); err != nil {
+		if _, err := eng.Dispatch(parentCtx, Spec{LocalOffload: true, Mode: OneShot, Role: RoleCoproc, Prompt: "summarize this", Source: "coproc:summarize"}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -101,9 +99,7 @@ func TestOneShotReturnsTextAndTokens(t *testing.T) {
 	)
 	eng.SetModelFor(func(isCloud bool, _ config.Tier) string { return "local-model" })
 
-	res, err := eng.Dispatch(context.Background(), Spec{
-		Mode: OneShot, Role: RoleCoproc, Prompt: "summarize this", Source: "coproc:summarize",
-	})
+	res, err := eng.Dispatch(context.Background(), Spec{LocalOffload: true, Mode: OneShot, Role: RoleCoproc, Prompt: "summarize this", Source: "coproc:summarize"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,8 +123,7 @@ func TestOneShotModelOverride(t *testing.T) {
 	)
 	eng.SetModelFor(func(isCloud bool, _ config.Tier) string { return "default-model" })
 
-	res, err := eng.Dispatch(context.Background(), Spec{
-		Mode:          OneShot,
+	res, err := eng.Dispatch(context.Background(), Spec{LocalOffload: true, Mode: OneShot,
 		Role:          RoleCoproc,
 		Prompt:        "hello",
 		ModelOverride: "override-model",
@@ -146,7 +141,7 @@ func TestOneShotAgenticReturnsError(t *testing.T) {
 	eng := NewEngine(provs(Providers{Open: prov}), func() locus.Mode { return locus.OpenOnly }, nil)
 	// No AgenticRunner installed — must return a clear error.
 
-	_, err := eng.Dispatch(context.Background(), Spec{Mode: Agentic, Role: RoleCoproc, Task: "x"})
+	_, err := eng.Dispatch(context.Background(), Spec{LocalOffload: true, Mode: Agentic, Role: RoleCoproc, Task: "x"})
 	if err == nil {
 		t.Fatal("expected error for Agentic mode with no runner")
 	}
@@ -168,8 +163,7 @@ func TestOneShotEmitsSourceLabeledUsage(t *testing.T) {
 	eng.SetModelFor(func(isCloud bool, _ config.Tier) string { return "local-model" })
 	eng.SetUsageSink(sink)
 
-	_, err := eng.Dispatch(context.Background(), Spec{
-		Mode:        OneShot,
+	_, err := eng.Dispatch(context.Background(), Spec{LocalOffload: true, Mode: OneShot,
 		Role:        RoleCoproc,
 		Prompt:      "summarize this",
 		Source:      "coproc:summarize",
@@ -215,8 +209,7 @@ func TestOneShotRecordsUsageOnlyWhenRequested(t *testing.T) {
 	// Case 1: RecordUsage=true — must emit exactly one event with savings fields.
 	captured = nil
 	eng := mkEng()
-	_, err := eng.Dispatch(context.Background(), Spec{
-		Mode:                 OneShot,
+	_, err := eng.Dispatch(context.Background(), Spec{LocalOffload: true, Mode: OneShot,
 		Role:                 RoleCoproc,
 		Prompt:               "do something",
 		Source:               "summarize",
@@ -246,8 +239,7 @@ func TestOneShotRecordsUsageOnlyWhenRequested(t *testing.T) {
 	// Case 2: RecordUsage=false — must emit nothing.
 	captured = nil
 	eng2 := mkEng()
-	_, err = eng2.Dispatch(context.Background(), Spec{
-		Mode:        OneShot,
+	_, err = eng2.Dispatch(context.Background(), Spec{LocalOffload: true, Mode: OneShot,
 		Role:        RoleCoproc,
 		Prompt:      "do something",
 		Source:      "coproc:research",
@@ -272,8 +264,7 @@ func TestOneShotWantsProjectContext_NoContextFile(t *testing.T) {
 	)
 	eng.SetModelFor(func(isCloud bool, _ config.Tier) string { return "local-model" })
 
-	res, err := eng.Dispatch(context.Background(), Spec{
-		Mode:                OneShot,
+	res, err := eng.Dispatch(context.Background(), Spec{LocalOffload: true, Mode: OneShot,
 		Role:                RoleCoproc,
 		Prompt:              "explain this",
 		WantsProjectContext: true,
@@ -306,9 +297,9 @@ func TestDispatchTierResolution(t *testing.T) {
 		spec Spec
 		want config.Tier
 	}{
-		{Spec{Mode: OneShot, Role: RoleCoproc, Prompt: "p"}, config.TierFastLightText},
-		{Spec{Mode: OneShot, Role: RoleMain, Prompt: "p"}, config.TierEveryday},
-		{Spec{Mode: OneShot, Role: RoleCoproc, Prompt: "p", Tier: config.TierEveryday}, config.TierEveryday},
+		{Spec{LocalOffload: true, Mode: OneShot, Role: RoleCoproc, Prompt: "p"}, config.TierFastLightText},
+		{Spec{Tier: config.TierEveryday, RoutingTask: config.TaskChat, Mode: OneShot, Role: RoleMain, Prompt: "p"}, config.TierEveryday},
+		{Spec{LocalOffload: true, Mode: OneShot, Role: RoleCoproc, Prompt: "p", Tier: config.TierEveryday}, config.TierEveryday},
 	}
 	for i, c := range cases {
 		res, err := eng.Dispatch(context.Background(), c.spec)
@@ -338,7 +329,7 @@ func TestTargetMirrorsDispatchModelResolution(t *testing.T) {
 		return "local-" + string(tier)
 	})
 
-	target, err := eng.Target(Spec{Mode: OneShot, Role: RoleCoproc, Tier: config.TierFastLightText})
+	target, err := eng.Target(Spec{LocalOffload: true, Mode: OneShot, Role: RoleCoproc, Tier: config.TierFastLightText})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -346,7 +337,7 @@ func TestTargetMirrorsDispatchModelResolution(t *testing.T) {
 		t.Fatalf("unexpected target: %+v", target)
 	}
 
-	target, err = eng.Target(Spec{Mode: OneShot, Role: RoleCoproc, Tier: config.TierFastLightText, ModelOverride: "pinned-model"})
+	target, err = eng.Target(Spec{LocalOffload: true, Mode: OneShot, Role: RoleCoproc, Tier: config.TierFastLightText, ModelOverride: "pinned-model"})
 	if err != nil {
 		t.Fatal(err)
 	}

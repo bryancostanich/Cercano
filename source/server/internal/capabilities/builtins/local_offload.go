@@ -75,6 +75,7 @@ func (localCap) Execute(ctx context.Context, call *capabilities.Call) (*capabili
 		WantsProjectContext:  true,
 		ModelOverride:        a.Model,
 		Source:               "local",
+		LocalOffload:         true,
 		ContentTokensAvoided: contextmeter.Default().Count(input),
 		RecordUsage:          true,
 	})

@@ -36,7 +36,7 @@ func TestDispatchLocalStartupFallback(t *testing.T) {
 		}
 		return "glm-local"
 	})
-	got, err := e.Dispatch(context.Background(), Spec{Role: RoleCoproc, Prompt: "hello"})
+	got, err := e.Dispatch(context.Background(), Spec{LocalOffload: true, Role: RoleCoproc, Prompt: "hello"})
 	if err != nil {
 		t.Fatalf("startup failure stranded dispatch: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestStartupFallbackPolicy(t *testing.T) {
 				}
 				return "glm-local"
 			})
-			_, err := e.Dispatch(context.Background(), Spec{Role: tt.role, Prompt: "hello"})
+			_, err := e.Dispatch(context.Background(), Spec{LocalOffload: true, Role: tt.role, Prompt: "hello"})
 			if tt.wantCloud {
 				if err != nil || cloud.calls != 1 {
 					t.Fatalf("fallback: calls=%d err=%v", cloud.calls, err)
@@ -177,7 +177,7 @@ func TestStartupFallbackDoesNotRestartAgenticRunner(t *testing.T) {
 		}
 		return Result{Text: resp.Blocks[0].Text, Model: model, IsCloud: sel.IsCloud}, nil
 	})
-	got, err := e.Dispatch(context.Background(), Spec{Mode: Agentic, Role: RoleCoproc})
+	got, err := e.Dispatch(context.Background(), Spec{LocalOffload: true, Mode: Agentic, Role: RoleCoproc})
 	if err != nil || runs != 1 || toolExecutions != 1 || !got.IsCloud || got.Model != "claude-sonnet-4-6" {
 		t.Fatalf("runs=%d actions=%d result=%+v err=%v", runs, toolExecutions, got, err)
 	}

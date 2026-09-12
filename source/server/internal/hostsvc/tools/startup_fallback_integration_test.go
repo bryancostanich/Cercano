@@ -96,7 +96,7 @@ func TestAgenticDispatch_MidLoopStartupFailureContinuesWithoutReplay(t *testing.
 	local, cloud := &localThenStartupFailure{}, &cloudFinisher{}
 	eng := dispatch.NewEngine(
 		func() inference.Tiers { return inference.Tiers{Open: local, Cloud: cloud} },
-		func() locus.Mode { return locus.CloudPrimary },
+		func() locus.Mode { return locus.OpenPrimary },
 		nil,
 	)
 	eng.SetModelFor(func(isCloud bool, _ config.Tier) string {
@@ -109,7 +109,7 @@ func TestAgenticDispatch_MidLoopStartupFailureContinuesWithoutReplay(t *testing.
 
 	res, err := eng.Dispatch(t.Context(), dispatch.Spec{
 		Mode:           dispatch.Agentic,
-		Role:           dispatch.RoleCoproc,
+		RoutingTask:    config.TaskChat,
 		Task:           "Edit the file.",
 		Tools:          []string{"Edit"},
 		MaxIterations:  4,

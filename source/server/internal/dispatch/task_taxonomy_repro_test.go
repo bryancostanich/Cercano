@@ -99,21 +99,6 @@ func TestTaskTaxonomyUnknownExplicitClassRejected(t *testing.T) {
 	}
 }
 
-func TestTaskTaxonomyLegacyCoprocBaselinePreserved(t *testing.T) {
-	e, primary, secondary, local := taxonomyEngine()
-	if _, err := e.Dispatch(context.Background(), Spec{Mode: OneShot, Role: RoleCoproc, Task: "excluded baseline"}); err != nil {
-		t.Errorf("Dispatch: %v", err)
-	}
-	if len(local.calls) != 1 {
-		t.Errorf("local calls = %d, want 1", len(local.calls))
-	} else if local.calls[0].Model != "legacy" {
-		t.Errorf("local model = %q, want legacy", local.calls[0].Model)
-	}
-	if len(primary.calls) != 0 || len(secondary.calls) != 0 {
-		t.Errorf("unexpected cloud calls: primary=%d secondary=%d", len(primary.calls), len(secondary.calls))
-	}
-}
-
 // Exercise the current excluded producers' spec shapes against a conflicting
 // saved Default dispatch assignment. Watchdog shapes mirror both host and worker;
 // Watchdog now has a normal task class, tested through its host/worker producers.
@@ -123,9 +108,8 @@ func TestTaskTaxonomyExcludedSpecsIgnoreDefaultBucket(t *testing.T) {
 		spec      Spec
 		wantModel string
 	}{
-		{"coprocessor", Spec{Mode: OneShot, Role: RoleCoproc, Tier: config.TierFastLightText, Source: "summarize"}, "legacy-fast_light_text"},
-		{"local_default", Spec{Mode: OneShot, Role: RoleCoproc, Tier: config.TierEveryday, Source: "local"}, "legacy-everyday"},
-		{"local_override", Spec{Mode: OneShot, Role: RoleCoproc, Tier: config.TierEveryday, Source: "local", ModelOverride: "local-pin"}, "local-pin"},
+		{"local_default", Spec{LocalOffload: true, Mode: OneShot, Role: RoleCoproc, Tier: config.TierEveryday, Source: "local"}, "legacy-everyday"},
+		{"local_override", Spec{LocalOffload: true, Mode: OneShot, Role: RoleCoproc, Tier: config.TierEveryday, Source: "local", ModelOverride: "local-pin"}, "local-pin"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e, primary, secondary, local := taxonomyEngine()

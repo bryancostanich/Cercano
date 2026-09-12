@@ -41,18 +41,6 @@ func (s *Server) DispatchModelFor(isCloud bool, tier config.Tier) string {
 	return s.resolveTierModel(config.TierEveryday)
 }
 
-// watchdogModelFor returns the model for watchdog one-shot checks. Explicit
-// watchdog.model config wins. Otherwise the fast_light_text tier's EFFECTIVE
-// open model (override-else-catalog-default) is used — the watchdog's oneShot
-// lane dispatches to the local co-processor, so it stays strictly on the open
-// side. Empty means the lane keeps its own default resolution.
-func (s *Server) watchdogModelFor(wc config.WatchdogConfig) string {
-	if wc.Model != "" {
-		return wc.Model
-	}
-	return s.resolveTierModel(config.TierFastLightText)
-}
-
 func (s *Server) DispatchCandidates() inference.Tiers { return s.providerSvc.Candidates() }
 func (s *Server) TaskAssignment(task config.Task) config.TaskAssignment {
 	return s.cfgSvc.Get().TaskAssignment(task)

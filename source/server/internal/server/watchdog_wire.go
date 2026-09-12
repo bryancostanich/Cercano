@@ -62,20 +62,14 @@ func (s *Server) buildWatchdogFrom(wc config.WatchdogConfig, mc config.ModelsCon
 		}
 	}
 
-	// OneShot is the fast-model handle the checks call, running on the
-	// co-processor lane (dispatch.RoleCoproc). Model resolution: explicit
-	// watchdog.model config wins, else the models taxonomy's fast_light_text
-	// tier (open side — this lane is local), else the lane's own default.
-	// Resolved at build time; a models-section change takes effect on the
-	// next watchdog rebuild (config reload / watchdog-field update).
-	oneShotModel := s.watchdogModelFor(wc)
+	// Watchdog is ordinary classified dispatch. Its live task assignment
+	// selects destination and quality; legacy watchdog.model is not a pin.
 	oneShot := func(ctx context.Context, prompt string) (string, error) {
 		res, err := s.toolSvc.Engine().Dispatch(ctx, dispatch.Spec{
-			Mode:          dispatch.OneShot,
-			Role:          dispatch.RoleCoproc,
-			Prompt:        prompt,
-			ModelOverride: oneShotModel, // "" → RoleCoproc model resolution (the lightweight lane)
-			Source:        "watchdog",
+			Mode:        dispatch.OneShot,
+			RoutingTask: config.TaskWatchdog,
+			Prompt:      prompt,
+			Source:      "watchdog",
 		})
 		if err != nil {
 			return "", err

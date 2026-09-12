@@ -116,7 +116,7 @@ func TestTaskTaxonomyLegacyCoprocBaselinePreserved(t *testing.T) {
 
 // Exercise the current excluded producers' spec shapes against a conflicting
 // saved Default dispatch assignment. Watchdog shapes mirror both host and worker;
-// this is an engine boundary test, not a test invoking either watchdog producer.
+// Watchdog now has a normal task class, tested through its host/worker producers.
 func TestTaskTaxonomyExcludedSpecsIgnoreDefaultBucket(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
@@ -126,8 +126,6 @@ func TestTaskTaxonomyExcludedSpecsIgnoreDefaultBucket(t *testing.T) {
 		{"coprocessor", Spec{Mode: OneShot, Role: RoleCoproc, Tier: config.TierFastLightText, Source: "summarize"}, "legacy-fast_light_text"},
 		{"local_default", Spec{Mode: OneShot, Role: RoleCoproc, Tier: config.TierEveryday, Source: "local"}, "legacy-everyday"},
 		{"local_override", Spec{Mode: OneShot, Role: RoleCoproc, Tier: config.TierEveryday, Source: "local", ModelOverride: "local-pin"}, "local-pin"},
-		{"watchdog_override", Spec{Mode: OneShot, Role: RoleCoproc, Source: "watchdog", ModelOverride: "watchdog-pin"}, "watchdog-pin"},
-		{"watchdog_default", Spec{Mode: OneShot, Role: RoleCoproc, Source: "watchdog"}, "legacy-fast_light_text"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e, primary, secondary, local := taxonomyEngine()

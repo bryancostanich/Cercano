@@ -32,6 +32,8 @@ func BuildWorkerWatchdogForTest(cfg pkgcfg.Config, r providerssvc.Resolver) *wat
 		},
 		LocusMode: func() locus.Mode { m, _ := locus.ParseMode(cfg.LocusMode); return m },
 	})
+	engine.SetModelFor(workerDispatchModelFor(cfg))
+	engine.SetTaskAssignment(cfg.TaskAssignment)
 	return buildWorkerWatchdog(cfg, engine)
 }
 

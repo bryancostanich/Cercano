@@ -143,3 +143,18 @@ Verification in source/server:
 - `go test ./internal/server ./internal/worker -run 'Test(TaskTaxonomy|DestinationRedirect|RoutingSettingsAtomicPresence)' -count=1` — PASS.
 
 The optional model-facing class selector remains a Phase 4 task; this validation secures the existing engine Spec boundary. Runtime redirect selection and ordinary missing-class routing remain Phase 3 work. No push, live inference, build or full-server test run.
+
+## Watchdog normal task routing — 2026-09-12
+
+User amendment supersedes the watchdog exclusion: Watchdog is a normal `watchdog` class defaulting to Local/Standard, subject to common routing rather than an exemption. Updated spec/plan/inventory. Delegated write attempt failed validation without performing edits; implemented directly under prior authorization.
+
+Added host and worker producer integration tests driving a real watchdog Gate through fake dispatch providers. Before the change both default and saved-assignment cases failed in both packages: zero task-assignment lookups, and saved Secondary assignment still executed locally. Added TaskWatchdog to shared metadata, validation and defaults. Both producers now supply that class with no forced tier or ModelOverride. Removed obsolete host and worker model-selection helpers and replaced the old helper-precedence test with producer-level coverage proving a legacy watchdog.model pin cannot override task model selection. Shared metadata-driven config/client/transport/snapshot tests now cover Watchdog as well. No new exemption flags or routing branches were added.
+
+An existing worker gate test exposed a deficient test seam: its engine had no model resolver and its snapshot had no Standard model. After classification it failed with `dispatch: selected task model unavailable`. Updated only the test seam to install workerDispatchModelFor and task assignment, and supplied a Standard model in enabled-test snapshots; gate block/allow tests pass. Removed obsolete synthetic watchdog-exclusion cases; co-processor and explicit local-offload controls remain pending their separate migration decisions.
+
+Final verification (source/server):
+- `go test ./pkg/config ./internal/routingwire ./pkg/agentclient ./internal/watchdog -count=1` — PASS complete packages.
+- `go test ./internal/server ./internal/worker -run 'Watchdog|TaskTaxonomy' -count=1` — PASS, including actual producer default Local/Standard and saved Secondary/Premium execution with a legacy model pin present, and class transport tests.
+- `go test ./internal/dispatch -count=1 -skip '^TestTaskTaxonomyMissingClassUsesDefaultDispatch$'` — PASS; the known ordinary missing-class regression is explicitly excluded, not fixed.
+
+Limitations: global redirect runtime integration, ordinary missing-class routing, dedicated Routing UI, and deprecated co-processor migration/removal remain pending. Legacy watchdog.model storage/transport/settings cleanup is not part of this unit; the stored field no longer controls watchdog dispatch. No live inference, build, full server suite, or push.

@@ -17,6 +17,7 @@ func TestTaskMetadata(t *testing.T) {
 		{TaskReview, "Review", TaskAssignment{DestinationSecondary, CostPremium}},
 		{TaskResearch, "Research", TaskAssignment{DestinationSecondary, CostPremium}},
 		{TaskGitLand, "Git land", TaskAssignment{DestinationLocal, CostPremium}},
+		{TaskWatchdog, "Watchdog", TaskAssignment{DestinationLocal, CostStandard}},
 	}
 	got := TaskDefinitions()
 	if !reflect.DeepEqual(got, want) {

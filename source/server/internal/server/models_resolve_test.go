@@ -32,29 +32,7 @@ func TestResolveTierModel_CatalogFallback(t *testing.T) {
 	}
 }
 
-func TestWatchdogModelFor(t *testing.T) {
-	s, _ := newTestServer()
-	wc := config.WatchdogConfig{Model: "override-model"}
-	if got := s.watchdogModelFor(wc); got != "override-model" {
-		t.Errorf("explicit override: got %q", got)
-	}
-
-	wc.Model = ""
-	s.cfgSvc.Mutate(func(c *config.Config) {
-		c.Models.SetOverride(c.OpenRuntime, config.TierFastLightText, "phi4:14b")
-	})
-	if got := s.watchdogModelFor(wc); got != "phi4:14b" {
-		t.Errorf("fast_light_text override: got %q, want phi4:14b", got)
-	}
-
-	s.cfgSvc.Mutate(func(c *config.Config) {
-		c.Models.SetOverride(c.OpenRuntime, config.TierFastLightText, "")
-	})
-	if got := s.watchdogModelFor(wc); got == "" {
-		t.Error("empty override should fall back to the catalog default")
-	}
-}
-
+// Watchdog model selection is covered by TestWatchdogTaskRouting.
 func TestUpdateConfig_ModelTier(t *testing.T) {
 	s, _ := newTestServer()
 	s.events = newEventHub()

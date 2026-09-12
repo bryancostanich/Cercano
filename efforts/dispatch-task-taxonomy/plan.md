@@ -84,3 +84,7 @@ Objective: demonstrate the approved contract from settings through inference and
 - [ ] Perform interactive Routing and Cloud smoke checks if the runtime is available; otherwise explicitly record that limitation. Do not claim live inference, manual interaction, or broad regression verification that was not performed.
 - [ ] Delegate an explicit-path final review for spec compliance, dropped class identity, stale routing docs, excluded-caller changes, redirect cycles, and unrelated modifications. Resolve findings with focused reproductions and retests.
 - [ ] Record verification outcomes and remaining limitations, update task status, and checkpoint only completed effort paths. Do not push.
+
+## Approved Watchdog amendment — 2026-09-12
+
+Watchdog is a normal `watchdog` class, default Local/Standard, not an excluded caller. This supersedes watchdog-preservation/exclusion language in earlier tasks and audits. Shared metadata, validation, transport, Routing UI and runtime resolution coverage must include Watchdog. Host and worker producers must carry Watchdog identity without legacy watchdog.model or fixed fast_light_text overrides. Preserve checks, cancellation, escalation and audit behavior. Redirect integration remains common pending runtime work, not a watchdog exemption. Deprecated co-processor callers need migration/removal follow-up rather than a new exemption field; explicit local-offload treatment is not changed in this unit.

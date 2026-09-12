@@ -40,8 +40,8 @@ func (p *chatProvider) StreamChat(_ context.Context, _ llm.ChatRequest) (llm.Str
 	return &fixedReader{text: p.text}, nil
 }
 
-// openResolver serves prov as the OPEN provider (the watchdog oneShot lane
-// dispatches to RoleCoproc, which under open_primary picks the open side). It
+// openResolver serves prov as the OPEN provider (the watchdog task
+// defaults to the Local destination). It
 // mirrors fakeResolver but returns prov from Open()/Main() so the worker's
 // dispatch engine resolves it.
 type openResolver struct{ prov inference.Provider }
@@ -110,6 +110,8 @@ func TestBuildWorkerWatchdog_EnabledGatesToolCall(t *testing.T) {
 		},
 	}
 
+	cfg.OpenRuntime = "llama_server"
+	cfg.Models.SetOverride(cfg.OpenRuntime, config.TierEveryday, "watchdog-standard")
 	wd := worker.BuildWorkerWatchdogForTest(cfg, r)
 	if wd == nil {
 		t.Fatal("enabled watchdog should be non-nil")
@@ -144,6 +146,8 @@ func TestBuildWorkerWatchdog_EnabledAllowsWhenNoViolation(t *testing.T) {
 		},
 	}
 
+	cfg.OpenRuntime = "llama_server"
+	cfg.Models.SetOverride(cfg.OpenRuntime, config.TierEveryday, "watchdog-standard")
 	wd := worker.BuildWorkerWatchdogForTest(cfg, r)
 	if wd == nil {
 		t.Fatal("enabled watchdog should be non-nil")

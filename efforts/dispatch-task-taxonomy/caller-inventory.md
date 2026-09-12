@@ -14,8 +14,8 @@ A delegated non-test Go search for `dispatch.Spec{` returned 12 constructors in 
 | builtins/gitflow_land.go:203 | Conflict-review gate has no RoutingTask; RoleMain/everyday; source gitflow:land-review | Preserve Git land identity, not independent Review; deterministic mechanics stay unchanged. |
 | builtins/coproc.go:21 | No RoutingTask; RoleCoproc/fast_light_text | Explicit co-processor exclusion; preserve model selection. |
 | builtins/local_offload.go:69 | No RoutingTask; RoleCoproc/everyday with optional model override | Explicit local-offload exclusion; do not move to Default dispatch. |
-| server/watchdog_wire.go:73 | No RoutingTask; RoleCoproc with resolved watchdog model override | Explicit watchdog exclusion. |
-| worker/watchdog.go:68 | No RoutingTask; RoleCoproc with resolved watchdog model override | Same exclusion in worker. |
+| server/watchdog_wire.go:73 | No RoutingTask; RoleCoproc with resolved watchdog model override | Superseded: classify as Watchdog, Local/Standard default; remove model override. |
+| worker/watchdog.go:68 | No RoutingTask; RoleCoproc with resolved watchdog model override | Same normal Watchdog classification in worker; remove model override. |
 | agent/agent.go:540 | processCoproc; RoleCoproc, no tier, forwards model override, thinking flag and conversation ID | Co-processor exclusion at the producer, not a general rule that every RoleCoproc request is excluded. |
 | hostsvc/persistence/persistence.go:1410 | Next-prompt suggestion; RoleCoproc/fast_light_text, source suggest_next_prompt | Existing background co-processor behavior; preserve under the co-processor exclusion rather than introducing a new task class. |
 
@@ -37,3 +37,7 @@ Paths above are relative to source/server/internal. Research callers are builtin
 - Tool schema quality guidance currently recommends light for recon/tracing/extraction without a class selector. Update alongside the selector so readers do not confuse quality with placement.
 
 Some initial delegated searches were truncated. This record uses subsequent bounded searches and direct inspection to close the producer, alias, shared-worker and guidance gaps; it does not claim a complete audit of all inference APIs or every documentation mention. Phase 4 must re-audit producer classification after changes, and Phase 6 must verify propagation with fake providers.
+
+## Approved amendment — 2026-09-12
+
+The watchdog rows now use normal task routing (Local/Standard by default) in host and worker, without legacy model pins. Earlier role/exclusion statements are historical. Deprecated co-processor migration/removal remains pending; no new exclusion mechanism is authorized.

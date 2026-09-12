@@ -12,9 +12,8 @@ import (
 // buildWorkerWatchdog constructs the protocol-supervision watchdog from the
 // snapshotted config, mirroring the host's buildWatchdogFrom. Returns nil when
 // disabled (the default) — identical to in-process default-off behavior. The
-// OneShot fast-model lane dispatches through the WORKER's engine (engine),
-// which resolves the worker's own local provider — the model call never leaves
-// the worker.
+// watchdog task dispatches through the worker engine using the snapshotted
+// task assignment and destination configuration.
 func buildWorkerWatchdog(cfg pkgcfg.Config, engine *dispatch.Engine) *watchdog.Watchdog {
 	wc := cfg.Watchdog
 	if !wc.Enabled {
@@ -58,19 +57,14 @@ func buildWorkerWatchdog(cfg pkgcfg.Config, engine *dispatch.Engine) *watchdog.W
 		}
 	}
 
-	// OneShot is the fast-model handle the checks call, running on the
-	// co-processor lane (dispatch.RoleCoproc) through the worker's engine.
-	// Model resolution mirrors the host: explicit watchdog.model wins, else the
-	// fast_light_text tier's OPEN side (this lane is local), else the lane
-	// default.
-	oneShotModel := workerWatchdogModel(wc, cfg.Models, cfg.OpenRuntime)
+	// Watchdog is ordinary classified dispatch. Its live task assignment
+	// selects destination and quality; legacy watchdog.model is not a pin.
 	oneShot := func(ctx context.Context, prompt string) (string, error) {
 		res, err := engine.Dispatch(ctx, dispatch.Spec{
-			Mode:          dispatch.OneShot,
-			Role:          dispatch.RoleCoproc,
-			Prompt:        prompt,
-			ModelOverride: oneShotModel, // "" → RoleCoproc model resolution
-			Source:        "watchdog",
+			Mode:        dispatch.OneShot,
+			RoutingTask: pkgcfg.TaskWatchdog,
+			Prompt:      prompt,
+			Source:      "watchdog",
 		})
 		if err != nil {
 			return "", err
@@ -80,29 +74,4 @@ func buildWorkerWatchdog(cfg pkgcfg.Config, engine *dispatch.Engine) *watchdog.W
 
 	// EscalateAfter 0 is normalized to 2 inside watchdog.New — don't re-default.
 	return watchdog.New(watchdog.Config{Mode: mode, EscalateAfter: wc.EscalateAfter}, checks, oneShot)
-}
-
-// workerWatchdogModel mirrors the host's watchdogModelFor: explicit
-// watchdog.model config wins; otherwise the fast_light_text tier's OPEN side
-// (the watchdog's oneShot lane dispatches to the local co-processor, so a cloud
-// model id must never leak into it). Empty means the lane keeps its own default
-// resolution.
-func workerWatchdogModel(wc pkgcfg.WatchdogConfig, mc pkgcfg.ModelsConfig, runtime string) string {
-	if wc.Model != "" {
-		return wc.Model
-	}
-	// The worker receives effective tier models as the active runtime's
-	// overrides (see modelsConfigFromWire), so OverrideFor is the resolution.
-	if id, ok := mc.OverrideFor(runtime, pkgcfg.TierFastLightText); ok {
-		return id
-	}
-	// Mirror the host engine's model resolution (DispatchModelFor): an
-	// unconfigured fast_light_text tier falls back to the everyday open model
-	// before giving up. Without this, a sparse taxonomy leaves the watchdog
-	// oneShot with an empty model → the model call errors → supervision silently
-	// fails open, a divergence from in-process (which resolves the everyday model).
-	if id, ok := mc.OverrideFor(runtime, pkgcfg.TierEveryday); ok {
-		return id
-	}
-	return ""
 }

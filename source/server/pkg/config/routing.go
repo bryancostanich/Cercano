@@ -27,6 +27,7 @@ const (
 	TaskReview                Task = "review"
 	TaskResearch              Task = "research"
 	TaskGitLand               Task = "git_land"
+	TaskWatchdog              Task = "watchdog"
 )
 
 // TaskAssignment never stores a model ID. Zero fields inherit product defaults.
@@ -53,6 +54,7 @@ var taskDefinitions = [...]TaskDefinition{
 	{TaskReview, "Review", TaskAssignment{DestinationSecondary, CostPremium}},
 	{TaskResearch, "Research", TaskAssignment{DestinationSecondary, CostPremium}},
 	{TaskGitLand, "Git land", TaskAssignment{DestinationLocal, CostPremium}},
+	{TaskWatchdog, "Watchdog", TaskAssignment{DestinationLocal, CostStandard}},
 }
 
 // TaskDefinitions returns ordered metadata by value so callers cannot mutate

@@ -15,6 +15,11 @@ func startAgentTelemetry(path, session string) (*telemetry.Collector, func(), er
 	}
 	collector := telemetry.NewCollector(store, 256)
 	collector.SetSessionID(session)
+	if err := collector.EnableAccounting(telemetry.AccountingOptions{}); err != nil {
+		collector.Close()
+		_ = store.Close()
+		return nil, nil, err
+	}
 	var once sync.Once
 	return collector, func() { once.Do(func() { collector.Close(); _ = store.Close() }) }, nil
 }

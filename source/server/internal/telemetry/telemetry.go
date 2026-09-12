@@ -1,6 +1,7 @@
 package telemetry
 
 import (
+	"cercano/source/server/internal/usage"
 	"context"
 	"database/sql"
 	"fmt"
@@ -85,10 +86,10 @@ type Stats struct {
 	TotalRequests          int
 	TotalInputTokens       int
 	TotalOutputTokens      int
-	OpenTokensSaved       int     // input + output for non-escalated requests
+	OpenTokensSaved        int // input + output for non-escalated requests
 	TotalCloudInputTokens  int
 	TotalCloudOutputTokens int
-	OpenPercentage        float64 // percentage of total tokens handled locally (0-100)
+	OpenPercentage         float64 // percentage of total tokens handled locally (0-100)
 	TotalContentAvoided    int     // sum of content_tokens_avoided across all events
 	EstimatedNetSavings    int     // TotalContentAvoided - overhead
 	ByTool                 []GroupStats
@@ -378,11 +379,14 @@ func (s *SQLiteStore) Close() error {
 // Collector provides async, non-blocking telemetry collection.
 // MCP handlers call Emit/EmitCloudUsage without waiting for the write to complete.
 type Collector struct {
-	store     Store
-	events    chan *Event
-	cloud     chan CloudUsageReport
-	done      chan struct{}
-	sessionID string // auto-applied to all emitted events
+	attempts     *AccountingCollector
+	drainContext context.Context
+	cancelDrain  context.CancelFunc
+	store        Store
+	events       chan *Event
+	cloud        chan CloudUsageReport
+	done         chan struct{}
+	sessionID    string // auto-applied to all emitted events
 
 	// mu guards closed so Emit/EmitCloudUsage never send on the channels after
 	// Close has closed them. Close takes the write lock (waiting for any in-flight
@@ -396,7 +400,9 @@ type Collector struct {
 // NewCollector creates a Collector that drains events to the given store.
 // bufferSize controls the channel capacity; events are dropped if the buffer is full.
 func NewCollector(store Store, bufferSize int) *Collector {
+	ctx, cancel := context.WithCancel(context.Background())
 	c := &Collector{
+		drainContext: ctx, cancelDrain: cancel,
 		store:  store,
 		events: make(chan *Event, bufferSize),
 		cloud:  make(chan CloudUsageReport, bufferSize),
@@ -450,42 +456,101 @@ func (c *Collector) EmitCloudUsage(r CloudUsageReport) {
 	}
 }
 
-// Close drains remaining events and shuts down the collector.
-func (c *Collector) Close() {
+// EnableAccounting composes the new record lane with the existing collector.
+// Configure at startup. This starts only background work, not schema I/O here.
+func (c *Collector) EnableAccounting(options AccountingOptions) error {
 	c.mu.Lock()
+	defer c.mu.Unlock()
 	if c.closed {
-		c.mu.Unlock()
-		return
+		return fmt.Errorf("telemetry collector closed")
 	}
-	c.closed = true
+	if c.attempts != nil {
+		return nil
+	}
+	store, ok := c.store.(AttemptStore)
+	if !ok {
+		return fmt.Errorf("telemetry store does not support attempt records")
+	}
+	c.attempts = NewAccountingCollector(store, options)
+	return nil
+}
+
+func (c *Collector) EmitAttempt(a usage.AttemptObservation) bool {
+	c.mu.RLock()
+	attempts := c.attempts
+	c.mu.RUnlock()
+	if attempts == nil {
+		return false
+	}
+	return attempts.Emit(a)
+}
+func (c *Collector) AccountingHealth() AccountingHealth {
+	c.mu.RLock()
+	attempts := c.attempts
+	c.mu.RUnlock()
+	if attempts == nil {
+		return AccountingHealth{LastError: "attempt accounting not enabled"}
+	}
+	return attempts.Health()
+}
+
+// Close drains within a default shutdown budget; inference producers must stop
+// first. Deadline expiry is warned, never reported as successful persistence.
+func (c *Collector) Close() {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := c.CloseContext(ctx); err != nil {
+		log.Printf("telemetry: shutdown incomplete: %v", err)
+	}
+}
+
+func (c *Collector) CloseContext(ctx context.Context) error {
+	c.mu.Lock()
+	if !c.closed {
+		c.closed = true
+		close(c.events)
+		close(c.cloud)
+	}
+	attempts := c.attempts
 	c.mu.Unlock()
-	close(c.events)
-	close(c.cloud)
-	<-c.done
+	var attemptErr error
+	if attempts != nil {
+		attemptErr = attempts.Close(ctx)
+	}
+	select {
+	case <-c.done:
+		c.cancelDrain()
+		return attemptErr
+	case <-ctx.Done():
+		c.cancelDrain()
+		return ctx.Err()
+	}
 }
 
 func (c *Collector) drain() {
 	defer close(c.done)
 	for {
 		select {
+		case <-c.drainContext.Done():
+			return
 		case e, ok := <-c.events:
 			if !ok {
 				// Channel closed — drain remaining cloud reports and exit.
 				for r := range c.cloud {
-					if err := c.store.RecordCloudUsage(context.Background(), r); err != nil {
+					if err := c.store.RecordCloudUsage(c.drainContext, r); err != nil {
 						log.Printf("telemetry: failed to record cloud usage: %v", err)
 					}
 				}
 				return
 			}
-			if err := c.store.RecordEvent(context.Background(), e); err != nil {
+			if err := c.store.RecordEvent(c.drainContext, e); err != nil {
 				log.Printf("telemetry: failed to record event: %v", err)
 			}
 		case r, ok := <-c.cloud:
 			if !ok {
 				continue
 			}
-			if err := c.store.RecordCloudUsage(context.Background(), r); err != nil {
+			if err := c.store.RecordCloudUsage(c.drainContext, r); err != nil {
 				log.Printf("telemetry: failed to record cloud usage: %v", err)
 			}
 		}

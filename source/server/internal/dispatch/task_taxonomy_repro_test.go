@@ -113,3 +113,38 @@ func TestTaskTaxonomyLegacyCoprocBaselinePreserved(t *testing.T) {
 		t.Errorf("unexpected cloud calls: primary=%d secondary=%d", len(primary.calls), len(secondary.calls))
 	}
 }
+
+// Exercise the current excluded producers' spec shapes against a conflicting
+// saved Default dispatch assignment. Watchdog shapes mirror both host and worker;
+// this is an engine boundary test, not a test invoking either watchdog producer.
+func TestTaskTaxonomyExcludedSpecsIgnoreDefaultBucket(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		spec      Spec
+		wantModel string
+	}{
+		{"coprocessor", Spec{Mode: OneShot, Role: RoleCoproc, Tier: config.TierFastLightText, Source: "summarize"}, "legacy-fast_light_text"},
+		{"local_default", Spec{Mode: OneShot, Role: RoleCoproc, Tier: config.TierEveryday, Source: "local"}, "legacy-everyday"},
+		{"local_override", Spec{Mode: OneShot, Role: RoleCoproc, Tier: config.TierEveryday, Source: "local", ModelOverride: "local-pin"}, "local-pin"},
+		{"watchdog_override", Spec{Mode: OneShot, Role: RoleCoproc, Source: "watchdog", ModelOverride: "watchdog-pin"}, "watchdog-pin"},
+		{"watchdog_default", Spec{Mode: OneShot, Role: RoleCoproc, Source: "watchdog"}, "legacy-fast_light_text"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e, primary, secondary, local := taxonomyEngine()
+			e.SetModelFor(func(_ bool, tier config.Tier) string { return "legacy-" + string(tier) })
+			target, err := e.Target(tc.spec)
+			if err != nil || target.Model != tc.wantModel {
+				t.Fatalf("Target=%+v err=%v, want %q", target, err, tc.wantModel)
+			}
+			if _, err := e.Dispatch(context.Background(), tc.spec); err != nil {
+				t.Fatal(err)
+			}
+			if len(local.calls) != 1 || len(primary.calls)+len(secondary.calls) != 0 {
+				t.Fatalf("calls local=%d primary=%d secondary=%d", len(local.calls), len(primary.calls), len(secondary.calls))
+			}
+			if local.calls[0].Model != tc.wantModel {
+				t.Fatalf("model=%q want %q", local.calls[0].Model, tc.wantModel)
+			}
+		})
+	}
+}

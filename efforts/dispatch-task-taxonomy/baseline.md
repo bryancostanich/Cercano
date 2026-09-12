@@ -77,3 +77,20 @@ Fresh package baseline command from source/server:
 All six packages pass. From source/clients/cli, the five existing cloud-routing draft/navigation tests pass using `go test ./internal/ui -run 'Test(CloudChoicesStayDraftUntilSave|CloudRowNavigationRequiresConfirmation|CloudTabCloseRequiresConfirmation|RoutingDraftAndLocalCatalog|CloudPickerCancellationDoesNotChangeDraft)$' -count=1`.
 
 Remaining Phase 1 work includes redirect/cycle reproductions and stronger excluded-producer/draft-ownership contract coverage. The new dispatch regression file is intentionally red on the current implementation; this checkpoint is a reproduction checkpoint, not a green production change. No live inference, UI interaction, full-suite run, or push was performed.
+
+## Direct test-only continuation — 2026-09-12
+
+The user authorized direct work after two more delegated attempts failed validation without verified writes or executions. No production code was changed.
+
+Added builtins/task_taxonomy_exclusions_test.go: real runCoproc and Local producers retain their existing role, quality and explicit local model intent. Extended dispatch/task_taxonomy_repro_test.go with five engine-boundary controls for coprocessor, default/explicit local offload, and default/explicit watchdog-shaped specs. Target and Dispatch retain Local and the legacy quality/model despite Default dispatch being saved as Secondary/Standard. Watchdog specs mirror the inspected host and worker constructors; the tests do NOT invoke those constructors. The empty RoutingTask assertions record current producer behavior, not a requirement to retain that representation when explicit exclusion handling is implemented.
+
+Added CLI ui/task_taxonomy_routing_repro_test.go: the dedicated Routing page is absent, and Cloud still renders ten routing controls. These are intentionally failing ownership reproductions, not full independent-draft Save/Discard coverage.
+
+Fresh commands/results:
+
+- From source/server: `go test ./internal/dispatch ./internal/capabilities/builtins -run TestTaskTaxonomyExcluded -count=1` — PASS both packages.
+- From source/server: `go test ./pkg/config ./internal/dispatch -run TestTaskTaxonomy -count=1` — expected FAIL: all seven class defaults/setters, missing-class dispatch, and unknown explicit invocation remain broken; controls pass.
+- From source/clients/cli: `go test ./internal/ui -run TestTaskTaxonomy -count=1` — expected FAIL: missing Routing tab and ten routing controls still owned by Cloud.
+- From source/clients/cli: `go test ./internal/ui -run 'Test(CloudChoicesStayDraftUntilSave|CloudRowNavigationRequiresConfirmation|CloudTabCloseRequiresConfirmation|RoutingDraftAndLocalCatalog|CloudPickerCancellationDoesNotChangeDraft)$' -count=1` — PASS existing five draft/navigation controls.
+
+Remaining Phase 1 gap: configuration has no destination-redirect field or resolver; a focused search of config Go files and agent.proto found no routing redirect API. The spec defines behavior but not storage field names or a resolver signature. No invented JSON schema, test-only redirect implementation, or skipped pseudo-reproduction was added. Direct directions, chains, cycle rejection, and exclusions under active redirects require the shared redirect API contract before executable tests can be written. Independent Routing/Cloud draft behavior and actual watchdog-producer integration coverage also remain outstanding. Phase 1 is not complete. No live inference, full-suite verification, build, or push was performed.

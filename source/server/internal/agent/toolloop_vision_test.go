@@ -36,13 +36,14 @@ func (p *capturingProvider) StreamChat(_ context.Context, req llm.ChatRequest) (
 }
 
 type captureEveryProvider struct {
-	scripts [][]llm.Block
-	capture [][]llm.Message
+	scripts  [][]llm.Block
+	capture  [][]llm.Message
+	textOnly bool
 }
 
 func (p *captureEveryProvider) Name() string { return "capture-every" }
 func (p *captureEveryProvider) Capabilities() inference.Capabilities {
-	return inference.Capabilities{SupportsTools: true, SupportsVision: true}
+	return inference.Capabilities{SupportsTools: true, SupportsVision: !p.textOnly}
 }
 func (p *captureEveryProvider) Chat(_ context.Context, _ llm.ChatRequest) (llm.ChatResponse, error) {
 	return llm.ChatResponse{}, nil
@@ -56,12 +57,20 @@ func (p *captureEveryProvider) StreamChat(_ context.Context, req llm.ChatRequest
 	return &scriptedStream{events: blocksToEvents(p.scripts[idx])}, nil
 }
 
-type imageTool struct{ data string }
+type imageTool struct {
+	data       string
+	permission agenttools.Permission
+}
 
-func (imageTool) Name() string                      { return "screenshot" }
-func (imageTool) Description() string               { return "returns an image" }
-func (imageTool) Permission() agenttools.Permission { return agenttools.PermR }
-func (imageTool) Schema() json.RawMessage           { return json.RawMessage(`{"type":"object"}`) }
+func (imageTool) Name() string        { return "screenshot" }
+func (imageTool) Description() string { return "returns an image" }
+func (t imageTool) Permission() agenttools.Permission {
+	if t.permission != "" {
+		return t.permission
+	}
+	return agenttools.PermR
+}
+func (imageTool) Schema() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
 func (t imageTool) Execute(context.Context, json.RawMessage) (*agenttools.Result, error) {
 	return &agenttools.Result{
 		Type: agenttools.ResultText,
@@ -163,48 +172,90 @@ func TestRunToolLoop_RewritesHistoricalImagesWhenVisionStoreSet(t *testing.T) {
 }
 
 func TestRunToolLoop_RewritesToolResultImagesBeforeNextProviderCall(t *testing.T) {
-	store := visionattach.NewStore()
-	largeEncodedImage := b64(strings.Repeat("TOOLPNG", 4096))
-	prov := &captureEveryProvider{scripts: [][]llm.Block{
-		{{Type: llm.BlockToolUse, ToolUseID: "call_1", ToolName: "screenshot", ToolInput: []byte(`{}`)}},
-		{{Type: llm.BlockText, Text: "done"}},
-	}}
-	reg := emptyRegistry(t)
-	reg.MustRegister(imageTool{data: largeEncodedImage})
-
-	_, err := RunToolLoop(t.Context(), ToolLoopInput{
-		Provider:       prov,
-		Registry:       reg,
-		UserInput:      "take a screenshot",
-		ConversationID: "conv-tool-image",
-		VisionStore:    store,
-		MaxIterations:  2,
-	})
-	if err != nil {
-		t.Fatalf("RunToolLoop: %v", err)
-	}
-	if len(prov.capture) < 2 {
-		t.Fatalf("provider calls = %d, want at least 2", len(prov.capture))
-	}
-	second := prov.capture[1]
-	for _, m := range second {
-		for _, b := range m.Blocks {
-			if b.Type == llm.BlockImage {
-				t.Fatalf("raw tool-result image reached follow-up provider request: %+v", second)
-			}
+	for _, permission := range []agenttools.Permission{agenttools.PermR, agenttools.PermW} {
+		for _, tc := range []struct {
+			name                     string
+			textOnly, withStore      bool
+			convID                   string
+			wantPlaceholder, wantRaw bool
+		}{
+			{"vision-store", false, true, "conv-tool-image", true, false},
+			{"text-only-store", true, true, "conv-tool-image", true, false},
+			{"vision-no-store", false, false, "conv-tool-image", false, true},
+			{"text-only-no-store", true, false, "conv-tool-image", false, false},
+			{"text-only-no-conversation", true, true, "", false, false},
+		} {
+			t.Run(string(permission)+"/"+tc.name, func(t *testing.T) {
+				store := visionattach.NewStore()
+				largeEncodedImage := b64(strings.Repeat("TOOLPNG", 4096))
+				prov := &captureEveryProvider{textOnly: tc.textOnly, scripts: [][]llm.Block{
+					{{Type: llm.BlockToolUse, ToolUseID: "call_1", ToolName: "screenshot", ToolInput: []byte(`{}`)}},
+					{{Type: llm.BlockText, Text: "done"}},
+				}}
+				reg := emptyRegistry(t)
+				reg.MustRegister(imageTool{data: largeEncodedImage, permission: permission})
+				in := ToolLoopInput{
+					Provider: prov, Registry: reg, UserInput: "take a screenshot",
+					ConversationID: tc.convID, MaxIterations: 2,
+					PermissionRequester: func(context.Context, string, string, json.RawMessage, llm.Permission, bool) (bool, error) {
+						return true, nil
+					},
+				}
+				if tc.withStore {
+					in.VisionStore = store
+				}
+				_, err := RunToolLoop(t.Context(), in)
+				if err != nil {
+					t.Fatalf("RunToolLoop: %v", err)
+				}
+				if len(prov.capture) != 2 {
+					t.Fatalf("provider calls = %d, want 2", len(prov.capture))
+				}
+				var placeholder string
+				raw, omitted, result := false, false, false
+				for _, m := range prov.capture[1] {
+					for _, b := range m.Blocks {
+						if b.Type == llm.BlockImage {
+							raw = true
+						}
+						if b.Type == llm.BlockText && strings.Contains(b.Text, "inspect_image") {
+							placeholder = b.Text
+						}
+						if b.Type == llm.BlockToolResult && b.ToolUseRef == "call_1" {
+							result = strings.Contains(b.Content, "screenshot captured")
+							omitted = strings.Contains(b.Content, "no vision support")
+						}
+					}
+					if messageContainsText(m, largeEncodedImage) {
+						t.Fatal("base64 leaked into text")
+					}
+				}
+				if !result {
+					t.Fatal("tool result missing")
+				}
+				if raw != tc.wantRaw {
+					t.Fatalf("raw image = %v, want %v", raw, tc.wantRaw)
+				}
+				if (placeholder != "") != tc.wantPlaceholder {
+					t.Fatalf("unexpected placeholder: %q", placeholder)
+				}
+				if omitted != (!tc.wantPlaceholder && !tc.wantRaw) {
+					t.Fatalf("unexpected omission: %v", omitted)
+				}
+				if tc.wantPlaceholder {
+					fields := strings.Fields(placeholder)
+					if len(fields) < 2 {
+						t.Fatalf("invalid placeholder: %q", placeholder)
+					}
+					att, ok := store.Lookup(tc.convID, fields[1])
+					if !ok || string(att.Data) != strings.Repeat("TOOLPNG", 4096) || att.MediaType != "image/png" {
+						t.Fatal("placeholder does not resolve to original PNG")
+					}
+				} else if store.Count(tc.convID) != 0 {
+					t.Fatal("unexpected stored image")
+				}
+			})
 		}
-		if messageContainsText(m, largeEncodedImage) {
-			t.Fatal("large tool-result base64 payload leaked into follow-up provider text")
-		}
-	}
-	foundPlaceholder := false
-	for _, m := range second {
-		if messageContainsText(m, "inspect_image") {
-			foundPlaceholder = true
-		}
-	}
-	if !foundPlaceholder {
-		t.Fatalf("follow-up provider request did not include inspect_image placeholder: %+v", second)
 	}
 }
 

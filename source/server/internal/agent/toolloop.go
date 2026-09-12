@@ -248,17 +248,14 @@ type ToolLoopResult struct {
 const MaxToolLoopIterations = config.DefaultToolLoopMaxIterations
 
 // toolResultBlocks builds the model-facing blocks for one completed tool call.
-// The tool_result block always comes first. When the tool returned images and
-// the active model reports vision support, each image is appended as a sibling
-// BlockImage in the same user turn immediately after the tool_result (the shape
-// every provider adapter already renders). When the model has no vision support,
-// the images are dropped and a stub is folded into the tool_result text so the
-// model knows an image was produced but not shown.
-func toolResultBlocks(out llm.Block, res *agenttools.Result, supportsVision bool) []llm.Block {
+// The tool_result block always comes first. Images are preserved as sibling
+// BlockImages when they can be rewritten to inspect_image placeholders or sent
+// directly to a vision provider. Otherwise a stub explains their omission.
+func toolResultBlocks(out llm.Block, res *agenttools.Result, preserveImages bool) []llm.Block {
 	if res == nil || len(res.Images) == 0 {
 		return []llm.Block{out}
 	}
-	if !supportsVision {
+	if !preserveImages {
 		stub := fmt.Sprintf("[%d image(s) omitted: the active model has no vision support]", len(res.Images))
 		if out.Content == "" {
 			out.Content = stub
@@ -792,7 +789,10 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (returned ToolLoopResult
 			}
 		}
 
-		supportsVision := in.Provider.Capabilities().SupportsVision
+		// Preserve tool images for vision-as-tool even when the reasoning provider
+		// is text-only. The next iteration rewrites them to inspect_image
+		// placeholders before sending history to the provider.
+		preserveImages := (in.VisionStore != nil && in.ConversationID != "") || in.Provider.Capabilities().SupportsVision
 		type rr struct {
 			idx    int
 			blocks []llm.Block
@@ -824,7 +824,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (returned ToolLoopResult
 					}
 					out.Content = content
 					out.StartLine = res.StartLine
-					blocks = toolResultBlocks(out, res, supportsVision)
+					blocks = toolResultBlocks(out, res, preserveImages)
 					emit(LoopEvent{Kind: LoopToolExecComplete, ToolUseID: pc.block.ToolUseID, ToolName: pc.block.ToolName, Summary: summarizeResult(res), Detail: res.Detail, StartLine: res.StartLine, IsError: false})
 				}
 				rChan <- rr{idx: i, blocks: blocks}
@@ -985,7 +985,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (returned ToolLoopResult
 				out.Content = content
 				out.StartLine = res.StartLine
 				emit(LoopEvent{Kind: LoopToolExecComplete, ToolUseID: pc.block.ToolUseID, ToolName: pc.block.ToolName, Summary: summarizeResult(res), Detail: res.Detail, StartLine: res.StartLine, IsError: false})
-				results = append(results, toolResultBlocks(out, res, supportsVision)...)
+				results = append(results, toolResultBlocks(out, res, preserveImages)...)
 				// Handoff tools (plan_exit, request_plan_approval) drop the
 				// read-only planning fence. The ProfileBroker change they make only
 				// lands on the next turn, so without this the rest of THIS turn

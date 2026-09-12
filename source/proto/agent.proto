@@ -1617,6 +1617,7 @@ message HostToWorker {
     SessionProfileResponse profile_response = 6;
     WorkerAuthenticationResponse auth_response = 7;
  RuntimeRestartToolResponse runtime_response = 8;
+    WorkerAccountingReceipt accounting_receipt = 9;
   }
 }
 
@@ -1635,6 +1636,7 @@ message WorkerToHost {
  RuntimeRequestAccounting request_accounting = 10;
     WorkerAuthenticationRequest auth_request = 11;
  RuntimeRestartToolRequest runtime_request = 12;
+    WorkerAccountingBatch accounting_batch = 13;
   }
 }
 
@@ -2085,4 +2087,44 @@ message ResetSetupResponse {
   string warning = 4;
   bool config_written = 5;
   bool live_applied = 6;
+}
+
+// Actual physical-attempt observations, never context-token estimates. All
+// counters are optional so reported zero is distinct from unavailable usage.
+message AccountingAttemptObservation {
+  string id = 1;
+  uint64 revision = 2;
+  string operation_id = 3;
+  string conversation_id = 4;
+  string session_id = 5;
+  string worker_id = 6;
+  string source = 7;
+  string provider = 8;
+  string model = 9;
+  string profile = 10;
+  string destination = 11;
+  optional int64 started_at_utc_micros = 12;
+  optional int64 ended_at_utc_micros = 13;
+  string outcome = 14;
+  optional int64 input_tokens = 15;
+  optional int64 output_tokens = 16;
+  optional int64 cache_read_tokens = 17;
+  optional int64 cache_write_tokens = 18;
+  optional int64 reasoning_tokens = 19;
+}
+
+// Sender retains ownership until persisted=true is received. Receivers reject
+// oversized/malformed batches without accepting partial ownership.
+message WorkerAccountingBatch {
+  string batch_id = 1;
+  repeated AccountingAttemptObservation observations = 2;
+}
+
+// persisted means every observation has an acknowledged database commit.
+// A negative receipt does NOT assert that no write reached storage.
+message WorkerAccountingReceipt {
+  string batch_id = 1;
+  bool persisted = 2;
+  bool retryable = 3;
+  string error = 4;
 }

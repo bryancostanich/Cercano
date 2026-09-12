@@ -568,3 +568,24 @@ func (c *Collector) MarkAccountingIncomplete(reason string) {
 		attempts.MarkCoverageIncomplete(reason)
 	}
 }
+
+// TryAttemptBatch receives worker-owned observations without taking ownership
+// of a rejected batch. Session defaults are added to a private value copy.
+func (c *Collector) TryAttemptBatch(observations []usage.AttemptObservation) (<-chan bool, error) {
+	if len(observations) == 0 || len(observations) > MaxAccountingBatch {
+		return nil, fmt.Errorf("invalid accounting batch size")
+	}
+	c.mu.RLock()
+	attempts, session := c.attempts, c.sessionID
+	c.mu.RUnlock()
+	if attempts == nil {
+		return nil, fmt.Errorf("attempt accounting not enabled")
+	}
+	batch := append([]usage.AttemptObservation(nil), observations...)
+	for i := range batch {
+		if batch[i].Attribution.SessionID == "" {
+			batch[i].Attribution.SessionID = session
+		}
+	}
+	return attempts.TryBatch(batch)
+}

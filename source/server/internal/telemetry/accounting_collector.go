@@ -2,6 +2,7 @@ package telemetry
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -78,7 +79,26 @@ func defaultAccountingOptions(o AccountingOptions) AccountingOptions {
 	return o
 }
 
+// A receipt only confirms commit acknowledgment, never mere queue admission.
+type persistenceReceipt struct {
+	remaining int  // writer goroutine only
+	failed    bool // writer goroutine only
+	done      chan bool
+	once      sync.Once
+}
+
+func (r *persistenceReceipt) signal(committed bool) {
+	r.once.Do(func() { r.done <- committed; close(r.done) })
+}
+
+const MaxAccountingBatch = 64
+
+var ErrAccountingCapacity = errors.New("accounting capacity exhausted")
+var ErrAccountingClosed = errors.New("accounting closed")
+
 type queuedObservation struct {
+	receipt *persistenceReceipt
+
 	sequence    uint64
 	observation usage.AttemptObservation
 }
@@ -96,6 +116,7 @@ type AccountingCollector struct {
 	cancel     context.CancelFunc
 	mu         sync.Mutex
 	health     AccountingHealth
+	receipts   map[*persistenceReceipt]struct{}
 	pending    map[uint64]time.Time
 	queue      chan queuedObservation
 	stop       chan struct{}
@@ -106,7 +127,7 @@ type AccountingCollector struct {
 func NewAccountingCollector(store AttemptStore, options AccountingOptions) *AccountingCollector {
 	options = defaultAccountingOptions(options)
 	ctx, cancel := context.WithCancel(context.Background())
-	c := &AccountingCollector{writerID: usage.NewIdentity(), store: store, options: options, ctx: ctx, cancel: cancel, pending: make(map[uint64]time.Time), queue: make(chan queuedObservation, options.Capacity), stop: make(chan struct{}), done: make(chan struct{})}
+	c := &AccountingCollector{writerID: usage.NewIdentity(), store: store, options: options, ctx: ctx, cancel: cancel, pending: make(map[uint64]time.Time), receipts: make(map[*persistenceReceipt]struct{}), queue: make(chan queuedObservation, options.Capacity), stop: make(chan struct{}), done: make(chan struct{})}
 	go c.run()
 	return c
 }
@@ -129,13 +150,46 @@ func (c *AccountingCollector) Emit(a usage.AttemptObservation) bool {
 		}
 		return false
 	}
+	c.enqueueLocked(a, nil)
+	return true
+}
+
+func (c *AccountingCollector) enqueueLocked(a usage.AttemptObservation, receipt *persistenceReceipt) {
 	c.health.Accepted++
 	seq := c.health.Accepted
 	c.pending[seq] = time.Now().UTC()
 	// The pending limit reserves space even while a batch is out of the channel.
 	// Thus queue admission cannot block while holding this short metadata lock.
-	c.queue <- queuedObservation{sequence: seq, observation: a}
-	return true
+	c.queue <- queuedObservation{sequence: seq, observation: a, receipt: receipt}
+}
+
+// TryBatch admits the entire batch or none. On rejection, the remote owner
+// retains it for retry, so this is backpressure, not host-owned loss. Accepted
+// batches can span writes; a receipt becomes true only after every member has
+// acknowledged persistence. False does not prove the database never committed.
+func (c *AccountingCollector) TryBatch(observations []usage.AttemptObservation) (<-chan bool, error) {
+	if len(observations) == 0 || len(observations) > MaxAccountingBatch {
+		return nil, fmt.Errorf("invalid accounting batch size")
+	}
+	for _, a := range observations {
+		if err := ValidateAttempt(a); err != nil {
+			return nil, err
+		}
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.health.Closed {
+		return nil, ErrAccountingClosed
+	}
+	if len(c.pending)+len(observations) > c.options.Capacity {
+		return nil, ErrAccountingCapacity
+	}
+	receipt := &persistenceReceipt{remaining: len(observations), done: make(chan bool, 1)}
+	c.receipts[receipt] = struct{}{}
+	for _, a := range observations {
+		c.enqueueLocked(a, receipt)
+	}
+	return receipt.done, nil
 }
 
 func (c *AccountingCollector) Health() AccountingHealth {
@@ -165,6 +219,10 @@ func (c *AccountingCollector) Close(ctx context.Context) error {
 		c.mu.Lock()
 		c.health.Uncertain = uint64(len(c.pending))
 		c.health.LastError = "accounting shutdown incomplete"
+		for receipt := range c.receipts {
+			receipt.signal(false)
+			delete(c.receipts, receipt)
+		}
 		c.mu.Unlock()
 		return ctx.Err()
 	}
@@ -269,6 +327,16 @@ func (c *AccountingCollector) run() {
 		c.mu.Lock()
 		for _, q := range batch {
 			delete(c.pending, q.sequence)
+			if receipt := q.receipt; receipt != nil {
+				if err != nil {
+					receipt.failed = true
+				}
+				receipt.remaining--
+				if receipt.remaining == 0 {
+					receipt.signal(!receipt.failed)
+					delete(c.receipts, receipt)
+				}
+			}
 		}
 		if err == nil {
 			c.health.Persisted += uint64(len(batch))

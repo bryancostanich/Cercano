@@ -545,22 +545,17 @@ func runtimeIsHostManaged(runtime string) bool {
 }
 
 func (r *workerResolver) Main() (inference.Provider, bool, bool, error) {
-	cfg := r.cfgSvc.Get()
-	mode, _ := locus.ParseMode(cfg.LocusMode)
-	// Open tier registers absent only when config can prove the effective model
-	// is unavailable; catalog IDs are left to runtime ensure/warm paths.
-	open := r.openProv
-	if !dispatch.OpenModelReadyFor(cfg, r.MainModel(false)) {
-		open = nil
-	}
 	candidates := r.Candidates()
-	candidates.Open = open
-	sel, err := inference.SelectDestination(mode, cfg.TaskAssignment(pkgcfg.TaskChat).Destination, candidates)
+	mode := candidates.Mode
+	assignment := candidates.TaskFor(pkgcfg.TaskChat)
+	model := candidates.ModelFor(inference.Selection{IsCloud: false}, assignment.Quality.CapabilityTier())
+	if candidates.OpenReady != nil && !candidates.OpenReady(model) {
+		candidates.Open = nil
+	}
+	sel, err := inference.SelectDestination(mode, assignment.Destination, candidates)
 	if err != nil {
 		return nil, false, false, err
 	}
-	assignment := candidates.TaskFor(pkgcfg.TaskChat)
-	model := openTierModel(cfg, assignment.Quality.CapabilityTier())
 	if sel.IsCloud {
 		model = inference.TargetForCall(sel.Provider, inference.Call{Tier: string(assignment.Quality.CapabilityTier())}).Model
 	}
@@ -569,7 +564,17 @@ func (r *workerResolver) Main() (inference.Provider, bool, bool, error) {
 
 func (r *workerResolver) Candidates() inference.Tiers {
 	c := r.cfgSvc.Get()
-	return inference.Tiers{Cloud: r.cloudProv, Open: r.openProv, TaskFor: c.TaskAssignment, ResolveDestination: c.ResolveDestination, Destinations: map[pkgcfg.Destination]inference.Candidate{
+	mode, _ := locus.ParseMode(c.LocusMode)
+	modelFor := func(sel inference.Selection, t pkgcfg.Tier) string {
+		if !sel.IsCloud {
+			return openTierModel(c, t)
+		}
+		if profile, ok := c.Profile(sel.Profile); ok {
+			return c.ModelProfiles.ResolveCloudModelForTier(profile, t)
+		}
+		return ""
+	}
+	return inference.Tiers{Mode: mode, ModelFor: modelFor, OpenReady: func(model string) bool { return dispatch.OpenModelReadyFor(c, model) }, Cloud: r.cloudProv, Open: r.openProv, TaskFor: c.TaskAssignment, ResolveDestination: c.ResolveDestination, Destinations: map[pkgcfg.Destination]inference.Candidate{
 		pkgcfg.DestinationPrimary:   {Provider: r.cloudProv, Profile: c.ActiveCloudProfile, IsCloud: true},
 		pkgcfg.DestinationSecondary: {Provider: r.secondaryProv, Profile: c.SecondaryCloudProfile, IsCloud: true},
 	}}

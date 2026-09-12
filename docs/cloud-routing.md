@@ -6,12 +6,24 @@ A **destination** chooses where a task runs. A **quality** chooses a model withi
 
 | Task | Default destination | Default quality |
 | --- | --- | --- |
-| Main chat | Primary | Premium |
-| Explicit dispatch/sub-agent | Secondary | Premium |
+| Chat | Primary | Premium |
+| Default dispatch (class omitted) | Secondary | Premium |
+| Reconnaissance | Local | Light |
+| Mechanical development | Local | Standard |
+| Investigation | Secondary | Premium |
+| Implementation | Secondary | Premium |
+| Review | Secondary | Premium |
+| Research | Secondary | Premium |
+| Git land | Local | Premium |
+| Watchdog | Local | Standard |
 
-Primary and Secondary each have their own preferred profile and optional backup. Secondary is not another name for Primary's backup. Local uses the independently managed local runtime and its existing model recommendations/overrides.
+Primary and Secondary each have their own preferred profile and optional backup. Secondary is not Primary's backup. Local uses its independently managed runtime and models. Light is the display label for the existing `economy` cost tier.
 
-Primary placement continues to obey the existing locus policy. `open_only` prohibits cloud inference and `cloud_only` prohibits Local inference. Secondary does not automatically fall through to Primary or Local. If Secondary is unconfigured, prohibited by locality, or exhausted, explicit dispatch reports it unavailable. Other co-processor work retains its existing routing policy.
+Secondary can redirect to Primary or Local; Local can redirect to Primary or Secondary. Chains are followed to their final destination; self-loops, cycles and unknown destinations are rejected atomically. **Own configuration** clears a redirect. Redirects change effective placement without overwriting saved profile bindings or task destination/quality. They are not failover: only the final destination's profile, model, credentials and backup chain are used.
+
+Final Primary placement follows locus policy. `open_only` prohibits cloud inference and `cloud_only` prohibits Local inference. Final Secondary never automatically falls through to Primary or Local; final Local has no implicit cloud fallback. Final Primary retains its existing permitted fallback, including redirected calls. Visible output and completed tool work must not be replayed across destinations.
+
+Omitting a task class uses Default dispatch, regardless of role, source label or prompt wording. Explicit dispatch difficulty changes quality only: light→Light, standard→Standard, deep→Premium. Standalone Review, Research and Git land carry their own class; watchdog is a normal configurable task, not an exemption. Text-analysis helpers use Reconnaissance; the deprecated co-processor wire flag is a compatibility alias for ordinary Default dispatch. The explicitly local `local` tool retains its prior policy rather than inheriting Default dispatch.
 
 Profile names identify configuration and credentials, not hardware. Selecting a destination does not imply GPU eviction or reconfigure a local runtime.
 
@@ -33,14 +45,16 @@ Legacy profile-wide `model`/`model_pinned` choices no longer override quality se
 
 ## Editing settings
 
-In **Cloud** settings:
+In **Routing** settings:
 
-1. Select Primary, Primary backup, Secondary, and Secondary backup independently. Choose **none** to clear a binding.
-2. Set chat and dispatch destinations/qualities, or leave their fields inherited.
-3. Use **Save routing** to apply that complete assignment draft, or **Discard routing** to restore the saved state.
-4. Select a profile to edit its quality and image choices. Use the separate profile **save** or **discard** action.
+1. Choose Primary, Primary backup, Secondary and Secondary backup independently; **none** clears a binding.
+2. Choose Secondary/Local redirects or **own configuration**. The effective route is displayed separately from the saved assignment.
+3. Set each task's destination and quality, or leave either inherited. **Reset task** removes both overrides and restores that class's defaults.
+4. **Save routing** applies the whole draft atomically. **Discard routing** restores saved assignments. Failed saves and disconnected-agent errors preserve edits.
 
-Choice edits are drafts, including edits to existing profiles. Cancelling a picker does not change a draft. Unsaved profile edits prompt before changing profiles; unsaved Cloud drafts prompt before leaving the tab or closing the surface. Authentication, API-key operations, and explicit profile activation remain separate actions.
+In **Cloud**, edit profile credentials, quality and image choices using the separate profile save/discard actions. Routing controls no longer live on Cloud. Runtime/model management stays in **Runtime / Local Models**; Local does not have a cloud-profile binding.
+
+All choice edits are drafts, including existing profiles. Cancelling a picker keeps the original value. Unsaved edits prompt before leaving their page or changing profiles; cancelling navigation preserves the draft. Cloud and Routing save/discard operations do not apply or clear each other's draft. Authentication and API-key operations remain separate actions.
 
 Activating a profile does not silently make the previous Primary its backup. If the requested Primary is already the Primary backup, use the routing draft to change both bindings atomically instead of creating a self-loop.
 

@@ -55,8 +55,11 @@ func TestDestinationRedirectProviderGraph(t *testing.T) {
 	check("s", "secondary-standard")
 	// Unbuilt settings must not change either route or model in a published graph.
 	c.LocalRedirect = config.DestinationPrimary
+	c.LocusMode = "open_only"
 	s.cfgSvc.Set(c)
 	check("s", "secondary-standard")
+	c.LocusMode = "cloud_only"
+	s.cfgSvc.Set(c)
 	if err := s.rebuildCloud(); err != nil {
 		t.Fatal(err)
 	}

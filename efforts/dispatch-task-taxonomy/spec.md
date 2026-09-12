@@ -90,3 +90,7 @@ Approval record: the user approved the overall spec, including rejection of unkn
 - Config persistence, client/server transport, worker snapshots, host/worker resolution, and end-to-end fake-provider integration preserve class identity.
 - Tests prove ordinary first-party classified paths do not fall through to Default dispatch, including when the bucket is configured to a different destination.
 - No live inference or broad regression results may be claimed without running them.
+
+## Implementation record — 2026-09-12
+
+The approved plan and Watchdog amendment are implemented; see verification.md for precise test scope and limitations. Co-processor helpers were migrated to normal task routing (Reconnaissance for narrow text analysis); the deprecated one-shot wire flag is compatibility-only and uses Default dispatch. Explicit local-offload intent is preserved without a Watchdog exemption. Routing is now a separate page from Cloud, covering all shared TaskDefinitions. Historical pending-approval and exclusion observations above do not describe the final implementation.

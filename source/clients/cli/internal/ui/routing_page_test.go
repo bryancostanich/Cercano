@@ -121,3 +121,14 @@ func TestRoutingNavigationCancellationAndEighthTab(t *testing.T) {
 		t.Fatal("eighth tab navigation missing")
 	}
 }
+
+func TestSelectingCurrentRoutingTabPreservesDraft(t *testing.T) {
+	sp := draftTestPage()
+	sp.scope = scopeRouting
+	sp.onCommit("routing-secondary", "unsaved")
+	m := Model{content: sp, configSurface: &configSurface{active: configTabRouting, focused: true}}
+	m.switchConfigTab(configTabRouting)
+	if m.content != sp || !sp.routingDirty || sp.routingDraft.Secondary != "unsaved" {
+		t.Fatal("selecting current tab discarded routing page/draft")
+	}
+}

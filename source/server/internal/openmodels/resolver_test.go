@@ -72,3 +72,20 @@ func TestVisionModel_DoesNotDisturbEveryday(t *testing.T) {
 		t.Fatalf("ChatModel() = %q, want glm-4.5-air-q4_k_m", got)
 	}
 }
+
+func TestModelsForConfigDoesNotReadMutableSettings(t *testing.T) {
+	saved := cfg.Config{OpenRuntime: "ollama"}
+	saved.Models.SetOverride("ollama", cfg.TierEveryday, "saved-standard")
+	current := saved.Clone()
+	current.Models.SetOverride("ollama", cfg.TierEveryday, "new-standard")
+	defaults := map[string]string{string(cfg.TierMostCapable): "catalog-premium"}
+	r := newResolver(current, defaults)
+	captured := r.ModelsForConfig(saved)
+	defaults[string(cfg.TierMostCapable)] = "later-catalog"
+	if captured[cfg.TierEveryday] != "saved-standard" || captured[cfg.TierMostCapable] != "catalog-premium" {
+		t.Fatalf("mixed graph models: %+v", captured)
+	}
+	if r.Model(cfg.TierEveryday) != "new-standard" {
+		t.Fatal("fixture failed to diverge live settings")
+	}
+}

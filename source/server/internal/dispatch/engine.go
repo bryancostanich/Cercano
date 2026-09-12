@@ -170,7 +170,8 @@ func (e *Engine) SetModelFor(fn func(isCloud bool, tier config.Tier) string) {
 // rules so callers that must budget before constructing a prompt can stay in
 // sync with execution.
 func (e *Engine) Target(spec Spec) (modelbudget.Target, error) {
-	sel, tier, model, err := e.resolve(spec, e.modeFn(), e.providersFn())
+	candidates, mode := e.routingSnapshot()
+	sel, tier, model, err := e.resolve(spec, mode, candidates)
 	if err != nil {
 		return modelbudget.Target{}, err
 	}
@@ -182,13 +183,20 @@ func dispatchTarget(ctx context.Context, sel inference.Selection, tier config.Ti
 		tier = ""
 	}
 	route := inference.TargetForContext(ctx, sel.Provider, inference.Call{Model: model, Tier: string(tier), FallbackTier: string(intent)})
+	if route.Profile == "" {
+		route.Profile = sel.Profile
+	}
+	if route.Destination == "" {
+		route.Destination = string(sel.Destination)
+	}
 	return modelbudget.Target{Provider: route.Provider, Profile: route.Profile, Destination: route.Destination, ContextWindow: route.ContextWindow, ContextWindowKnown: route.ContextWindowKnown, Model: route.Model, Tier: string(tier), IsCloud: sel.IsCloud}
 }
 
 // PreparedTarget uses the same destination snapshot as dispatch, then prepares
 // runtime-confirmed Local capacity before the caller builds its prompt.
 func (e *Engine) PreparedTarget(ctx context.Context, spec Spec) (modelbudget.Target, error) {
-	sel, tier, model, err := e.resolve(spec, e.modeFn(), e.providersFn())
+	candidates, mode := e.routingSnapshot()
+	sel, tier, model, err := e.resolve(spec, mode, candidates)
 	if err != nil {
 		return modelbudget.Target{}, err
 	}
@@ -208,7 +216,7 @@ func (e *Engine) PreparedTarget(ctx context.Context, spec Spec) (modelbudget.Tar
 func (e *Engine) Dispatch(ctx context.Context, spec Spec) (Result, error) {
 	spec = defaultTask(spec)
 	// 1. Select provider via locus (providers resolved fresh each dispatch).
-	mode, candidates := e.modeFn(), e.providersFn()
+	candidates, mode := e.routingSnapshot()
 	sel, tier, model, err := e.resolve(spec, mode, candidates)
 	if err != nil {
 		return Result{}, err
@@ -376,7 +384,9 @@ func (e *Engine) resolve(spec Spec, mode locus.Mode, candidates inference.Tiers)
 		return sel, tier, "", err
 	}
 	model := ""
-	if spec.RoutingTask != "" && e.destinationModelFor != nil {
+	if spec.RoutingTask != "" && candidates.ModelFor != nil {
+		model = candidates.ModelFor(sel, tier)
+	} else if spec.RoutingTask != "" && e.destinationModelFor != nil {
 		model = e.destinationModelFor(sel, tier)
 	} else if spec.RoutingTask != "" && sel.Destination == config.DestinationSecondary {
 		return sel, tier, "", errors.New("dispatch: Secondary model resolver unavailable")
@@ -416,4 +426,12 @@ func defaultTask(spec Spec) Spec {
 		spec.RoutingTask = config.TaskDispatch
 	}
 	return spec
+}
+
+func (e *Engine) routingSnapshot() (inference.Tiers, locus.Mode) {
+	candidates := e.providersFn()
+	if candidates.Mode != "" {
+		return candidates, candidates.Mode
+	}
+	return candidates, e.modeFn()
 }

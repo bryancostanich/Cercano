@@ -214,9 +214,9 @@ func TestSetDispatchEngine_WiresAgenticRunner(t *testing.T) {
 
 	// An Agentic dispatch must succeed now (runner is wired).
 	res, dispErr := eng.Dispatch(context.Background(), dispatch.Spec{
-		Mode: dispatch.Agentic,
-		Role: dispatch.RoleCoproc,
-		Task: "hello",
+		Mode:        dispatch.Agentic,
+		RoutingTask: config.TaskReconnaissance,
+		Task:        "hello",
 	})
 	if dispErr != nil {
 		t.Fatalf("Agentic dispatch after SetDispatchEngine: %v", dispErr)

@@ -37,10 +37,10 @@ func (dispatchCap) Schema() capabilities.Schema {
 		"type": "object",
 		"required": ["task"],
 		"properties": {
-			"class": {"type":"string", "enum":` + string(keys) + `, "description":"Optional task class; omitted uses Default dispatch."},
+			"class": {"type":"string", "enum":` + string(keys) + `, "description":"Choose a class by work: reconnaissance for narrow read-only tracing/extraction; mechanical_development for specified edits; investigation for diagnosis; implementation for substantial coding. Dedicated Review, Research and Git land use review/research/git_land. Omission uses Default dispatch."},
  "task":            {"type": "string", "description": "Open-ended instruction for the sub-agent tool loop."},
 			"tools":           {"type": "array", "items": {"type": "string"}, "description": "Tool or capability names to grant, using the plain registered names (e.g. \"Read\", \"Glob\", \"Grep\", \"Bash\") — no host or MCP prefix. Omit to default to read-only tools."},
-			"tier":            {"type": "string", "enum": ["light", "standard", "deep"], "description": "Omit to use the saved dispatch quality (Premium by default). An optional class selects the saved task routing; omitted class uses Default dispatch. Explicit light selects Economy, standard selects Standard, and deep selects Premium. The saved dispatch destination controls placement, subject to locality policy. Prefer explicit light for routine recon/tracing/extraction."},
+			"tier":            {"type": "string", "enum": ["light", "standard", "deep"], "description": "Omit to use the selected class's saved quality. Default dispatch is Premium. An optional class selects the saved task routing; omitted class uses Default dispatch. Explicit light selects Economy, standard selects Standard, and deep selects Premium. The saved dispatch destination controls placement, subject to locality policy. For routine recon/tracing/extraction select class reconnaissance and normally omit tier."},
 			"cwd":             {"type": "string", "description": "Optional absolute project working directory for the sub-agent. Use this for git/GitHub workflows so scoped tools run in the intended repository."},
 			"path":            {"type": "string", "description": "Alias for cwd."},
 			"intent":          {"type": "string", "description": "Optional concise human-facing reason for the delegation, shown in permission prompts."},

@@ -23,6 +23,14 @@ In short:
 
 > A sub-agent's skills are dynamically selected by the parent from the unified catalog and enforced by mounting only the granted tools into the child registry.
 
+## Routing class is not a tool grant
+
+The optional dispatch `class` selects saved destination and quality, not a predefined set of tools. Pass `reconnaissance`, `mechanical_development`, `investigation`, `implementation`, `review`, `research`, or `git_land` at the semantic entry point. Watchdog uses `watchdog` (Local/Standard). Omission uses Default dispatch (Secondary/Premium). Explicit difficulty overrides only quality. Redirects change effective placement without changing grants; see [routing](../../cloud-routing.md).
+
+```json
+{"class":"mechanical_development","task":"Apply the specified rename and run its tests","tools":["Read","Grep","Edit","Bash"]}
+```
+
 ## Non-goals
 
 ### No static behavior buckets

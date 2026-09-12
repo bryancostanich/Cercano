@@ -41,3 +41,9 @@ Some initial delegated searches were truncated. This record uses subsequent boun
 ## Approved amendment — 2026-09-12
 
 The watchdog rows now use normal task routing (Local/Standard by default) in host and worker, without legacy model pins. Earlier role/exclusion statements are historical. Deprecated co-processor migration/removal remains pending; no new exclusion mechanism is authorized.
+
+## Final producer audit — 2026-09-12
+
+Historical exclusions above are superseded: runTextAnalysis backs summarize/extract/classify/explain with Reconnaissance; next-action extraction and MCP project-context extraction use Reconnaissance. MCP documentation generation selects Mechanical development. Generic dispatch/workflow exposes the metadata-validated class selector and preserves it (including Investigation/Implementation) across wrappers and agentic execution; omitted class always uses Default dispatch. Review uses Review in both modes. Research budgets, normal inference and query generation use Research, preserving query-only DisableThinking. Git land retains Git land through its existing review gate. Host and worker Watchdog use Watchdog/Local/Standard unless changed in Routing.
+
+The legacy ProcessRequest coproc flag is deprecated and translates to ordinary Default dispatch. Explicit routing_task crosses the wire for known first-party one-shot producers. The unused grpcModelCaller was removed. Only the explicitly local capability carries LocalOffload; no role/source-text inference and no Watchdog/co-processor exemption remain. Re-audited production dispatch.Spec construction across source/server with grep; all remaining producers are described here. Historical model-choice and role notes above are not current behavior.

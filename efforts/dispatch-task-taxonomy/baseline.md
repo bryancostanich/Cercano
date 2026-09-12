@@ -218,3 +218,10 @@ Initial CLI reproductions failed: no Routing tab and Cloud exposed routing contr
 Cloud no longer exposes activate/backup or routing fields. Routing uses its own commit prefix and draft lifecycle. Save snapshots the draft, validates cycles before transport, retains edits on failure/reconnect, refreshes the saved baseline on success (including availability warnings), and never clears Cloud edits. Scoped navigation/discard respects draft ownership. Added eighth-tab navigation, effective-route rendering, reset/isolation, failed-save, disconnected-save and cancel-navigation tests. Existing narrow layout test caught overlong task labels; separate task headings and short field labels fix it.
 
 Full CLI UI and wizard tests PASS. CLI build `go build -o /tmp/cercano-routing-cli .` PASS (an initial guessed ./cmd/cercano path failed; corrected to the module's actual root main package). No live/manual UI interaction claimed; no running service restarted. Ignored watchdog.model control was not present in the current UI; its transport/storage field remains compatibility-only, not a route selector.
+
+
+## Final verification and closure — 2026-09-12
+
+Completed snapshot hardening (captured mode/model/readiness, deep-cloned local model maps), selected-target attribution and a real client/settings→disk→worker snapshot→shared chain fake-provider integration test. See verification.md for exact commands and limits. Broad affected server packages and CLI UI/wizard tests pass; all-class quality/agentic matrix, final cross-layer test with race detection and both binary builds pass. No taxonomy failure is skipped.
+
+An independent adversarial review found same-tab navigation could drop Routing edits; failing-before/passing-after regression added and fix verified by the complete CLI UI suite. Later review returned no fresh evidence; no exhaustive independent-review claim is made. Source audit confirmed class-bearing producer inventory; explicit-path checkpoints preserve concurrent token-accounting documentation. Manual UI/live inference/production credentials/runtime restarts were not performed. No push.

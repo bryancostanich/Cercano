@@ -17,6 +17,10 @@ const (
 
 // Tiers holds the candidate inference providers; either may be nil/absent.
 type Tiers struct {
+	// Mode and ModelFor are frozen with task assignments in the candidate graph.
+	Mode      locus.Mode
+	ModelFor  func(Selection, config.Tier) string
+	OpenReady func(string) bool
 	// ResolveDestination is captured with TaskFor from the same routing graph.
 	ResolveDestination func(config.Destination) (config.Destination, error)
 	TaskFor            func(config.Task) config.TaskAssignment
@@ -95,6 +99,9 @@ func Select(mode locus.Mode, role Role, tiers Tiers) (Selection, error) {
 // SelectDestination never treats Primary backup as Secondary. Explicit Secondary
 // has no cross-destination fallback. Primary keeps the established locus policy.
 func SelectDestination(mode locus.Mode, destination config.Destination, tiers Tiers) (Selection, error) {
+	if tiers.Mode != "" {
+		mode = tiers.Mode
+	}
 	if tiers.ResolveDestination != nil {
 		final, err := tiers.ResolveDestination(destination)
 		if err != nil {

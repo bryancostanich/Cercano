@@ -22,11 +22,11 @@ or `Bash`. The `SKILL.md` files under `plugins/skills/` and the embedded
 
 | Tool | Shape | Runs on | Use it for |
 |---|---|---|---|
-| `dispatch` (alias `workflow`) | agentic sub-agent (bounded tool loop over a granted toolset) | resolved by locus + the tier you request | tracing a code path, "how/if does X happen," understanding a class, finding something in a subsystem, any read-heavy recon that returns a distilled answer |
-| `explain` | one-shot, local co-processor | open tier | explaining a file/snippet you already have in hand |
-| `summarize` | one-shot, local co-processor | open tier | condensing a long file or output |
-| `extract` | one-shot, local co-processor | open tier | pulling specific facts out of text |
-| `classify` | one-shot, local co-processor | open tier | bucketing text/files |
+| `dispatch` (alias `workflow`) | agentic sub-agent (bounded tool loop over a granted toolset) | saved task class → redirects → locality policy | tracing a code path, "how/if does X happen," understanding a class, finding something in a subsystem, any read-heavy recon that returns a distilled answer |
+| `explain` | one-shot text analysis | Reconnaissance route | explaining a file/snippet you already have in hand |
+| `summarize` | one-shot text analysis | Reconnaissance route | condensing a long file or output |
+| `extract` | one-shot text analysis | Reconnaissance route | pulling specific facts out of text |
+| `classify` | one-shot text analysis | Reconnaissance route | bucketing text/files |
 
 **Canonical delegation example.** Instead of running fifteen Grep/Read calls
 yourself to chase a code path, call `dispatch` with a concrete intent and a
@@ -34,54 +34,32 @@ read-only grant:
 
 ```json
 {
+  "class": "reconnaissance",
   "task": "Figure out how/if model reloading happens when the backend changes. Trace the code and return the full code path, the relevant code snippets, and their file:line locations.",
   "tools": ["Read", "Grep", "Glob"]
 }
 ```
 
-The sub-agent does the grinding on an open model and hands you back the answer;
-you spend frontier tokens only on the part that needs them.
+The sub-agent uses the configured Reconnaissance route (Local/Light by default), which the user can override. Do not assume it is free or local after a redirect.
 
-### The two axes that decide where work runs
+### Task class, quality, and permissions are independent
 
-Delegation is a two-axis decision, and **both axes belong to you, the delegating
-thread**:
+Choose `class` at the semantic entry point:
 
-1. **How much brain does this task need?** You judge whether an open model is
-   *sufficient* (tracing code, understanding a class, documenting → yes, open is
-   plenty) or whether it genuinely needs a frontier model. You express this as a
-   tier; you never express a location.
-2. **Locus mode maps that onto a physical tier and decides whether crossing is
-   allowed** (`internal/locus`, single source of truth). You do not decide
-   local-vs-cloud — locus does:
-   - **cloud_primary** (default): main thread is cloud; open-sufficient
-     delegations resolve *down* to the local model. This is the mode where
-     offloading recon to open models saves the most.
-   - **open_primary**: main thread is an open model; a delegation you mark as
-     needing a frontier model escalates *up* to cloud — but only if crossing is
-     allowed.
-   - **open_only / cloud_only**: never cross tiers; the request stays on the one
-     permitted tier or fails.
+- `reconnaissance`: narrow read-only tracing, extraction and summaries (Local/Light).
+- `mechanical_development`: well-specified edits (Local/Standard).
+- `investigation`: open-ended diagnosis (Secondary/Premium).
+- `implementation`: substantial implementation (Secondary/Premium).
+- `review`: standalone adversarial review (Secondary/Premium).
+- `research`: source gathering, query generation and synthesis (Secondary/Premium).
+- `git_land`: the existing landing workflow including its nested review (Local/Premium).
+- `watchdog`: normal Watchdog routing (Local/Standard); no special placement exemption.
 
-So you say "an open model is sufficient for this," locus decides that means the
-local model under cloud_primary (or the open model under open_primary). Same
-knob, correct behavior in every mode.
+Chat is Primary/Premium; omitted dispatch class uses Default dispatch (Secondary/Premium). Unknown explicit classes are rejected. Prefer omitting `tier` so the chosen class's saved quality applies. Explicit `light`, `standard`, or `deep` changes quality only; it never chooses a destination, class or permission grant. Light uses the persisted `economy` value.
 
-How this is wired in `dispatch_cap.go`: the capability always sets
-`Role: RoleCoproc` — a delegated sub-agent is offloadable work, so its location
-resolves like the co-processor (open under cloud_primary, and per your locus
-mode otherwise). The main thread never names a location. The only model-facing
-knob is `tier: "light" | "standard" | "deep"` (axis 1, "how much brain"),
-mapping to `TierFastLight` / `TierEveryday` / `TierMostCapable`; omitted or
-unrecognized defaults to `light` so delegated grunt work offloads cheaply.
-`tier` never changes `Role` — reasoning demand and location stay independent,
-matching the engine's own `Select(role)` vs `modelFor(tier)` split.
+Secondary/Local redirects resolve before placement and model selection. Only the final destination's models, credentials and backup chain apply. Saved source assignments remain unchanged. Locus policy still prohibits forbidden placement; final Secondary cannot fall through to Primary/Local. Tool permissions remain the explicit grant and approval system, independent of model quality. See [the routing guide](../cloud-routing.md).
 
-> **History:** `dispatch` used to hardcode `Role: RoleMain` (plus
-> `Tier: TierEveryday`), which pinned every sub-agent to the main thread's tier
-> — cloud under cloud_primary — defeating the point of delegating recon off the
-> frontier tier. Fixed by switching to `RoleCoproc` and exposing the `tier` knob
-> above.
+The old RoleCoproc/default-light delegation policy is retired. Text analysis uses Reconnaissance; the explicit `local` tool retains its existing local-offload intent. New first-party callers must pass a task class; do not infer one from role, prompt text or tool/source names.
 
 ## Layout & build
 

@@ -1185,6 +1185,21 @@ func applyEnvOverrides(cfg *Config) {
 // array.
 func (c Config) Clone() Config {
 	out := c
+	// A routing graph must not observe later edits to per-runtime model slots.
+	if c.Models.Open.Overrides != nil {
+		out.Models.Open.Overrides = make(map[string]map[string]string, len(c.Models.Open.Overrides))
+		for runtime, tiers := range c.Models.Open.Overrides {
+			if tiers == nil {
+				out.Models.Open.Overrides[runtime] = nil
+				continue
+			}
+			copied := make(map[string]string, len(tiers))
+			for tier, model := range tiers {
+				copied[tier] = model
+			}
+			out.Models.Open.Overrides[runtime] = copied
+		}
+	}
 	if c.LlamaServer.ContextSize != nil {
 		n := *c.LlamaServer.ContextSize
 		out.LlamaServer.ContextSize = &n

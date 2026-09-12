@@ -66,6 +66,12 @@ func (m *Model) closeConfigSurface() tea.Cmd {
 // init/refresh cmd.
 func (m *Model) switchConfigTab(tab configTab) tea.Cmd {
 	tab = clampConfigTab(tab)
+	if m.configSurface != nil && tab == m.configSurface.active {
+		// Reselecting the current tab is focus navigation, not a refresh that
+		// may replace a page carrying unsaved Cloud or Routing edits.
+		m.configSurface.focused = true
+		return nil
+	}
 	if m.configSurface != nil && tab != m.configSurface.active && m.deferCloudNavigation(&tab, false) {
 		return nil
 	}

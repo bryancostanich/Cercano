@@ -86,3 +86,17 @@ func EffectiveModel(c cfg.Config, t cfg.Tier, catalog CatalogDefaults, ramBytes 
 	}
 	return catalog(c.OpenRuntime, ramBytes)[string(t)]
 }
+
+// ModelsForConfig captures all effective tiers for an immutable routing graph.
+func (r *Resolver) ModelsForConfig(c cfg.Config) map[cfg.Tier]string {
+	out := map[cfg.Tier]string{}
+	defaults := r.catalog(c.OpenRuntime, r.ram())
+	for _, t := range []cfg.Tier{cfg.TierFastLight, cfg.TierFastLightText, cfg.TierEveryday, cfg.TierMostCapable, cfg.TierVision, cfg.TierEmbedding} {
+		if id, ok := c.Models.OverrideFor(c.OpenRuntime, t); ok {
+			out[t] = id
+		} else {
+			out[t] = defaults[string(t)]
+		}
+	}
+	return out
+}

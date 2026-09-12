@@ -2853,7 +2853,7 @@ func (m Model) submit(text string, images []agentclient.InlineImage) (tea.Model,
 	// New turn = new generation: stream events from any prior (canceled) turn
 	// become identifiable ghosts.
 	m.turnGen++
-	driver := &mainAgentDriver{agent: m.agent, convID: m.convID, workDir: m.effectiveWorkDir()}
+	driver := &mainAgentDriver{agent: m.agent, convID: m.convID, workDir: m.effectiveWorkDir(), debugMode: m.workDirOverride != ""}
 	cmd, cancel, err := driver.Submit(context.Background(), m.turnGen, text, images)
 	if err != nil {
 		m.errMsg = err.Error()

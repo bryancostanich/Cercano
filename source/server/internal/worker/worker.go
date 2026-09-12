@@ -108,6 +108,7 @@ func (w *WorkerServer) runTurn(stream proto.Worker_RunTurnServer, authRecovery b
 	// must mutate the host's live profile broker, not a worker-local copy.
 	profileCtl := newStreamSessionProfileController(sndr, start.GetConversationId())
 	authRequest := newStreamAuthentication(sndr)
+	runtimeControl := newStreamRuntimeControl(sndr)
 
 	// Recv loop: routes incoming HostToWorker messages from the host.
 	recvDone := make(chan struct{})
@@ -119,6 +120,8 @@ func (w *WorkerServer) runTurn(stream proto.Worker_RunTurnServer, authRecovery b
 				return // stream closed or host hung up
 			}
 			switch {
+			case msg.GetRuntimeResponse() != nil:
+				runtimeControl.deliver(msg.GetRuntimeResponse())
 			case msg.GetAuthResponse() != nil:
 				authRequest.deliver(msg.GetAuthResponse())
 			case msg.GetPermResponse() != nil:
@@ -137,7 +140,7 @@ func (w *WorkerServer) runTurn(stream proto.Worker_RunTurnServer, authRecovery b
 	}()
 
 	// Build Deps from StartTurn.
-	deps, buildErr := w.buildDeps(ctx, start, credSource, openProxy, subPersist, profileCtl)
+	deps, buildErr := w.buildDeps(ctx, start, credSource, openProxy, subPersist, profileCtl, runtimeControl.Restart)
 	if buildErr != nil {
 		sndr.close()
 		cancel() // returning finalizes the stream; the recv goroutine unwinds on the Recv error
@@ -178,6 +181,7 @@ func (w *WorkerServer) runTurn(stream proto.Worker_RunTurnServer, authRecovery b
 		ConversationID: start.GetConversationId(),
 		Input:          start.GetInput(),
 		WorkDir:        start.GetWorkDir(),
+		DebugMode:      start.GetDebugMode(),
 		Gen:            start.GetGen(),
 	}
 	if authRecovery {
@@ -240,7 +244,7 @@ func (w *WorkerServer) runTurn(stream proto.Worker_RunTurnServer, authRecovery b
 
 // ─── buildDeps ────────────────────────────────────────────────────────────────
 
-func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, credSource *streamCredentialSource, openProxy *streamOpenProvider, subPersist *streamSubagentPersist, profileCtl *streamSessionProfileController) (runner.Deps, error) {
+func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, credSource *streamCredentialSource, openProxy *streamOpenProvider, subPersist *streamSubagentPersist, profileCtl *streamSessionProfileController, restart ...runtimeRestartFunc) (runner.Deps, error) {
 	// Build config from snapshot.
 	cfg := ConfigFromSnapshot(start.GetConfig())
 	cfgService := cfgsvc.New("", cfg, secrets.NewMemory())
@@ -372,7 +376,7 @@ func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, cr
 			return runner.Deps{}, fmt.Errorf("build tools: %w", err)
 		}
 	} else {
-		toolSvc = buildWorkerToolSvc(permBroker, engine, ctxLoader, provSvc.Cloud(), provSvc.Open(), cfg, subPersist, profileCtl.SetProfile, visionSvc, failureLog)
+		toolSvc = buildWorkerToolSvc(permBroker, engine, ctxLoader, provSvc.Cloud(), provSvc.Open(), cfg, subPersist, profileCtl.SetProfile, visionSvc, failureLog, restart...)
 	}
 
 	// Build the protocol-supervision watchdog from the snapshotted config

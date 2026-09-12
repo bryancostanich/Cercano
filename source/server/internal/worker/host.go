@@ -55,9 +55,10 @@ type dialFunc func(ctx context.Context) (*grpc.ClientConn, error)
 
 // workerRunner implements runner.TurnRunner by running turns in a child process.
 type workerRunner struct {
-	persist runner.TurnHistory
-	cfg     cfgsvc.Service
-	perms   permissions.Broker
+	restartRuntime runtimeRestartFunc
+	persist        runner.TurnHistory
+	cfg            cfgsvc.Service
+	perms          permissions.Broker
 
 	// openTierModel resolves the EFFECTIVE open model id for a tier on the
 	// active runtime (override-else-catalog-default), so the ConfigSnapshot
@@ -122,13 +123,19 @@ func NewWorkerRunner(
 	openProvider func() inference.Provider,
 	openTierModel func(pkgcfg.Tier) string,
 	modelEvidence func(ctx context.Context, cfg pkgcfg.Config) modelmetadata.Snapshot,
+	restart ...runtimeRestartFunc,
 ) runner.TurnRunner {
+	var restartRuntime runtimeRestartFunc
+	if len(restart) > 0 {
+		restartRuntime = restart[0]
+	}
 	pool := newWorkerPool(nil) // production: spawn via spawnWorker
 	// Start the idle-reaper with the configured window. The reaper runs on a
 	// background context and stops when the pool is Shut down (Shutdown closes
 	// p.done). A window <= 0 (config's "disabled" sentinel) starts no goroutine.
 	pool.StartReaper(context.Background(), cfg.Get().WorkerIdleTimeout())
 	return &workerRunner{
+		restartRuntime: restartRuntime,
 		persist:        persist,
 		cfg:            cfg,
 		perms:          perms,
@@ -278,6 +285,7 @@ func (w *workerRunner) RunTurn(
 		Input:          req.Input,
 		Images:         protoImages,
 		WorkDir:        req.WorkDir,
+		DebugMode:      req.DebugMode,
 		Gen:            req.Gen,
 		Config:         snap,
 		History:        historyProto,
@@ -492,6 +500,24 @@ func (w *workerRunner) RunTurn(
 				}
 			}
 
+		case *proto.WorkerToHost_RuntimeRequest:
+			request := m.RuntimeRequest
+			go func() {
+				response := &proto.RuntimeRestartToolResponse{Id: request.GetId()}
+				if w.restartRuntime == nil {
+					response.Error = "runtime control not configured"
+				} else {
+					result, err := w.restartRuntime(ctx, request.GetInstanceId())
+					if err != nil {
+						response.Error = err.Error()
+					} else {
+						response.ResultJson = result
+					}
+				}
+				if err := safeSend(&proto.HostToWorker{Msg: &proto.HostToWorker_RuntimeResponse{RuntimeResponse: response}}); err != nil {
+					log.Printf("[workerRunner] runtime response: %v", err)
+				}
+			}()
 		case *proto.WorkerToHost_ProfileRequest:
 			// Session-control capabilities run in the worker but own no session
 			// state. Apply profile changes on the host profile broker and respond so

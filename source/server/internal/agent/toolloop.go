@@ -108,6 +108,7 @@ func loopProgressEvent(defaultToolUseID, defaultToolName string, progress agentt
 }
 
 type ToolLoopInput struct {
+	DebugMode   bool
 	Provider    inference.Provider
 	Registry    *agenttools.Registry
 	Permissions *PermissionStore
@@ -485,7 +486,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (returned ToolLoopResult
 	// model never reaches for a tool it can't have. Enforcement is separate,
 	// below at the gate — filtering is ergonomics, not the fence.
 	hydratedTools := map[string]bool{}
-	catalog := buildCompactToolCatalog(in.Registry, in.Profile, in.TightContextFallback, hydratedTools)
+	catalog := buildCompactToolCatalog(in.Registry, in.Profile, in.TightContextFallback, hydratedTools, in.DebugMode)
 	if in.TightContextFallback {
 		log.Printf("[tool-loop] compact fallback catalog: conv=%s provider=%s model=%s tools=%d names=%v", in.ConversationID, in.Provider.Name(), in.Model, len(catalog), toolNamesForLog(catalog))
 	}
@@ -563,10 +564,10 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (returned ToolLoopResult
 		// screenshot returned by a tool cannot be replayed as raw base64 on the next
 		// iteration.
 		hist = RewriteImagesToPlaceholders(in.VisionStore, in.ConversationID, hist)
-		catalog = buildCompactToolCatalog(in.Registry, in.Profile, in.TightContextFallback, hydratedTools)
+		catalog = buildCompactToolCatalog(in.Registry, in.Profile, in.TightContextFallback, hydratedTools, in.DebugMode)
 		effectiveSystem := in.System
 		if in.TightContextFallback {
-			effectiveSystem += compactToolDirectory(in.Registry, in.Profile, hydratedTools)
+			effectiveSystem += compactToolDirectory(in.Registry, in.Profile, hydratedTools, in.DebugMode)
 			log.Printf("[tool-loop] compact fallback catalog: conv=%s provider=%s model=%s iter=%d tools=%d hydrated=%d names=%v", in.ConversationID, in.Provider.Name(), in.Model, iter+1, len(catalog), len(hydratedTools), toolNamesForLog(catalog))
 		}
 		preserveTail := len(hist) - priorHistoryCount

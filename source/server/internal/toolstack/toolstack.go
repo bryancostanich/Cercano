@@ -17,6 +17,7 @@ package toolstack
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"cercano/source/server/internal/capabilities"
@@ -88,7 +89,8 @@ type CapDeps struct {
 	// RestartAgent bounces the singleton agent process (used by the restart_agent
 	// capability). Optional; nil means agent restart is unavailable and
 	// restart_agent errors clearly.
-	RestartAgent func(reason string) error
+	RestartAgent   func(reason string) error
+	RestartRuntime func(context.Context, string) (json.RawMessage, error)
 	// Vision backs the inspect_image capability: it resolves a per-conversation
 	// image attachment and asks the configured vision model a focused question.
 	// Optional; nil means vision-as-tool is not configured and inspect_image
@@ -141,9 +143,10 @@ func InstallCapabilities(svc tools.Catalog, d CapDeps) {
 			}
 			return target, nil
 		},
-		EnterProfile: d.EnterProfile,
-		RestartAgent: d.RestartAgent,
-		Vision:       d.Vision,
+		EnterProfile:   d.EnterProfile,
+		RestartAgent:   d.RestartAgent,
+		RestartRuntime: d.RestartRuntime,
+		Vision:         d.Vision,
 	})
 	builtins.Register(capReg)
 	svc.SetCapRegistry(capReg)

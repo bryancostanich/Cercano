@@ -2,6 +2,7 @@ package server
 
 import (
 	"cercano/source/server/internal/routingwire"
+	"cercano/source/server/internal/runtimecontrol"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -283,6 +284,7 @@ func (s *Server) InstallCapabilities() {
 		// restart_agent bounces the singleton agent via a self-SIGTERM once the
 		// user approves at the confirm gate. Same drain+child-stop path as the
 		// ShutdownAgent RPC; the CLI reconnect loop auto-launches a fresh agent.
+		RestartRuntime: s.restartRuntimeTool,
 		RestartAgent: func(reason string) error {
 			log.Printf("restart_agent capability accepted: %s", reason)
 			s.scheduleSelfShutdown()
@@ -1180,6 +1182,7 @@ func (s *Server) SelectExecutionMode() {
 		func() inference.Provider { return s.OpenLLMProvider() }, // answers the worker's OpenInferenceRequests
 		s.openModels.Model,  // resolves effective active-runtime open tier models for the snapshot
 		s.turnModelEvidence, // host-resolved capability evidence for every model the turn might address
+		s.restartRuntimeTool,
 	)
 	log.Printf("[server] execution mode: worker (turns run in isolated child processes; " +
 		"MCP-involving turns fall back to in-process — worker MCP proxying is a future refinement)")
@@ -3197,6 +3200,7 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 		Input:          req.GetInput(),
 		Images:         mapInlineImages(req.GetImages()),
 		WorkDir:        req.GetWorkDir(),
+		DebugMode:      req.GetDebugMode(),
 		Gen:            turnGen,
 	}
 
@@ -3985,4 +3989,8 @@ func (s *Server) profileModelEvidence(p config.CloudProfile, model string) model
 	ctx, cancel := context.WithTimeout(context.Background(), cloudEvidenceTimeout)
 	defer cancel()
 	return s.modelEvidence().Resolve(ctx, modelevidence.IdentityFor(p, model))
+}
+
+func (s *Server) restartRuntimeTool(ctx context.Context, id string) (json.RawMessage, error) {
+	return runtimecontrol.Restart(ctx, s, id)
 }

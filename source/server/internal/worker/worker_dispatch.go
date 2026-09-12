@@ -51,7 +51,12 @@ func buildWorkerToolSvc(
 	enterProfile func(context.Context, string) error,
 	vision capabilities.VisionService,
 	failures *failurelog.Writer,
+	restart ...runtimeRestartFunc,
 ) runner.ToolSvc {
+	var restartRuntime runtimeRestartFunc
+	if len(restart) > 0 {
+		restartRuntime = restart[0]
+	}
 	systemPrompt := func(workDir string) string {
 		// Sub-agents (Agentic dispatch) never run under a session capability
 		// profile — planning mode is a top-level session posture, not inherited
@@ -65,10 +70,11 @@ func buildWorkerToolSvc(
 		svc.SetEnsureSubagent(subPersist.ensure) // worker creates sub-agent conversation rows on the host
 	}
 	toolstack.InstallCapabilities(svc, toolstack.CapDeps{
-		Cloud:     cloud,
-		Open:      open,
-		Config:    &cfg,
-		CtxLoader: ctxLoader,
+		RestartRuntime: restartRuntime,
+		Cloud:          cloud,
+		Open:           open,
+		Config:         &cfg,
+		CtxLoader:      ctxLoader,
 		EnterProfile: func(convID, name string) error {
 			if enterProfile == nil {
 				return fmt.Errorf("session profile control not configured")

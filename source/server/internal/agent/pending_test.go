@@ -22,9 +22,19 @@ func TestPending_WaitResolves(t *testing.T) {
 
 func TestPendingCarriesPersist(t *testing.T) {
 	p := NewPendingDecisions()
-	go func() { p.Resolve("c1", "t1", Decision{Allow: true, Persist: true}) }()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
+	go func() {
+		// Resolve intentionally rejects decisions before a waiter registers.
+		// Synchronize on acceptance instead of depending on goroutine order.
+		for !p.Resolve("c1", "t1", Decision{Allow: true, Persist: true}) {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(time.Millisecond):
+			}
+		}
+	}()
 	d, err := p.Wait(ctx, "c1", "t1")
 	if err != nil {
 		t.Fatal(err)

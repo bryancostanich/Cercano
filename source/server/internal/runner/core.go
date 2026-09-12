@@ -684,6 +684,7 @@ func (c *Core) runLoop(
 	}
 
 	return agent.RunToolLoop(ctx, agent.ToolLoopInput{
+		DebugMode:            req.DebugMode,
 		Provider:             provider,
 		Registry:             gateRegistry,
 		Permissions:          permStore,

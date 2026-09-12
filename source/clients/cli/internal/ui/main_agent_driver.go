@@ -13,9 +13,10 @@ import (
 // the host stays a pure router (no streamCh field) — the channel + cancel travel
 // inside the emitted chatStreamMsg so the drain loop re-arms itself.
 type mainAgentDriver struct {
-	agent   *agentclient.Client
-	convID  string
-	workDir string
+	agent     *agentclient.Client
+	convID    string
+	workDir   string
+	debugMode bool
 }
 
 func (d *mainAgentDriver) Name() string { return "main agent" }
@@ -38,7 +39,7 @@ type chatStreamMsg struct {
 // carries gen — the host's turn generation at submit time — so stale events
 // from a canceled turn are identifiable.
 func (d *mainAgentDriver) Submit(ctx context.Context, gen int, input string, images []agentclient.InlineImage) (tea.Cmd, context.CancelFunc, error) {
-	ctx, cancel := context.WithCancel(ctx)
+	ctx, cancel := context.WithCancel(agentclient.WithDebugAdvertisement(ctx, d.debugMode))
 	ch, err := d.agent.StreamChatWithRecovery(ctx, d.convID, input, d.workDir, images...)
 	if err != nil {
 		cancel()

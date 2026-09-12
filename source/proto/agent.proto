@@ -413,6 +413,7 @@ message ProcessRequestRequest {
   bool coproc = 8; // Route per Locus Mode's co-processor tier (local/cloud)
   repeated InlineImage images = 9; // user-attached images, spliced in at "[image N]" markers in input
   bool supports_auth_recovery = 10;
+ bool debug_mode = 12; // advertisement only; does not grant permissions
   // One-shot co-processor policy; false preserves the model default.
   bool disable_thinking = 11;
 }
@@ -1607,6 +1608,7 @@ message HostToWorker {
     OpenInferenceEvent     open_event       = 5;
     SessionProfileResponse profile_response = 6;
     WorkerAuthenticationResponse auth_response = 7;
+ RuntimeRestartToolResponse runtime_response = 8;
   }
 }
 
@@ -1624,6 +1626,7 @@ message WorkerToHost {
     SessionProfileRequest    profile_request = 9;
  RuntimeRequestAccounting request_accounting = 10;
     WorkerAuthenticationRequest auth_request = 11;
+ RuntimeRestartToolRequest runtime_request = 12;
   }
 }
 
@@ -1639,7 +1642,8 @@ message StartTurn {
   ConfigSnapshot      config           = 6;
   repeated LLMMessage history          = 7;
   string              project_context  = 8;
-  string              permission_mode  = 9; // host's mode: "strict"|"permissive"|"bypass" — worker gating MUST match the host, never default
+  bool debug_mode = 10;
+ string              permission_mode  = 9; // host's mode: "strict"|"permissive"|"bypass" — worker gating MUST match the host, never default
 }
 
 // LLMMessage is the wire form of llm.Message. Serialization uses the same
@@ -2060,3 +2064,6 @@ message WorkerAuthenticationResponse {
 }
 
 message AuthenticationDecisionResponse {}
+
+message RuntimeRestartToolRequest { string id = 1; string instance_id = 2; }
+message RuntimeRestartToolResponse { string id = 1; bytes result_json = 2; string error = 3; }

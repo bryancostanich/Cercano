@@ -29,7 +29,7 @@ var compactFallbackTools = map[string]bool{
 	// Native agent workflow and local model helpers.
 	"dispatch": true, "workflow": true, "local": true, "classify": true,
 	"explain": true, "extract": true, "summarize": true, "review": true,
-	"get_protocol": true,
+	"get_protocol": true, "restart_runtime": true,
 	// Planning/autonomous handoff and status tools that the active profile may
 	// require even in a narrowed catalog.
 	"suggest_plan": true, "request_plan_approval": true, "plan_exit": true,
@@ -62,10 +62,12 @@ func enableToolsCatalogEntry() llm.Tool {
 	}
 }
 
-func buildCompactToolCatalog(reg *agenttools.Registry, profile Profile, tight bool, hydrated map[string]bool) []llm.Tool {
-	var allowTool func(llm.Permission, string) bool
+func buildCompactToolCatalog(reg *agenttools.Registry, profile Profile, tight bool, hydrated map[string]bool, debug ...bool) []llm.Tool {
+	allowTool := func(_ llm.Permission, name string) bool {
+		return name != "restart_runtime" || (len(debug) > 0 && debug[0])
+	}
 	if profile.Restricts() {
-		allowTool = profile.Allows
+		allowTool = combineAllows(allowTool, profile.Allows)
 	}
 	if tight {
 		allowTool = combineAllows(allowTool, func(tier llm.Permission, name string) bool {
@@ -80,9 +82,12 @@ func buildCompactToolCatalog(reg *agenttools.Registry, profile Profile, tight bo
 	return catalog
 }
 
-func compactToolDirectory(reg *agenttools.Registry, profile Profile, hydrated map[string]bool) string {
+func compactToolDirectory(reg *agenttools.Registry, profile Profile, hydrated map[string]bool, debug ...bool) string {
 	entries := []string{}
 	for _, tool := range reg.All() {
+		if tool.Name() == "restart_runtime" && (len(debug) == 0 || !debug[0]) {
+			continue
+		}
 		tier := agenttools.PermissionToLLM(tool.Permission())
 		if !profile.Allows(tier, tool.Name()) {
 			continue

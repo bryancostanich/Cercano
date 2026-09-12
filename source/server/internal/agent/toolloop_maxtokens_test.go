@@ -125,7 +125,7 @@ func TestToolLoop_SmallWindowKeepsGrantedToolsAdvertised(t *testing.T) {
 
 	if _, err := RunToolLoop(t.Context(), ToolLoopInput{
 		Provider: prov, Registry: testDefaultRegistry(), Permissions: perms,
-		UserInput: "x", ContextWindow: 16384, ContextWindowKnown: true,
+		UserInput: "x", ContextWindow: 16384, ContextWindowKnown: true, DebugMode: true, // include the full debug catalog for this clamp regression
 	}); err != nil {
 		t.Fatal(err)
 	}

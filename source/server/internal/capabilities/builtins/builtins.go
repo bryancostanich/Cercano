@@ -75,6 +75,7 @@ func Register(reg *capabilities.Registry) {
 	reg.MustRegister(GitRecover())
 	reg.MustRegister(GitLand())
 	reg.MustRegister(RestartAgent())
+	reg.MustRegister(RestartRuntime())
 }
 
 // AgentAliases maps canonical capability names to standalone display names —

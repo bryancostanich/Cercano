@@ -50,6 +50,7 @@ type ToolSvc interface {
 // assembles history itself (so it works across a process boundary; see the
 // plan's load-bearing decision).
 type Request struct {
+	DebugMode      bool
 	AuthRecovery   llm.AuthRequester
 	ConversationID string
 	Input          string

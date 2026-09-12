@@ -2083,6 +2083,7 @@ func (c *Client) StreamChat(ctx context.Context, conversationID, input, workDir 
 func (c *Client) streamChat(ctx context.Context, conversationID, input, workDir string, recovery bool, images ...InlineImage) (<-chan StreamMsg, error) {
 	stream, err := c.agent.StreamProcessRequest(ctx, &proto.ProcessRequestRequest{
 		SupportsAuthRecovery: recovery,
+		DebugMode:            debugAdvertisement(ctx),
 		Input:                input,
 		ConversationId:       conversationID,
 		WorkDir:              workDir,
@@ -2526,20 +2527,23 @@ func (c *Client) SetCloudProfileKey(ctx context.Context, name, key string) error
 }
 
 // UpsertCloudProfile creates or updates a cloud profile's metadata.
-func (c *Client) UpsertCloudProfile(ctx context.Context,p CloudProfileInfo)error {_,err:=c.SaveCloudProfile(ctx,p);return err}
+func (c *Client) UpsertCloudProfile(ctx context.Context, p CloudProfileInfo) error {
+	_, err := c.SaveCloudProfile(ctx, p)
+	return err
+}
 
-func (c *Client) SaveCloudProfile(ctx context.Context, p CloudProfileInfo) (string,error) {
+func (c *Client) SaveCloudProfile(ctx context.Context, p CloudProfileInfo) (string, error) {
 	resp, err := c.agent.UpsertCloudProfile(ctx, &proto.UpsertCloudProfileRequest{
 		Name: p.Name, Flavor: p.Flavor, Backend: p.Backend, BaseUrl: p.BaseURL, Route: p.Route,
 		ModelChoices: choicesToProto(p.Choices), Structure: profileStructureToProto(p), Provider: nonemptyProfileField(p.Provider), Region: nonemptyProfileField(p.Region), AwsProfile: nonemptyProfileField(p.AWSProfile),
 	})
 	if err != nil {
-		return "",err
+		return "", err
 	}
 	if !resp.GetOk() {
-		return "",fmt.Errorf("%s", resp.GetError())
+		return "", fmt.Errorf("%s", resp.GetError())
 	}
-	return resp.GetWarning(),nil
+	return resp.GetWarning(), nil
 }
 
 // RemoveCloudProfile deletes a cloud profile and its keychain key.

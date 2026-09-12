@@ -37,10 +37,10 @@ Objective: reuse the existing onboarding lifecycle when the config file remains 
 
 Tests: shared path rules, persisted-state compatibility, fresh initial state, startup decision with retained config, baseline capture/rollback, completion and interrupted resume.
 
-- [ ] Extract only the persisted state/path/load-save boundary needed by both executables, keeping existing wizard files readable and preserving CERCANO_WIZARD_STATE and XDG_CONFIG_HOME behavior.
-- [ ] Provide a typed fresh-initial-state operation with no previous answers, selected profiles/models, completion markers or rollback baseline. Reuse the existing first step rather than introducing a competing setup-pending flag.
-- [ ] Ensure the CLI recognizes fresh wizard state even when config exists, captures only the post-reset baseline, and cannot restore pre-reset settings when setup is cancelled or resumed.
-- [ ] Test normal wizard completion and subsequent launch do not reopen setup unnecessarily; verify default-location downloads can be rediscovered without preserving old selections or custom directory overrides.
+- [x] Extract only the persisted state/path/load-save boundary needed by both executables, keeping existing wizard files readable and preserving CERCANO_WIZARD_STATE and XDG_CONFIG_HOME behavior.
+- [x] Provide a typed fresh-initial-state operation with no previous answers, selected profiles/models, completion markers or rollback baseline. Reuse the existing first step rather than introducing a competing setup-pending flag.
+- [x] Ensure the CLI recognizes fresh wizard state even when config exists, captures only the post-reset baseline, and cannot restore pre-reset settings when setup is cancelled or resumed.
+- [~] Test normal wizard completion and subsequent launch do not reopen setup unnecessarily; verify default-location downloads can be rediscovered without preserving old selections or custom directory overrides.
 
 ## Phase 4 — Exclusive offline coordination
 

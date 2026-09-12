@@ -16,7 +16,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	cliui "cercano/source/clients/cli/internal/ui"
-	"cercano/source/clients/cli/internal/wizard"
 	"cercano/source/server/pkg/agentclient"
 	"cercano/source/server/pkg/config"
 	"cercano/source/server/pkg/update"
@@ -65,15 +64,7 @@ func main() {
 	openHistory := *resumeShort || *resumeLong
 	// The wizard opens on explicit request, on first run (no config file
 	// yet), or when a previous run was left unfinished (resume).
-	openWizard := *setupShort || *setupLong
-	if !openWizard {
-		if _, statErr := os.Stat(config.DefaultPath()); os.IsNotExist(statErr) {
-			openWizard = true
-		}
-	}
-	if !openWizard {
-		_, openWizard = wizard.Load()
-	}
+	openWizard := needsSetup(*setupShort || *setupLong, config.DefaultPath())
 	seedDoc := ""
 	if *mdtest {
 		// Render-testing mode: launch the TUI with a markdown doc pre-loaded.

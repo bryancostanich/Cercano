@@ -93,6 +93,8 @@ func (m *Model) buildConfigTabPage(tab configTab) (contentPage, tea.Cmd) {
 	case configTabMcp:
 		d, cmd := newMcpDashboard(m.agent, m.palette, m.styles, m.width, h)
 		return d, tea.Batch(cmd, d.refreshTick())
+	case configTabRouting:
+		return newScopedSettingsPage(m.agent, m.palette, m.styles, m.promptColorToken, m.width, h, m.themes, m.theme, scopeRouting)
 	case configTabCloud:
 		return newScopedSettingsPage(m.agent, m.palette, m.styles, m.promptColorToken, m.width, h, m.themes, m.theme, scopeCloud)
 	case configTabRuntime:
@@ -138,8 +140,8 @@ func (m Model) handleConfigSurfaceKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool
 			cs.pendingClose = false
 			cs.pendingTab = nil
 			if sp, ok := m.content.(*settingsPage); ok {
-				sp.discardCloudDrafts()
-				sp.cloudNavigationPrompt = false
+				sp.discardSettingsDrafts()
+				sp.settingsNavigationPrompt = false
 			}
 			if close {
 				return m, m.closeConfigSurface(), true
@@ -151,7 +153,7 @@ func (m Model) handleConfigSurfaceKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool
 			cs.pendingClose = false
 			cs.pendingTab = nil
 			if sp, ok := m.content.(*settingsPage); ok {
-				sp.cloudNavigationPrompt = false
+				sp.settingsNavigationPrompt = false
 				sp.form.SetStatus("kept unsaved edits")
 			}
 		}
@@ -195,7 +197,7 @@ func (m Model) handleConfigSurfaceKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool
 			// which reads naturally too.
 			next, cmd := m.dropFocusForwarding(msg)
 			return next, cmd, true
-		case "1", "2", "3", "4", "5", "6", "7":
+		case "1", "2", "3", "4", "5", "6", "7", "8":
 			return m, m.switchConfigTab(configTab(int(key[0] - '1'))), true
 		}
 		// A page may advertise action hotkeys (e.g. the MCP dashboard's
@@ -337,11 +339,11 @@ func (m *Model) deferCloudNavigation(tab *configTab, close bool) bool {
 		return false
 	}
 	sp, ok := m.content.(*settingsPage)
-	if !ok || !sp.cloudHasUnsaved() {
+	if !ok || !sp.hasUnsavedSettings() {
 		return false
 	}
 	m.configSurface.pendingTab = tab
 	m.configSurface.pendingClose = close
-	sp.cloudNavigationPrompt = true
+	sp.settingsNavigationPrompt = true
 	return true
 }

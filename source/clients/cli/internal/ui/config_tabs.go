@@ -10,6 +10,7 @@ type configTab int
 const (
 	configTabGeneral configTab = iota // routing, permissions, server, dev tools (settings form)
 	configTabCloud                    // cloud-profiles editor (settings form, cloud section)
+	configTabRouting                  // task assignment and destination setup
 	configTabRuntime                  // runtime + open-model picker (dashboard, runtime mode)
 	configTabModels                   // the runtime dashboard (local model management)
 	configTabMcp                      // hosted MCP servers (dashboard + add-server popover)
@@ -18,11 +19,11 @@ const (
 )
 
 // configTabLabels are the visible tab titles, indexed by configTab.
-var configTabLabels = []string{"General", "Cloud", "Runtime", "Local Models", "MCP", "UI", "Context"}
+var configTabLabels = []string{"General", "Cloud", "Routing", "Runtime", "Local Models", "MCP", "UI", "Context"}
 
 // configTabCount is the number of tabs; kept as a named constant so wrap-around
 // navigation and digit-jump bounds stay in one place.
-const configTabCount = 7
+const configTabCount = 8
 
 func (t configTab) label() string {
 	if int(t) < 0 || int(t) >= len(configTabLabels) {

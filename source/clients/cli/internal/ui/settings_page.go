@@ -59,6 +59,7 @@ const (
 	scopeAll     settingsScope = iota // every section (legacy single page)
 	scopeGeneral                      // routing, permissions, server, dev tools
 	scopeCloud                        // cloud-profiles editor
+	scopeRouting                      // independent routing draft
 	scopeUI                           // theme sections
 )
 
@@ -92,15 +93,15 @@ type settingsPage struct {
 	// cloudView is the grouped provider catalog from GetCloudProviders that the
 	// cloud section renders (one row per provider with its profiles grouped
 	// under it). Loaded alongside profiles under the same profilesLoaded gate.
-	cloudView             agentclient.CloudProvidersView
-	cloudSelected         string
-	cloudDraft            cloudDraft
-	cloudDraftNew         bool
-	cloudDirty            bool
-	routingDirty          bool
-	routingDraft          *agentclient.RoutingAssignments
-	cloudPendingLeave     string
-	cloudNavigationPrompt bool
+	cloudView                agentclient.CloudProvidersView
+	cloudSelected            string
+	cloudDraft               cloudDraft
+	cloudDraftNew            bool
+	cloudDirty               bool
+	routingDirty             bool
+	routingDraft             *agentclient.RoutingAssignments
+	settingsPendingLeave     string
+	settingsNavigationPrompt bool
 	// Cloud model catalog for the selected profile. Fetched lazily by
 	// selectCloudRow via ListCloudProfileModels when the row is anthropic-
 	// style; cleared on row-selection change so a switch between profiles
@@ -137,7 +138,7 @@ func (sp *settingsPage) snapshotSections() []form.Section {
 	// Fetch only what the active scope needs: the UI (theme) tab must render
 	// even when the agent is unreachable, so it never triggers GetConfig.
 	needCfg := sp.scope == scopeGeneral || sp.scope == scopeAll
-	needProfiles := sp.scope == scopeCloud || sp.scope == scopeAll
+	needProfiles := sp.scope == scopeCloud || sp.scope == scopeRouting || sp.scope == scopeAll
 	if needCfg && sp.cfg == nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
@@ -176,6 +177,8 @@ func (sp *settingsPage) snapshotSections() []form.Section {
 		return append(buildSettingsSections(sp.cfg, sp.mode, sp.accentToken), sp.devToolsSection())
 	case scopeCloud:
 		return []form.Section{sp.buildCloudSection()}
+	case scopeRouting:
+		return []form.Section{sp.buildRoutingSection()}
 	case scopeUI:
 		if sp.themes == nil {
 			return nil
@@ -186,7 +189,7 @@ func (sp *settingsPage) snapshotSections() []form.Section {
 
 	// scopeAll — the legacy single page: every section in order.
 	secs := buildSettingsSections(sp.cfg, sp.mode, sp.accentToken)
-	secs = append(secs, sp.buildCloudSection())
+	secs = append(secs, sp.buildCloudSection(), sp.buildRoutingSection())
 	if sp.themes != nil {
 		builtin := sp.themes.IsBuiltin(sp.working.Name)
 		secs = append(secs, buildThemeSections(sp.working, sp.themes.Names(), builtin, sp.dirty)...)
@@ -282,31 +285,31 @@ func (sp *settingsPage) applySpinnerTick() tea.Cmd {
 }
 
 func (sp *settingsPage) Update(msg tea.KeyPressMsg) (tea.Cmd, bool) {
-	if sp.cloudPendingLeave != "" {
+	if sp.settingsPendingLeave != "" {
 		switch msg.String() {
 		case "y", "Y":
-			target := sp.cloudPendingLeave
-			sp.cloudPendingLeave = ""
-			sp.cloudNavigationPrompt = false
+			target := sp.settingsPendingLeave
+			sp.settingsPendingLeave = ""
+			sp.settingsNavigationPrompt = false
 			if target == "__close" {
-				sp.discardCloudDrafts()
+				sp.discardSettingsDrafts()
 				return nil, true
 			}
 			sp.selectCloudRow(target)
 			sp.form.Reload()
 			return nil, false
 		case "n", "N", "esc":
-			sp.cloudPendingLeave = ""
-			sp.cloudNavigationPrompt = false
+			sp.settingsPendingLeave = ""
+			sp.settingsNavigationPrompt = false
 			sp.form.SetStatus("kept unsaved edits")
 		}
 		return nil, false
 	}
 
 	cmd, closed := sp.form.Update(msg)
-	if closed && sp.cloudHasUnsaved() {
-		sp.cloudPendingLeave = "__close"
-		sp.cloudNavigationPrompt = true
+	if closed && sp.hasUnsavedSettings() {
+		sp.settingsPendingLeave = "__close"
+		sp.settingsNavigationPrompt = true
 		closed = false
 	}
 	sp.scrollToFocus()
@@ -337,14 +340,21 @@ func (sp *settingsPage) View() string {
 	lines := sp.form.Lines(sp.width, sp.palette, sp.styles)
 	sp.clampScroll()
 	body := renderScrollable(lines, sp.viewportHeight(), sp.width-2, sp.offset, sp.styles)
-	if sp.cloudNavigationPrompt {
-		return "Unsaved Cloud edits. Discard and leave? y/n\n" + body
+	if sp.settingsNavigationPrompt {
+		label := "Cloud"
+		if sp.scope == scopeRouting {
+			label = "Routing"
+		}
+		return "Unsaved " + label + " edits. Discard and leave? y/n\n" + body
 	}
 	return body
 }
 
 // onCommit routes a committed field to its sink.
 func (sp *settingsPage) onCommit(key, value string) (string, tea.Cmd, error) {
+	if strings.HasPrefix(key, "routing-") {
+		return sp.commitRouting(key, value)
+	}
 	// Cloud provider keys — handled before everything else.
 	if ca := classifyCloudCommit(key, value); ca.kind != cloudCommitNone {
 		status, cmd, err := sp.commitCloud(ca)

@@ -91,7 +91,7 @@ func TestCloudSectionShowsDetailForSelectedProfile(t *testing.T) {
 		keys = append(keys, f.Key())
 	}
 	j := strings.Join(keys, "|")
-	for _, want := range []string{"cloud-base-url", "cloud-quality-premium", "cloud-image", "cloud-discard", "cloud-key", "cloud-save", "cloud-activate", "cloud-delete"} {
+	for _, want := range []string{"cloud-base-url", "cloud-quality-premium", "cloud-image", "cloud-discard", "cloud-key", "cloud-save", "cloud-delete"} {
 		if !strings.Contains(j, want) {
 			t.Errorf("missing detail field %q in %v", want, keys)
 		}
@@ -159,59 +159,15 @@ func TestCloudSectionComingSoonDisablesActivate(t *testing.T) {
 	}
 }
 
-func TestCloudSectionActiveRowShowsPrimaryDisabled(t *testing.T) {
-	sp := cloudSamplePage() // primary profile is "work-openai"
-	sp.selectCloudRow("profile:work-openai")
-	sec := sp.buildCloudSection()
-	var found bool
-	for _, f := range sec.Fields {
-		if f.Key() != "cloud-activate" {
-			continue
+func TestCloudProfilesDoNotExposeRoutingActions(t *testing.T) {
+	for _, row := range []string{"profile:work-openai", "template:anthropic", "other"} {
+		sp := cloudSamplePage()
+		sp.selectCloudRow(row)
+		for _, f := range sp.buildCloudSection().Fields {
+			if f.Key() == "cloud-activate" || f.Key() == "cloud-backup" || strings.HasPrefix(f.Key(), "routing-") {
+				t.Fatalf("Cloud exposes %s", f.Key())
+			}
 		}
-		found = true
-		// The primary row's button reads "primary" so it reflects the current
-		// state instead of inviting a no-op re-selection.
-		if !strings.Contains(f.Label(), "primary") {
-			t.Errorf("primary row's button should read \"primary\", got %q", f.Label())
-		}
-		if strings.Contains(f.Label(), "set as primary") {
-			t.Errorf("primary row's button should not still say \"set as primary\", got %q", f.Label())
-		}
-		// It must be disabled: a disabled button never commits on Enter.
-		if _, committed, _ := f.Update(tea.KeyPressMsg{Code: tea.KeyEnter}); committed {
-			t.Error("primary row's button must be disabled (no commit)")
-		}
-	}
-	if !found {
-		t.Fatal("cloud-activate field missing from primary profile row")
-	}
-}
-
-func TestCloudSectionInactiveProfileShowsSetAsPrimaryEnabled(t *testing.T) {
-	sp := cloudSamplePage()
-	// Make a second, non-active profile the selected editable row.
-	sp.cloudView.Providers[3].PrimaryProfile = "personal-gemini"
-	sp.cloudView.Providers[3].Profiles = []agentclient.CloudProfileInfo{
-		{Name: "personal-gemini", Flavor: "chat_completions", Backend: "gemini",
-			BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai", Model: "gemini-x", HasKey: true},
-	}
-	sp.selectCloudRow("profile:personal-gemini")
-	sec := sp.buildCloudSection()
-	var found bool
-	for _, f := range sec.Fields {
-		if f.Key() != "cloud-activate" {
-			continue
-		}
-		found = true
-		if f.Label() == "" || !strings.Contains(f.Label(), "set as primary") {
-			t.Errorf("inactive row's button should read \"set as primary\", got %q", f.Label())
-		}
-		if _, committed, _ := f.Update(tea.KeyPressMsg{Code: tea.KeyEnter}); !committed {
-			t.Error("inactive row's set-as-primary button must be enabled (commits)")
-		}
-	}
-	if !found {
-		t.Fatal("cloud-activate field missing from inactive profile row")
 	}
 }
 

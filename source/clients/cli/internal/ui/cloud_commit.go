@@ -24,7 +24,6 @@ const (
 	cloudCommitSignIn
 	cloudCommitSignInClaude
 	cloudCommitDiscard
-	cloudCommitRouting
 )
 
 type cloudCommitAction struct {
@@ -37,9 +36,6 @@ type cloudCommitAction struct {
 // classifyCloudCommit maps a committed (key,value) from the Cloud Providers
 // section to an action. Returns cloudCommitNone for non-cloud keys.
 func classifyCloudCommit(key, value string) cloudCommitAction {
-	if strings.HasPrefix(key, "cloud-routing-") || strings.HasPrefix(key, "cloud-task-") {
-		return cloudCommitAction{kind: cloudCommitRouting, field: key, value: value}
-	}
 	if key == "cloud-discard" {
 		return cloudCommitAction{kind: cloudCommitDiscard}
 	}
@@ -101,8 +97,6 @@ func (sp *settingsPage) applyCloudDraftEdit(field, value string) {
 // and so needs the agent too.
 func cloudCommitNeedsAgent(ca cloudCommitAction, draftNew bool) bool {
 	switch ca.kind {
-	case cloudCommitRouting:
-		return ca.field == "cloud-routing-save"
 	case cloudCommitSave, cloudCommitActivate, cloudCommitBackup,
 		cloudCommitDelete, cloudCommitKey, cloudCommitSignIn, cloudCommitSignInClaude:
 		return true
@@ -124,15 +118,13 @@ func (sp *settingsPage) commitCloud(ca cloudCommitAction) (string, tea.Cmd, erro
 		return "agent reconnecting — retry in a moment", nil, nil
 	}
 	switch ca.kind {
-	case cloudCommitRouting:
-		return sp.commitCloudRouting(ca.field, ca.value)
 	case cloudCommitDiscard:
 		sp.selectCloudRow(sp.cloudSelected)
 		return "discarded profile draft", nil, nil
 	case cloudCommitSelect:
 		if sp.cloudDirty {
-			sp.cloudPendingLeave = ca.rowID
-			sp.cloudNavigationPrompt = true
+			sp.settingsPendingLeave = ca.rowID
+			sp.settingsNavigationPrompt = true
 			return "Unsaved profile edits. Discard and leave? y/n", nil, nil
 		}
 		sp.selectCloudRow(ca.rowID)
@@ -148,7 +140,7 @@ func (sp *settingsPage) commitCloud(ca cloudCommitAction) (string, tea.Cmd, erro
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		d := sp.cloudDraft
-		warning,err := sp.agent.SaveCloudProfile(ctx, agentclient.CloudProfileInfo{
+		warning, err := sp.agent.SaveCloudProfile(ctx, agentclient.CloudProfileInfo{
 			ReplaceStructure: true, Name: d.Name, Flavor: d.Flavor, Backend: d.Backend, Route: d.Route, BaseURL: d.BaseURL, Choices: d.Choices, Provider: d.Provider, Region: d.Region, AWSProfile: d.AWSProfile,
 		})
 		if err != nil {
@@ -158,7 +150,9 @@ func (sp *settingsPage) commitCloud(ca cloudCommitAction) (string, tea.Cmd, erro
 		sp.cloudSelected = "profile:" + d.Name
 		sp.cloudDraftNew = false
 		sp.cloudDirty = false
- if warning!="" {return "saved "+d.Name+"; provider unavailable: "+warning,nil,nil}
+		if warning != "" {
+			return "saved " + d.Name + "; provider unavailable: " + warning, nil, nil
+		}
 		return "saved " + d.Name, nil, nil
 	case cloudCommitActivate:
 		if sp.agent == nil {

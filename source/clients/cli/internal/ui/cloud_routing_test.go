@@ -55,7 +55,7 @@ func TestCloudRowNavigationRequiresConfirmation(t *testing.T) {
 		t.Fatal("navigation dropped draft")
 	}
 	sp.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
-	if !sp.cloudDirty || sp.cloudPendingLeave != "" {
+	if !sp.cloudDirty || sp.settingsPendingLeave != "" {
 		t.Fatal("cancel lost draft")
 	}
 	sp.commitCloud(classifyCloudCommit("cloud-row:other", ""))
@@ -64,11 +64,12 @@ func TestCloudRowNavigationRequiresConfirmation(t *testing.T) {
 		t.Fatal("confirmed navigation failed")
 	}
 }
-func TestCloudTabCloseRequiresConfirmation(t *testing.T) {
+func TestRoutingTabCloseRequiresConfirmation(t *testing.T) {
 	sp := draftTestPage()
-	sp.commitCloudRouting("cloud-routing-secondary", "new")
-	m := Model{content: sp, configSurface: &configSurface{active: configTabCloud, focused: true}}
-	if m.closeConfigSurface() != nil || m.configSurface == nil || !sp.cloudNavigationPrompt {
+	sp.scope = scopeRouting
+	sp.commitRouting("routing-secondary", "new")
+	m := Model{content: sp, configSurface: &configSurface{active: configTabRouting, focused: true}}
+	if m.closeConfigSurface() != nil || m.configSurface == nil || !sp.settingsNavigationPrompt {
 		t.Fatal("closed dirty page")
 	}
 	m, _, _ = m.handleConfigSurfaceKey(tea.KeyPressMsg{Code: 'n', Text: "n"})
@@ -77,7 +78,7 @@ func TestCloudTabCloseRequiresConfirmation(t *testing.T) {
 	}
 	m.closeConfigSurface()
 	m, _, _ = m.handleConfigSurfaceKey(tea.KeyPressMsg{Code: 'y', Text: "y"})
-	if m.configSurface != nil || sp.cloudHasUnsaved() {
+	if m.configSurface != nil || sp.hasUnsavedSettings() {
 		t.Fatal("confirmed discard did not close")
 	}
 }
@@ -85,11 +86,11 @@ func TestRoutingDraftAndLocalCatalog(t *testing.T) {
 	sp := draftTestPage()
 	sp.cloudView.Assignments = &agentclient.RoutingAssignments{Primary: "p", Secondary: "s", Tasks: map[string]agentclient.TaskAssignment{}}
 	sp.routingDraft = nil
-	sp.commitCloudRouting("cloud-task-dispatch-quality", "economy")
+	sp.commitRouting("routing-task-dispatch-quality", "economy")
 	if len(sp.cloudView.Assignments.Tasks) != 0 || !sp.routingDirty {
 		t.Fatal("routing draft aliases loaded config")
 	}
-	sp.commitCloudRouting("cloud-routing-discard", "")
+	sp.commitRouting("routing-discard", "")
 	sp.ensureRoutingDraft()
 	if sp.routingDirty || len(sp.routingDraft.Tasks) != 0 {
 		t.Fatal("routing discard failed")

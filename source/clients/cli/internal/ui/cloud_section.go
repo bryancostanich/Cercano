@@ -55,7 +55,7 @@ func (sp *settingsPage) selectCloudRow(rowID string) {
 // under the selected row.
 func (sp *settingsPage) buildCloudSection() form.Section {
 	rows := buildCloudRowsFromProviders(sp.cloudView)
-	fields := sp.cloudRoutingFields()
+	var fields []form.Field
 	for _, r := range rows {
 		fields = append(fields, form.NewRow("cloud-row:"+r.ID, r.Label, rowAnnotation(r), r.Active))
 		if r.ID == sp.cloudSelected {
@@ -129,29 +129,8 @@ func (sp *settingsPage) cloudDetailFields(r cloudRow) []form.Field {
 	if d.Route != "subscription" {
 		out = append(out, form.NewMasked("cloud-key", il("api-key"), sp.draftHasKey(r)))
 	}
-	// Primary button: reads "primary" (disabled) when this row is already the
-	// primary profile, so it doesn't invite a no-op re-selection and reflects
-	// the current state. Otherwise "set as primary", enabled unless coming-soon.
-	activateLabel := "set as primary"
-	activateEnabled := !r.ComingSoon
-	if r.Active {
-		activateLabel = "primary"
-		activateEnabled = false
-	}
-	out = append(out,
-		form.NewButton("cloud-save", il("save"), true),
-		form.NewButton("cloud-discard", il("discard"), true),
-		form.NewButton("cloud-activate", il(activateLabel), activateEnabled),
-	)
+	out = append(out, form.NewButton("cloud-save", il("save"), true), form.NewButton("cloud-discard", il("discard"), true))
 	if !sp.cloudDraftNew {
-		// Backup toggle: the active profile can't be its own backup (the
-		// server rejects it), so the set button is disabled on the active row.
-		label := "set as Primary backup"
-		enabled := !r.Active && !r.ComingSoon
-		if r.Profile != nil && r.Profile.Name == sp.cloudView.Backup {
-			label, enabled = "clear Primary backup", true
-		}
-		out = append(out, form.NewButton("cloud-backup", il(label), enabled))
 		out = append(out, form.NewButton("cloud-delete", il("delete"), true))
 	}
 	return out

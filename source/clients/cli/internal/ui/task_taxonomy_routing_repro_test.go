@@ -18,7 +18,7 @@ func TestTaskTaxonomyDedicatedRoutingPage(t *testing.T) {
 func TestTaskTaxonomyCloudDoesNotOwnRoutingControls(t *testing.T) {
 	sp := cloudSamplePage()
 	for _, field := range sp.buildCloudSection().Fields {
-		if strings.HasPrefix(field.Key(), "cloud-routing-") || strings.HasPrefix(field.Key(), "cloud-task-") {
+		if strings.HasPrefix(field.Key(), "routing-") || strings.HasPrefix(field.Key(), "cloud-routing-") || strings.HasPrefix(field.Key(), "cloud-task-") {
 			t.Errorf("Cloud still owns routing control %q", field.Key())
 		}
 	}

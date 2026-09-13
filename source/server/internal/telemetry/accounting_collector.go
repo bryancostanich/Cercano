@@ -108,20 +108,21 @@ type queuedObservation struct {
 // happens on one background goroutine. Outstanding capacity includes the batch
 // currently being retried, not only the channel contents.
 type AccountingCollector struct {
-	writerID   string
-	lastHealth *AccountingHealth
-	store      AttemptStore
-	options    AccountingOptions
-	ctx        context.Context
-	cancel     context.CancelFunc
-	mu         sync.Mutex
-	health     AccountingHealth
-	receipts   map[*persistenceReceipt]struct{}
-	pending    map[uint64]time.Time
-	queue      chan queuedObservation
-	stop       chan struct{}
-	done       chan struct{}
-	closeOnce  sync.Once
+	shutdownMarked bool // guarded by mu
+	writerID       string
+	lastHealth     *AccountingHealth
+	store          AttemptStore
+	options        AccountingOptions
+	ctx            context.Context
+	cancel         context.CancelFunc
+	mu             sync.Mutex
+	health         AccountingHealth
+	receipts       map[*persistenceReceipt]struct{}
+	pending        map[uint64]time.Time
+	queue          chan queuedObservation
+	stop           chan struct{}
+	done           chan struct{}
+	closeOnce      sync.Once
 }
 
 func NewAccountingCollector(store AttemptStore, options AccountingOptions) *AccountingCollector {
@@ -217,7 +218,10 @@ func (c *AccountingCollector) Close(ctx context.Context) error {
 	case <-ctx.Done():
 		c.cancel()
 		c.mu.Lock()
-		c.health.Uncertain = uint64(len(c.pending))
+		if !c.shutdownMarked {
+			c.health.Uncertain += uint64(len(c.pending))
+			c.shutdownMarked = true
+		}
 		c.health.LastError = "accounting shutdown incomplete"
 		for receipt := range c.receipts {
 			receipt.signal(false)

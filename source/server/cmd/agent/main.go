@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cercano/source/server/pkg/statelease"
 	"context"
 	"fmt"
 	"log"
@@ -54,6 +55,10 @@ func checkOllama(ctx context.Context, baseURL string, models ...string) error {
 }
 
 func main() {
+	if err := statelease.HoldProcessLifetime(); err != nil {
+		fmt.Fprintln(os.Stderr, "Cercano startup refused:", err)
+		os.Exit(1)
+	}
 	const version = "0.3.0"
 	fmt.Printf("Starting Cercano AI Agent gRPC server (v%s)...\n", version)
 

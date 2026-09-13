@@ -7,6 +7,7 @@
 package main
 
 import (
+	"cercano/source/server/pkg/statelease"
 	"context"
 	"flag"
 	"fmt"
@@ -31,6 +32,10 @@ func init() {
 }
 
 func main() {
+	if err := statelease.HoldProcessLifetime(); err != nil {
+		fmt.Fprintln(os.Stderr, "Cercano startup refused:", err)
+		os.Exit(1)
+	}
 	resumeShort := flag.Bool("r", false, "Open the conversation history picker on launch (alias for --resume)")
 	resumeLong := flag.Bool("resume", false, "Open the conversation history picker on launch")
 	setupShort := flag.Bool("s", false, "Open the setup wizard on launch (alias for --setup)")

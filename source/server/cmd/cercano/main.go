@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"cercano/source/server/pkg/statelease"
 	"context"
 	"crypto/rand"
 	"encoding/json"
@@ -978,6 +979,10 @@ Flags:
 `
 
 func main() {
+	if err := statelease.HoldProcessLifetime(); err != nil {
+		fmt.Fprintln(os.Stderr, "Cercano startup refused:", err)
+		os.Exit(1)
+	}
 	// Handle subcommands before flag parsing.
 	if len(os.Args) > 1 {
 		switch os.Args[1] {

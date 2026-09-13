@@ -26,6 +26,7 @@ import (
 )
 
 func TestRoutingSettingsClientPersistenceSnapshotExecution(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	calls := []string{}
 	endpoint := func(name string, fail bool) *httptest.Server {
 		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -311,6 +311,23 @@ func (c *Client) reconnect(ctx context.Context) error {
 	// already restored the connection.
 	c.reconnectMu.Lock()
 	defer c.reconnectMu.Unlock()
+	if c.closed {
+		return errClientClosed
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go func() {
+		select {
+		case <-c.stopWatch:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	select {
+	case <-c.stopWatch:
+		return errClientClosed
+	default:
+	}
 	if c.currentState() == ConnStateConnected {
 		if conn := c.readConn(); conn != nil && conn.GetState() == connectivity.Ready {
 			return nil
@@ -358,6 +375,12 @@ func (c *Client) reconnect(ctx context.Context) error {
 		// Swap the underlying conn + agent handle atomically so
 		// in-flight callers using c.agent see the new client on their
 		// next call.
+		select {
+		case <-c.stopWatch:
+			fresh.Close()
+			return errClientClosed
+		default:
+		}
 		c.writeConn(fresh.conn, fresh.agent)
 		c.setState(ConnStateConnected, attempt, nil)
 		return nil

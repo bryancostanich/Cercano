@@ -48,11 +48,11 @@ Objective: make the reset mutually exclusive with relevant live writers and new 
 
 Extend/reuse the existing launch-lock infrastructure where its semantics fit, but do not mistake its current short critical section for lifetime protection. Define one documented lock order for launch, writer lifetime and reset exclusivity. Acquire participation before reading mutable setup state. Do not deadlock autolaunch by holding a parent launch lock while a child needs that same exclusive lock to become ready.
 
-- [ ] Implement the shared coordination primitive with bounded/cancellable acquisition, per-user/state-root ownership, restrictive file permissions and crash-safe operating-system lock release. Fail closed on unsupported platforms rather than using a fake lock.
-- [ ] Have participating agents/clients/direct writers acquire the appropriate lease before reading/writing setup state and hold it for the required lifetime; let reset acquire exclusive access only when those leases are absent.
-- [ ] Serialize or refuse competing startup while reset holds exclusive access. Use the same guard for direct agent launch and reconnect/autolaunch, not only one executable path.
-- [ ] Refuse reset with an actionable message if an agent/client/writer is active, a legacy nonparticipating process is detected, or quiescence cannot be verified. Do not infer quiescence from port closure, issue a force-kill, or introduce a live destructive RPC.
-- [ ] Test simultaneous reset, new launch, reconnect, wizard/settings writes, token refresh, draining agent, timeout/cancellation and reset-process crash. Verify no mutation on refusal and no old state can be repopulated after reported success. Escalate any unguarded writer or older-binary compatibility gap rather than claiming exclusivity.
+- [x] Implement the shared coordination primitive with bounded/cancellable acquisition, per-user/state-root ownership, restrictive file permissions and crash-safe operating-system lock release. Fail closed on unsupported platforms rather than using a fake lock.
+- [x] Have participating agents/clients/direct writers acquire the appropriate lease before reading/writing setup state and hold it for the required lifetime; let reset acquire exclusive access only when those leases are absent.
+- [x] Serialize or refuse competing startup while reset holds exclusive access. Use the same guard for direct agent launch and reconnect/autolaunch, not only one executable path.
+- [-] Refuse reset with an actionable message if an agent/client/writer is active, a legacy nonparticipating process is detected, or quiescence cannot be verified. Do not infer quiescence from port closure, issue a force-kill, or introduce a live destructive RPC.
+- [~] Test simultaneous reset, new launch, reconnect, wizard/settings writes, token refresh, draining agent, timeout/cancellation and reset-process crash. Verify no mutation on refusal and no old state can be repopulated after reported success. Escalate any unguarded writer or older-binary compatibility gap rather than claiming exclusivity.
 
 ## Phase 5 — Credential clearing and reset orchestration
 

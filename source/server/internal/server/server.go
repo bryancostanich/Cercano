@@ -160,11 +160,12 @@ type Server struct {
 	// addition to providerSvc) so the server can emit an aggregate usage event
 	// for WORKER turns — the worker child's provider is never wrapped by
 	// resolveMainProvider, so no usage would otherwise be recorded.
-	attemptSinkMu sync.RWMutex
-	attemptSink   usage.AttemptSink
-	usageSink     func(usage.Usage)
-	routingLog    *routinglog.Writer
-	failureLog    *failurelog.Writer
+	attemptSinkMu      sync.RWMutex
+	accountingReceiver worker.AccountingReceiver
+	attemptSink        usage.AttemptSink
+	usageSink          func(usage.Usage)
+	routingLog         *routinglog.Writer
+	failureLog         *failurelog.Writer
 
 	requestAccountingMu sync.Mutex
 	requestAccounting   map[string]requestAccountingSnapshot
@@ -1192,6 +1193,7 @@ func (s *Server) SelectExecutionMode() {
 		s.turnModelEvidence, // host-resolved capability evidence for every model the turn might address
 		s.restartRuntimeTool,
 	)
+	s.configureWorkerAccounting()
 	log.Printf("[server] execution mode: worker (turns run in isolated child processes; " +
 		"MCP-involving turns fall back to in-process — worker MCP proxying is a future refinement)")
 }

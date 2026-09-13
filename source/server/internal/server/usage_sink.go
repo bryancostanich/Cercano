@@ -1,7 +1,9 @@
 package server
 
 import (
+	"cercano/source/server/internal/worker"
 	"context"
+	"log"
 	"time"
 
 	"cercano/source/server/internal/telemetry"
@@ -54,4 +56,32 @@ func (s *Server) accountingContext(ctx context.Context, source, conversation str
 	sink := s.attemptSink
 	s.attemptSinkMu.RUnlock()
 	return usage.ForOperation(ctx, sink, source, conversation)
+}
+
+// SetAccountingCollector configures actual accounting at startup, including
+// receipt-backed worker delivery. A plain AttemptSink remains useful for
+// embedded/in-process callers; workers need the collector's receipt surface.
+func (s *Server) SetAccountingCollector(collector *telemetry.Collector) {
+	if collector == nil {
+		return
+	}
+	s.attemptSinkMu.Lock()
+	s.accountingReceiver = collector
+	s.attemptSinkMu.Unlock()
+	s.SetAttemptSink(collector.EmitAttempt)
+	s.configureWorkerAccounting()
+}
+func (s *Server) configureWorkerAccounting() {
+	s.attemptSinkMu.RLock()
+	receiver := s.accountingReceiver
+	s.attemptSinkMu.RUnlock()
+	if receiver == nil {
+		return
+	}
+	if target, ok := s.workerRunner.(worker.AccountingConfigurer); ok {
+		if err := target.SetAccountingReceiver(receiver); err != nil {
+			log.Printf("[accounting] worker configuration failed: %v", err)
+			receiver.MarkAccountingIncomplete("worker accounting configuration failed")
+		}
+	}
 }

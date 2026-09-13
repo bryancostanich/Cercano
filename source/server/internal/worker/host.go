@@ -46,6 +46,7 @@ import (
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/modelmetadata"
 	"cercano/source/server/internal/runner"
+	"cercano/source/server/internal/usage"
 	pkgcfg "cercano/source/server/pkg/config"
 	proto "cercano/source/server/pkg/proto"
 )
@@ -55,6 +56,8 @@ type dialFunc func(ctx context.Context) (*grpc.ClientConn, error)
 
 // workerRunner implements runner.TurnRunner by running turns in a child process.
 type workerRunner struct {
+	accountingMu   sync.RWMutex
+	accounting     *accountingConnections
 	restartRuntime runtimeRestartFunc
 	persist        runner.TurnHistory
 	cfg            cfgsvc.Service
@@ -179,6 +182,14 @@ func (w *workerRunner) resolveOpenTiers() map[string]string {
 // stops the idle-reaper. Safe to call once at host shutdown; a no-op on a
 // dial-injected (test) runner with no pool.
 func (w *workerRunner) Shutdown() {
+	if manager := w.accountingManager(); manager != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), workerAccountingDrainBudget)
+		if err := manager.shutdown(ctx); err != nil {
+			log.Printf("[accounting] worker shutdown incomplete: %v", err)
+		}
+		cancel()
+	}
+
 	if w.pool != nil {
 		w.pool.Shutdown()
 	}
@@ -308,14 +319,25 @@ func (w *workerRunner) RunTurn(
 		turnHealthy bool
 	)
 
+	manager := w.accountingManager()
 	if w.dial != nil {
-		// Test path: use injected dial.
-		c, err := w.dial(ctx)
+		// Accounting-enabled dialers mirror the process-owned production transport.
+		var c *grpc.ClientConn
+		var err error
+		if manager != nil {
+			c, err = manager.dial(ctx, w.dial)
+		} else {
+			c, err = w.dial(ctx)
+		}
 		if err != nil {
 			return runner.Result{}, fmt.Errorf("workerRunner: dial: %w", err)
 		}
 		conn = c
-		cleanupFn = func() { _ = conn.Close() }
+		if manager != nil {
+			cleanupFn = func() {}
+		} else {
+			cleanupFn = func() { _ = conn.Close() }
+		}
 	} else {
 		// Production path: acquire a warm worker from the per-conversation pool.
 		wh, err := w.pool.Acquire(ctx, req.ConversationID, req.Gen)
@@ -326,6 +348,19 @@ func (w *workerRunner) RunTurn(
 		cleanupFn = func() { w.pool.Release(req.ConversationID, wh, turnHealthy) }
 	}
 	defer cleanupFn()
+	if manager != nil {
+		if err := manager.ensure(conn); err != nil {
+			return runner.Result{}, err
+		}
+		a, _ := usage.AttributionFromContext(ctx)
+		if a.OperationID == "" {
+			a.OperationID = usage.NewIdentity()
+		}
+		if a.Source == "" {
+			a.Source = "main"
+		}
+		startTurn.Accounting = &proto.AccountingWork{OperationId: a.OperationID, ConversationId: req.ConversationID, SessionId: a.SessionID, Source: a.Source}
+	}
 
 	// ── 6. Open bidi stream and send StartTurn ────────────────────────────
 	client := proto.NewWorkerClient(conn)

@@ -186,3 +186,13 @@ func ForOperation(ctx context.Context, sink AttemptSink, source, conversation st
 	a.OperationID = NewIdentity()
 	return WithAttempts(ctx, inherited.sink, a)
 }
+
+// AttributionFromContext copies metadata for existing in-process/RPC boundaries.
+// The sink itself never crosses a process boundary.
+func AttributionFromContext(ctx context.Context) (Attribution, bool) {
+	config, ok := ctx.Value(attemptContextKey{}).(attemptContext)
+	if !ok || config.sink == nil {
+		return Attribution{}, false
+	}
+	return config.attribution, true
+}

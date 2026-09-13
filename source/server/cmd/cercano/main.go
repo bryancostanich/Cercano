@@ -658,7 +658,7 @@ func startGRPCServer(cfg config.Config, bindAddr string, events *crashlog.Writer
 		fmt.Fprintf(os.Stderr, "[WARN] Failed to initialize agent telemetry: %v\n", err)
 	} else {
 		srv.SetUsageSink(server.UsageEventSink(agentCollector.Emit))
-		srv.SetAttemptSink(agentCollector.EmitAttempt)
+		srv.SetAccountingCollector(agentCollector)
 		if recapGen != nil {
 			recapGen.SetAttemptSink(agentCollector.EmitAttempt)
 		}

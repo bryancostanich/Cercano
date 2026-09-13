@@ -53,9 +53,10 @@ type pooledEntry struct {
 
 // workerPool keeps at most one warm worker per conversation.
 type workerPool struct {
-	mu     sync.Mutex
-	byConv map[string]*pooledEntry
-	spawn  spawnFunc
+	beforeIdleKill func(*workerHandle) // guarded by mu; called outside it
+	mu             sync.Mutex
+	byConv         map[string]*pooledEntry
+	spawn          spawnFunc
 
 	// now is the pool's clock, injectable so tests exercise the idle-reaper with
 	// a fake clock + tiny window instead of sleeping real durations. Defaults to
@@ -268,6 +269,7 @@ func (p *workerPool) reapIdle(window time.Duration) {
 	var reaped []*workerHandle
 
 	p.mu.Lock()
+	beforeKill := p.beforeIdleKill
 	for convID, e := range p.byConv {
 		if e.inUse {
 			continue // a live turn holds it — never reap.
@@ -281,6 +283,9 @@ func (p *workerPool) reapIdle(window time.Duration) {
 	p.mu.Unlock()
 
 	for _, h := range reaped {
+		if beforeKill != nil {
+			beforeKill(h)
+		}
 		h.Kill()
 	}
 }
@@ -337,4 +342,12 @@ func processAlive(h *workerHandle) bool {
 	}
 	// Signal 0 probes existence without delivering a signal.
 	return h.cmd.Process.Signal(syscall.Signal(0)) == nil
+}
+
+// setIdleRetirement adds best-effort background drain only for idle workers.
+// Crash, cancellation, and unhealthy-release Kill behavior is unchanged.
+func (p *workerPool) setIdleRetirement(fn func(*workerHandle)) {
+	p.mu.Lock()
+	p.beforeIdleKill = fn
+	p.mu.Unlock()
 }

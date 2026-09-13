@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"cercano/source/server/internal/telemetry"
@@ -23,6 +24,15 @@ type AccountingReceiver interface {
 // receiveAccounting runs in a connection-owned background goroutine. Waiting
 // for persistence is confined to this RPC, never the ordinary RunTurn stream.
 func receiveAccounting(ctx context.Context, client wire.WorkerClient, sink AccountingReceiver, source string, ready func()) error {
+	return receiveAccountingControlled(ctx, client, sink, source, ready, nil)
+}
+
+var errAccountingDrainIncomplete = errors.New("worker accounting drain incomplete")
+
+func receiveAccountingControlled(ctx context.Context, client wire.WorkerClient, sink AccountingReceiver, source string, ready func(), drain <-chan struct{}) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	if sink == nil || source == "" || len(source) > 256 {
 		return fmt.Errorf("invalid worker accounting receiver")
 	}
@@ -31,24 +41,61 @@ func receiveAccounting(ctx context.Context, client wire.WorkerClient, sink Accou
 		return err
 	}
 	defer stream.CloseSend()
-	if err = stream.Send(&wire.WorkerAccountingReceipt{}); err != nil {
+	var sendMu sync.Mutex
+	send := func(r *wire.WorkerAccountingReceipt) error {
+		sendMu.Lock()
+		defer sendMu.Unlock()
+		return stream.Send(r)
+	}
+
+	if err = send(&wire.WorkerAccountingReceipt{}); err != nil {
 		return err
 	}
 	handshake, err := stream.Recv()
 	if err != nil {
 		return err
 	}
-	if handshake.BatchId != "" || len(handshake.Observations) != 0 || handshake.Health != nil {
+	if handshake.BatchId != "" || len(handshake.Observations) != 0 || handshake.Health != nil || handshake.DrainFinished || handshake.DrainError != "" {
 		return fmt.Errorf("invalid worker accounting readiness message")
 	}
 	if ready != nil {
 		ready()
+	}
+	if drain != nil {
+		go func() {
+			select {
+			case <-ctx.Done():
+				return
+			case <-drain:
+				if err := send(&wire.WorkerAccountingReceipt{Drain: true}); err != nil {
+					cancel()
+				}
+			}
+		}()
 	}
 	workerID := "worker/" + source
 	for {
 		batch, err := stream.Recv()
 		if err != nil {
 			return err
+		}
+		if batch.DrainFinished {
+			select {
+			case <-drain:
+			default:
+				return fmt.Errorf("unsolicited worker accounting drain")
+			}
+			if batch.BatchId != "" || len(batch.Observations) != 0 || batch.Health != nil || len(batch.DrainError) > 1024 {
+				return fmt.Errorf("invalid worker accounting drain result")
+			}
+			if batch.DrainError != "" {
+				sink.MarkAccountingIncomplete("worker accounting drain incomplete")
+				return errAccountingDrainIncomplete
+			}
+			return nil
+		}
+		if batch.DrainError != "" {
+			return fmt.Errorf("invalid worker accounting drain error")
 		}
 		if batch.BatchId == "" || len(batch.BatchId) > 1024 {
 			return fmt.Errorf("invalid worker accounting batch identity")
@@ -98,7 +145,7 @@ func receiveAccounting(ctx context.Context, client wire.WorkerClient, sink Accou
 			}
 			timer.Stop()
 		}
-		if err = stream.Send(ack); err != nil {
+		if err = send(ack); err != nil {
 			return err
 		}
 	}

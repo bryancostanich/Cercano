@@ -25,7 +25,7 @@ func accountingHealthToWire(batchID, writer string, h telemetry.AccountingHealth
 	return out, nil
 }
 func accountingHealthFromWire(batch *wire.WorkerAccountingBatch) (string, telemetry.AccountingHealth, error) {
-	if batch == nil || batch.BatchId == "" || len(batch.BatchId) > 1024 || batch.Health == nil || len(batch.Observations) != 0 || pb.Size(batch) > maxAccountingWireBytes {
+	if batch == nil || batch.BatchId == "" || len(batch.BatchId) > 1024 || batch.Health == nil || batch.DrainFinished || batch.DrainError != "" || len(batch.Observations) != 0 || pb.Size(batch) > maxAccountingWireBytes {
 		return "", telemetry.AccountingHealth{}, fmt.Errorf("invalid accounting health envelope")
 	}
 	v := batch.Health

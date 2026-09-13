@@ -1648,6 +1648,7 @@ message WorkerToHost {
 // ConfigSnapshot contains the resolved API credential so the worker never
 // touches the keychain.
 message StartTurn {
+  AccountingWork accounting = 11; // present only when host accounting is enabled
   string              conversation_id  = 1;
   string              input            = 2;
   repeated InlineImage images          = 3; // reuse existing InlineImage
@@ -2123,6 +2124,8 @@ message WorkerAccountingBatch {
   string batch_id = 1;
   repeated AccountingAttemptObservation observations = 2;
   WorkerAccountingHealth health = 3;
+  bool drain_finished = 4;
+  string drain_error = 5;
 }
 
 // persisted means every observation has an acknowledged database commit.
@@ -2132,6 +2135,7 @@ message WorkerAccountingReceipt {
   bool persisted = 2;
   bool retryable = 3;
   string error = 4;
+  bool drain = 5;
 }
 
 // Health is a separate record, never an inference observation or token total.
@@ -2151,4 +2155,13 @@ message WorkerAccountingHealth {
   string last_error = 12;
   bool closed = 13;
   bool coverage_incomplete = 14;
+}
+
+// Parent work attribution crosses the worker boundary without carrying a sink
+// or any permission capability. The same operation survives auth recovery.
+message AccountingWork {
+  string operation_id = 1;
+  string conversation_id = 2;
+  string session_id = 3;
+  string source = 4;
 }

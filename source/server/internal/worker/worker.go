@@ -29,6 +29,7 @@ import (
 	"cercano/source/server/internal/routinglog"
 	"cercano/source/server/internal/runner"
 	"cercano/source/server/internal/secrets"
+	"cercano/source/server/internal/telemetry"
 	"cercano/source/server/internal/toolstack"
 	"cercano/source/server/internal/usage"
 	"cercano/source/server/internal/watchdog"
@@ -41,6 +42,14 @@ import (
 
 // WorkerServer implements the gRPC Worker service (worker-side).
 type WorkerServer struct {
+	accountingCollector *telemetry.AccountingCollector
+	accountingClosing   bool
+	accountingTurns     map[string]context.CancelFunc
+	accountingWorkers   sync.WaitGroup
+	accountingCloseOnce sync.Once
+	accountingCloseDone chan struct{}
+	accountingCloseErr  error
+
 	accountingMu        sync.Mutex
 	accountingTransport *workerAccountingWriter
 	proto.UnimplementedWorkerServer
@@ -81,7 +90,16 @@ func (w *WorkerServer) runTurn(stream proto.Worker_RunTurnServer, authRecovery b
 	}
 
 	// Build execution context: cancel when host sends Cancel.
-	ctx, cancel := context.WithCancel(stream.Context())
+	parent := stream.Context()
+	if start.Accounting != nil {
+		scoped, release, scopeErr := w.beginAccountingTurn(parent, start.Accounting, start.GetConversationId())
+		if scopeErr != nil {
+			return scopeErr
+		}
+		defer release()
+		parent = scoped
+	}
+	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 
 	// Serialized sender: all outbound messages go through one goroutine.

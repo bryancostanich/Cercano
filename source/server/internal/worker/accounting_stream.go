@@ -153,7 +153,7 @@ func (w *WorkerServer) Accounting(stream wire.Worker_AccountingServer) error {
 	if err != nil {
 		return err
 	}
-	if first.BatchId != "" || first.Persisted || first.Retryable || first.Error != "" {
+	if first.BatchId != "" || first.Persisted || first.Retryable || first.Error != "" || first.Drain {
 		return status.Error(codes.InvalidArgument, "accounting stream must start with an empty receipt")
 	}
 	writer := w.accountingWriter()
@@ -166,12 +166,22 @@ func (w *WorkerServer) Accounting(stream wire.Worker_AccountingServer) error {
 		return err
 	}
 	recvDone := make(chan error, 1)
+	drainResult := make(chan *wire.WorkerAccountingBatch, 1)
+	var drainOnce sync.Once
 	go func() {
 		for {
 			receipt, err := stream.Recv()
 			if err != nil {
 				recvDone <- err
 				return
+			}
+			if receipt.Drain {
+				if receipt.BatchId != "" || receipt.Persisted || receipt.Retryable || receipt.Error != "" {
+					recvDone <- status.Error(codes.InvalidArgument, "invalid accounting drain request")
+					return
+				}
+				drainOnce.Do(func() { go func() { drainResult <- w.finishAccounting(stream.Context()) }() })
+				continue
 			}
 			if receipt.BatchId == "" || len(receipt.BatchId) > 1024 || len(receipt.Error) > 1024 {
 				recvDone <- status.Error(codes.InvalidArgument, "invalid accounting receipt")
@@ -186,6 +196,8 @@ func (w *WorkerServer) Accounting(stream wire.Worker_AccountingServer) error {
 			return stream.Context().Err()
 		case err := <-recvDone:
 			return err
+		case result := <-drainResult:
+			return stream.Send(result)
 		case batch := <-link.send:
 			if err := stream.Send(batch); err != nil {
 				return err

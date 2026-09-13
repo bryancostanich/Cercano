@@ -447,3 +447,6 @@ func (c *AccountingCollector) TryRemoteHealth(writer string, h AccountingHealth)
 	c.enqueueLocked(usage.AttemptObservation{}, receipt, &remoteHealthRecord{writer: writer, snapshot: h})
 	return receipt.done, nil
 }
+
+// WriterID is immutable for the collector lifetime.
+func (c *AccountingCollector) WriterID() string { return c.writerID }

@@ -50,7 +50,7 @@ func accountingBatchToWire(id string, observations []usage.AttemptObservation) (
 	return out, nil
 }
 func accountingBatchFromWire(batch *wire.WorkerAccountingBatch) ([]usage.AttemptObservation, error) {
-	if batch == nil || batch.Health != nil || batch.BatchId == "" || len(batch.BatchId) > 1024 || len(batch.Observations) == 0 || len(batch.Observations) > telemetry.MaxAccountingBatch {
+	if batch == nil || batch.Health != nil || batch.DrainFinished || batch.DrainError != "" || batch.BatchId == "" || len(batch.BatchId) > 1024 || len(batch.Observations) == 0 || len(batch.Observations) > telemetry.MaxAccountingBatch {
 		return nil, fmt.Errorf("invalid accounting batch identity or size")
 	}
 	if pb.Size(batch) > maxAccountingWireBytes {

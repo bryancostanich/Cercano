@@ -134,8 +134,12 @@ git clone https://github.com/bryancostanich/Cercano.git
 cd Cercano/source/server
 make build
 bin/cercano setup    # prepares Ollama plus the managed llama-server runtime
+bin/cercano reset --setup  # confirmed developer reset; preserves history and model files
 bin/cercano          # starts the gRPC server
 ```
+
+For fresh-setup testing with existing sessions left open, see [setup reset](docs/features/setup-reset.md).
+
 
 **Windows (PowerShell):**
 

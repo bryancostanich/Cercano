@@ -1,3 +1,13 @@
+# Approved amendment — live developer reset
+
+The user explicitly superseded the offline-only safety design. `cercano reset --setup` is a manually confirmed developer command and MUST work with other sessions open. Remove process/lifetime locks, legacy-process detection, shutdown/drain requirements and busy-session refusals. The user controls activity and accepts in-flight errors, stale settings writes and credential refresh races. Warn about those limitations; do not claim a global transaction or guaranteed quiescence. No further planning approval is required for this amendment.
+
+Use the running agent when available so its configuration/providers refresh; otherwise reset locally. Keep existing sessions and all conversation/history data. Preserve downloads, installed runtimes and non-setup preferences. Keep confirmation, scoped deletion, truthful partial-failure reporting, and fixture-only verification. Actual reset of the user's installation still requires a separate request.
+
+The historical specification below remains authoritative for the clear/preserve boundary and wizard behavior, but its exclusive-access/offline/legacy-process requirements are superseded by this amendment.
+
+---
+
 # Setup reset without deleting conversations or downloaded models
 
 Status: human-approved specification. The user approved the specification after selecting setup-only reset and the terminal interface. Implementation-plan approval remains required. No implementation or destructive reset has been performed.

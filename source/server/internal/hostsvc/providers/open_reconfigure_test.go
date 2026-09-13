@@ -130,3 +130,17 @@ func TestReconfigure_OpenModelOnlyResetsOpenTurnRunner(t *testing.T) {
 		t.Fatalf("open tier output = %q, want ollama:qwen3-coder", resp.Output)
 	}
 }
+
+func TestClearingOpenProviderRemovesOldTurnRunner(t *testing.T) {
+	r := &recordingRouter{}
+	svc := &service{router: r}
+	svc.SetOpenLLMProvider(&labelProvider{label: "old"})
+	svc.setOpenTurnRunner("old-model")
+	if r.open == nil {
+		t.Fatal("fixture never installed old runner")
+	}
+	svc.SetOpenLLMProvider(nil)
+	if svc.Open() != nil || r.open != nil {
+		t.Fatal("cleared native provider retained old model runner")
+	}
+}

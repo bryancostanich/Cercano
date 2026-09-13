@@ -24,6 +24,10 @@ service Agent {
   // providers and model-tier mappings are rebuilt.
   rpc UpdateConfig (UpdateConfigRequest) returns (UpdateConfigResponse) {}
 
+  // Debug-only, explicitly confirmed setup reset. Sessions remain open; active
+  // work may fail or race with this operation. Never deletes conversations/models.
+  rpc ResetSetup (ResetSetupRequest) returns (ResetSetupResponse) {}
+
   // ShutdownAgent asks the singleton agent process to exit after this response
   // is sent. CLI clients use this for restart-required config changes; their
   // reconnect loop auto-launches the replacement agent.
@@ -2071,3 +2075,14 @@ message AuthenticationDecisionResponse {}
 
 message RuntimeRestartToolRequest { string id = 1; string instance_id = 2; }
 message RuntimeRestartToolResponse { string id = 1; bytes result_json = 2; string error = 3; }
+
+// Terminal confirmation is required before requesting this developer operation.
+message ResetSetupRequest { bool confirmed = 1; }
+message ResetSetupResponse {
+  bool ok = 1;
+  int32 credentials_removed = 2;
+  string error = 3;
+  string warning = 4;
+  bool config_written = 5;
+  bool live_applied = 6;
+}

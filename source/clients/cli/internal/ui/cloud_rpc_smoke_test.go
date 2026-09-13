@@ -27,7 +27,6 @@ func (s *cloudSettingsStub) UpsertCloudProfile(_ context.Context, r *proto.Upser
 	return &proto.UpsertCloudProfileResponse{Ok: true}, nil
 }
 func TestCloudSaveRPCSmokeAndErrorRetention(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)

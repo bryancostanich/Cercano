@@ -23,6 +23,7 @@ const (
 	Agent_StreamProcessRequest_FullMethodName                  = "/agent.Agent/StreamProcessRequest"
 	Agent_AttachConversation_FullMethodName                    = "/agent.Agent/AttachConversation"
 	Agent_UpdateConfig_FullMethodName                          = "/agent.Agent/UpdateConfig"
+	Agent_ResetSetup_FullMethodName                            = "/agent.Agent/ResetSetup"
 	Agent_ShutdownAgent_FullMethodName                         = "/agent.Agent/ShutdownAgent"
 	Agent_GetConfig_FullMethodName                             = "/agent.Agent/GetConfig"
 	Agent_ListConversations_FullMethodName                     = "/agent.Agent/ListConversations"
@@ -115,6 +116,9 @@ type AgentClient interface {
 	// (notably open_runtime swaps) require an agent restart before all worker-side
 	// providers and model-tier mappings are rebuilt.
 	UpdateConfig(ctx context.Context, in *UpdateConfigRequest, opts ...grpc.CallOption) (*UpdateConfigResponse, error)
+	// Debug-only, explicitly confirmed setup reset. Sessions remain open; active
+	// work may fail or race with this operation. Never deletes conversations/models.
+	ResetSetup(ctx context.Context, in *ResetSetupRequest, opts ...grpc.CallOption) (*ResetSetupResponse, error)
 	// ShutdownAgent asks the singleton agent process to exit after this response
 	// is sent. CLI clients use this for restart-required config changes; their
 	// reconnect loop auto-launches the replacement agent.
@@ -383,6 +387,16 @@ func (c *agentClient) UpdateConfig(ctx context.Context, in *UpdateConfigRequest,
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(UpdateConfigResponse)
 	err := c.cc.Invoke(ctx, Agent_UpdateConfig_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentClient) ResetSetup(ctx context.Context, in *ResetSetupRequest, opts ...grpc.CallOption) (*ResetSetupResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ResetSetupResponse)
+	err := c.cc.Invoke(ctx, Agent_ResetSetup_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1199,6 +1213,9 @@ type AgentServer interface {
 	// (notably open_runtime swaps) require an agent restart before all worker-side
 	// providers and model-tier mappings are rebuilt.
 	UpdateConfig(context.Context, *UpdateConfigRequest) (*UpdateConfigResponse, error)
+	// Debug-only, explicitly confirmed setup reset. Sessions remain open; active
+	// work may fail or race with this operation. Never deletes conversations/models.
+	ResetSetup(context.Context, *ResetSetupRequest) (*ResetSetupResponse, error)
 	// ShutdownAgent asks the singleton agent process to exit after this response
 	// is sent. CLI clients use this for restart-required config changes; their
 	// reconnect loop auto-launches the replacement agent.
@@ -1426,6 +1443,9 @@ func (UnimplementedAgentServer) AttachConversation(*AttachConversationRequest, g
 }
 func (UnimplementedAgentServer) UpdateConfig(context.Context, *UpdateConfigRequest) (*UpdateConfigResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method UpdateConfig not implemented")
+}
+func (UnimplementedAgentServer) ResetSetup(context.Context, *ResetSetupRequest) (*ResetSetupResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ResetSetup not implemented")
 }
 func (UnimplementedAgentServer) ShutdownAgent(context.Context, *ShutdownAgentRequest) (*ShutdownAgentResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ShutdownAgent not implemented")
@@ -1712,6 +1732,24 @@ func _Agent_UpdateConfig_Handler(srv interface{}, ctx context.Context, dec func(
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(AgentServer).UpdateConfig(ctx, req.(*UpdateConfigRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Agent_ResetSetup_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResetSetupRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServer).ResetSetup(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Agent_ResetSetup_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServer).ResetSetup(ctx, req.(*ResetSetupRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2920,6 +2958,10 @@ var Agent_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UpdateConfig",
 			Handler:    _Agent_UpdateConfig_Handler,
+		},
+		{
+			MethodName: "ResetSetup",
+			Handler:    _Agent_ResetSetup_Handler,
 		},
 		{
 			MethodName: "ShutdownAgent",

@@ -1494,3 +1494,7 @@ func (m *mockAgentClient) ResolveAuthentication(context.Context, *proto.Authenti
 func (m *mockAgentClient) UpdateRoutingAssignments(context.Context, *proto.UpdateRoutingAssignmentsRequest, ...grpc.CallOption) (*proto.UpdateRoutingAssignmentsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "not used in MCP fixture")
 }
+
+func (m *mockAgentClient) ResetSetup(context.Context, *proto.ResetSetupRequest, ...grpc.CallOption) (*proto.ResetSetupResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "setup reset is not an MCP tool")
+}

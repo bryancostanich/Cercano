@@ -46,7 +46,6 @@ func (s *cloudSettingsStub) GetCloudProfiles(context.Context, *proto.GetCloudPro
 	return &proto.GetCloudProfilesResponse{Active: "work-profile", Profiles: []*proto.CloudProfileInfo{{Name: "work-profile", ModelChoices: &proto.ProfileModelChoices{TierOverrides: map[string]string{"economy": "kept"}, ImageModel: "kept-image"}}}}, nil
 }
 func TestWizardCloudChoiceRPCUsesActiveProfileAndExplicitEdits(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)

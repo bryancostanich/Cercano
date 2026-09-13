@@ -223,6 +223,14 @@ func (p *service) SetCloudLLMProvider(prov inference.Provider) {
 }
 func (p *service) SetOpenLLMProvider(prov inference.Provider) {
 	p.openState.Store(&providerSlot{provider: prov})
+	if prov == nil {
+		if p.router != nil {
+			p.router.SetOpenProvider(nil)
+		}
+		if p.coordinator != nil {
+			p.coordinator.SetOpenProvider(nil)
+		}
+	}
 }
 func (p *service) SetCatalogManager(cm *ollamacatalog.Manager) { p.catalogManager = cm }
 func (p *service) SetUsageSink(fn func(usage.Usage))           { p.usageSink = fn }

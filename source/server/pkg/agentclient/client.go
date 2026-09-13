@@ -4,7 +4,6 @@
 package agentclient
 
 import (
-	"cercano/source/server/pkg/statelease"
 	"context"
 	"errors"
 	"fmt"
@@ -48,10 +47,6 @@ type grpcConnAlias = grpc.ClientConn
 // SDK methods read c.conn / c.agent through readConn — never touch the
 // fields directly outside that helper.
 type Client struct {
-	closed       bool
-	stateLease   *statelease.Lease
-	closeOnce    sync.Once
-	closeErr     error
 	connMu       sync.Mutex
 	conn         *grpc.ClientConn
 	agent        proto.AgentClient
@@ -90,7 +85,7 @@ type InlineImage struct {
 // watches the underlying connection for TRANSIENT_FAILURE (server crash
 // / network partition) and automatically reconnects — respawning the
 // server if necessary. See reconnect.go for the recovery flow.
-func dial(ctx context.Context, addr string) (*Client, error) {
+func Dial(ctx context.Context, addr string) (*Client, error) {
 	// First try: short connect against an existing server.
 	if c, err := connect(ctx, addr, 600*time.Millisecond); err == nil {
 		c.addr = addr
@@ -123,7 +118,7 @@ func dial(ctx context.Context, addr string) (*Client, error) {
 
 // DialExisting connects only to the supplied running server. It never launches
 // or respawns a process; the caller owns connection lifetime and retry policy.
-func dialExisting(ctx context.Context, addr string) (*Client, error) {
+func DialExisting(ctx context.Context, addr string) (*Client, error) {
 	return connect(ctx, addr, 600*time.Millisecond)
 }
 
@@ -147,9 +142,7 @@ func connect(ctx context.Context, addr string, timeout time.Duration) (*Client, 
 }
 
 func ensureServerLaunched(ctx context.Context, addr string, timeout time.Duration) (string, bool, error) {
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	lock, err := acquireAutoLaunchLockContext(ctx)
+	lock, err := acquireAutoLaunchLock()
 	if err != nil {
 		return "", false, err
 	}
@@ -162,9 +155,6 @@ func ensureServerLaunched(ctx context.Context, addr string, timeout time.Duratio
 		return "", false, nil
 	}
 
-	if err := ctx.Err(); err != nil {
-		return "", false, err
-	}
 	logPath, err := autoLaunchServer(addr)
 	if err != nil {
 		return "", false, err
@@ -243,60 +233,21 @@ func (c *Client) Close() error {
 	if c == nil {
 		return nil
 	}
-	c.closeOnce.Do(func() {
-		if c.stopWatch != nil {
-			select {
-			case <-c.stopWatch:
-			default:
-				close(c.stopWatch)
-			}
+	if c.stopWatch != nil {
+		select {
+		case <-c.stopWatch:
+			// already closed
+		default:
+			close(c.stopWatch)
 		}
-		// A reconnect already in flight may still launch an agent. Retain the
-		// participation lease until it exits, and prevent another one after close.
-		c.reconnectMu.Lock()
-		defer c.reconnectMu.Unlock()
-		c.closed = true
-		c.connMu.Lock()
-		conn := c.conn
-		c.conn = nil
-		c.connMu.Unlock()
-		if conn != nil {
-			c.closeErr = conn.Close()
-		}
-		if err := c.stateLease.Close(); c.closeErr == nil {
-			c.closeErr = err
-		}
-	})
-	return c.closeErr
-}
-
-// Dial joins the local state lifecycle before any connection/autolaunch work.
-func Dial(ctx context.Context, addr string) (*Client, error) {
-	return participatingDial(ctx, addr, true)
-}
-
-// DialExisting participates even without autolaunch: the client may retain
-// settings for later RPCs and must be closed before an offline reset.
-func DialExisting(ctx context.Context, addr string) (*Client, error) {
-	return participatingDial(ctx, addr, false)
-}
-func participatingDial(ctx context.Context, addr string, autolaunch bool) (*Client, error) {
-	lease, err := statelease.BeginParticipation()
-	if err != nil {
-		return nil, err
 	}
-	var c *Client
-	if autolaunch {
-		c, err = dial(ctx, addr)
-	} else {
-		c, err = dialExisting(ctx, addr)
+	c.connMu.Lock()
+	conn := c.conn
+	c.connMu.Unlock()
+	if conn == nil {
+		return nil
 	}
-	if err != nil {
-		lease.Close()
-		return nil, err
-	}
-	c.stateLease = lease
-	return c, nil
+	return conn.Close()
 }
 
 // Config is the current runtime config reported by the agent.

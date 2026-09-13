@@ -1,3 +1,54 @@
+# Final outcome — live developer reset
+
+The user's final instruction explicitly superseded the offline-only design. All new lifetime/process locks and client-lifecycle restrictions were removed. The current command is `cercano reset --setup`: terminal confirmation, no session closure/drain/process checks, live agent config refresh when present, local reset otherwise. The user controls concurrent activity and accepts in-flight errors and stale writeback/refresh races. Historical lock tests below describe removed work, not the current feature or a remaining blocker.
+
+Current implementation includes selective YAML reset, complete Cercano credential enumeration/deletion without reading secret values, current-default restoration, shared fresh wizard state, a confirmed ResetSetup RPC, and a terminal command that never silently falls back locally after a reachable-agent error.
+
+The final live integration invokes the command's Perform path against a local gRPC agent with fake credentials while a second client connection remains open. It verifies that connection still works, the live routing graph/config are reset, old/orphan credentials are gone, history sentinel bytes survive and fresh wizard state has no old baseline. A separate llama-server catalog fixture verifies normalized-directory downloads remain marked Downloaded after reset and custom-directory model bytes remain unchanged. No inference or download occurs.
+
+Additional failing-before/passing-after regressions cover a stale local TurnRunner surviving native provider removal, unknown agent outcomes being misleadingly printed as zero progress, and a wizard-path override colliding with the config path. YAML type errors were also sanitized to avoid echoing config-value snippets.
+
+## Final checks
+
+From source/server, all 11 affected packages passed:
+
+```sh
+go test ./internal/server ./internal/hostsvc/providers ./internal/hostsvc/config \
+  ./internal/hostsvc/credentials ./pkg/agentclient ./internal/mcp ./cmd/cercano \
+  ./internal/setupreset ./internal/setupresetcmd ./pkg/setupstate ./pkg/config -count=1
+
+go test -race ./internal/setupreset ./internal/setupresetcmd ./internal/server \
+  -run 'SetupReset|ResetSetup|ResetPreserves|ResetFailures|ResetRefuses|Confirmation|PartialFailure|UnknownAgent|WizardPath|ReachableAgent|LocalReset' -count=1
+
+go test ./internal/localruntime/llamaserver \
+  -run '^TestSetupResetRediscoversPreservedDefaultDownloads$' -count=1
+
+go build -o /tmp/cercano-debug-reset ./cmd/cercano
+```
+
+From source/clients/cli, root, wizard and UI tests and the build passed:
+
+```sh
+go test . ./internal/wizard ./internal/ui -count=1
+go build -o /tmp/cercano-debug-reset-cli .
+```
+
+Protobufs were regenerated via source/proto/generate.sh. The MCP test mock was extended for the new RPC without exposing a reset tool. Additional full consumer suites also passed: `go test ./internal/worker ./internal/runner ./internal/capabilities/builtins -count=1`, bringing affected server coverage to 14 passing packages.
+
+Actual built-binary smoke checks used isolated HOME/XDG_CONFIG_HOME/TMPDIR/wizard paths: `reset --help` returned 0, `reset` returned 2, and noninteractive `reset --setup` returned 1 even with RESET piped in. All three left the temporary state directory empty. No confirmed production-adapter invocation was made.
+
+## Review and limits
+
+A bounded independent review inspected the core and found no concrete defect; it did not complete an exhaustive multi-file audit. Direct source review and regression tests cover command triggering, live routing, preservation and error reporting. The complete repository end-to-end suite was not run; checks above target affected interfaces and behavior.
+
+No actual user config, OS-keychain credentials, sessions, runtime installations or model files were reset. Credential tests use fake/in-memory stores; gRPC integration is local and uses those stores. Real OS keychain deletion and manual interactive setup against a running user's installation were not exercised. Test binaries were built under /tmp, not installed, and no running agent was restarted. No push or merge is authorized/performed.
+
+Unknown unrelated YAML keys are preserved. Unsupported aliases/merges and malformed config are rejected rather than silently losing unrelated data. External auth/environment/browser state is intentionally not cleared. In-flight errors, partial failure and stale writes from other sessions remain intentional limitations of this user-approved debug reset.
+
+---
+
+## Historical implementation record (superseded where noted)
+
 # Setup reset verification — in progress
 
 Implementation worktree: Cercano-new-user-reset, branch feat/new-user-setup-reset, base d9d21fd3. No real reset, user-config mutation, credential reads/deletes, service shutdown, inference or model-file deletion performed.

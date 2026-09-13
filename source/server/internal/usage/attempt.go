@@ -113,6 +113,7 @@ func (a *Attempt) Observe(tokens llm.TokenUsage, route *llm.ServingRoute) {
 		a.mu.Unlock()
 		return
 	}
+	before := a.observation
 	a.observation.Tokens = a.observation.Tokens.Merge(tokens)
 	if route != nil {
 		if route.Provider != "" {
@@ -123,6 +124,10 @@ func (a *Attempt) Observe(tokens llm.TokenUsage, route *llm.ServingRoute) {
 		}
 		a.observation.Profile = route.Profile
 		a.observation.Destination = route.Destination
+	}
+	if a.observation == before {
+		a.mu.Unlock()
+		return
 	}
 	a.observation.Revision++
 	snapshot := a.observation

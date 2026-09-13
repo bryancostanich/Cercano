@@ -20,13 +20,13 @@ func TestAttemptLifecycleSnapshots(t *testing.T) {
 	a.Finish(Failed)
 	a.Finish(Completed)
 	a.Observe(llm.TokenUsage{Output: llm.ReportedTokens(99)}, nil)
-	if len(got) != 4 {
-		t.Fatalf("observations=%d; want start, two snapshots, terminal", len(got))
+	if len(got) != 3 {
+		t.Fatalf("observations=%d; want start, changed snapshot, terminal", len(got))
 	}
 	if got[0].Outcome != Started || got[0].Tokens.TotalsKnown() {
 		t.Fatalf("start fabricated counts: %+v", got[0])
 	}
-	last := got[3]
+	last := got[2]
 	if last.Outcome != Failed || last.Tokens.Input.Value != 11 || last.Tokens.Output.Value != 7 || last.Model != "actual-model" {
 		t.Fatalf("terminal=%+v", last)
 	}
@@ -109,5 +109,38 @@ func TestOperationScopePreservesAttribution(t *testing.T) {
 	disabled := t.Context()
 	if ForOperation(disabled, nil, "vision", "") != disabled {
 		t.Fatal("disabled accounting allocated a context")
+	}
+}
+
+func TestIdenticalAttemptSnapshotsDoNotCreateQueueTraffic(t *testing.T) {
+	var observations []AttemptObservation
+	ctx := WithAttempts(t.Context(), func(a AttemptObservation) bool { observations = append(observations, a); return true }, Attribution{Source: "main"})
+	a := StartAttempt(ctx, "provider", "model")
+	tokens := llm.TokenUsage{Input: llm.ReportedTokens(11), Output: llm.ReportedTokens(0)}
+	a.Observe(tokens, nil)
+	a.Observe(tokens, nil)
+	a.Finish(Completed)
+	// One start + one changed snapshot + one final, not another revision merely
+	// because a streaming text chunk repeated identical cumulative usage.
+	if len(observations) != 3 {
+		t.Fatalf("identical snapshot emitted: got %d observations, want 3", len(observations))
+	}
+	if observations[2].Revision != 3 {
+		t.Fatalf("no-op changed revision: %d", observations[2].Revision)
+	}
+}
+
+func TestRouteOnlyChangeStillEmitsObservation(t *testing.T) {
+	var got []AttemptObservation
+	ctx := WithAttempts(t.Context(), func(a AttemptObservation) bool { got = append(got, a); return true }, Attribution{})
+	a := StartAttempt(ctx, "provider", "requested")
+	tokens := llm.TokenUsage{Input: llm.ReportedTokens(11)}
+	a.Observe(tokens, nil)
+	route := &llm.ServingRoute{Provider: "provider", Model: "actual"}
+	a.Observe(tokens, route)
+	a.Observe(tokens, route)
+	a.Finish(Completed)
+	if len(got) != 4 || got[2].Model != "actual" || got[3].Tokens.Input.Value != 11 {
+		t.Fatalf("route update lost or tokens added twice: %+v", got)
 	}
 }

@@ -3270,6 +3270,7 @@ var Agent_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
+	Worker_Accounting_FullMethodName                = "/agent.Worker/Accounting"
 	Worker_RunTurn_FullMethodName                   = "/agent.Worker/RunTurn"
 	Worker_RunTurnWithAuthentication_FullMethodName = "/agent.Worker/RunTurnWithAuthentication"
 )
@@ -3278,6 +3279,11 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type WorkerClient interface {
+	// Independent background accounting on the existing worker connection.
+	// An empty first receipt opens the stream; subsequent receipts identify a
+	// batch. An empty first batch confirms stream readiness. Neither direction
+	// carries permission or tool-control messages.
+	Accounting(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[WorkerAccountingReceipt, WorkerAccountingBatch], error)
 	// RunTurn executes one conversation turn in the worker process.
 	// Host sends HostToWorker (StartTurn, then PermissionResponse / Cancel as
 	// needed); worker sends WorkerToHost (WorkerEvent, PermissionRequest,
@@ -3294,9 +3300,22 @@ func NewWorkerClient(cc grpc.ClientConnInterface) WorkerClient {
 	return &workerClient{cc}
 }
 
+func (c *workerClient) Accounting(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[WorkerAccountingReceipt, WorkerAccountingBatch], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &Worker_ServiceDesc.Streams[0], Worker_Accounting_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[WorkerAccountingReceipt, WorkerAccountingBatch]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Worker_AccountingClient = grpc.BidiStreamingClient[WorkerAccountingReceipt, WorkerAccountingBatch]
+
 func (c *workerClient) RunTurn(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[HostToWorker, WorkerToHost], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &Worker_ServiceDesc.Streams[0], Worker_RunTurn_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &Worker_ServiceDesc.Streams[1], Worker_RunTurn_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -3309,7 +3328,7 @@ type Worker_RunTurnClient = grpc.BidiStreamingClient[HostToWorker, WorkerToHost]
 
 func (c *workerClient) RunTurnWithAuthentication(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[HostToWorker, WorkerToHost], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &Worker_ServiceDesc.Streams[1], Worker_RunTurnWithAuthentication_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &Worker_ServiceDesc.Streams[2], Worker_RunTurnWithAuthentication_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -3324,6 +3343,11 @@ type Worker_RunTurnWithAuthenticationClient = grpc.BidiStreamingClient[HostToWor
 // All implementations must embed UnimplementedWorkerServer
 // for forward compatibility.
 type WorkerServer interface {
+	// Independent background accounting on the existing worker connection.
+	// An empty first receipt opens the stream; subsequent receipts identify a
+	// batch. An empty first batch confirms stream readiness. Neither direction
+	// carries permission or tool-control messages.
+	Accounting(grpc.BidiStreamingServer[WorkerAccountingReceipt, WorkerAccountingBatch]) error
 	// RunTurn executes one conversation turn in the worker process.
 	// Host sends HostToWorker (StartTurn, then PermissionResponse / Cancel as
 	// needed); worker sends WorkerToHost (WorkerEvent, PermissionRequest,
@@ -3340,6 +3364,9 @@ type WorkerServer interface {
 // pointer dereference when methods are called.
 type UnimplementedWorkerServer struct{}
 
+func (UnimplementedWorkerServer) Accounting(grpc.BidiStreamingServer[WorkerAccountingReceipt, WorkerAccountingBatch]) error {
+	return status.Error(codes.Unimplemented, "method Accounting not implemented")
+}
 func (UnimplementedWorkerServer) RunTurn(grpc.BidiStreamingServer[HostToWorker, WorkerToHost]) error {
 	return status.Error(codes.Unimplemented, "method RunTurn not implemented")
 }
@@ -3367,6 +3394,13 @@ func RegisterWorkerServer(s grpc.ServiceRegistrar, srv WorkerServer) {
 	s.RegisterService(&Worker_ServiceDesc, srv)
 }
 
+func _Worker_Accounting_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(WorkerServer).Accounting(&grpc.GenericServerStream[WorkerAccountingReceipt, WorkerAccountingBatch]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Worker_AccountingServer = grpc.BidiStreamingServer[WorkerAccountingReceipt, WorkerAccountingBatch]
+
 func _Worker_RunTurn_Handler(srv interface{}, stream grpc.ServerStream) error {
 	return srv.(WorkerServer).RunTurn(&grpc.GenericServerStream[HostToWorker, WorkerToHost]{ServerStream: stream})
 }
@@ -3389,6 +3423,12 @@ var Worker_ServiceDesc = grpc.ServiceDesc{
 	HandlerType: (*WorkerServer)(nil),
 	Methods:     []grpc.MethodDesc{},
 	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "Accounting",
+			Handler:       _Worker_Accounting_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
 		{
 			StreamName:    "RunTurn",
 			Handler:       _Worker_RunTurn_Handler,

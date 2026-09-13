@@ -1598,6 +1598,12 @@ message AttachConversationRequest {
 // ============================================================
 
 service Worker {
+  // Independent background accounting on the existing worker connection.
+  // An empty first receipt opens the stream; subsequent receipts identify a
+  // batch. An empty first batch confirms stream readiness. Neither direction
+  // carries permission or tool-control messages.
+  rpc Accounting(stream WorkerAccountingReceipt) returns (stream WorkerAccountingBatch);
+
   // RunTurn executes one conversation turn in the worker process.
   // Host sends HostToWorker (StartTurn, then PermissionResponse / Cancel as
   // needed); worker sends WorkerToHost (WorkerEvent, PermissionRequest,
@@ -1617,7 +1623,6 @@ message HostToWorker {
     SessionProfileResponse profile_response = 6;
     WorkerAuthenticationResponse auth_response = 7;
  RuntimeRestartToolResponse runtime_response = 8;
-    WorkerAccountingReceipt accounting_receipt = 9;
   }
 }
 
@@ -1636,7 +1641,6 @@ message WorkerToHost {
  RuntimeRequestAccounting request_accounting = 10;
     WorkerAuthenticationRequest auth_request = 11;
  RuntimeRestartToolRequest runtime_request = 12;
-    WorkerAccountingBatch accounting_batch = 13;
   }
 }
 

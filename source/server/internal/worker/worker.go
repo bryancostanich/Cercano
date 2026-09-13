@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"runtime/debug"
+	"sync"
 
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/cloudfactory"
@@ -40,6 +41,8 @@ import (
 
 // WorkerServer implements the gRPC Worker service (worker-side).
 type WorkerServer struct {
+	accountingMu        sync.Mutex
+	accountingTransport *workerAccountingWriter
 	proto.UnimplementedWorkerServer
 
 	// providerFactory overrides provider construction for tests.

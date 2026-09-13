@@ -16,12 +16,14 @@ import (
 // reasoning item's output_item.done and is surfaced as EventReasoning in stream
 // order, so collectStream assembles a BlockReasoning before the function_call.
 type streamReader struct {
-	usage    llm.TokenUsage
-	rc       io.ReadCloser
-	br       *bufio.Reader
-	provider string
-	pending  []llm.StreamEvent
-	done     bool
+	observeModel  func(string)
+	observedModel string
+	usage         llm.TokenUsage
+	rc            io.ReadCloser
+	br            *bufio.Reader
+	provider      string
+	pending       []llm.StreamEvent
+	done          bool
 	// failure is a classified in-band error frame ("response.failed" /
 	// "error"), returned from Next after pending events drain — as a normalized
 	// error, not an EventError, so both the resilience engine (pre-content) and
@@ -127,6 +129,10 @@ func (s *streamReader) dispatch(data string) {
 		return // ignore unparseable frames
 	}
 	if env.Response != nil {
+		if s.observeModel != nil && env.Response.Model != "" && env.Response.Model != s.observedModel {
+			s.observedModel = env.Response.Model
+			s.observeModel(env.Response.Model)
+		}
 		s.usage = s.usage.Merge(env.Response.Usage.normalized())
 	}
 	switch env.Type {

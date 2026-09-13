@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 
 	goopenai "github.com/sashabaranov/go-openai"
 
@@ -35,11 +36,12 @@ type Config struct {
 
 // Client implements inference.Provider using the OpenAI chat completions API.
 type Client struct {
-	api            *goopenai.Client
-	model          string
-	backend        string
-	quirks         Quirks
-	supportsVision bool
+	accountingProvider string // metadata only; Name/routing behavior stays unchanged
+	api                *goopenai.Client
+	model              string
+	backend            string
+	quirks             Quirks
+	supportsVision     bool
 }
 
 // NewClient constructs a Client from cfg. The HTTP transport is wrapped in a
@@ -48,12 +50,17 @@ type Client struct {
 // retry policy is owned by the resilience engine above this adapter.
 func NewClient(cfg Config) *Client {
 	c := goopenai.DefaultConfig(cfg.APIKey)
+	accountingProvider := cfg.Backend
+	if accountingProvider == "" && (cfg.BaseURL == "" || strings.TrimRight(cfg.BaseURL, "/") == strings.TrimRight(c.BaseURL, "/")) {
+		accountingProvider = "openai"
+	}
+
 	if cfg.BaseURL != "" {
 		c.BaseURL = cfg.BaseURL
 	}
 	q := quirksFor(cfg.Backend)
 	c.HTTPClient = &normalizingDoer{next: &http.Client{}, quirks: q, onHTTPError: cfg.OnHTTPError}
-	return &Client{api: goopenai.NewClientWithConfig(c), model: cfg.Model, backend: cfg.Backend, quirks: q, supportsVision: cfg.SupportsVision}
+	return &Client{accountingProvider: accountingProvider, api: goopenai.NewClientWithConfig(c), model: cfg.Model, backend: cfg.Backend, quirks: q, supportsVision: cfg.SupportsVision}
 }
 
 // resolveImageURLs replaces URL image blocks with inline base64, so backends
@@ -229,7 +236,7 @@ func (c *Client) Chat(ctx context.Context, req llm.ChatRequest) (out llm.ChatRes
 	}
 	wire := c.buildRequest(req, false)
 	logRequestDiagnostics(req, wire, c.backend, false)
-	a := usage.StartAttempt(ctx, c.Name(), wire.Model)
+	a := usage.StartAttempt(ctx, c.accountingProvider, wire.Model)
 	defer func() { a.FinishResponse(out, err) }()
 	resp, err := c.api.CreateChatCompletion(c.requestContext(ctx, req), wire)
 	if err != nil {
@@ -264,7 +271,7 @@ func (c *Client) StreamChat(ctx context.Context, req llm.ChatRequest) (llm.Strea
 	}
 	wire := c.buildRequest(req, true)
 	logRequestDiagnostics(req, wire, c.backend, true)
-	a := usage.StartAttempt(ctx, c.Name(), wire.Model)
+	a := usage.StartAttempt(ctx, c.accountingProvider, wire.Model)
 	stream, err := c.api.CreateChatCompletionStream(c.requestContext(ctx, req), wire)
 	if err != nil {
 		log.Printf("[openai] request failed: conv=%s request_id=%s backend=%s model=%s stream=true error=%v", req.ConversationID, req.RequestID, c.backend, wire.Model, err)
@@ -273,5 +280,8 @@ func (c *Client) StreamChat(ctx context.Context, req llm.ChatRequest) (llm.Strea
 	}
 	r := newStreamReader(stream)
 	r.normalize = c.normalize
+	if a != nil {
+		r.observeModel = func(model string) { a.Observe(llm.TokenUsage{}, &llm.ServingRoute{Model: model}) }
+	}
 	return a.TrackStream(r), nil
 }

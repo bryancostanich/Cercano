@@ -177,7 +177,7 @@ func (c *Client) Chat(ctx context.Context, req ChatRequest) (ChatResponse, error
 
 func (c *Client) chatOnce(ctx context.Context, req ChatRequest) (out ChatResponse, err error) {
 	params := c.buildParams(req)
-	a := usage.StartAttempt(ctx, c.Name(), string(params.Model))
+	a := usage.StartAttempt(ctx, c.accountingProviderName(), string(params.Model))
 	defer func() { a.FinishResponse(out, err) }()
 	resp, err := c.sdk.Messages.New(ctx, params)
 	if err != nil {
@@ -200,7 +200,18 @@ func (c *Client) chatOnce(ctx context.Context, req ChatRequest) (out ChatRespons
 
 func (c *Client) StreamChat(ctx context.Context, req ChatRequest) (llm.StreamReader, error) {
 	params := c.buildParams(req)
-	a := usage.StartAttempt(ctx, c.Name(), string(params.Model))
+	a := usage.StartAttempt(ctx, c.accountingProviderName(), string(params.Model))
 	st := c.sdk.Messages.NewStreaming(ctx, params)
-	return a.TrackStream(&streamReader{stream: st, blockKind: map[int64]string{}, normalize: c.normalize}), nil
+	reader := &streamReader{stream: st, blockKind: map[int64]string{}, normalize: c.normalize}
+	if a != nil {
+		reader.observeModel = func(model string) { a.Observe(llm.TokenUsage{}, &llm.ServingRoute{Model: model}) }
+	}
+	return a.TrackStream(reader), nil
+}
+
+func (c *Client) accountingProviderName() string {
+	if c.cfg.BaseURL == "" || strings.TrimRight(c.cfg.BaseURL, "/") == "https://api.anthropic.com" {
+		return c.Name()
+	}
+	return "" // compatible endpoint is not proof of the native hosting provider
 }

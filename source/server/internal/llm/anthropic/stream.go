@@ -8,9 +8,10 @@ import (
 )
 
 type streamReader struct {
-	usage     usageCounts
-	stream    *ssestream.Stream[sdk.MessageStreamEventUnion]
-	blockKind map[int64]string
+	observeModel func(string)
+	usage        usageCounts
+	stream       *ssestream.Stream[sdk.MessageStreamEventUnion]
+	blockKind    map[int64]string
 	// normalize maps vendor/transport errors into the llm.Error taxonomy; the
 	// SDK is lazy, so even request-time failures (auth, quota 429) surface
 	// here on the first read rather than at StreamChat.
@@ -39,6 +40,9 @@ func (s *streamReader) Close() error { return s.stream.Close() }
 func (s *streamReader) convert(raw sdk.MessageStreamEventUnion) (llm.StreamEvent, bool) {
 	switch raw.Type {
 	case "message_start":
+		if s.observeModel != nil && raw.Message.Model != "" {
+			s.observeModel(string(raw.Message.Model))
+		}
 		s.usage.message(raw.Message.Usage)
 		return llm.StreamEvent{Type: llm.EventMessageStart, Usage: s.usage.snapshot(), InputTokens: int(raw.Message.Usage.InputTokens)}, true
 	case "content_block_start":

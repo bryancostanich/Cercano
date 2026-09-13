@@ -323,7 +323,7 @@ func (c *Client) chatOnce(ctx context.Context, req llm.ChatRequest) (out llm.Cha
 	if err != nil {
 		return llm.ChatResponse{}, err
 	}
-	a := accounting.StartAttempt(ctx, c.Name(), built.Model)
+	a := accounting.StartAttempt(ctx, c.accountingProviderName(), built.Model)
 	defer func() { a.FinishResponse(out, err) }()
 	httpResp, err := c.do(ctx, built)
 	if err != nil {
@@ -372,7 +372,7 @@ func (c *Client) streamOnce(ctx context.Context, req llm.ChatRequest) (llm.Strea
 	if err != nil {
 		return nil, err
 	}
-	a := accounting.StartAttempt(ctx, c.Name(), built.Model)
+	a := accounting.StartAttempt(ctx, c.accountingProviderName(), built.Model)
 	httpResp, err := c.do(ctx, built)
 	if err != nil {
 		a.FinishResponse(llm.ChatResponse{}, err)
@@ -387,6 +387,9 @@ func (c *Client) streamOnce(ctx context.Context, req llm.ChatRequest) (llm.Strea
 	}
 	reader := newStreamReader(httpResp.Body, c.Name())
 	reader.normalizeAuth = c.normalizeStreamAuthentication
+	if a != nil {
+		reader.observeModel = func(model string) { a.Observe(llm.TokenUsage{}, &llm.ServingRoute{Model: model}) }
+	}
 	return a.TrackStream(reader), nil
 }
 
@@ -399,4 +402,12 @@ func (c *Client) normalizeStreamAuthentication(err error) error {
 		profile = source.CredentialProfile()
 	}
 	return &llm.Error{Class: llm.ErrLoginRequired, Provider: c.Name(), Err: &llm.CredentialError{Class: llm.ErrLoginRequired, Provider: c.Name(), Profile: profile, Method: llm.AuthSubscription, Reason: llm.CredentialRejected, Cause: err}}
+}
+
+func (c *Client) accountingProviderName() string {
+	base := strings.TrimRight(c.baseURL, "/")
+	if base == defaultBaseURL || base == CodexBaseURL {
+		return c.Name()
+	}
+	return "" // preserve unknown identity for custom compatible endpoints
 }

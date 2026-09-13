@@ -20,7 +20,7 @@ func (m *attemptMiddleware) ID() string { return "CercanoAttemptAccounting" }
 func (m *attemptMiddleware) HandleFinalize(ctx context.Context, in middleware.FinalizeInput, next middleware.FinalizeHandler) (middleware.FinalizeOutput, middleware.Metadata, error) {
 	a := usage.StartAttempt(ctx, "bedrock", m.model)
 	out, metadata, err := next.HandleFinalize(ctx, in)
-	response := llm.ChatResponse{Model: m.model, Route: &llm.ServingRoute{Provider: "bedrock", Model: m.model, Destination: "cloud"}}
+	response := llm.ChatResponse{Model: m.model, Route: &llm.ServingRoute{Provider: "bedrock", Model: m.model}}
 	switch result := out.Result.(type) {
 	case *bedrockruntime.ConverseOutput:
 		if result != nil {

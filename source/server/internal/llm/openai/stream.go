@@ -23,8 +23,10 @@ import (
 // change that emits ToolUseStop+ToolUseStart). A pending-event queue lets Next()
 // drain them one at a time without re-calling Recv().
 type streamReader struct {
-	usage  llm.TokenUsage
-	stream *goopenai.ChatCompletionStream
+	observeModel  func(string)
+	observedModel string
+	usage         llm.TokenUsage
+	stream        *goopenai.ChatCompletionStream
 
 	// pending events to return before the next Recv()
 	pending []llm.StreamEvent
@@ -135,6 +137,11 @@ func (r *streamReader) Next() (llm.StreamEvent, bool, error) {
 				err = r.normalize(err)
 			}
 			return llm.StreamEvent{Usage: r.usage}, false, err
+		}
+
+		if r.observeModel != nil && chunk.Model != "" && chunk.Model != r.observedModel {
+			r.observedModel = chunk.Model
+			r.observeModel(chunk.Model)
 		}
 
 		// Emit EventMessageStart once (InputTokens unknown until end for OpenAI).

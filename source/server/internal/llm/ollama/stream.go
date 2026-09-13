@@ -77,7 +77,7 @@ func (c *Client) StreamChat(ctx context.Context, req ChatRequest) (llm.StreamRea
 			r.usage = r.usage.Merge(next)
 			if next != (llm.TokenUsage{}) || resp.Model != actualModel {
 				actualModel = resp.Model
-				a.Observe(next, &llm.ServingRoute{Provider: c.Name(), Model: resp.Model, Destination: "local"})
+				a.Observe(next, &llm.ServingRoute{Provider: c.Name(), Model: resp.Model})
 			}
 			if resp.Message.Content != "" {
 				if !send(llm.StreamEvent{Type: llm.EventTextDelta, TextDelta: resp.Message.Content}) {

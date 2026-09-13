@@ -38,6 +38,7 @@ func TestSDKRetriesAreSeparateAttempts(t *testing.T) {
 	c := &Client{api: api, model: "fake"}
 	var got []usage.AttemptObservation
 	ctx := usage.WithAttempts(t.Context(), func(o usage.AttemptObservation) bool { got = append(got, o); return true }, usage.Attribution{Source: "main"})
+	ctx = usage.WithAttemptProfile(ctx, "selected-profile", "secondary")
 	out, err := c.Chat(ctx, llm.ChatRequest{Messages: []llm.Message{{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: "hello"}}}}})
 	if err != nil {
 		t.Fatal(err)
@@ -50,6 +51,9 @@ func TestSDKRetriesAreSeparateAttempts(t *testing.T) {
 			ids[o.ID] = true
 		}
 		if o.Outcome != usage.Started {
+			if o.Profile != "selected-profile" || o.Destination != "secondary" {
+				t.Fatalf("selected route overwritten: %+v", o)
+			}
 			ends++
 			if o.Outcome == usage.Completed && o.Tokens.Input != llm.ReportedTokens(19) {
 				t.Fatalf("cache total=%+v", o)

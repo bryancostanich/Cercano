@@ -54,15 +54,16 @@ type AttemptObservation struct {
 type AttemptSink func(AttemptObservation) bool
 
 type attemptContext struct {
-	sink        AttemptSink
-	attribution Attribution
+	profile, destination string
+	sink                 AttemptSink
+	attribution          Attribution
 }
 type attemptContextKey struct{}
 
 // WithAttempts extends existing sink wiring to physical adapter boundaries.
 // Higher-level wrappers supply attribution but must not emit duplicate attempts.
 func WithAttempts(ctx context.Context, sink AttemptSink, attribution Attribution) context.Context {
-	return context.WithValue(ctx, attemptContextKey{}, attemptContext{sink, attribution})
+	return context.WithValue(ctx, attemptContextKey{}, attemptContext{sink: sink, attribution: attribution})
 }
 
 var attemptSequence atomic.Uint64
@@ -95,6 +96,7 @@ func StartAttempt(ctx context.Context, provider, model string) *Attempt {
 	a := &Attempt{sink: config.sink, observation: AttemptObservation{
 		ID:       NewIdentity(),
 		Revision: 1, Attribution: config.attribution, Provider: provider, Model: model,
+		Profile: config.profile, Destination: config.destination,
 		StartedAt: time.Now().UTC(), Outcome: Started,
 	}}
 	a.sink(a.observation)
@@ -122,8 +124,12 @@ func (a *Attempt) Observe(tokens llm.TokenUsage, route *llm.ServingRoute) {
 		if route.Model != "" {
 			a.observation.Model = route.Model
 		}
-		a.observation.Profile = route.Profile
-		a.observation.Destination = route.Destination
+		if route.Profile != "" {
+			a.observation.Profile = route.Profile
+		}
+		if route.Destination != "" {
+			a.observation.Destination = route.Destination
+		}
 	}
 	if a.observation == before {
 		a.mu.Unlock()
@@ -195,4 +201,16 @@ func AttributionFromContext(ctx context.Context) (Attribution, bool) {
 		return Attribution{}, false
 	}
 	return config.attribution, true
+}
+
+// WithAttemptProfile supplies metadata from the actually selected profile,
+// before its inner physical call. It does not choose a route or emit an attempt.
+// The adapter remains authoritative for its backend and wire/requested model.
+func WithAttemptProfile(ctx context.Context, profile, destination string) context.Context {
+	config, _ := ctx.Value(attemptContextKey{}).(attemptContext)
+	if config.sink == nil {
+		return ctx
+	}
+	config.profile, config.destination = profile, destination
+	return context.WithValue(ctx, attemptContextKey{}, config)
 }

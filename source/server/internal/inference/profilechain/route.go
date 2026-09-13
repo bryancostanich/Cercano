@@ -5,6 +5,7 @@ import (
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/modelmetadata"
+	"cercano/source/server/internal/usage"
 	"context"
 	"fmt"
 )
@@ -33,6 +34,7 @@ func (p *routeProvider) Chat(ctx context.Context, req inference.Call) (inference
 	if req.Model == "" {
 		return inference.Result{}, fmt.Errorf("profile %q has no model for requested intent", p.profile)
 	}
+	ctx = usage.WithAttemptProfile(ctx, p.profile, p.destination)
 	result, err := p.Provider.Chat(ctx, req)
 	if err == nil {
 		model := result.Model
@@ -49,6 +51,7 @@ func (p *routeProvider) StreamChat(ctx context.Context, req inference.Call) (inf
 	if req.Model == "" {
 		return nil, fmt.Errorf("profile %q has no model for requested intent", p.profile)
 	}
+	ctx = usage.WithAttemptProfile(ctx, p.profile, p.destination)
 	stream, err := p.Provider.StreamChat(ctx, req)
 	if err != nil {
 		return nil, err

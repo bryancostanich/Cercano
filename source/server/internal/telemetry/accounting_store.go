@@ -30,7 +30,7 @@ func (s *SQLiteStore) InitializeAccounting(ctx context.Context) error {
    started_at INTEGER NOT NULL,ended_at INTEGER,
    outcome TEXT NOT NULL CHECK(outcome IN ('started','completed','failed','interrupted')),
    input_tokens INTEGER CHECK(input_tokens>=0),output_tokens INTEGER CHECK(output_tokens>=0),
-   cache_read_tokens INTEGER CHECK(cache_read_tokens>=0),cache_write_tokens INTEGER CHECK(cache_write_tokens>=0),reasoning_tokens INTEGER CHECK(reasoning_tokens>=0))`,
+   cache_read_tokens INTEGER CHECK(cache_read_tokens>=0),cache_write_tokens INTEGER CHECK(cache_write_tokens>=0),reasoning_tokens INTEGER CHECK(reasoning_tokens>=0),usage_final INTEGER NOT NULL CHECK(usage_final IN (0,1)))`,
 		`CREATE INDEX IF NOT EXISTS inference_attempts_time ON inference_attempts(started_at)`,
 		`CREATE INDEX IF NOT EXISTS inference_attempts_provider_model_time ON inference_attempts(provider,model,started_at)`,
 		`CREATE INDEX IF NOT EXISTS inference_attempts_source_time ON inference_attempts(source,started_at)`,
@@ -139,19 +139,19 @@ func (s *SQLiteStore) WriteAttempts(ctx context.Context, batch []usage.AttemptOb
 	}
 	defer tx.Rollback()
 	stmt, err := tx.PrepareContext(ctx, `INSERT INTO inference_attempts
- (id,revision,operation_id,conversation_id,session_id,worker_id,source,provider,model,profile,destination,started_at,ended_at,outcome,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,reasoning_tokens)
- VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+ (id,revision,operation_id,conversation_id,session_id,worker_id,source,provider,model,profile,destination,started_at,ended_at,outcome,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,reasoning_tokens,usage_final)
+ VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
  ON CONFLICT(id) DO UPDATE SET revision=excluded.revision,provider=excluded.provider,model=excluded.model,
  profile=excluded.profile,destination=excluded.destination,ended_at=excluded.ended_at,outcome=excluded.outcome,
  input_tokens=excluded.input_tokens,output_tokens=excluded.output_tokens,cache_read_tokens=excluded.cache_read_tokens,
- cache_write_tokens=excluded.cache_write_tokens,reasoning_tokens=excluded.reasoning_tokens
+ cache_write_tokens=excluded.cache_write_tokens,reasoning_tokens=excluded.reasoning_tokens,usage_final=excluded.usage_final
  WHERE excluded.revision>inference_attempts.revision AND (inference_attempts.outcome='started' OR excluded.outcome!='started')`)
 	if err != nil {
 		return err
 	}
 	defer stmt.Close()
 	for _, a := range batch {
-		_, err = stmt.ExecContext(ctx, a.ID, a.Revision, a.Attribution.OperationID, a.Attribution.ConversationID, a.Attribution.SessionID, a.Attribution.WorkerID, a.Attribution.Source, a.Provider, a.Model, a.Profile, a.Destination, a.StartedAt.UTC().UnixMicro(), nullableTime(a.EndedAt), a.Outcome, nullableCount(a.Tokens.Input), nullableCount(a.Tokens.Output), nullableCount(a.Tokens.CacheRead), nullableCount(a.Tokens.CacheWrite), nullableCount(a.Tokens.Reasoning))
+		_, err = stmt.ExecContext(ctx, a.ID, a.Revision, a.Attribution.OperationID, a.Attribution.ConversationID, a.Attribution.SessionID, a.Attribution.WorkerID, a.Attribution.Source, a.Provider, a.Model, a.Profile, a.Destination, a.StartedAt.UTC().UnixMicro(), nullableTime(a.EndedAt), a.Outcome, nullableCount(a.Tokens.Input), nullableCount(a.Tokens.Output), nullableCount(a.Tokens.CacheRead), nullableCount(a.Tokens.CacheWrite), nullableCount(a.Tokens.Reasoning), a.Tokens.Final)
 		if err != nil {
 			return err
 		}
@@ -165,7 +165,7 @@ func (s *SQLiteStore) AccountingAttempt(ctx context.Context, id string) (usage.A
 	var start int64
 	var end sql.NullInt64
 	var counts [5]sql.NullInt64
-	err := s.db.QueryRowContext(ctx, `SELECT id,revision,operation_id,conversation_id,session_id,worker_id,source,provider,model,profile,destination,started_at,ended_at,outcome,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,reasoning_tokens FROM inference_attempts WHERE id=?`, id).Scan(&a.ID, &a.Revision, &a.Attribution.OperationID, &a.Attribution.ConversationID, &a.Attribution.SessionID, &a.Attribution.WorkerID, &a.Attribution.Source, &a.Provider, &a.Model, &a.Profile, &a.Destination, &start, &end, &a.Outcome, &counts[0], &counts[1], &counts[2], &counts[3], &counts[4])
+	err := s.db.QueryRowContext(ctx, `SELECT id,revision,operation_id,conversation_id,session_id,worker_id,source,provider,model,profile,destination,started_at,ended_at,outcome,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,reasoning_tokens,usage_final FROM inference_attempts WHERE id=?`, id).Scan(&a.ID, &a.Revision, &a.Attribution.OperationID, &a.Attribution.ConversationID, &a.Attribution.SessionID, &a.Attribution.WorkerID, &a.Attribution.Source, &a.Provider, &a.Model, &a.Profile, &a.Destination, &start, &end, &a.Outcome, &counts[0], &counts[1], &counts[2], &counts[3], &counts[4], &a.Tokens.Final)
 	if err != nil {
 		return a, err
 	}

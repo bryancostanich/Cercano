@@ -157,6 +157,9 @@ func (s *streamReader) dispatch(data string) {
 			s.pending = append(s.pending, llm.StreamEvent{Type: llm.EventReasoning, ReasoningID: env.Item.ID, ReasoningData: env.Item.EncryptedContent})
 		}
 	case "response.completed":
+		if env.Response != nil && env.Response.Usage != nil {
+			s.usage.Final = env.Response.Usage.normalized().Reported()
+		}
 		ev := llm.StreamEvent{Type: llm.EventMessageStop, Usage: s.usage}
 		if env.Response != nil {
 			ev.StopReason = env.Response.Status

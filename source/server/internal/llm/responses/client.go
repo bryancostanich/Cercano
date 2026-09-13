@@ -344,6 +344,7 @@ func (c *Client) chatOnce(ctx context.Context, req llm.ChatRequest) (out llm.Cha
 	out = llm.ChatResponse{Blocks: blocksFromOutput(r.Output), StopReason: r.Status, Model: r.Model}
 	if r.Usage != nil {
 		out.Usage = r.Usage.normalized()
+		out.Usage.Final = r.Status == "completed" && out.Usage.Reported()
 		out.InputTokens = int(out.Usage.Input.Value)
 		out.OutputTokens = int(out.Usage.Output.Value)
 	}

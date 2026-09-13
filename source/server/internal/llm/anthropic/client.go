@@ -185,6 +185,7 @@ func (c *Client) chatOnce(ctx context.Context, req ChatRequest) (out ChatRespons
 	}
 	var counts usageCounts
 	counts.message(resp.Usage)
+	counts.tokens.Final = counts.snapshot().Reported()
 	out = ChatResponse{
 		Usage:        counts.snapshot(),
 		StopReason:   string(resp.StopReason),

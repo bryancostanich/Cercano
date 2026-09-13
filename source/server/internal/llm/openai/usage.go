@@ -23,6 +23,14 @@ func normalizedUsage(v goopenai.Usage) llm.TokenUsage {
 	if v.CompletionTokensDetails != nil {
 		out.Reasoning = sdkReportedCount(v.CompletionTokensDetails.ReasoningTokens)
 	}
+
 	// Prompt/completion totals already include these breakdowns.
+	return out
+}
+
+// A non-streaming response supplies final usage, even when counts are incomplete.
+func finalUsage(v goopenai.Usage) llm.TokenUsage {
+	out := normalizedUsage(v)
+	out.Final = out.Reported()
 	return out
 }

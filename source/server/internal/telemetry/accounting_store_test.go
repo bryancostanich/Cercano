@@ -34,7 +34,7 @@ func TestAccountingStoreIdempotencyAndPresence(t *testing.T) {
 	final.Revision = 3
 	final.Outcome = usage.Completed
 	final.EndedAt = final.StartedAt.Add(time.Second)
-	final.Tokens = llm.TokenUsage{Input: llm.ReportedTokens(11), Output: llm.ReportedTokens(0)}
+	final.Tokens = llm.TokenUsage{Final: true, Input: llm.ReportedTokens(11), Output: llm.ReportedTokens(0)}
 	late := start
 	late.Revision = 4
 	for _, batch := range [][]usage.AttemptObservation{{start}, {final}, {final, start, late}} {
@@ -46,7 +46,7 @@ func TestAccountingStoreIdempotencyAndPresence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Revision != 3 || got.Outcome != usage.Completed || got.Tokens.Output != llm.ReportedTokens(0) || got.Tokens.CacheRead.Known {
+	if !got.Tokens.Complete() || got.Revision != 3 || got.Outcome != usage.Completed || got.Tokens.Output != llm.ReportedTokens(0) || got.Tokens.CacheRead.Known {
 		t.Fatalf("stored=%+v", got)
 	}
 	var count int
@@ -149,5 +149,27 @@ func TestAccountingStoreRejectsFutureSchema(t *testing.T) {
 	var version string
 	if err := s.db.QueryRow(`SELECT value FROM accounting_metadata WHERE key='schema_version'`).Scan(&version); err != nil || version != "999" {
 		t.Fatalf("version modified: %q %v", version, err)
+	}
+}
+
+func TestStorePreservesFinalityOnlyRevision(t *testing.T) {
+	s := accountingTestStore(t)
+	a := accountingFixture("finality")
+	a.Tokens = llm.TokenUsage{Input: llm.ReportedTokens(11), Output: llm.ReportedTokens(0)}
+	if err := s.WriteAttempts(t.Context(), []usage.AttemptObservation{a}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.AccountingAttempt(t.Context(), a.ID)
+	if err != nil || got.Tokens.Final || !got.Tokens.TotalsKnown() {
+		t.Fatalf("partial=%+v err=%v", got, err)
+	}
+	a.Revision++
+	a.Tokens.Final = true
+	if err := s.WriteAttempts(t.Context(), []usage.AttemptObservation{a}); err != nil {
+		t.Fatal(err)
+	}
+	got, err = s.AccountingAttempt(t.Context(), a.ID)
+	if err != nil || !got.Tokens.Complete() || got.Tokens.Output.Value != 0 {
+		t.Fatalf("final=%+v err=%v", got, err)
 	}
 }

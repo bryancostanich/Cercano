@@ -30,5 +30,6 @@ func normalizedUsage(v *types.TokenUsage) llm.TokenUsage {
 			out.Input = llm.ReportedTokens(base.Value + out.CacheRead.Value + out.CacheWrite.Value)
 		}
 	}
+	out.Final = out.Reported()
 	return out
 }

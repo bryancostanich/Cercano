@@ -144,3 +144,22 @@ func TestRouteOnlyChangeStillEmitsObservation(t *testing.T) {
 		t.Fatalf("route update lost or tokens added twice: %+v", got)
 	}
 }
+
+func TestFinalityOnlyObservationIsEmitted(t *testing.T) {
+	var got []AttemptObservation
+	ctx := WithAttempts(t.Context(), func(a AttemptObservation) bool { got = append(got, a); return true }, Attribution{})
+	a := StartAttempt(ctx, "fake", "fake")
+	partial := llm.TokenUsage{Input: llm.ReportedTokens(11), Output: llm.ReportedTokens(0)}
+	a.Observe(partial, nil)
+	final := partial
+	final.Final = true
+	a.Observe(final, nil)
+	a.Observe(final, nil)
+	a.Finish(Failed)
+	if len(got) != 4 || got[1].Tokens.Final || !got[2].Tokens.Complete() || !got[3].Tokens.Complete() || got[3].Outcome != Failed {
+		t.Fatalf("observations=%+v", got)
+	}
+	if got[2].Revision != got[1].Revision+1 {
+		t.Fatal("finality did not advance revision")
+	}
+}

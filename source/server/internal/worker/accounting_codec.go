@@ -41,7 +41,7 @@ func accountingBatchToWire(id string, observations []usage.AttemptObservation) (
 		out.Observations = append(out.Observations, &wire.AccountingAttemptObservation{
 			Id: a.ID, Revision: a.Revision, OperationId: a.Attribution.OperationID, ConversationId: a.Attribution.ConversationID, SessionId: a.Attribution.SessionID, WorkerId: a.Attribution.WorkerID, Source: a.Attribution.Source,
 			Provider: a.Provider, Model: a.Model, Profile: a.Profile, Destination: a.Destination, StartedAtUtcMicros: optionalMicros(a.StartedAt), EndedAtUtcMicros: optionalMicros(a.EndedAt), Outcome: string(a.Outcome),
-			InputTokens: optionalCount(a.Tokens.Input), OutputTokens: optionalCount(a.Tokens.Output), CacheReadTokens: optionalCount(a.Tokens.CacheRead), CacheWriteTokens: optionalCount(a.Tokens.CacheWrite), ReasoningTokens: optionalCount(a.Tokens.Reasoning),
+			UsageFinal: a.Tokens.Final, InputTokens: optionalCount(a.Tokens.Input), OutputTokens: optionalCount(a.Tokens.Output), CacheReadTokens: optionalCount(a.Tokens.CacheRead), CacheWriteTokens: optionalCount(a.Tokens.CacheWrite), ReasoningTokens: optionalCount(a.Tokens.Reasoning),
 		})
 	}
 	if pb.Size(out) > maxAccountingWireBytes {
@@ -62,6 +62,7 @@ func accountingBatchFromWire(batch *wire.WorkerAccountingBatch) ([]usage.Attempt
 			return nil, fmt.Errorf("accounting observation missing start")
 		}
 		a := usage.AttemptObservation{ID: v.Id, Revision: v.Revision, Attribution: usage.Attribution{OperationID: v.OperationId, ConversationID: v.ConversationId, SessionID: v.SessionId, WorkerID: v.WorkerId, Source: v.Source}, Provider: v.Provider, Model: v.Model, Profile: v.Profile, Destination: v.Destination, StartedAt: time.UnixMicro(*v.StartedAtUtcMicros).UTC(), Outcome: usage.Outcome(v.Outcome)}
+		a.Tokens.Final = v.UsageFinal
 		if v.EndedAtUtcMicros != nil {
 			a.EndedAt = time.UnixMicro(*v.EndedAtUtcMicros).UTC()
 		}

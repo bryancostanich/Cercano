@@ -26,6 +26,7 @@ func TestTokenUsageCumulativePresence(t *testing.T) {
 type accountingCollectReader struct {
 	index   int
 	failure error
+	final   bool
 }
 
 func (r *accountingCollectReader) Next() (StreamEvent, bool, error) {
@@ -33,7 +34,7 @@ func (r *accountingCollectReader) Next() (StreamEvent, bool, error) {
 	if r.index == 1 {
 		return StreamEvent{Type: EventMessageStart, Usage: TokenUsage{Input: ReportedTokens(11)}}, true, nil
 	}
-	return StreamEvent{Usage: TokenUsage{Output: ReportedTokens(7)}}, false, r.failure
+	return StreamEvent{Usage: TokenUsage{Final: r.final, Output: ReportedTokens(7)}}, false, r.failure
 }
 func (*accountingCollectReader) Close() error { return nil }
 
@@ -45,5 +46,30 @@ func TestCollectStreamRetainsUsageOnErrorEvent(t *testing.T) {
 	}
 	if out.Usage.Input != ReportedTokens(11) || out.Usage.Output != ReportedTokens(7) {
 		t.Fatalf("lost partial usage: %+v", out.Usage)
+	}
+}
+
+func TestUsageFinalityIsIndependentOfKnownTotals(t *testing.T) {
+	u := TokenUsage{Input: ReportedTokens(11), Output: ReportedTokens(0)}
+	if u.Complete() {
+		t.Fatal("initial usage was final")
+	}
+	final := u.Merge(TokenUsage{Final: true, Output: ReportedTokens(0)})
+	if !final.Complete() || final.Input != u.Input || final.Output != u.Output {
+		t.Fatalf("final=%+v", final)
+	}
+	if final.Merge(TokenUsage{}) != final {
+		t.Fatal("empty snapshot erased evidence")
+	}
+	if (TokenUsage{Final: true, Input: ReportedTokens(11)}).Complete() {
+		t.Fatal("final boundary fabricated missing output")
+	}
+}
+
+func TestCollectStreamPreservesFinalUsageDespiteLaterError(t *testing.T) {
+	failure := errors.New("transport failed after final usage")
+	out, err := CollectStream(t.Context(), &accountingCollectReader{failure: failure, final: true}, nil, nil)
+	if !errors.Is(err, failure) || !out.Usage.Complete() {
+		t.Fatalf("usage=%+v err=%v", out.Usage, err)
 	}
 }

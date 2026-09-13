@@ -41,3 +41,17 @@ func TestFailedStreamRetainsReportedUsage(t *testing.T) {
 		t.Fatalf("lost failure usage: %+v", out.Usage)
 	}
 }
+
+func TestStreamFinalityRequiresTerminalUsage(t *testing.T) {
+	for _, tc := range []struct {
+		kind  string
+		final bool
+	}{{"response.created", false}, {"response.failed", false}, {"response.completed", true}} {
+		raw := `{"type":"` + tc.kind + `","response":{"usage":{"input_tokens":11,"output_tokens":0}}}`
+		rd := newStreamReader(io.NopCloser(strings.NewReader("data: "+raw+"\n\n")), "fake")
+		out, _ := llm.CollectStream(t.Context(), rd, nil, nil)
+		if out.Usage.Final != tc.final || out.Usage.Output != llm.ReportedTokens(0) {
+			t.Fatalf("%s: %+v", tc.kind, out.Usage)
+		}
+	}
+}

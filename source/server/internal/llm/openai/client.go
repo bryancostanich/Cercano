@@ -244,7 +244,7 @@ func (c *Client) Chat(ctx context.Context, req llm.ChatRequest) (out llm.ChatRes
 		return llm.ChatResponse{}, c.normalize(err)
 	}
 	out = llm.ChatResponse{
-		Usage:        normalizedUsage(resp.Usage),
+		Usage:        finalUsage(resp.Usage),
 		InputTokens:  resp.Usage.PromptTokens,
 		OutputTokens: resp.Usage.CompletionTokens,
 		Model:        resp.Model,

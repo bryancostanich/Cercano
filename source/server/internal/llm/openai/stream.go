@@ -152,7 +152,11 @@ func (r *streamReader) Next() (llm.StreamEvent, bool, error) {
 
 		// Capture usage from the final non-[DONE] chunk.
 		if chunk.Usage != nil {
-			r.usage = r.usage.Merge(normalizedUsage(*chunk.Usage))
+			next := normalizedUsage(*chunk.Usage)
+			// OpenAI's final usage-only chunk has no choices. Compatible endpoints
+			// may also report running usage on ordinary choice chunks; keep it partial.
+			next.Final = len(chunk.Choices) == 0 && next.Reported()
+			r.usage = r.usage.Merge(next)
 			r.inputTokens = chunk.Usage.PromptTokens
 			r.outputTokens = chunk.Usage.CompletionTokens
 		}

@@ -13,7 +13,7 @@ import (
 )
 
 func wireAttemptFixture() usage.AttemptObservation {
-	return usage.AttemptObservation{ID: "attempt", Revision: 2, Attribution: usage.Attribution{OperationID: "operation", ConversationID: "conversation", SessionID: "session", WorkerID: "worker", Source: "main"}, Provider: "provider", Model: "model", Profile: "profile", Destination: "local", StartedAt: time.Unix(100, 123456000).UTC(), EndedAt: time.Unix(101, 654321000).UTC(), Outcome: usage.Completed, Tokens: llm.TokenUsage{Input: llm.ReportedTokens(0), Output: llm.ReportedTokens(17), CacheRead: llm.ReportedTokens(3), CacheWrite: llm.ReportedTokens(0)}}
+	return usage.AttemptObservation{ID: "attempt", Revision: 2, Attribution: usage.Attribution{OperationID: "operation", ConversationID: "conversation", SessionID: "session", WorkerID: "worker", Source: "main"}, Provider: "provider", Model: "model", Profile: "profile", Destination: "local", StartedAt: time.Unix(100, 123456000).UTC(), EndedAt: time.Unix(101, 654321000).UTC(), Outcome: usage.Completed, Tokens: llm.TokenUsage{Final: true, Input: llm.ReportedTokens(0), Output: llm.ReportedTokens(17), CacheRead: llm.ReportedTokens(3), CacheWrite: llm.ReportedTokens(0)}}
 }
 func TestAccountingWireRoundTrip(t *testing.T) {
 	original := wireAttemptFixture()

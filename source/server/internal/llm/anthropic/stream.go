@@ -73,6 +73,9 @@ func (s *streamReader) convert(raw sdk.MessageStreamEventUnion) (llm.StreamEvent
 		return llm.StreamEvent{}, false
 	case "message_delta":
 		s.usage.delta(raw.Usage)
+		if raw.Delta.StopReason != "" && raw.Usage.JSON.OutputTokens.Valid() {
+			s.usage.tokens.Final = true
+		}
 		return llm.StreamEvent{Type: llm.EventMessageStop, Usage: s.usage.snapshot(), StopReason: string(raw.Delta.StopReason), OutputTokens: int(raw.Usage.OutputTokens)}, true
 	case "message_stop":
 		return llm.StreamEvent{Type: llm.EventMessageStop, Usage: s.usage.snapshot()}, true

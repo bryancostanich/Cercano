@@ -16188,6 +16188,7 @@ type AccountingAttemptObservation struct {
 	CacheReadTokens    *int64                 `protobuf:"varint,17,opt,name=cache_read_tokens,json=cacheReadTokens,proto3,oneof" json:"cache_read_tokens,omitempty"`
 	CacheWriteTokens   *int64                 `protobuf:"varint,18,opt,name=cache_write_tokens,json=cacheWriteTokens,proto3,oneof" json:"cache_write_tokens,omitempty"`
 	ReasoningTokens    *int64                 `protobuf:"varint,19,opt,name=reasoning_tokens,json=reasoningTokens,proto3,oneof" json:"reasoning_tokens,omitempty"`
+	UsageFinal         bool                   `protobuf:"varint,20,opt,name=usage_final,json=usageFinal,proto3" json:"usage_final,omitempty"` // Explicit provider final-usage evidence, independent of outcome.
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
 }
@@ -16353,6 +16354,13 @@ func (x *AccountingAttemptObservation) GetReasoningTokens() int64 {
 		return *x.ReasoningTokens
 	}
 	return 0
+}
+
+func (x *AccountingAttemptObservation) GetUsageFinal() bool {
+	if x != nil {
+		return x.UsageFinal
+	}
+	return false
 }
 
 // Sender retains ownership until persisted=true is received. Receivers reject
@@ -18022,7 +18030,7 @@ const file_agent_proto_rawDesc = "" +
 	"\x05error\x18\x03 \x01(\tR\x05error\x12\x18\n" +
 	"\awarning\x18\x04 \x01(\tR\awarning\x12%\n" +
 	"\x0econfig_written\x18\x05 \x01(\bR\rconfigWritten\x12!\n" +
-	"\flive_applied\x18\x06 \x01(\bR\vliveApplied\"\xdb\x06\n" +
+	"\flive_applied\x18\x06 \x01(\bR\vliveApplied\"\xfc\x06\n" +
 	"\x1cAccountingAttemptObservation\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1a\n" +
 	"\brevision\x18\x02 \x01(\x04R\brevision\x12!\n" +
@@ -18044,7 +18052,9 @@ const file_agent_proto_rawDesc = "" +
 	"\routput_tokens\x18\x10 \x01(\x03H\x03R\foutputTokens\x88\x01\x01\x12/\n" +
 	"\x11cache_read_tokens\x18\x11 \x01(\x03H\x04R\x0fcacheReadTokens\x88\x01\x01\x121\n" +
 	"\x12cache_write_tokens\x18\x12 \x01(\x03H\x05R\x10cacheWriteTokens\x88\x01\x01\x12.\n" +
-	"\x10reasoning_tokens\x18\x13 \x01(\x03H\x06R\x0freasoningTokens\x88\x01\x01B\x18\n" +
+	"\x10reasoning_tokens\x18\x13 \x01(\x03H\x06R\x0freasoningTokens\x88\x01\x01\x12\x1f\n" +
+	"\vusage_final\x18\x14 \x01(\bR\n" +
+	"usageFinalB\x18\n" +
 	"\x16_started_at_utc_microsB\x16\n" +
 	"\x14_ended_at_utc_microsB\x0f\n" +
 	"\r_input_tokensB\x10\n" +

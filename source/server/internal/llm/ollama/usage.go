@@ -14,5 +14,6 @@ func normalizedUsage(r api.ChatResponse) llm.TokenUsage {
 	if r.EvalCount > 0 {
 		out.Output = llm.ReportedTokens(int64(r.EvalCount))
 	}
+	out.Final = r.Done && out.Reported()
 	return out
 }

@@ -64,3 +64,29 @@ func TestNormalizedSDKChatAndStream(t *testing.T) {
 		}
 	}
 }
+
+func TestStreamingUsageRequiresFinalUsageChunk(t *testing.T) {
+	for _, final := range []bool{false, true} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			sse(w, `{"choices":[{"delta":{"content":"x"}}],"usage":{"prompt_tokens":11,"completion_tokens":7}}`)
+			if final {
+				sse(w, `{"choices":[],"usage":{"prompt_tokens":11,"completion_tokens":7}}`)
+			}
+			sse(w, `{"choices":[{"delta":{},"finish_reason":"stop"}]}`, `[DONE]`)
+		}))
+		c := NewClient(Config{BaseURL: srv.URL + "/v1", APIKey: "fake", Model: "fake"})
+		rd, err := c.StreamChat(t.Context(), llm.ChatRequest{})
+		if err != nil {
+			srv.Close()
+			t.Fatal(err)
+		}
+		out, err := llm.CollectStream(t.Context(), rd, nil, nil)
+		srv.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if out.Usage.Final != final || !out.Usage.TotalsKnown() {
+			t.Fatalf("final=%v usage=%+v", final, out.Usage)
+		}
+	}
+}

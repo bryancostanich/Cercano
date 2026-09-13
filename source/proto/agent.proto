@@ -2116,6 +2116,7 @@ message AccountingAttemptObservation {
   optional int64 cache_read_tokens = 17;
   optional int64 cache_write_tokens = 18;
   optional int64 reasoning_tokens = 19;
+  bool usage_final = 20; // Explicit provider final-usage evidence, independent of outcome.
 }
 
 // Sender retains ownership until persisted=true is received. Receivers reject

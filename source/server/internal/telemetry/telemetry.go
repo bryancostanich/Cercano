@@ -589,3 +589,13 @@ func (c *Collector) TryAttemptBatch(observations []usage.AttemptObservation) (<-
 	}
 	return attempts.TryBatch(batch)
 }
+
+func (c *Collector) TryRemoteAccountingHealth(writer string, h AccountingHealth) (<-chan bool, error) {
+	c.mu.RLock()
+	attempts := c.attempts
+	c.mu.RUnlock()
+	if attempts == nil {
+		return nil, fmt.Errorf("attempt accounting not enabled")
+	}
+	return attempts.TryRemoteHealth(writer, h)
+}

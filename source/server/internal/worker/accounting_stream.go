@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"sync"
 
+	"cercano/source/server/internal/telemetry"
 	"cercano/source/server/internal/usage"
 	wire "cercano/source/server/pkg/proto"
 	"google.golang.org/grpc/codes"
@@ -29,8 +30,9 @@ type accountingLink struct {
 // telemetry collector owns bounded admission and retries; inference never calls
 // WriteAttempts, serializes wire data, or waits here.
 type workerAccountingWriter struct {
-	mu   sync.Mutex
-	link *accountingLink
+	statusSequence uint64
+	mu             sync.Mutex
+	link           *accountingLink
 }
 
 func (w *workerAccountingWriter) InitializeAccounting(context.Context) error { return nil }
@@ -68,6 +70,22 @@ func (w *workerAccountingWriter) WriteAttempts(ctx context.Context, observations
 	if err != nil {
 		return err
 	}
+	return w.writeBatch(ctx, batch)
+}
+
+func (w *workerAccountingWriter) WriteAccountingHealth(ctx context.Context, writer string, h telemetry.AccountingHealth) error {
+	w.mu.Lock()
+	w.statusSequence++
+	h.Sequence = w.statusSequence
+	w.mu.Unlock()
+	batch, err := accountingHealthToWire("pending", writer, h)
+	if err != nil {
+		return err
+	}
+	return w.writeBatch(ctx, batch)
+}
+
+func (w *workerAccountingWriter) writeBatch(ctx context.Context, batch *wire.WorkerAccountingBatch) error {
 	bytes, err := (pb.MarshalOptions{Deterministic: true}).Marshal(batch)
 	if err != nil {
 		return err

@@ -2122,6 +2122,7 @@ message AccountingAttemptObservation {
 message WorkerAccountingBatch {
   string batch_id = 1;
   repeated AccountingAttemptObservation observations = 2;
+  WorkerAccountingHealth health = 3;
 }
 
 // persisted means every observation has an acknowledged database commit.
@@ -2131,4 +2132,23 @@ message WorkerAccountingReceipt {
   bool persisted = 2;
   bool retryable = 3;
   string error = 4;
+}
+
+// Health is a separate record, never an inference observation or token total.
+// Sequence is monotonic within writer_id to reject stale replayed snapshots.
+message WorkerAccountingHealth {
+  string writer_id = 1;
+  uint64 sequence = 2;
+  uint64 accepted = 3;
+  uint64 persisted = 4;
+  uint64 lost = 5;
+  uint32 pending = 6;
+  uint64 retries = 7;
+  uint64 write_failures = 8;
+  uint64 uncertain = 9;
+  optional int64 oldest_pending_utc_micros = 10;
+  optional int64 last_persistence_utc_micros = 11;
+  string last_error = 12;
+  bool closed = 13;
+  bool coverage_incomplete = 14;
 }

@@ -189,6 +189,6 @@ func (s *SQLiteStore) WriteAccountingHealth(ctx context.Context, writer string, 
 	if err != nil {
 		return err
 	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO accounting_health(writer_id,updated_at,snapshot) VALUES(?,?,?) ON CONFLICT(writer_id) DO UPDATE SET updated_at=excluded.updated_at,snapshot=excluded.snapshot`, writer, time.Now().UTC().UnixMicro(), string(payload))
+	_, err = s.db.ExecContext(ctx, `INSERT INTO accounting_health(writer_id,updated_at,snapshot) VALUES(?,?,?) ON CONFLICT(writer_id) DO UPDATE SET updated_at=excluded.updated_at,snapshot=excluded.snapshot WHERE COALESCE(json_extract(excluded.snapshot,'$.sequence'),0)>=COALESCE(json_extract(accounting_health.snapshot,'$.sequence'),0)`, writer, time.Now().UTC().UnixMicro(), string(payload))
 	return err
 }

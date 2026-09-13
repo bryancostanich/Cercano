@@ -16,6 +16,7 @@ type AttemptStore interface {
 }
 
 type AccountingHealth struct {
+	Sequence           uint64    `json:"sequence,omitempty"`
 	CoverageIncomplete bool      `json:"coverage_incomplete"`
 	Accepted           uint64    `json:"accepted"`
 	Persisted          uint64    `json:"persisted"`
@@ -96,8 +97,14 @@ const MaxAccountingBatch = 64
 var ErrAccountingCapacity = errors.New("accounting capacity exhausted")
 var ErrAccountingClosed = errors.New("accounting closed")
 
+type remoteHealthRecord struct {
+	writer   string
+	snapshot AccountingHealth
+}
+
 type queuedObservation struct {
-	receipt *persistenceReceipt
+	remoteHealth *remoteHealthRecord
+	receipt      *persistenceReceipt
 
 	sequence    uint64
 	observation usage.AttemptObservation
@@ -151,17 +158,17 @@ func (c *AccountingCollector) Emit(a usage.AttemptObservation) bool {
 		}
 		return false
 	}
-	c.enqueueLocked(a, nil)
+	c.enqueueLocked(a, nil, nil)
 	return true
 }
 
-func (c *AccountingCollector) enqueueLocked(a usage.AttemptObservation, receipt *persistenceReceipt) {
+func (c *AccountingCollector) enqueueLocked(a usage.AttemptObservation, receipt *persistenceReceipt, remote *remoteHealthRecord) {
 	c.health.Accepted++
 	seq := c.health.Accepted
 	c.pending[seq] = time.Now().UTC()
 	// The pending limit reserves space even while a batch is out of the channel.
 	// Thus queue admission cannot block while holding this short metadata lock.
-	c.queue <- queuedObservation{sequence: seq, observation: a, receipt: receipt}
+	c.queue <- queuedObservation{sequence: seq, observation: a, receipt: receipt, remoteHealth: remote}
 }
 
 // TryBatch admits the entire batch or none. On rejection, the remote owner
@@ -188,7 +195,7 @@ func (c *AccountingCollector) TryBatch(observations []usage.AttemptObservation) 
 	receipt := &persistenceReceipt{remaining: len(observations), done: make(chan bool, 1)}
 	c.receipts[receipt] = struct{}{}
 	for _, a := range observations {
-		c.enqueueLocked(a, receipt)
+		c.enqueueLocked(a, receipt, nil)
 	}
 	return receipt.done, nil
 }
@@ -280,9 +287,11 @@ func (c *AccountingCollector) run() {
 			}
 			continue
 		}
-		observations := make([]usage.AttemptObservation, len(batch))
-		for i, q := range batch {
-			observations[i] = q.observation
+		observations := make([]usage.AttemptObservation, 0, len(batch))
+		for _, q := range batch {
+			if q.remoteHealth == nil {
+				observations = append(observations, q.observation)
+			}
 		}
 		var err error
 		for attempt := 0; attempt <= c.options.MaxRetries; attempt++ {
@@ -294,7 +303,25 @@ func (c *AccountingCollector) run() {
 				}
 			}
 			if initialized {
-				err = c.store.WriteAttempts(ctx, observations)
+				err = nil
+				if len(observations) > 0 {
+					err = c.store.WriteAttempts(ctx, observations)
+				}
+				if err == nil {
+					for _, q := range batch {
+						if q.remoteHealth != nil {
+							store, ok := c.store.(accountingHealthStore)
+							if !ok {
+								err = errors.New("accounting store does not support health records")
+								break
+							}
+							err = store.WriteAccountingHealth(ctx, q.remoteHealth.writer, q.remoteHealth.snapshot)
+							if err != nil {
+								break
+							}
+						}
+					}
+				}
 			}
 			cancel()
 			if err == nil {
@@ -397,4 +424,26 @@ func (c *AccountingCollector) MarkCoverageIncomplete(reason string) {
 	defer c.mu.Unlock()
 	c.health.CoverageIncomplete = true
 	c.health.LastError = reason
+}
+
+// TryRemoteHealth uses the same bounded queue and persistence receipts. Health
+// records are never inserted into the inference-attempt table or token totals.
+func (c *AccountingCollector) TryRemoteHealth(writer string, h AccountingHealth) (<-chan bool, error) {
+	if err := ValidateRemoteHealth(writer, h); err != nil {
+		return nil, err
+	}
+	h.OldestPending = h.OldestPending.UTC()
+	h.LastPersistence = h.LastPersistence.UTC()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.health.Closed {
+		return nil, ErrAccountingClosed
+	}
+	if len(c.pending) >= c.options.Capacity {
+		return nil, ErrAccountingCapacity
+	}
+	receipt := &persistenceReceipt{remaining: 1, done: make(chan bool, 1)}
+	c.receipts[receipt] = struct{}{}
+	c.enqueueLocked(usage.AttemptObservation{}, receipt, &remoteHealthRecord{writer: writer, snapshot: h})
+	return receipt.done, nil
 }

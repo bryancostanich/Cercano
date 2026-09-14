@@ -178,7 +178,7 @@ func (sp *settingsPage) snapshotSections() []form.Section {
 	case scopeCloud:
 		return []form.Section{sp.buildCloudSection()}
 	case scopeRouting:
-		return []form.Section{sp.buildRoutingSection()}
+		return sp.buildRoutingSections()
 	case scopeUI:
 		if sp.themes == nil {
 			return nil
@@ -189,7 +189,8 @@ func (sp *settingsPage) snapshotSections() []form.Section {
 
 	// scopeAll — the legacy single page: every section in order.
 	secs := buildSettingsSections(sp.cfg, sp.mode, sp.accentToken)
-	secs = append(secs, sp.buildCloudSection(), sp.buildRoutingSection())
+	secs = append(secs, sp.buildCloudSection())
+	secs = append(secs, sp.buildRoutingSections()...)
 	if sp.themes != nil {
 		builtin := sp.themes.IsBuiltin(sp.working.Name)
 		secs = append(secs, buildThemeSections(sp.working, sp.themes.Names(), builtin, sp.dirty)...)

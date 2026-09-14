@@ -13,9 +13,11 @@ import (
 // Section is a titled group of fields. When Groups is non-empty, Fields is
 // ignored and each Group renders as a subheading with its own fields.
 type Section struct {
-	Title  string
-	Fields []Field
-	Groups []Group
+	Title string
+	// ColumnHeadings labels a compact pair table: row label, left value, right value.
+	ColumnHeadings [3]string
+	Fields         []Field
+	Groups         []Group
 }
 
 // Group is a titled sub-cluster of fields within a section — a subheading that
@@ -144,13 +146,13 @@ func (f *Form) commit(key, val string, fieldCmd tea.Cmd) tea.Cmd {
 		// error — re-snapshot so the form shows the server's truth rather
 		// than pre-commit state. With caches intact this is a no-op repaint.
 		if f.OnReload != nil {
-			f.Sections = f.OnReload()
+			f.Reload()
 		}
 		return tea.Batch(fieldCmd, cmd)
 	}
 	f.status = status
 	if f.OnReload != nil {
-		f.Sections = f.OnReload()
+		f.Reload()
 	}
 	return tea.Batch(fieldCmd, cmd)
 }
@@ -162,9 +164,31 @@ func (f *Form) SetStatus(s string) { f.status = s }
 
 // Reload re-snapshots sections via OnReload. Async-commit hosts call this
 // once fresh values are cached so the rebuilt fields reflect the server.
+// partFocusable preserves the active subcontrol when a compound row is rebuilt.
+type partFocusable interface {
+	FocusPart() int
+	RestoreFocusPart(int)
+}
+
 func (f *Form) Reload() {
-	if f.OnReload != nil {
-		f.Sections = f.OnReload()
+	if f.OnReload == nil {
+		return
+	}
+	fields := f.flat()
+	part := -1
+	label := ""
+	if f.cursor >= 0 && f.cursor < len(fields) {
+		if row, ok := fields[f.cursor].(partFocusable); ok {
+			part = row.FocusPart()
+			label = fields[f.cursor].Label()
+		}
+	}
+	f.Sections = f.OnReload()
+	fields = f.flat()
+	if part >= 0 && f.cursor >= 0 && f.cursor < len(fields) && fields[f.cursor].Label() == label {
+		if row, ok := fields[f.cursor].(partFocusable); ok {
+			row.RestoreFocusPart(part)
+		}
 	}
 }
 
@@ -218,6 +242,16 @@ func (f *Form) View(width int, palette theme.Palette, styles theme.Styles) strin
 		// field can render multiple lines — an open select picker, or any field in
 		// the narrow under-label layout.
 		bodyLine := 3
+		// Compact table headings are decoration, never empty/focusable fields.
+		if sec.ColumnHeadings[0] != "" {
+			valueW := panelW - 4 - (3 + labelW + 2)
+			if valueW >= pairMinWidth {
+				left, _ := pairWidths(valueW)
+				headers := sec.ColumnHeadings
+				body.WriteString("   " + styles.Muted.Render(headers[0]) + strings.Repeat(" ", max(0, labelW-lipgloss.Width(headers[0])+2)) + styles.Muted.Render(headers[1]) + strings.Repeat(" ", max(0, left-lipgloss.Width(headers[1])+2)) + styles.Muted.Render(headers[2]) + "\n")
+				bodyLine++
+			}
+		}
 		focusedBodyLine := -1
 		renderField := func(fld Field) {
 			focused := idx == f.cursor

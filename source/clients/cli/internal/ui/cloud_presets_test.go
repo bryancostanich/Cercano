@@ -96,7 +96,7 @@ func TestRowAnnotation(t *testing.T) {
 		{
 			name:     "primary direct key → plain primary",
 			row:      cloudRow{ID: "profile:x", IsProfile: true, HasKey: true, Active: true},
-			expected: "primary",
+			expected: "✓ key",
 		},
 		{
 			name:     "inactive without key",
@@ -106,17 +106,17 @@ func TestRowAnnotation(t *testing.T) {
 		{
 			name:     "primary with model, direct key",
 			row:      cloudRow{ID: "profile:x", IsProfile: true, HasKey: true, Active: true, Profile: &agentclient.CloudProfileInfo{Model: "claude-opus-5"}},
-			expected: "claude-opus-5  primary",
+			expected: "claude-opus-5  ✓ key",
 		},
 		{
 			name:     "primary subscription → primary (subscription)",
 			row:      cloudRow{ID: "profile:x", IsProfile: true, Active: true, Profile: &agentclient.CloudProfileInfo{Model: "claude-opus-5", Route: "subscription"}},
-			expected: "claude-opus-5  primary (subscription)",
+			expected: "claude-opus-5  subscription",
 		},
 		{
 			name:     "primary responses → primary (ChatGPT OAuth)",
 			row:      cloudRow{ID: "profile:x", IsProfile: true, Active: true, Profile: &agentclient.CloudProfileInfo{Model: "gpt-5.5", Flavor: "responses"}},
-			expected: "gpt-5.5  primary (ChatGPT OAuth)",
+			expected: "gpt-5.5  ChatGPT OAuth",
 		},
 		{
 			name:     "inactive subscription shows route as auth hint",
@@ -155,7 +155,7 @@ func TestRowAnnotation(t *testing.T) {
 	}
 }
 
-func TestBackupMarkerOnRows(t *testing.T) {
+func TestBackupStateDoesNotAddRoutingMarkersToCloudRows(t *testing.T) {
 	view := agentclient.CloudProvidersView{
 		Providers: []agentclient.CloudProvider{
 			{ID: "anthropic", Label: "anthropic", Tier: "verified", PrimaryProfile: "anthropic",
@@ -182,8 +182,8 @@ func TestBackupMarkerOnRows(t *testing.T) {
 	if anthropicRow.Backup {
 		t.Fatal("primary anthropic row must not carry Backup")
 	}
-	if ann := rowAnnotation(*openaiRow); !strings.Contains(ann, "backup") {
-		t.Fatalf("backup row annotation %q missing marker", ann)
+	if ann := rowAnnotation(*openaiRow); strings.Contains(ann, "backup") {
+		t.Fatalf("backup row annotation %q leaks routing marker", ann)
 	}
 	if ann := rowAnnotation(*anthropicRow); strings.Contains(ann, "backup") {
 		t.Fatalf("primary row annotation %q must not carry backup marker", ann)

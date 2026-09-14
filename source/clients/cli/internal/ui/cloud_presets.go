@@ -142,19 +142,8 @@ func rowAnnotation(r cloudRow) string {
 				parts = append(parts, "— no model")
 			}
 		}
-		// Primary rows get an auth-aware "primary (…)" marker so the primary
-		// provider is unmistakable and its auth path is visible; inactive rows
-		// show just the auth hint.
-		if r.Active {
-			parts = append(parts, activeLabel(r))
-		} else {
-			parts = append(parts, authHint(r))
-		}
-		// The configured fallback is marked at row level so the pair (active
-		// primary, backup) is visible at a glance.
-		if r.Backup {
-			parts = append(parts, "backup")
-		}
+		// Show auth hint for all configured profiles
+		parts = append(parts, authHint(r))
 		return strings.Join(parts, "  ")
 	}
 	switch r.Tier {
@@ -166,27 +155,15 @@ func rowAnnotation(r cloudRow) string {
 	return ""
 }
 
-// activeLabel is the auth-aware marker for the primary provider's row. Meridian
-// (Claude Max OAuth) and ChatGPT (the responses OAuth path) are called out so
-// the user sees not just which provider is primary but how it authenticates.
-func activeLabel(r cloudRow) string {
-	switch {
-	case r.Profile != nil && r.Profile.Route == "subscription":
-		return "primary (subscription)"
-	case r.Profile != nil && r.Profile.Flavor == "responses":
-		return "primary (ChatGPT OAuth)"
-	default:
-		return "primary"
-	}
-}
-
-// authHint is the non-active auth indicator. Meridian routes authenticate via
+// authHint describes authentication, independently of routing assignments. Meridian routes authenticate via
 // Claude Max OAuth (no stored key), so "no key" would mislead — show the route
 // instead. Otherwise reflect keychain presence.
 func authHint(r cloudRow) string {
 	switch {
 	case r.Profile != nil && r.Profile.Route == "subscription":
 		return "subscription"
+	case r.Profile != nil && r.Profile.Flavor == "responses":
+		return "ChatGPT OAuth"
 	case r.HasKey:
 		return "✓ key"
 	default:

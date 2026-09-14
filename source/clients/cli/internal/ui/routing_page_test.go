@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"cercano/source/clients/cli/internal/form"
 	"cercano/source/clients/cli/internal/theme"
 	"cercano/source/server/pkg/config"
 	tea "charm.land/bubbletea/v2"
@@ -12,18 +13,31 @@ import (
 func TestRoutingPageUsesSharedMetadata(t *testing.T) {
 	themes, active := scopeTestThemes(t)
 	sp, _ := newScopedSettingsPage(nil, active.Palette, theme.NewStyles(active.Palette), "palette:accent", 100, 40, themes, active, scopeRouting)
-	if titles := sectionTitles(sp); len(titles) != 1 || titles[0] != "Routing" {
+	if titles := sectionTitles(sp); len(titles) != 2 || titles[0] != "Model tiers" || titles[1] != "Task routing" {
 		t.Fatalf("sections=%v", titles)
 	}
 	keys := map[string]bool{}
-	for _, f := range sp.buildRoutingSection().Fields {
-		keys[f.Key()] = true
-		if strings.HasPrefix(f.Key(), "cloud-") {
-			t.Fatal("Cloud control on Routing")
+	pairs := 0
+	for _, sec := range sp.buildRoutingSections() {
+		for _, group := range sec.Groups {
+			for _, f := range group.Fields {
+				keys[f.Key()] = true
+				if p, ok := f.(*form.SelectPairField); ok {
+					pairs++
+					keys[p.Left.Key()] = true
+					keys[p.Right.Key()] = true
+				}
+				if strings.HasPrefix(f.Key(), "cloud-") {
+					t.Fatal("Cloud control on Routing")
+				}
+			}
 		}
 	}
+	if pairs != len(config.TaskDefinitions()) {
+		t.Fatalf("compact task rows=%d", pairs)
+	}
 	for _, d := range config.TaskDefinitions() {
-		for _, suffix := range []string{"destination", "quality", "effective", "reset"} {
+		for _, suffix := range []string{"destination", "quality"} {
 			if !keys["routing-task-"+string(d.Task)+"-"+suffix] {
 				t.Fatalf("missing %s/%s", d.Task, suffix)
 			}

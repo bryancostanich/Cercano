@@ -1,13 +1,16 @@
 package ui
 
 import (
-	"cercano/source/clients/cli/internal/form"
-	"cercano/source/server/pkg/config"
-	tea "charm.land/bubbletea/v2"
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
+
+	tea "charm.land/bubbletea/v2"
+
+	"cercano/source/clients/cli/internal/form"
+	"cercano/source/server/pkg/config"
 )
 
 func (sp *settingsPage) ensureRoutingDraft() {
@@ -38,44 +41,95 @@ func (sp *settingsPage) routingConfig() config.Config {
 	}
 	return c
 }
-func (sp *settingsPage) buildRoutingSection() form.Section {
+func destinationLabel(d config.Destination) string {
+	switch d {
+	case config.DestinationPrimary:
+		return "Primary"
+	case config.DestinationSecondary:
+		return "Secondary"
+	case config.DestinationLocal:
+		return "Local"
+	}
+	return string(d)
+}
+func taskChoiceOptions(values []form.Option, current, defaultValue string) []form.Option {
+	options := append([]form.Option(nil), values...)
+	for i := range options {
+		if options[i].Value == current && current != defaultValue {
+			options[i].Label += " (overridden)"
+		}
+	}
+	return options
+}
+func (sp *settingsPage) buildRoutingSections() []form.Section {
 	sp.ensureRoutingDraft()
 	a := sp.routingDraft
-	profiles := []form.Option{{Label: "none", Value: ""}}
-	seen := map[string]bool{"": true}
-	for _, p := range sp.profiles {
-		profiles = append(profiles, form.Option{Label: p.Name, Value: p.Name})
-		seen[p.Name] = true
-	}
-	for _, name := range []string{a.Primary, a.PrimaryBackup, a.Secondary, a.SecondaryBackup} {
-		if !seen[name] {
-			profiles = append(profiles, form.Option{Label: name + " (unavailable)", Value: name})
-			seen[name] = true
+	profileOptions := func(empty string) []form.Option {
+		options := []form.Option{{Label: empty, Value: ""}}
+		seen := map[string]bool{"": true}
+		for _, p := range sp.profiles {
+			if !seen[p.Name] {
+				options = append(options, form.Option{Label: p.Name, Value: p.Name})
+				seen[p.Name] = true
+			}
 		}
+		for _, name := range []string{a.Primary, a.PrimaryBackup, a.Secondary, a.SecondaryBackup} {
+			if !seen[name] {
+				options = append(options, form.Option{Label: name + " (unavailable)", Value: name})
+				seen[name] = true
+			}
+		}
+		return options
 	}
-	fields := []form.Field{
-		form.NewSelect("routing-primary", "Primary", profiles, a.Primary), form.NewSelect("routing-primary-backup", "Primary backup", profiles, a.PrimaryBackup),
-		form.NewSelect("routing-secondary", "Secondary", profiles, a.Secondary), form.NewSelect("routing-secondary-backup", "Secondary backup", profiles, a.SecondaryBackup),
-		form.NewSelect("routing-secondary-redirect", "Secondary routing", []form.Option{{Label: "own configuration", Value: ""}, {Label: "redirect to Primary", Value: "primary"}, {Label: "redirect to Local", Value: "local"}}, a.SecondaryRedirect),
-		form.NewSelect("routing-local-redirect", "Local routing", []form.Option{{Label: "own configuration", Value: ""}, {Label: "redirect to Primary", Value: "primary"}, {Label: "redirect to Secondary", Value: "secondary"}}, a.LocalRedirect),
-		form.NewReadOnly("routing-local-setup", "Local setup", "Manage runtime in Runtime; models in Local Models", "No cloud profile binding"),
-	}
+	tiers := form.Section{Title: "Model tiers", Groups: []form.Group{
+		{Title: "Primary", Fields: []form.Field{
+			form.NewSelect("routing-primary", "Profile", profileOptions("No profile selected"), a.Primary),
+			form.NewSelect("routing-primary-backup", "Backup", profileOptions("No backup"), a.PrimaryBackup),
+		}},
+		{Title: "Secondary", Fields: []form.Field{
+			form.NewSelect("routing-secondary", "Profile", profileOptions("No profile selected"), a.Secondary),
+			form.NewSelect("routing-secondary-backup", "Backup", profileOptions("No backup"), a.SecondaryBackup),
+			form.NewSelect("routing-secondary-redirect", "Redirect all work to", []form.Option{{Label: "No redirect", Value: ""}, {Label: "Primary", Value: "primary"}, {Label: "Local", Value: "local"}}, a.SecondaryRedirect),
+		}},
+		{Title: "Local", Fields: []form.Field{
+			form.NewReadOnly("routing-local-setup", "Setup", "Runtime and Local Models tabs", ""),
+			form.NewSelect("routing-local-redirect", "Redirect all work to", []form.Option{{Label: "No redirect", Value: ""}, {Label: "Primary", Value: "primary"}, {Label: "Secondary", Value: "secondary"}}, a.LocalRedirect),
+		}},
+		{Fields: []form.Field{form.NewReadOnly("routing-behavior", "Behavior", "Backups are used after failures. Redirects send all work to another model tier.", "")}},
+	}}
 	c := sp.routingConfig()
+	var tasks []form.Field
 	for _, d := range config.TaskDefinitions() {
 		task := string(d.Task)
-		current := a.Tasks[task]
-		effective := c.TaskAssignment(d.Task)
-		final, err := c.ResolveDestination(effective.Destination)
-		placement := string(effective.Destination) + " → " + string(final)
+		assignment := c.TaskAssignment(d.Task)
+		destination, quality := string(assignment.Destination), string(assignment.Quality)
+		destinations := taskChoiceOptions([]form.Option{{Label: "Primary", Value: "primary"}, {Label: "Secondary", Value: "secondary"}, {Label: "Local", Value: "local"}}, destination, string(d.Default.Destination))
+		qualities := taskChoiceOptions([]form.Option{{Label: "Light", Value: "economy"}, {Label: "Standard", Value: "standard"}, {Label: "Premium", Value: "premium"}}, quality, string(d.Default.Quality))
+		note := ""
+		final, err := c.ResolveDestination(assignment.Destination)
 		if err != nil {
-			placement = "invalid redirect: " + err.Error()
+			note = "Invalid redirect: " + err.Error()
+		} else if final != assignment.Destination {
+			note = "Redirected to " + destinationLabel(final)
 		}
-		dest := []form.Option{{Label: "inherit: " + string(d.Default.Destination), Value: ""}, {Label: "Primary", Value: "primary"}, {Label: "Secondary", Value: "secondary"}, {Label: "Local", Value: "local"}}
-		qualities := []form.Option{{Label: "inherit: " + qualityLabel(d.Default.Quality), Value: ""}, {Label: "Light", Value: "economy"}, {Label: "Standard", Value: "standard"}, {Label: "Premium", Value: "premium"}}
-		fields = append(fields, form.NewReadOnly("routing-task-"+task+"-heading", d.Label, "", ""), form.NewSelect("routing-task-"+task+"-destination", "  destination", dest, current.Destination), form.NewSelect("routing-task-"+task+"-quality", "  quality", qualities, current.Quality), form.NewReadOnly("routing-task-"+task+"-effective", "  effective", placement+" / "+qualityLabel(effective.Quality), "Saved assignment is preserved through redirects"), form.NewButton("routing-task-"+task+"-reset", "  reset task", true))
+		modified := assignment != d.Default
+		row := form.NewSelectPair("routing-task-"+task, d.Label,
+			form.NewSelect("routing-task-"+task+"-destination", "Model tier", destinations, destination),
+			form.NewSelect("routing-task-"+task+"-quality", "Quality", qualities, quality), modified, note)
+		if modified {
+			row.Help = "Defaults: " + destinationLabel(d.Default.Destination) + " / " + qualityLabel(d.Default.Quality)
+		}
+		tasks = append(tasks, row)
 	}
-	fields = append(fields, form.NewButton("routing-save", "Save routing", true), form.NewButton("routing-discard", "Discard routing", true))
-	return form.Section{Title: "Routing", Fields: fields}
+	status := "No unsaved changes"
+	if sp.routingDirty {
+		status = "Unsaved changes"
+	}
+	routing := form.Section{Title: "Task routing", ColumnHeadings: [3]string{"Task", "Model tier", "Quality"}, Groups: []form.Group{
+		{Fields: tasks},
+		{Title: status, Fields: []form.Field{form.NewButton("routing-save", "Save routing", sp.routingDirty), form.NewButton("routing-discard", "Discard routing", sp.routingDirty)}},
+	}}
+	return []form.Section{tiers, routing}
 }
 func (sp *settingsPage) commitRouting(field, value string) (string, tea.Cmd, error) {
 	sp.ensureRoutingDraft()
@@ -118,10 +172,17 @@ func (sp *settingsPage) commitRouting(field, value string) (string, tea.Cmd, err
 			return "", nil, fmt.Errorf("unknown task %q", task)
 		}
 		a := sp.routingDraft.Tasks[task]
+		defaults := (config.Config{}).TaskAssignment(config.Task(task))
 		switch part {
 		case "destination":
+			if value == string(defaults.Destination) {
+				value = ""
+			}
 			a.Destination = value
 		case "quality":
+			if value == string(defaults.Quality) {
+				value = ""
+			}
 			a.Quality = value
 		case "reset":
 			a.Destination = ""
@@ -135,7 +196,15 @@ func (sp *settingsPage) commitRouting(field, value string) (string, tea.Cmd, err
 			sp.routingDraft.Tasks[task] = a
 		}
 	}
-	sp.routingDirty = true
+	saved := sp.cloudView.Assignments.Clone()
+	if sp.cloudView.Assignments == nil {
+		saved.Primary = sp.cloudView.Active
+		saved.PrimaryBackup = sp.cloudView.Backup
+	}
+	sp.routingDirty = !reflect.DeepEqual(sp.routingDraft, saved)
+	if !sp.routingDirty {
+		return "routing matches saved settings", nil, nil
+	}
 	return "routing draft changed; Save to apply", nil, nil
 }
 func (sp *settingsPage) finishRoutingSave(warning string, err error) (string, tea.Cmd, error) {

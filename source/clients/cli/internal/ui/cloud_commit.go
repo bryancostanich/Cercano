@@ -17,8 +17,6 @@ const (
 	cloudCommitSelect
 	cloudCommitDraftEdit
 	cloudCommitSave
-	cloudCommitActivate
-	cloudCommitBackup
 	cloudCommitDelete
 	cloudCommitKey
 	cloudCommitSignIn
@@ -52,10 +50,6 @@ func classifyCloudCommit(key, value string) cloudCommitAction {
 		return cloudCommitAction{kind: cloudCommitKey, value: value}
 	case "cloud-save":
 		return cloudCommitAction{kind: cloudCommitSave}
-	case "cloud-activate":
-		return cloudCommitAction{kind: cloudCommitActivate}
-	case "cloud-backup":
-		return cloudCommitAction{kind: cloudCommitBackup}
 	case "cloud-delete":
 		return cloudCommitAction{kind: cloudCommitDelete}
 	case "cloud-signin":
@@ -92,12 +86,11 @@ func (sp *settingsPage) applyCloudDraftEdit(field, value string) {
 }
 
 // cloudCommitNeedsAgent reports whether executing the action reaches the
-// agent over gRPC. Row selection and plain draft edits are local; a draft
-// model edit on an existing profile pushes immediately (shouldApplyModelEdit)
-// and so needs the agent too.
+// agent over gRPC. Row selection and all draft edits stay local. Explicit
+// profile saves, deletion, credentials and sign-in actions reach the agent.
 func cloudCommitNeedsAgent(ca cloudCommitAction, draftNew bool) bool {
 	switch ca.kind {
-	case cloudCommitSave, cloudCommitActivate, cloudCommitBackup,
+	case cloudCommitSave,
 		cloudCommitDelete, cloudCommitKey, cloudCommitSignIn, cloudCommitSignInClaude:
 		return true
 	case cloudCommitDraftEdit:
@@ -154,37 +147,6 @@ func (sp *settingsPage) commitCloud(ca cloudCommitAction) (string, tea.Cmd, erro
 			return "saved " + d.Name + "; provider unavailable: " + warning, nil, nil
 		}
 		return "saved " + d.Name, nil, nil
-	case cloudCommitActivate:
-		if sp.agent == nil {
-			return "no agent", nil, nil
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := sp.agent.SetActiveCloudProfile(ctx, sp.cloudDraft.Name); err != nil {
-			return "", nil, err
-		}
-		sp.profilesLoaded = false
-		return "primary: " + sp.cloudDraft.Name, nil, nil
-	case cloudCommitBackup:
-		if sp.agent == nil {
-			return "no agent", nil, nil
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		// Toggle: pressing the button on the profile that already IS the
-		// backup clears it (the button reads "clear backup" in that state).
-		name := sp.cloudDraft.Name
-		if sp.cloudView.Backup == name {
-			name = ""
-		}
-		if err := sp.agent.SetBackupCloudProfile(ctx, name); err != nil {
-			return "", nil, err
-		}
-		sp.profilesLoaded = false
-		if name == "" {
-			return "backup cleared", nil, nil
-		}
-		return "backup: " + name, nil, nil
 	case cloudCommitDelete:
 		if sp.agent == nil {
 			return "no agent", nil, nil

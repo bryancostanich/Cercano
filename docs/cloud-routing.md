@@ -1,10 +1,10 @@
-# Cloud profiles, destinations, and model quality
+# Model tiers, cloud profiles, and model quality
 
 ## Two separate choices
 
-A **destination** chooses where a task runs. A **quality** chooses a model within that destination. Neither is a tool permission level.
+A **model tier** (called a `destination` in configuration and APIs) chooses where a task runs. A **quality** chooses a model within that destination. Neither is a tool permission level.
 
-| Task | Default destination | Default quality |
+| Task | Default model tier | Default quality |
 | --- | --- | --- |
 | Chat | Primary | Premium |
 | Default dispatch (class omitted) | Secondary | Premium |
@@ -19,7 +19,7 @@ A **destination** chooses where a task runs. A **quality** chooses a model withi
 
 Primary and Secondary each have their own preferred profile and optional backup. Secondary is not Primary's backup. Local uses its independently managed runtime and models. Light is the display label for the existing `economy` cost tier.
 
-Secondary can redirect to Primary or Local; Local can redirect to Primary or Secondary. Chains are followed to their final destination; self-loops, cycles and unknown destinations are rejected atomically. **Own configuration** clears a redirect. Redirects change effective placement without overwriting saved profile bindings or task destination/quality. They are not failover: only the final destination's profile, model, credentials and backup chain are used.
+Secondary can redirect to Primary or Local; Local can redirect to Primary or Secondary. Chains are followed to their final destination; self-loops, cycles and unknown destinations are rejected atomically. **No redirect** clears a redirect. Redirects change effective placement without overwriting saved profile bindings or task destination/quality. They are not failover: only the final destination's profile, model, credentials and backup chain are used.
 
 Final Primary placement follows locus policy. `open_only` prohibits cloud inference and `cloud_only` prohibits Local inference. Final Secondary never automatically falls through to Primary or Local; final Local has no implicit cloud fallback. Final Primary retains its existing permitted fallback, including redirected calls. Visible output and completed tool work must not be replayed across destinations.
 
@@ -45,14 +45,25 @@ Legacy profile-wide `model`/`model_pinned` choices no longer override quality se
 
 ## Editing settings
 
-In **Routing** settings:
+The **Routing** tab has two sections:
 
-1. Choose Primary, Primary backup, Secondary and Secondary backup independently; **none** clears a binding.
-2. Choose Secondary/Local redirects or **own configuration**. The effective route is displayed separately from the saved assignment.
-3. Set each task's destination and quality, or leave either inherited. **Reset task** removes both overrides and restores that class's defaults.
-4. **Save routing** applies the whole draft atomically. **Discard routing** restores saved assignments. Failed saves and disconnected-agent errors preserve edits.
+### Model tiers
 
-In **Cloud**, edit profile credentials, quality and image choices using the separate profile save/discard actions. Routing controls no longer live on Cloud. Runtime/model management stays in **Runtime / Local Models**; Local does not have a cloud-profile binding.
+Primary and Secondary each group their profile and backup controls. **No profile selected** means that tier has no cloud profile binding; **No backup** means no backup is configured. These are absent bindings, not hidden default selections.
+
+Secondary and Local each have **Redirect all work to**, with **No redirect** as the normal selection. A redirect always changes where work runs; a backup is tried after a failure. Local's runtime/model setup remains in **Runtime / Local Models**, rather than becoming a cloud-profile binding.
+
+### Task routing
+
+Each task has one compact row with independently editable **Model tier** and **Quality** columns. On a focused row, use left/right to select a column, then Enter to choose a value. Narrow terminals stack the labeled columns instead of clipping them.
+
+The row shows actual values, including defaults—not “inherit” or “unset.” A value that differs from that task's built-in default is marked **(overridden)**. Destination and quality can be overridden independently. Choosing the default removes that component's override so it follows future defaults. On a modified task, **r Restore defaults** removes both overrides; the action and default-value help are shown only for the focused task.
+
+There is no permanent “effective” row. A note such as **Redirected to Primary** appears only when a redirect changes the task's destination. This note is not a report of runtime failover or which provider served a request.
+
+**Save routing** applies the whole draft atomically; **Discard routing** restores saved assignments. The page distinguishes **Unsaved changes** from saved overrides. Selecting an unchanged value or undoing edits back to the saved state does not mark the page unsaved. Save/Discard are disabled when there are no pending changes. Failed saves and disconnected-agent errors preserve edits.
+
+In **Cloud**, edit profile credentials, quality and image choices using the separate profile Save/Discard actions. Cloud no longer displays Primary/backup routing badges or supports the obsolete activation/backup actions; authentication and account identity annotations remain. Routing is the sole owner of tier bindings and backups.
 
 All choice edits are drafts, including existing profiles. Cancelling a picker keeps the original value. Unsaved edits prompt before leaving their page or changing profiles; cancelling navigation preserves the draft. Cloud and Routing save/discard operations do not apply or clear each other's draft. Authentication and API-key operations remain separate actions.
 

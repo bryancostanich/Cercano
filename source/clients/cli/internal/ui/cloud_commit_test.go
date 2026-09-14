@@ -19,7 +19,10 @@ func TestClassifyCloudCommit(t *testing.T) {
 	if a := classifyCloudCommit("cloud-save", form.ButtonActivate); a.kind != cloudCommitSave {
 		t.Errorf("save misrouted: %+v", a)
 	}
-	if a := classifyCloudCommit("cloud-activate", form.ButtonActivate); a.kind != cloudCommitActivate {
+	if a := classifyCloudCommit("cloud-backup", form.ButtonActivate); a.kind != cloudCommitNone {
+		t.Fatalf("obsolete backup action still classified: %+v", a)
+	}
+	if a := classifyCloudCommit("cloud-activate", form.ButtonActivate); a.kind != cloudCommitNone {
 		t.Errorf("activate misrouted: %+v", a)
 	}
 	if a := classifyCloudCommit("cloud-delete", form.ButtonActivate); a.kind != cloudCommitDelete {
@@ -128,7 +131,7 @@ func TestFallbackClaudeModelsIncludeCurrentGeneration(t *testing.T) {
 // gRPC (and so must fail fast while the connection is down) versus the
 // local-only ones that must never be blocked by connection state.
 func TestCloudCommitNeedsAgent(t *testing.T) {
-	rpc := []cloudCommitKind{cloudCommitSave, cloudCommitActivate, cloudCommitBackup,
+	rpc := []cloudCommitKind{cloudCommitSave,
 		cloudCommitDelete, cloudCommitKey, cloudCommitSignIn}
 	for _, k := range rpc {
 		if !cloudCommitNeedsAgent(cloudCommitAction{kind: k}, false) {
@@ -141,8 +144,7 @@ func TestCloudCommitNeedsAgent(t *testing.T) {
 			t.Errorf("kind %d must stay local", k)
 		}
 	}
-	// Draft edits are local — except a model edit on an existing profile,
-	// which pushes immediately (shouldApplyModelEdit).
+	// All draft edits, including model edits on existing profiles, are local.
 	if cloudCommitNeedsAgent(cloudCommitAction{kind: cloudCommitDraftEdit, field: "cloud-name"}, false) {
 		t.Error("name draft edit must stay local")
 	}
@@ -156,16 +158,16 @@ func TestCloudCommitNeedsAgent(t *testing.T) {
 
 // TestCloudCommitNoErrorKeepsSnapshotCache pins the counterpart of the
 // error-path invalidation in onCommit: a commit that does NOT error (here a
-// nil-agent activate, which returns a status) must leave the snapshot cache
+// local draft edit, which returns a status) must leave the snapshot cache
 // alone. The error branch itself (profilesLoaded dropped so the form's
 // error-path reload refetches truth) is exercised end-to-end by
 // TestFormCommitErrorReloadsSections plus the three-line branch in onCommit.
 func TestCloudCommitNoErrorKeepsSnapshotCache(t *testing.T) {
 	sp := cloudSamplePage()
 	sp.profilesLoaded = true
-	_, _, err := sp.onCommit("cloud-activate", "activate")
+	_, _, err := sp.onCommit("cloud-base-url", "https://example.invalid")
 	if err != nil {
-		t.Fatalf("nil-agent activate should not error (returns status): %v", err)
+		t.Fatalf("local draft edit should not error: %v", err)
 	}
 	if !sp.profilesLoaded {
 		t.Fatal("no-error commit must not drop the cache")

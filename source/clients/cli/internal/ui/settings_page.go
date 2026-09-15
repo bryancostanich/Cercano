@@ -285,6 +285,12 @@ func (sp *settingsPage) applySpinnerTick() tea.Cmd {
 	return settingsSpinnerTick()
 }
 
+// handlePaste keeps terminal paste inside the active settings editor rather
+// than dropping it or letting a credential reach the conversation prompt.
+func (sp *settingsPage) handlePaste(content string) bool {
+	return sp.form != nil && sp.form.Paste(content)
+}
+
 func (sp *settingsPage) Update(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	if sp.settingsPendingLeave != "" {
 		switch msg.String() {

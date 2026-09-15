@@ -132,6 +132,22 @@ func (f *Form) Update(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	return nil, false
 }
 
+// Paste inserts terminal paste content into the focused text editor only.
+// It never activates a field or commits its value.
+func (f *Form) Paste(content string) bool {
+	fields := f.flat()
+	if content == "" || f.cursor < 0 || f.cursor >= len(fields) {
+		return false
+	}
+	field, ok := fields[f.cursor].(*TextField)
+	if !ok || !field.editing {
+		return false
+	}
+	// Use textinput's paste handling for cursor insertion and sanitization.
+	field.input, _ = field.input.Update(tea.PasteMsg{Content: content})
+	return true
+}
+
 func (f *Form) commit(key, val string, fieldCmd tea.Cmd) tea.Cmd {
 	if f.OnCommit == nil {
 		f.status = "no commit handler"

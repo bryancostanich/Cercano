@@ -123,3 +123,38 @@ func TestCloudPickerCancellationDoesNotChangeDraft(t *testing.T) {
 		t.Fatal("cancelled picker modified draft")
 	}
 }
+
+// Saving a template keeps its draft selected while the provider snapshot reloads.
+// Recommendations must be refreshed even though the selected row did not change.
+func TestSavedDeepInfraDraftRefreshesInheritedModels(t *testing.T) {
+	sp := cloudSamplePage()
+	sp.cloudSelected = "profile:deepinfra"
+	sp.cloudDraft = cloudDraft{Name: "deepinfra", Flavor: "chat_completions", BaseURL: "https://api.deepinfra.com/v1/openai", Choices: &agentclient.CloudModelChoices{TierOverrides: map[string]string{}}}
+	sp.cloudDraftNew = false
+	recommendations := map[string]string{"economy": "openai/gpt-oss-120b", "standard": "zai-org/GLM-5.3-Flash", "premium": "zai-org/GLM-5.3"}
+	p := agentclient.CloudProfileInfo{Name: sp.cloudDraft.Name, Flavor: sp.cloudDraft.Flavor, BaseURL: sp.cloudDraft.BaseURL, RecommendedQualityModels: recommendations}
+	sp.profiles = []agentclient.CloudProfileInfo{p}
+	sp.cloudView = agentclient.CloudProvidersView{Providers: []agentclient.CloudProvider{{ID: "deepinfra", Label: "DeepInfra", Flavor: p.Flavor, BaseURL: p.BaseURL, Profiles: sp.profiles}}}
+	for _, dirty := range []bool{false, true} {
+		sp.cloudDirty = dirty
+		if dirty {
+			sp.cloudDraft.Choices.TierOverrides["premium"] = "custom"
+			sp.cloudDraft.apiKey = "synthetic"
+			sp.cloudDraft.apiKeyEdited = true
+		}
+		section := sp.buildCloudSection()
+		for q, want := range recommendations {
+			if got := sp.cloudDraft.Effective[q]; got != want {
+				t.Errorf("dirty=%v %s inherited=%q want=%q", dirty, q, got, want)
+			}
+		}
+		for _, field := range section.Fields {
+			if field.Key() == "cloud-quality-standard" && !strings.Contains(field.Display(), recommendations["standard"]) {
+				t.Error("default model not displayed")
+			}
+		}
+		if dirty && (sp.cloudDraft.Choices.TierOverrides["premium"] != "custom" || sp.cloudDraft.apiKey != "synthetic" || !sp.cloudDirty) {
+			t.Fatal("refresh lost unsaved edits")
+		}
+	}
+}

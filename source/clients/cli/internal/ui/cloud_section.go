@@ -57,6 +57,16 @@ func (sp *settingsPage) selectCloudRow(rowID string) {
 // buildCloudSection renders the Cloud Providers list with an inline detail editor
 // under the selected row.
 func (sp *settingsPage) buildCloudSection() form.Section {
+	// Save keeps the draft selected while the profile snapshot reloads. Refresh
+	// derived recommendations without reselecting (and discarding draft edits).
+	if !sp.cloudDraftNew {
+		for _, p := range sp.profiles {
+			if sp.cloudSelected == "profile:"+p.Name && sp.cloudDraft.Name == p.Name {
+				sp.cloudDraft.Effective = p.RecommendedQualityModels
+				break
+			}
+		}
+	}
 	rows := buildCloudRowsFromProviders(sp.cloudView)
 	var fields []form.Field
 	for _, r := range rows {

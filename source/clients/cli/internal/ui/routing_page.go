@@ -125,6 +125,7 @@ func (sp *settingsPage) buildRoutingSections() []form.Section {
 	if sp.routingDirty {
 		status = "Unsaved changes"
 	}
+	tiers.Groups = append(tiers.Groups, form.Group{Title: status, Fields: []form.Field{form.NewButton("routing-save-tiers", "Save routing", sp.routingDirty)}})
 	routing := form.Section{Title: "Task routing", ColumnHeadings: [3]string{"Task", "Model tier", "Quality"}, Groups: []form.Group{
 		{Fields: tasks},
 		{Title: status, Fields: []form.Field{form.NewButton("routing-save", "Save routing", sp.routingDirty), form.NewButton("routing-discard", "Discard routing", sp.routingDirty)}},
@@ -138,7 +139,7 @@ func (sp *settingsPage) commitRouting(field, value string) (string, tea.Cmd, err
 		sp.routingDraft = nil
 		sp.routingDirty = false
 		return "discarded routing draft", nil, nil
-	case "routing-save":
+	case "routing-save", "routing-save-tiers":
 		if err := sp.routingConfig().ValidateDestinationRedirects(); err != nil {
 			return "", nil, err
 		}

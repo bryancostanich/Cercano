@@ -208,3 +208,15 @@ func TestGroupCustomEndpointSplitOut(t *testing.T) {
 		}
 	}
 }
+
+func TestDeepInfraIsVerified(t *testing.T) {
+	for _, p := range Catalog() {
+		if p.ID == "deepinfra" {
+			if p.Tier != TierVerified {
+				t.Fatalf("DeepInfra tier = %q, want verified", p.Tier)
+			}
+			return
+		}
+	}
+	t.Fatal("DeepInfra missing from catalog")
+}

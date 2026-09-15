@@ -10,6 +10,9 @@ import (
 
 // cloudDraft is the in-progress profile edit backing the detail editor.
 type cloudDraft struct {
+	// Pending credentials are memory-only and never included in profile metadata.
+	apiKey                                       string
+	apiKeyEdited                                 bool
 	Name, Flavor, Backend, Route, BaseURL, Model string
 	Choices                                      *agentclient.CloudModelChoices
 	Effective                                    map[string]string
@@ -196,6 +199,9 @@ func (sp *settingsPage) hasCanonicalClaudeSubscriptionProfile() bool {
 // draftHasKey reports whether the row's profile already has a stored key (drives
 // the masked field's "(stored)" vs "(not set)" hint).
 func (sp *settingsPage) draftHasKey(r cloudRow) bool {
+	if sp.cloudDraft.apiKeyEdited {
+		return sp.cloudDraft.apiKey != ""
+	}
 	return r.IsProfile && r.HasKey
 }
 

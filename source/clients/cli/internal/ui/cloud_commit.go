@@ -87,11 +87,12 @@ func (sp *settingsPage) applyCloudDraftEdit(field, value string) {
 
 // cloudCommitNeedsAgent reports whether executing the action reaches the
 // agent over gRPC. Row selection and all draft edits stay local. Explicit
-// profile saves, deletion, credentials and sign-in actions reach the agent.
+// profile saves, deletion and sign-in actions reach the agent. Credentials
+// remain in the draft until explicit Save.
 func cloudCommitNeedsAgent(ca cloudCommitAction, draftNew bool) bool {
 	switch ca.kind {
 	case cloudCommitSave,
-		cloudCommitDelete, cloudCommitKey, cloudCommitSignIn, cloudCommitSignInClaude:
+		cloudCommitDelete, cloudCommitSignIn, cloudCommitSignInClaude:
 		return true
 	case cloudCommitDraftEdit:
 		return shouldApplyModelEdit(ca.field, draftNew)
@@ -139,7 +140,16 @@ func (sp *settingsPage) commitCloud(ca cloudCommitAction) (string, tea.Cmd, erro
 		if err != nil {
 			return "", nil, err
 		}
+		// Profile creation must succeed before its credential can be stored.
+		// Keep the pending key and dirty state on failure so Save can retry.
 		sp.profilesLoaded = false
+		if d.apiKeyEdited {
+			if err := sp.agent.SetCloudProfileKey(ctx, d.Name, d.apiKey); err != nil {
+				return "", nil, err
+			}
+		}
+		sp.cloudDraft.apiKey = ""
+		sp.cloudDraft.apiKeyEdited = false
 		sp.cloudSelected = "profile:" + d.Name
 		sp.cloudDraftNew = false
 		sp.cloudDirty = false
@@ -181,16 +191,11 @@ func (sp *settingsPage) commitCloud(ca cloudCommitAction) (string, tea.Cmd, erro
 			return openClaudeLoginModalMsg{profile: profile, model: claudeModel, setActive: true}
 		}, nil
 	case cloudCommitKey:
-		if sp.agent == nil {
-			return "no agent", nil, nil
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := sp.agent.SetCloudProfileKey(ctx, sp.cloudDraft.Name, ca.value); err != nil {
-			return "", nil, err
-		}
-		sp.profilesLoaded = false
-		return "key stored for " + sp.cloudDraft.Name, nil, nil
+		sp.cloudDraft.apiKey = ca.value
+		sp.cloudDraft.apiKeyEdited = true
+		sp.cloudDirty = true
+		return "key edited — Save to apply", nil, nil
+
 	}
 	return "", nil, nil
 }

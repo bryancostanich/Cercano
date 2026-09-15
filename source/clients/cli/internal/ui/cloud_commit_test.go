@@ -132,13 +132,13 @@ func TestFallbackClaudeModelsIncludeCurrentGeneration(t *testing.T) {
 // local-only ones that must never be blocked by connection state.
 func TestCloudCommitNeedsAgent(t *testing.T) {
 	rpc := []cloudCommitKind{cloudCommitSave,
-		cloudCommitDelete, cloudCommitKey, cloudCommitSignIn}
+		cloudCommitDelete, cloudCommitSignIn}
 	for _, k := range rpc {
 		if !cloudCommitNeedsAgent(cloudCommitAction{kind: k}, false) {
 			t.Errorf("kind %d should need the agent", k)
 		}
 	}
-	local := []cloudCommitKind{cloudCommitNone, cloudCommitSelect}
+	local := []cloudCommitKind{cloudCommitNone, cloudCommitSelect, cloudCommitKey}
 	for _, k := range local {
 		if cloudCommitNeedsAgent(cloudCommitAction{kind: k}, false) {
 			t.Errorf("kind %d must stay local", k)

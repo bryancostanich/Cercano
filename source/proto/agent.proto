@@ -73,6 +73,8 @@ service Agent {
   // context window for a conversation. The CLI status bar polls this after
   // each streamed turn.
   rpc GetContextUsage (GetContextUsageRequest) returns (GetContextUsageResponse) {}
+  // Actual consumed usage, separate from context estimates and legacy telemetry.
+  rpc GetTokenMetrics (GetTokenMetricsRequest) returns (GetTokenMetricsResponse) {}
 
   // GetCompactionState returns the compaction summary + frozen/live split for
   // the /c context viewer.
@@ -2165,4 +2167,71 @@ message AccountingWork {
   string conversation_id = 2;
   string session_id = 3;
   string source = 4;
+}
+
+// Calendar presets: today, 7d, 30d, all, custom; utc uses explicit half-open bounds.
+// Optional filters: absent = all, present empty string = unknown attribution.
+message GetTokenMetricsRequest {
+  string preset = 1;
+  string timezone = 2;
+  string start_date = 3;
+  string end_date = 4;
+  int64 start_unix_micros = 5;
+  int64 end_unix_micros = 6;
+  optional string provider = 7;
+  optional string model = 8;
+  optional string source = 9;
+  string population = 10; // attempts (default) or external; source = reporter for external
+}
+message TokenMetricCount {
+  int64 tokens = 1; // sum of reported values only, not an estimate
+  int64 known_records = 2;
+}
+message TokenMetricTotals {
+  int64 records = 1;
+  TokenMetricCount input = 2;
+  TokenMetricCount output = 3;
+  TokenMetricCount cache_read = 4;
+  TokenMetricCount cache_write = 5;
+  TokenMetricCount reasoning = 6;
+  int64 incomplete = 7;
+  int64 unknown_attribution = 8;
+  int64 unfinished = 9;
+}
+message TokenMetricBucket {
+  int64 start_unix_micros = 1;
+  int64 end_unix_micros = 2;
+  string label = 3;
+  bool partial = 4;
+  TokenMetricTotals totals = 5;
+}
+message TokenMetricBreakdown {
+  string dimension = 1; // provider, model, source
+  string value = 2; // empty = unknown
+  TokenMetricTotals totals = 3;
+}
+message TokenMetricsHealth {
+  int64 pending = 1;
+  uint64 retries = 2;
+  uint64 write_failures = 3;
+  uint64 lost = 4;
+  uint64 uncertain = 5;
+  bool coverage_incomplete = 6;
+  string last_persistence = 7;
+  string last_error = 8;
+  string oldest_pending = 9;
+}
+message GetTokenMetricsResponse {
+  string population = 1;
+  string timezone = 2;
+  string tracking_since = 3;
+  int64 start_unix_micros = 4;
+  int64 end_unix_micros = 5;
+  TokenMetricTotals totals = 6;
+  repeated TokenMetricBucket buckets = 7;
+  repeated TokenMetricBreakdown breakdowns = 8;
+  TokenMetricsHealth health = 9; // global, not restricted by date/filter
+  repeated string warnings = 10;
+  bool breakdowns_truncated = 11;
+  string generated_at = 12;
 }

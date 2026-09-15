@@ -36,6 +36,7 @@ const (
 	Agent_ListSubAgents_FullMethodName                         = "/agent.Agent/ListSubAgents"
 	Agent_DismissSubAgent_FullMethodName                       = "/agent.Agent/DismissSubAgent"
 	Agent_GetContextUsage_FullMethodName                       = "/agent.Agent/GetContextUsage"
+	Agent_GetTokenMetrics_FullMethodName                       = "/agent.Agent/GetTokenMetrics"
 	Agent_GetCompactionState_FullMethodName                    = "/agent.Agent/GetCompactionState"
 	Agent_ElideContext_FullMethodName                          = "/agent.Agent/ElideContext"
 	Agent_SuggestNextPrompt_FullMethodName                     = "/agent.Agent/SuggestNextPrompt"
@@ -158,6 +159,8 @@ type AgentClient interface {
 	// context window for a conversation. The CLI status bar polls this after
 	// each streamed turn.
 	GetContextUsage(ctx context.Context, in *GetContextUsageRequest, opts ...grpc.CallOption) (*GetContextUsageResponse, error)
+	// Actual consumed usage, separate from context estimates and legacy telemetry.
+	GetTokenMetrics(ctx context.Context, in *GetTokenMetricsRequest, opts ...grpc.CallOption) (*GetTokenMetricsResponse, error)
 	// GetCompactionState returns the compaction summary + frozen/live split for
 	// the /c context viewer.
 	GetCompactionState(ctx context.Context, in *GetCompactionStateRequest, opts ...grpc.CallOption) (*GetCompactionStateResponse, error)
@@ -535,6 +538,16 @@ func (c *agentClient) GetContextUsage(ctx context.Context, in *GetContextUsageRe
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetContextUsageResponse)
 	err := c.cc.Invoke(ctx, Agent_GetContextUsage_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentClient) GetTokenMetrics(ctx context.Context, in *GetTokenMetricsRequest, opts ...grpc.CallOption) (*GetTokenMetricsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetTokenMetricsResponse)
+	err := c.cc.Invoke(ctx, Agent_GetTokenMetrics_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1255,6 +1268,8 @@ type AgentServer interface {
 	// context window for a conversation. The CLI status bar polls this after
 	// each streamed turn.
 	GetContextUsage(context.Context, *GetContextUsageRequest) (*GetContextUsageResponse, error)
+	// Actual consumed usage, separate from context estimates and legacy telemetry.
+	GetTokenMetrics(context.Context, *GetTokenMetricsRequest) (*GetTokenMetricsResponse, error)
 	// GetCompactionState returns the compaction summary + frozen/live split for
 	// the /c context viewer.
 	GetCompactionState(context.Context, *GetCompactionStateRequest) (*GetCompactionStateResponse, error)
@@ -1482,6 +1497,9 @@ func (UnimplementedAgentServer) DismissSubAgent(context.Context, *DismissSubAgen
 }
 func (UnimplementedAgentServer) GetContextUsage(context.Context, *GetContextUsageRequest) (*GetContextUsageResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetContextUsage not implemented")
+}
+func (UnimplementedAgentServer) GetTokenMetrics(context.Context, *GetTokenMetricsRequest) (*GetTokenMetricsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetTokenMetrics not implemented")
 }
 func (UnimplementedAgentServer) GetCompactionState(context.Context, *GetCompactionStateRequest) (*GetCompactionStateResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetCompactionState not implemented")
@@ -1952,6 +1970,24 @@ func _Agent_GetContextUsage_Handler(srv interface{}, ctx context.Context, dec fu
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(AgentServer).GetContextUsage(ctx, req.(*GetContextUsageRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Agent_GetTokenMetrics_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetTokenMetricsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServer).GetTokenMetrics(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Agent_GetTokenMetrics_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServer).GetTokenMetrics(ctx, req.(*GetTokenMetricsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -3002,6 +3038,10 @@ var Agent_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetContextUsage",
 			Handler:    _Agent_GetContextUsage_Handler,
+		},
+		{
+			MethodName: "GetTokenMetrics",
+			Handler:    _Agent_GetTokenMetrics_Handler,
 		},
 		{
 			MethodName: "GetCompactionState",

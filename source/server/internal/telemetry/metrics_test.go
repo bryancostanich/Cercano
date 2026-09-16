@@ -202,3 +202,23 @@ func TestMetricsIndexedQueriesAndBoundedBreakdowns(t *testing.T) {
 		t.Fatalf("bounded: %v %v", out, e)
 	}
 }
+
+func TestMetricsHealthOrdersFractionalTimestamps(t *testing.T) {
+	s := metricsStore(t)
+	ctx := t.Context()
+	a := time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC)
+	b := a.Add(900 * time.Millisecond)
+	if e := s.WriteAccountingHealth(ctx, "first", AccountingHealth{LastPersistence: a, OldestPending: a, Pending: 1}); e != nil {
+		t.Fatal(e)
+	}
+	if e := s.WriteAccountingHealth(ctx, "second", AccountingHealth{LastPersistence: b, OldestPending: b, Pending: 1}); e != nil {
+		t.Fatal(e)
+	}
+	out, e := s.QueryTokenMetrics(ctx, &proto.GetTokenMetricsRequest{Preset: "today", Timezone: "UTC"}, b, "", nil)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if out.Health.LastPersistence != b.Format(time.RFC3339Nano) || out.Health.OldestPending != a.Format(time.RFC3339Nano) {
+		t.Fatalf("timestamps not chronological: %+v", out.Health)
+	}
+}

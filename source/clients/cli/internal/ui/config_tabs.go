@@ -18,12 +18,12 @@ const (
 	configTabModels                   // the runtime dashboard (local model management)
 	configTabMcp                      // hosted MCP servers (dashboard + add-server popover)
 	configTabUI                       // theme + accent color (settings form)
-	configTabContext                  // read-only context viewer for the active conversation
 	configTabMetrics                  // actual consumed-token reports
+	configTabContext                  // read-only context viewer for the active conversation
 )
 
 // configTabLabels are the visible tab titles, indexed by configTab.
-var configTabLabels = []string{"General", "Cloud", "Routing", "Runtime", "Local Models", "MCP", "UI", "Context", "Token Metrics"}
+var configTabLabels = []string{"General", "Cloud", "Routing", "Runtime", "Local Models", "MCP", "UI", "Token Metrics", "Context"}
 
 // configTabCount is the number of tabs; kept as a named constant so wrap-around
 // navigation and digit-jump bounds stay in one place.
@@ -75,7 +75,7 @@ func clampConfigTab(t configTab) configTab {
 		return configTabGeneral
 	}
 	if t >= configTabCount {
-		return configTabMetrics
+		return configTabContext
 	}
 	return t
 }

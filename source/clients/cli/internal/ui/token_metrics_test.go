@@ -181,9 +181,9 @@ func TestTokenMetricsKeyboardAndTabNavigation(t *testing.T) {
 		t.Fatal("population switching")
 	}
 	m.configSurface.focused = true
-	m, _, handled = m.handleConfigSurfaceKey(tea.KeyPressMsg{Code: '9', Text: "9"})
+	m, _, handled = m.handleConfigSurfaceKey(tea.KeyPressMsg{Code: '8', Text: "8"})
 	if !handled || m.configSurface.active != configTabMetrics {
-		t.Fatal("ninth tab shortcut")
+		t.Fatal("eighth tab shortcut")
 	}
 	for _, width := range []int{20, 40, 80, 160} {
 		line := renderConfigTabStrip(width, configTabMetrics, true, theme.Styles{})

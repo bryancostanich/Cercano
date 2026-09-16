@@ -259,8 +259,8 @@ Programmatic clients that cannot answer prompts should use the noninteractive AP
 
 ## Token Metrics (`/config`)
 
-`/config` has a ninth **Token Metrics** tab. With the tab strip focused, press
-**9**, or cycle with left/right arrows; press **Enter** to focus the page.
+`/config` has an eighth **Token Metrics** tab, immediately before Context. With the tab strip focused, press
+**8**, or cycle with left/right arrows; press **Enter** to focus the page.
 This page requires both the updated CLI and agent (`GetTokenMetrics` RPC).
 A running older CLI will not gain the tab until it is rebuilt/relaunched; an
 older agent returns a query error rather than fabricated zero totals.

@@ -201,6 +201,11 @@ type ToolLoopInput struct {
 	// role:"tool" result history; this compatibility mode preserves tool use
 	// while giving the model plain text evidence for the final answer.
 	FlattenToolResults bool
+	// FlattenToolResultsFor, when set, overrides FlattenToolResults. It is
+	// evaluated after each provider response so a local-to-cloud startup
+	// fallback stops flattening newly generated tool history immediately.
+	// Previously recorded history remains unchanged; completed tools are not replayed.
+	FlattenToolResultsFor func() bool
 
 	// ConversationID names the conversation this loop serves. Threaded onto
 	// ctx so tools that spawn linked work (dispatch) can record lineage.
@@ -619,7 +624,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (returned ToolLoopResult
 			RequestID:      fmt.Sprintf("%s:%d", in.ConversationID, iter+1),
 		}
 		log.Printf("[tool-loop] model request: conv=%s provider=%s model=%s iter=%d stream=true temp=%s max_tokens=%d tools=%v lean_subagent_prompt=%t flatten_tool_results=%t system_prefix=%q user_prefix=%q history=%d message_tokens=%d system_tokens=%d tool_schema_tokens=%d output_reserve_tokens=%d estimated_request_tokens=%d context_window=%d context_window_known=%t prompt_budget=%d",
-			in.ConversationID, in.Provider.Name(), in.Model, iter+1, temperatureForLog(req.Temperature), req.MaxTokens, toolNamesForLog(req.Tools), systemHasLeanSubagentMarker(req.System), in.FlattenToolResults, truncateRunes(strings.TrimSpace(req.System), 120), truncateRunes(strings.TrimSpace(in.UserInput), 120), len(req.Messages), budget.MessageTokens, budget.SystemTokens, budget.ToolTokens, budget.OutputReserve, budget.EstimatedUsed, budget.Limit, in.ContextWindowKnown, budget.PromptBudget)
+			in.ConversationID, in.Provider.Name(), in.Model, iter+1, temperatureForLog(req.Temperature), req.MaxTokens, toolNamesForLog(req.Tools), systemHasLeanSubagentMarker(req.System), in.flattenToolResults(), truncateRunes(strings.TrimSpace(req.System), 120), truncateRunes(strings.TrimSpace(in.UserInput), 120), len(req.Messages), budget.MessageTokens, budget.SystemTokens, budget.ToolTokens, budget.OutputReserve, budget.EstimatedUsed, budget.Limit, in.ContextWindowKnown, budget.PromptBudget)
 		rdr, err := in.Provider.StreamChat(ctx, req)
 		if err != nil {
 			return ToolLoopResult{Iterations: iter + 1, History: hist, InputTokens: lastIn, OutputTokens: lastOut, LastRequestBudget: budget}, err
@@ -645,6 +650,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (returned ToolLoopResult
 		lastIn, lastOut = resp.InputTokens, resp.OutputTokens
 		noteAssembledTurn(in.ConversationID, resp.Blocks, seenToolUse)
 
+		flattenToolResults := in.flattenToolResults()
 		var toolCalls []llm.Block
 		var finalText string
 		for _, b := range resp.Blocks {
@@ -656,7 +662,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (returned ToolLoopResult
 			}
 		}
 		recordCalled(toolCalls)
-		if len(toolCalls) > 0 && in.FlattenToolResults {
+		if len(toolCalls) > 0 && flattenToolResults {
 			persistTurn(llm.Message{Role: llm.RoleAssistant, Blocks: resp.Blocks})
 			appendModelTurn(llm.Message{Role: llm.RoleAssistant, Blocks: []llm.Block{{Type: llm.BlockText, Text: flattenToolUseSummary(toolCalls)}}})
 		} else {
@@ -1007,7 +1013,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (returned ToolLoopResult
 				break
 			}
 		}
-		if in.FlattenToolResults {
+		if flattenToolResults {
 			persistTurn(llm.Message{Role: llm.RoleUser, Blocks: results})
 			appendModelTurn(llm.Message{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: flattenToolResultsForModel(toolCalls, results)}}})
 		} else {
@@ -1129,4 +1135,12 @@ func noticeSink(in ToolLoopInput) func(string) {
 	return func(text string) {
 		in.EventSink(LoopEvent{Kind: LoopNotice, Summary: text})
 	}
+}
+
+// Resolve at the point of use: serving location may change during a call.
+func (in ToolLoopInput) flattenToolResults() bool {
+	if in.FlattenToolResultsFor != nil {
+		return in.FlattenToolResultsFor()
+	}
+	return in.FlattenToolResults
 }

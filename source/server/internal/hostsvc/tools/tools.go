@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"regexp"
 	"runtime"
 	"sort"
 	"strings"
@@ -317,7 +318,8 @@ func calledToolNames(history []llm.Message) map[string]bool {
 }
 
 // detectSuspiciousNoOp decides whether a finished agentic dispatch looks like a
-// no-op that lied about completing. It reports the HIGH-CONFIDENCE case only:
+// no-op that lied about completing. In addition to exact synthetic tools-only
+// summaries (which contain no deliverable), it reports the HIGH-CONFIDENCE case:
 // the sub-agent was granted at least one write/execute tool, called NONE of
 // them, yet returned a non-empty final answer. That is a provable
 // contradiction — a fix/migration cannot have happened without a write or exec
@@ -334,16 +336,25 @@ func suspiciousNoOpMessage(reason string) string {
 	return "sub-agent failed validation: " + reason
 }
 
+// Match only the synthetic sentence and a list of tool identifiers. A real
+// answer following or quoting the sentence must not be rejected.
+var syntheticToolSummary = regexp.MustCompile(`^I used the granted tools: [A-Za-z_][A-Za-z0-9_-]*(, [A-Za-z_][A-Za-z0-9_-]*)*\.$`)
+
 func detectSuspiciousNoOp(finalText string, called, mutating map[string]bool) (bool, string) {
+	synthetic := syntheticToolSummary.MatchString(strings.TrimSpace(finalText))
+	syntheticReason := ""
+	if synthetic {
+		syntheticReason = "returned only a synthetic tools-used summary, not a task result"
+	}
 	if len(mutating) == 0 {
-		return false, "" // no write/exec tool was granted — no contradiction possible
+		return synthetic, syntheticReason
 	}
 	if strings.TrimSpace(finalText) == "" {
 		return false, "" // no "done" claim to contradict
 	}
 	for name := range called {
 		if mutating[name] {
-			return false, "" // it used at least one write/exec tool — genuine work
+			return synthetic, syntheticReason // work happened, but still require a task result
 		}
 	}
 	granted := make([]string, 0, len(mutating))
@@ -569,7 +580,13 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 		UserInput:          spec.Task,
 		MaxIterations:      spec.MaxIterations,
 		Temperature:        &greedy,
-		FlattenToolResults: true,
+		// Preserve the local runtime compatibility workaround, but never apply
+		// it to cloud-generated tool history. Startup fallback can switch the
+		// serving location inside this loop, so consult the current route.
+		FlattenToolResultsFor: func() bool {
+			current, _ := dispatch.CurrentRoute(sel, model)
+			return !current.IsCloud
+		},
 		WorkDir:            spec.WorkDir,
 		ConversationID:     subConvID, // nested dispatches link to this sub-conversation
 		PreauthorizedTools: granted,

@@ -1116,7 +1116,7 @@ func (m Model) Update(msg tea.Msg) (nextModel tea.Model, nextCmd tea.Cmd) {
 				return m, nil
 			}
 			if m.configSurface != nil && mouse.Y == m.configStripTop() {
-				if tab := configTabAtX(mouse.X); tab >= 0 {
+				if tab := configTabAtVisibleX(mouse.X, m.width, m.configSurface.active); tab >= 0 {
 					return m, m.switchConfigTab(tab)
 				}
 				return m, nil
@@ -1668,6 +1668,16 @@ func (m Model) Update(msg tea.Msg) (nextModel tea.Model, nextCmd tea.Cmd) {
 	case chatStatusMsg, chatAssistantMsg, chatDoneMsg, chatErrorMsg, chatConfirmMsg:
 		return m.routeChatMsg(msg)
 
+	case tokenMetricsResultMsg:
+		if p, ok := m.content.(*tokenMetricsPage); ok {
+			return m, p.apply(msg)
+		}
+		return m, nil
+	case tokenMetricsTickMsg:
+		if p, ok := m.content.(*tokenMetricsPage); ok {
+			return m, p.tick(msg)
+		}
+		return m, nil
 	case contextRefreshTickMsg:
 		// /c auto-refresh. Stops ticking once /c is closed. Skips the reload mid-
 		// edit (active proposal or a busy pane) to avoid disrupting the

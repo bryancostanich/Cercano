@@ -3,11 +3,11 @@ package ui
 import "testing"
 
 func TestCycleConfigTabWrapsBothWays(t *testing.T) {
-	if got := cycleConfigTab(configTabContext, +1); got != configTabGeneral {
+	if got := cycleConfigTab(configTabMetrics, +1); got != configTabGeneral {
 		t.Fatalf("forward wrap: got %v, want General", got)
 	}
-	if got := cycleConfigTab(configTabGeneral, -1); got != configTabContext {
-		t.Fatalf("backward wrap: got %v, want Context", got)
+	if got := cycleConfigTab(configTabGeneral, -1); got != configTabMetrics {
+		t.Fatalf("backward wrap: got %v, want Token Metrics", got)
 	}
 	if got := cycleConfigTab(configTabGeneral, +1); got != configTabCloud {
 		t.Fatalf("forward step: got %v, want Cloud", got)
@@ -18,8 +18,8 @@ func TestClampConfigTabBounds(t *testing.T) {
 	if got := clampConfigTab(-3); got != configTabGeneral {
 		t.Fatalf("under: got %v, want General", got)
 	}
-	if got := clampConfigTab(99); got != configTabContext {
-		t.Fatalf("over: got %v, want Context", got)
+	if got := clampConfigTab(99); got != configTabMetrics {
+		t.Fatalf("over: got %v, want Token Metrics", got)
 	}
 }
 

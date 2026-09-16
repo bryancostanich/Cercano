@@ -1,6 +1,9 @@
 package ui
 
-import "cercano/source/clients/cli/internal/theme"
+import (
+	"cercano/source/clients/cli/internal/theme"
+	"github.com/charmbracelet/x/ansi"
+)
 
 // configTab identifies one tab in the unified configuration surface opened by
 // /config, /m, /c, and /theme. The iota order is the left-to-right render
@@ -16,14 +19,15 @@ const (
 	configTabMcp                      // hosted MCP servers (dashboard + add-server popover)
 	configTabUI                       // theme + accent color (settings form)
 	configTabContext                  // read-only context viewer for the active conversation
+	configTabMetrics                  // actual consumed-token reports
 )
 
 // configTabLabels are the visible tab titles, indexed by configTab.
-var configTabLabels = []string{"General", "Cloud", "Routing", "Runtime", "Local Models", "MCP", "UI", "Context"}
+var configTabLabels = []string{"General", "Cloud", "Routing", "Runtime", "Local Models", "MCP", "UI", "Context", "Token Metrics"}
 
 // configTabCount is the number of tabs; kept as a named constant so wrap-around
 // navigation and digit-jump bounds stay in one place.
-const configTabCount = 8
+const configTabCount = 9
 
 func (t configTab) label() string {
 	if int(t) < 0 || int(t) >= len(configTabLabels) {
@@ -71,7 +75,7 @@ func clampConfigTab(t configTab) configTab {
 		return configTabGeneral
 	}
 	if t >= configTabCount {
-		return configTabContext
+		return configTabMetrics
 	}
 	return t
 }
@@ -89,7 +93,9 @@ func cycleConfigTab(active configTab, dir int) configTab {
 // focused form field brightens.
 func renderConfigTabStrip(width int, active configTab, focused bool, s theme.Styles) string {
 	active = clampConfigTab(active)
-	return renderTabStrip(width, configTabItems(), configTabID(active), focused, s)
+	line := renderTabStrip(width, configTabItems(), configTabID(active), focused, s)
+	offset := configTabOffset(width, active)
+	return ansi.Cut(line, offset, offset+maxInt(0, width))
 }
 
 // configTabAtX maps a 0-based column on the tab-strip row to the tab whose cell
@@ -102,4 +108,16 @@ func configTabAtX(x int) configTab {
 		return -1
 	}
 	return configTabFromID(id)
+}
+
+// Scroll the one-line strip to keep the active tab visible on narrow terminals.
+func configTabOffset(width int, active configTab) int {
+	segs := configTabSegments()
+	return maxInt(0, segs[int(clampConfigTab(active))].end+1-width)
+}
+func configTabAtVisibleX(x, width int, active configTab) configTab {
+	if x < 0 || x >= width {
+		return -1
+	}
+	return configTabAtX(x + configTabOffset(width, active))
 }

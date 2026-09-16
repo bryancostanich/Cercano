@@ -42,6 +42,7 @@ func (m Model) configStripTop() int {
 // openConfigSurface enters the tabbed config surface on the given tab with the
 // tab bar focused, and returns the new page's init/refresh cmd.
 func (m *Model) openConfigSurface(tab configTab) tea.Cmd {
+	closeMetricsPage(m.content)
 	m.configSurface = &configSurface{active: clampConfigTab(tab), focused: true}
 	page, cmd := m.buildConfigTabPage(m.configSurface.active)
 	m.content = page
@@ -55,6 +56,7 @@ func (m *Model) closeConfigSurface() tea.Cmd {
 	if m.deferCloudNavigation(nil, true) {
 		return nil
 	}
+	closeMetricsPage(m.content)
 	m.configSurface = nil
 	m.content = nil
 	m.contentScrollbarDragging = false
@@ -78,6 +80,7 @@ func (m *Model) switchConfigTab(tab configTab) tea.Cmd {
 	if m.configSurface == nil {
 		return m.openConfigSurface(tab)
 	}
+	closeMetricsPage(m.content)
 	m.configSurface.active = tab
 	m.configSurface.focused = true
 	page, cmd := m.buildConfigTabPage(tab)
@@ -108,6 +111,12 @@ func (m *Model) buildConfigTabPage(tab configTab) (contentPage, tea.Cmd) {
 		return d, tea.Batch(cmd, d.refreshTick())
 	case configTabUI:
 		return newScopedSettingsPage(m.agent, m.palette, m.styles, m.promptColorToken, m.width, h, m.themes, m.theme, scopeUI)
+	case configTabMetrics:
+		var client tokenMetricsClient
+		if m.agent != nil {
+			client = m.agent
+		}
+		return newTokenMetricsPage(client, m.styles, m.width, h)
 	case configTabContext:
 		cv, cmd := newContextView(m.agent, m.palette, m.styles, m.convID, m.width, h)
 		return cv, tea.Batch(cmd, contextRefreshTick())
@@ -119,7 +128,7 @@ func (m *Model) buildConfigTabPage(tab configTab) (contentPage, tea.Cmd) {
 // handleConfigSurfaceKey intercepts tab-navigation keys before the active page
 // sees them, returning handled=true when it consumes the key. Focus model:
 //
-//   - Tab bar focused: ←/→ and Tab/Shift+Tab switch tabs (wrapping), 1–5 jump
+//   - Tab bar focused: ←/→ and Tab/Shift+Tab switch tabs (wrapping), 1–9 jump
 //     to a tab, Enter drops into the body, ↓ drops into the body and is also
 //     forwarded to the page so a list moves its cursor on that first press,
 //     Esc closes the surface.
@@ -203,7 +212,7 @@ func (m Model) handleConfigSurfaceKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool
 			// which reads naturally too.
 			next, cmd := m.dropFocusForwarding(msg)
 			return next, cmd, true
-		case "1", "2", "3", "4", "5", "6", "7", "8":
+		case "1", "2", "3", "4", "5", "6", "7", "8", "9":
 			return m, m.switchConfigTab(configTab(int(key[0] - '1'))), true
 		}
 		// A page may advertise action hotkeys (e.g. the MCP dashboard's
@@ -352,4 +361,10 @@ func (m *Model) deferCloudNavigation(tab *configTab, close bool) bool {
 	m.configSurface.pendingClose = close
 	sp.settingsNavigationPrompt = true
 	return true
+}
+
+func closeMetricsPage(page contentPage) {
+	if p, ok := page.(*tokenMetricsPage); ok {
+		p.Close()
+	}
 }

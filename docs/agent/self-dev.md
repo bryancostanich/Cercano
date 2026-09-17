@@ -55,7 +55,7 @@ Choose `class` at the semantic entry point:
 - `git_land`: the existing landing workflow including its nested review (Local/Premium).
 - `watchdog`: normal Watchdog routing (Local/Standard); no special placement exemption.
 
-Chat is Primary/Premium; omitted dispatch class uses Default dispatch (Secondary/Premium). Unknown explicit classes are rejected. Prefer omitting `tier` so the chosen class's saved quality applies. Explicit `light`, `standard`, or `deep` changes quality only; it never chooses a destination, class or permission grant. Light uses the persisted `economy` value.
+Chat is Primary/Standard; omitted dispatch class uses Default dispatch (Secondary/Premium). Unknown explicit classes are rejected. Prefer omitting `tier` so the chosen class's saved quality applies. Explicit `light`, `standard`, or `deep` changes quality only; it never chooses a destination, class or permission grant. Light uses the persisted `economy` value.
 
 Secondary/Local redirects resolve before placement and model selection. Only the final destination's models, credentials and backup chain apply. Saved source assignments remain unchanged. Locus policy still prohibits forbidden placement; final Secondary cannot fall through to Primary/Local. Tool permissions remain the explicit grant and approval system, independent of model quality. See [the routing guide](../cloud-routing.md).
 

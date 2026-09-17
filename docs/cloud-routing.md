@@ -6,7 +6,7 @@ A **model tier** (called a `destination` in configuration and APIs) chooses wher
 
 | Task | Default model tier | Default quality |
 | --- | --- | --- |
-| Chat | Primary | Premium |
+| Chat | Primary | Standard |
 | Default dispatch (class omitted) | Secondary | Premium |
 | Reconnaissance | Local | Light |
 | Mechanical development | Local | Standard |

@@ -37,7 +37,7 @@ func TestRoutingSparseProfilesAndTasks(t *testing.T) {
 	if got := c.ModelProfiles.ResolveCloudModelForTier(c.CloudProfiles[0], TierVision); got != "image" {
 		t.Fatal(got)
 	}
-	if got := c.ResolveTask(TaskChat, ""); got != (TaskAssignment{DestinationPrimary, CostPremium}) {
+	if got := c.ResolveTask(TaskChat, ""); got != (TaskAssignment{DestinationPrimary, CostStandard}) {
 		t.Fatal(got)
 	}
 	if got := c.ResolveTask(TaskDispatch, ""); got != (TaskAssignment{DestinationSecondary, CostPremium}) {

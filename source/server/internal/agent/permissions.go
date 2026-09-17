@@ -206,6 +206,10 @@ func (s *PermissionStore) AddMCPAllow(pattern string) error {
 // here. Without this, a worker turn would keep gating on the values captured at
 // StartTurn — strictly more permissive than in-process for the rest of the turn.
 //
+// NOTE: no host-side caller sends that push yet, so this is currently exercised
+// only by tests and the gap above is live. See
+// docs/bugs/2026-09-17-worker-mcp-permission-liveness.md.
+//
 // File-backed stores ignore this: their own re-read is the source of truth, and
 // letting a push overwrite it would race with the watcher.
 func (s *PermissionStore) ApplyRuntimeUpdate(m PermissionMode, mcpAllow []string) {

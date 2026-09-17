@@ -13,8 +13,11 @@ import (
 // A worker store that pinned both at StartTurn would keep gating on stale,
 // more-permissive values for the rest of the turn.
 //
-// These tests assert the worker store honors a live update, which is what the
-// host applies when it observes a permission change mid-turn.
+// These tests cover the RECEIVING half only: given an update, the worker store
+// applies it. The host-side trigger that sends PermissionUpdate is not wired,
+// so the gap is currently live — a mid-turn tightening does not reach a running
+// worker. See docs/bugs/2026-09-17-worker-mcp-permission-liveness.md. When that
+// trigger lands, these stay valid and an end-to-end test should join them.
 func TestWorkerStoreReflectsMidTurnModeTightening(t *testing.T) {
 	s := agent.NewStaticPermissionStoreWithMCPAllow(agent.ModeBypass, nil)
 	if got := s.Mode(); got != agent.ModeBypass {

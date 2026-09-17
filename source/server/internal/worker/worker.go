@@ -163,6 +163,12 @@ func (w *WorkerServer) runTurn(stream proto.Worker_RunTurnServer, authRecovery b
 				// sees the same values an in-process turn would re-read from
 				// permissions.yaml on its NEXT decision — a tightening must not
 				// wait for the turn to end.
+				//
+				// NOTE: nothing sends this yet. The host-side trigger is
+				// unwired, so a mid-turn tightening currently does not reach a
+				// running worker; gating uses the values pinned at StartTurn
+				// for the life of the turn. See
+				// docs/bugs/2026-09-17-worker-mcp-permission-liveness.md.
 				u := msg.GetPermUpdate()
 				if store := permStoreRef.Load(); store != nil {
 					m := agent.ModePermissive

@@ -29,7 +29,7 @@ var compactFallbackTools = map[string]bool{
 	// Native agent workflow and local model helpers.
 	"dispatch": true, "workflow": true, "local": true, "classify": true,
 	"explain": true, "extract": true, "summarize": true, "review": true,
-	"get_protocol": true, "restart_runtime": true,
+	"get_protocol": true, "restart_runtime": true, "reasoning_diagnostic": true,
 	// Planning/autonomous handoff and status tools that the active profile may
 	// require even in a narrowed catalog.
 	"suggest_plan": true, "request_plan_approval": true, "plan_exit": true,
@@ -64,7 +64,7 @@ func enableToolsCatalogEntry() llm.Tool {
 
 func buildCompactToolCatalog(reg *agenttools.Registry, profile Profile, tight bool, hydrated map[string]bool, debug ...bool) []llm.Tool {
 	allowTool := func(_ llm.Permission, name string) bool {
-		return name != "restart_runtime" || (len(debug) > 0 && debug[0])
+		return (name != "restart_runtime" && name != "reasoning_diagnostic") || (len(debug) > 0 && debug[0])
 	}
 	if profile.Restricts() {
 		allowTool = combineAllows(allowTool, profile.Allows)
@@ -85,7 +85,7 @@ func buildCompactToolCatalog(reg *agenttools.Registry, profile Profile, tight bo
 func compactToolDirectory(reg *agenttools.Registry, profile Profile, hydrated map[string]bool, debug ...bool) string {
 	entries := []string{}
 	for _, tool := range reg.All() {
-		if tool.Name() == "restart_runtime" && (len(debug) == 0 || !debug[0]) {
+		if (tool.Name() == "restart_runtime" || tool.Name() == "reasoning_diagnostic") && (len(debug) == 0 || !debug[0]) {
 			continue
 		}
 		tier := agenttools.PermissionToLLM(tool.Permission())

@@ -1,0 +1,28 @@
+{
+  "profile": "REPLACE_WITH_EXISTING_CHAT_COMPLETIONS_PROFILE",
+  "model": "REPLACE_WITH_EXACT_MODEL_ID",
+  "system": "Inspect the recorded fixture using Read, then report its status. Do not repeat an unchanged read.",
+  "messages": [
+    {"role": "user", "content": [{"type": "text", "text": "Read fixture.txt and report its status."}]}
+  ],
+  "tools": [
+    {
+      "Name": "Read",
+      "Description": "Read a recorded fixture. Only fixture.txt is available.",
+      "Schema": {
+        "type": "object",
+        "properties": {"path": {"type": "string", "enum": ["fixture.txt"]}},
+        "required": ["path"],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "recorded_results": [
+    {"name": "Read", "arguments": {"path": "fixture.txt"}, "content": "status=ready"}
+  ],
+  "max_requests": 4,
+  "max_tokens": 8192,
+  "timeout_seconds": 180,
+  "temperature": 0,
+  "preserve_first": false
+}

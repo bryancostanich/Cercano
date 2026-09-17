@@ -10,6 +10,7 @@ package providers
 
 import (
 	"cercano/source/server/internal/modelmetadata"
+	"cercano/source/server/internal/reasoningexperiment"
 	"context"
 	"log"
 	"sync"
@@ -554,4 +555,9 @@ func (p *service) chainEvents(c cfg.Config, d cfg.Destination) func(resilience.E
 			p.routingLog.Log("cloud.resilience", routinglog.Event{"destination": string(d), "primary_profile": preferred, "backup_profile": backup, "action": string(ev.Action), "stage": ev.Stage, "error_class": string(ev.Class), "from_provider": ev.From, "to_provider": ev.To, "wait_ms": ev.Wait.Milliseconds(), "notice": ev.Notice(), "error": errorString(ev.Err)})
 		}
 	}
+}
+
+// RunReasoningDiagnostic deliberately bypasses destination retry/fallback chains.
+func (p *service) RunReasoningDiagnostic(ctx context.Context, spec reasoningexperiment.Spec) (reasoningexperiment.Report, error) {
+	return reasoningexperiment.Run(ctx, p.cfgSvc.Get(), spec, p.buildProfile)
 }

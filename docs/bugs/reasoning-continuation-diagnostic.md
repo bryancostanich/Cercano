@@ -1,6 +1,10 @@
 # Reasoning continuation diagnostic — 2026-09-16
 
-## Status: offline mechanism verified; live cause unproven
+## Status: driver integrated; live cause unproven
+
+The confirmation-gated `reasoning_diagnostic` debug tool is now wired in both
+host and worker execution. See **Experiment driver** below for its input format
+and invocation after restart. The original offline harness is described first.
 
 The test-only harness is in
 `source/server/internal/llm/openai/reasoning_continuation_diagnostic_test.go`.
@@ -73,13 +77,11 @@ capture the running agent's authenticated cloud requests. `ProcessRequest` and
 for capturing/replaying OpenAI-compatible reasoning. The inspected interface
 has no existing control for this intervention.
 
-The opt-in provider-boundary hook is now implemented (see below). Completing
-the causal experiment still needs an in-process experiment driver that attaches
-the diagnostic context to the authenticated provider and replays recorded tool
-results. There is no remote RPC or CLI switch for it, and the running singleton
-has not been rebuilt or restarted. Do not silently extract keys, change profile
-endpoints, intercept TLS, restart the singleton, or run another uncontrolled
-audit to work around this boundary.
+The opt-in provider-boundary hook and in-process driver are now implemented
+(see below). The driver is exposed through the agent capability stack, not a
+new unauthenticated HTTP endpoint or a standalone key-extracting script.
+Do not extract keys, change profile endpoints, intercept TLS, or run another
+uncontrolled audit to work around unsupported experiment inputs.
 
 Once that access is available:
 
@@ -190,3 +192,124 @@ matching call contents and batch membership fixed it before the passing runs.
 
 No live model calls, credential extraction, agent restart, or causal GLM claim
 were made as part of implementing this hook.
+
+
+## Experiment driver — 2026-09-16
+
+Implementation: `source/server/internal/reasoningexperiment/driver.go`.
+Agent entry point: `reasoning_diagnostic` (development-mode advertisement,
+confirmation required even in bypass mode). Host and crash-isolated worker
+both use their existing profile factory and normal credential service. The
+selected **named profile** and explicit model are fixed for the entire pair;
+profile backups, routing redirects, retries, and compaction are deliberately
+not used. Local-only policy rejects the experiment before credential access.
+There is no model-requested tool executor in this package.
+
+### After rebuilding and restarting
+
+1. Copy `docs/bugs/reasoning-experiment.example.json` to a private local file.
+   Set `profile` to an existing chat-completions profile and `model` to its exact
+   deployed model ID. Keep the profile's configured endpoint unchanged.
+2. Supply the initial text history, tool schemas, and deterministic recorded
+   results. This is explicit input preparation, not an automatic database read.
+   The example is a smoke probe, **not the original audit trajectory**.
+3. Invoke the agent tool and approve the paid experiment:
+
+   ```json
+   {"input_path": "/absolute/path/to/private-experiment.json"}
+   ```
+
+4. Repeat with `preserve_first: true` to reverse arm order. Each invocation has
+   fresh, isolated capture sessions. No live trials run during build or restart.
+
+Input uses the JSON shape in the example (`messages` use the existing block
+format). Unknown input fields and trailing documents are rejected. Recorded
+arguments must be JSON objects: key ordering/whitespace do not affect lookup,
+but names and values must match. Duplicate recorded actions are rejected rather
+than guessing which result to replay. Unknown calls stop that arm without
+executing anything. Generated IDs are attached to the corresponding recorded
+result; no actual `Read`, `Bash`, write, or other capability is invoked.
+
+### Explicit bounds
+
+- 1–12 requests per arm, 1–32768 requested output tokens per request, at most
+  262144 requested output tokens across the pair. The upper bound is
+  `2 × max_requests × max_tokens`; it is not a dollar-price estimate or an
+  assertion that a remote provider honors token limits.
+- One shared 1–600-second request deadline for the pair. Credential lookup uses
+  the existing host/worker credential path, not an independently killable process.
+- At most 8 MiB of input, 64 tool definitions and 1024 recorded actions.
+  Replay growth has a conservative 8 MiB encoding budget (including an allowance
+  for JSON escaping) checked before constructing the next provider request.
+- Hook limits: 8 MiB per HTTP body and 64 MiB of retained payload per arm.
+  These are payload limits, not a hard process-resident-memory guarantee.
+- At most 64 call IDs per response, each at most 256 bytes in the report.
+- No output files, raw reasoning logs, or automatic raw capture persistence.
+  Captures are released after each arm; the input file remains caller-owned.
+
+### Reading the report
+
+The report contains arm order, statuses, request/response SHA-256 hashes,
+reasoning arrival/replay flags, tool IDs, action/result batch hashes, finish
+reasons, served model when supplied, and usage with explicit known/unknown
+flags. It never returns raw prompts, tool results, answers, reasoning, HTTP
+headers, or credentials. Hashes are fingerprints, **not anonymization**.
+Existing adapter logs still include structural request diagnostics.
+
+`comparable_inputs[i]` compares same-index request bodies after removing only
+`reasoning_content`. Different generated call IDs also make it false. Live
+responses are independently sampled; identical initial inputs and temperature
+zero do not guarantee identical trajectories. Never interpret a divergent pair
+as a controlled reasoning-only causal result.
+
+`terminal_stop` records a terminal provider finish, **not audit correctness**.
+`repeated_action_result_batch` observes an identical ordered action/result batch
+at any earlier step, ignoring call IDs; this detects A→B→A as well as immediate
+repetition but does not prove an infinite loop. Budget exhaustion, unrecorded
+calls, nonterminal finishes, timeout/cancellation, and capture/provider failures
+remain distinct outcomes. Raw provider errors are not included in the report.
+
+Initial history must be text-only. Historical tool messages without their
+original captured reasoning cannot seed a valid preserve arm; those inputs are
+rejected before network access. The driver collects new reasoning from the first
+response. It does **not** reconstruct the old audit, assess answer correctness,
+or establish the live cause of repeated investigations. Those are experiment
+interpretation/input-preparation tasks, not reasons to modify production
+reasoning behavior based on the scripted tests.
+
+### Driver verification
+
+Local authenticated HTTP fixtures verify paired reasoning-only requests, both
+arm orders, fresh-ID repetition and multi-step cycles, deterministic replay,
+unknown-tool rejection, budgets, cancellation, malformed streams, missing
+reasoning, and report privacy. Host and worker integration tests verify normal
+credential use and no backup requests; permission/catalog tests verify debug
+advertisement and confirmation. The tests never call a live cloud model.
+
+
+Final driver gate passed on 2026-09-16:
+
+```sh
+go test ./internal/reasoningexperiment ./internal/llm/openai \
+  ./internal/capabilities/builtins ./internal/toolstack \
+  ./internal/hostsvc/providers ./internal/server ./internal/worker \
+  ./internal/agent -count=1
+go test -race ./internal/reasoningexperiment ./internal/llm/openai \
+  ./internal/hostsvc/providers ./internal/worker ./internal/agent \
+  ./internal/capabilities/builtins \
+  -run 'Test(PairRealTransport|RejectBeforeBuild|FailClosedOutcomes|DecodeStrict|RepeatedMultiStepCycleAndReplayMemory|PairDeadline|ReasoningDiagnostic|WorkerReasoningDiagnostic)' -count=1
+go vet ./internal/reasoningexperiment ./internal/capabilities/... \
+  ./internal/toolstack ./internal/hostsvc/providers ./internal/worker \
+  ./internal/server ./internal/agent
+make build
+```
+
+The binary was Developer ID signed. No agent restart or live inference was
+performed. An earlier broad run hit `TestAttachConversation_TwoSurfacesSeeOneTurn`
+(received two rather than three events); ten isolated reruns and subsequent
+full server and final package runs passed without modifying that test. The
+new timeout fixture initially hung during server cleanup because its handler
+had not consumed the request body; consuming it let the server observe client
+cancellation. A separate failing named-pipe probe confirmed that ordinary
+`os.Open` could block before input validation; Unix input now uses a nonblocking
+open followed by a regular-file check, and the probe passes.

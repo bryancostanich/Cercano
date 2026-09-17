@@ -1,6 +1,7 @@
 package capabilities
 
 import (
+	"cercano/source/server/internal/reasoningexperiment"
 	"context"
 	"encoding/json"
 
@@ -52,8 +53,9 @@ type Services struct {
 	// caller's tool_result must flush before the socket drops. A func hook keeps
 	// this package free of a server import, matching Dispatch/EnterProfile. Nil
 	// until wired by the server; restart_agent errors clearly if it is nil.
-	RestartAgent   func(reason string) error
-	RestartRuntime func(context.Context, string) (json.RawMessage, error)
+	RestartAgent        func(reason string) error
+	RestartRuntime      func(context.Context, string) (json.RawMessage, error)
+	ReasoningDiagnostic func(context.Context, reasoningexperiment.Spec) (reasoningexperiment.Report, error)
 
 	// Vision resolves an image attachment by conversation-scoped ID and asks the
 	// configured vision model a focused question about it. It backs the

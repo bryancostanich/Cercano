@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"cercano/source/server/internal/reasoningexperiment"
 	"context"
 	"fmt"
 
@@ -53,6 +54,19 @@ func buildWorkerToolSvc(
 	failures *failurelog.Writer,
 	restart ...runtimeRestartFunc,
 ) runner.ToolSvc {
+	return buildWorkerToolSvcWithDiagnostic(permBroker, engine, ctxLoader, cloud, open, cfg, subPersist, enterProfile, vision, failures, nil, restart...)
+}
+
+func buildWorkerToolSvcWithDiagnostic(
+	permBroker permissions.Broker, engine *dispatch.Engine, ctxLoader *projectctx.Loader,
+	cloud, open inference.Provider, cfg pkgcfg.Config, subPersist *streamSubagentPersist,
+	enterProfile func(context.Context, string) error, vision capabilities.VisionService,
+	failures *failurelog.Writer, diagnostic reasoningexperiment.Service, restart ...runtimeRestartFunc,
+) runner.ToolSvc {
+	var runDiagnostic func(context.Context, reasoningexperiment.Spec) (reasoningexperiment.Report, error)
+	if diagnostic != nil {
+		runDiagnostic = diagnostic.RunReasoningDiagnostic
+	}
 	var restartRuntime runtimeRestartFunc
 	if len(restart) > 0 {
 		restartRuntime = restart[0]
@@ -70,11 +84,12 @@ func buildWorkerToolSvc(
 		svc.SetEnsureSubagent(subPersist.ensure) // worker creates sub-agent conversation rows on the host
 	}
 	toolstack.InstallCapabilities(svc, toolstack.CapDeps{
-		RestartRuntime: restartRuntime,
-		Cloud:          cloud,
-		Open:           open,
-		Config:         &cfg,
-		CtxLoader:      ctxLoader,
+		RestartRuntime:      restartRuntime,
+		ReasoningDiagnostic: runDiagnostic,
+		Cloud:               cloud,
+		Open:                open,
+		Config:              &cfg,
+		CtxLoader:           ctxLoader,
 		EnterProfile: func(convID, name string) error {
 			if enterProfile == nil {
 				return fmt.Errorf("session profile control not configured")

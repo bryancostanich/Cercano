@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"cercano/source/server/internal/reasoningexperiment"
 	"cercano/source/server/internal/visioninspect"
 	"context"
 	"errors"
@@ -405,7 +406,8 @@ func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, cr
 			return runner.Deps{}, fmt.Errorf("build tools: %w", err)
 		}
 	} else {
-		toolSvc = buildWorkerToolSvc(permBroker, engine, ctxLoader, provSvc.Cloud(), provSvc.Open(), cfg, subPersist, profileCtl.SetProfile, visionSvc, failureLog, restart...)
+		diagnostic, _ := provSvc.(reasoningexperiment.Service)
+		toolSvc = buildWorkerToolSvcWithDiagnostic(permBroker, engine, ctxLoader, provSvc.Cloud(), provSvc.Open(), cfg, subPersist, profileCtl.SetProfile, visionSvc, failureLog, diagnostic, restart...)
 	}
 
 	// Build the protocol-supervision watchdog from the snapshotted config
@@ -451,10 +453,11 @@ func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, cr
 // It holds pre-built cloud + open providers and delegates model selection to
 // the config service.
 type workerResolver struct {
-	secondaryProv inference.Provider
-	cloudProv     inference.Provider
-	openProv      inference.Provider
-	cfgSvc        cfgsvc.Service
+	diagnosticBuild func(pkgcfg.CloudProfile) (inference.Provider, error)
+	secondaryProv   inference.Provider
+	cloudProv       inference.Provider
+	openProv        inference.Provider
+	cfgSvc          cfgsvc.Service
 }
 
 // profileByName selects a cloud profile by name, mirroring
@@ -520,6 +523,7 @@ func buildWorkerProviders(ctx context.Context, cfg pkgcfg.Config, credSource cre
 		}
 		return profilechain.GuardVision(provider, confirmed, metadataFor), nil
 	}
+	r.diagnosticBuild = build
 	r.cloudProv, _ = profilechain.Build(cfg, pkgcfg.DestinationPrimary, build, workerChainEvents(pkgcfg.DestinationPrimary))
 	r.secondaryProv, _ = profilechain.Build(cfg, pkgcfg.DestinationSecondary, build, workerChainEvents(pkgcfg.DestinationSecondary))
 
@@ -663,4 +667,11 @@ func workerChainEvents(d pkgcfg.Destination) func(resilience.Event) {
 	return func(ev resilience.Event) {
 		log.Printf("[worker] %s resilience %s (%s, %s): %s: %v", d, ev.Action, ev.Stage, ev.Class, ev.Notice(), ev.Err)
 	}
+}
+
+func (r *workerResolver) RunReasoningDiagnostic(ctx context.Context, spec reasoningexperiment.Spec) (reasoningexperiment.Report, error) {
+	if r.diagnosticBuild == nil {
+		return reasoningexperiment.Report{}, fmt.Errorf("reasoning diagnostic unavailable")
+	}
+	return reasoningexperiment.Run(ctx, r.cfgSvc.Get(), spec, r.diagnosticBuild)
 }

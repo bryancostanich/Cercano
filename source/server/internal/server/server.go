@@ -1,6 +1,7 @@
 package server
 
 import (
+	"cercano/source/server/internal/reasoningexperiment"
 	"cercano/source/server/internal/routingwire"
 	"cercano/source/server/internal/runtimecontrol"
 	"context"
@@ -289,6 +290,13 @@ func (s *Server) InstallCapabilities() {
 		// user approves at the confirm gate. Same drain+child-stop path as the
 		// ShutdownAgent RPC; the CLI reconnect loop auto-launches a fresh agent.
 		RestartRuntime: s.restartRuntimeTool,
+		ReasoningDiagnostic: func(ctx context.Context, spec reasoningexperiment.Spec) (reasoningexperiment.Report, error) {
+			svc, ok := s.providerSvc.(reasoningexperiment.Service)
+			if !ok {
+				return reasoningexperiment.Report{}, fmt.Errorf("reasoning diagnostic unavailable")
+			}
+			return svc.RunReasoningDiagnostic(ctx, spec)
+		},
 		RestartAgent: func(reason string) error {
 			log.Printf("restart_agent capability accepted: %s", reason)
 			s.scheduleSelfShutdown()

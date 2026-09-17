@@ -4,8 +4,8 @@ package server
 //
 // Two runners coexist: inProcessRunner (always built) and workerRunner (nil
 // unless worker mode is selected). The front door picks per turn via
-// pickTurnRunner: worker mode + no MCP tools → worker; worker mode + MCP tools
-// present → in-process (this turn); in_process mode → always in-process.
+// pickTurnRunner: worker mode → worker (host MCP tools are proxied into the
+// worker, so they no longer force a fallback); in_process mode → in-process.
 //
 // These tests verify the wiring WITHOUT spawning any worker process — they
 // assert which runner pickTurnRunner returns, and that the existing suite (which
@@ -84,18 +84,17 @@ func TestSelectExecutionMode_EmptyDefaultsToWorker(t *testing.T) {
 	}
 }
 
-// TestPickTurnRunner_MCPToolRoutesInProcess is Task A3's core assertion: with
-// worker mode armed but an MCP-origin tool in the registry, the per-turn pick
-// must return the IN-PROCESS runner (the worker excludes host-side MCP tools).
-func TestPickTurnRunner_MCPToolRoutesInProcess(t *testing.T) {
+// MCP tools no longer divert a turn away from the worker: host MCP tools are
+// proxied into the worker process, so MCP-involving turns get the same crash
+// isolation as every other turn. This replaces the previous assertion that such
+// turns fell back in-process.
+func TestPickTurnRunner_MCPToolStaysInWorker(t *testing.T) {
 	srv, _ := newServerWithStore(t)
 	srv.SetConfigPersistence("", config.Config{ExecutionMode: "worker"})
 	srv.SelectExecutionMode()
 	if srv.workerRunner == nil {
 		t.Fatal("precondition: worker mode must arm workerRunner")
 	}
-
-	// Before registering the MCP tool: worker.
 	if !sameRunner(srv.pickTurnRunner(), srv.workerRunner) {
 		t.Fatal("no MCP tools yet: expected worker runner")
 	}
@@ -104,9 +103,56 @@ func TestPickTurnRunner_MCPToolRoutesInProcess(t *testing.T) {
 	if !srv.hasMCPTools() {
 		t.Fatal("hasMCPTools must report true after registering an MCP-origin tool")
 	}
-	// After: the MCP-involving turn falls back to in-process.
-	if !sameRunner(srv.pickTurnRunner(), srv.inProcessRunner) {
-		t.Error("worker mode + MCP tool present: pickTurnRunner must fall back to the in-process runner")
+	if !sameRunner(srv.pickTurnRunner(), srv.workerRunner) {
+		t.Error("worker mode + MCP tool present: the turn must stay in the worker (tools are proxied)")
+	}
+}
+
+// The worker can only call what it was told about, so advertisement must report
+// the live MCP tools — and must NOT leak built-ins into the MCP namespace.
+func TestAdvertiseMCPToolsReportsOnlyMCPOriginTools(t *testing.T) {
+	srv, _ := newServerWithStore(t)
+
+	if got := srv.advertiseMCPTools(); len(got) != 0 {
+		t.Fatalf("built-in-only registry advertised %d MCP tools, want 0", len(got))
+	}
+
+	registerMCPTool(t, srv)
+	got := srv.advertiseMCPTools()
+	if len(got) != 1 {
+		t.Fatalf("advertised %d tools, want 1", len(got))
+	}
+	if got[0].Name == "" {
+		t.Error("advertised tool has no name; the worker could not address it")
+	}
+	if len(got[0].Schema) == 0 {
+		t.Error("advertised tool has no schema; the model could not call it correctly")
+	}
+}
+
+// The host must refuse to run a non-MCP tool through the MCP call path, so a
+// stale or forged advertisement cannot reach a first-party tool.
+func TestCallMCPToolRejectsNonMCPAndUnknownTools(t *testing.T) {
+	srv, _ := newServerWithStore(t)
+	registerMCPTool(t, srv)
+
+	if _, err := srv.callMCPTool(context.Background(), "definitely__missing", nil); err == nil {
+		t.Error("expected an error for an unregistered tool")
+	}
+
+	// Find a genuine built-in and try to call it through the MCP path.
+	var builtin string
+	for _, tl := range srv.toolSvc.Registry().All() {
+		if agenttools.OriginOf(tl) == agenttools.OriginBuiltin {
+			builtin = tl.Name()
+			break
+		}
+	}
+	if builtin == "" {
+		t.Skip("no built-in tool registered in this fixture")
+	}
+	if _, err := srv.callMCPTool(context.Background(), builtin, nil); err == nil {
+		t.Errorf("callMCPTool(%q) succeeded; built-ins must not be reachable via the MCP path", builtin)
 	}
 }
 

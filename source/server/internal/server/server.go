@@ -150,10 +150,9 @@ type Server struct {
 	// Two runners coexist so the front door can pick per turn. inProcessRunner is
 	// always built (NewServer / SetPermissions) and is the embedded runnersvc.Core
 	// the test suite constructs. workerRunner is nil until SelectExecutionMode
-	// picks worker mode; when non-nil, a turn that touches NO host-side MCP tool
-	// runs in a child process. MCP-involving turns fall back to inProcessRunner
-	// (the worker excludes host-side MCP tools) — see hasMCPTools + the per-turn
-	// pick in streamProcessRequestWithToolLoop.
+	// picks worker mode; when non-nil, every turn runs in a child process —
+	// including MCP-involving turns, whose tools are proxied back to the host
+	// (SetMCPBridge) rather than duplicated in the worker.
 	inProcessRunner runnersvc.TurnRunner // in-process turn execution; rebuilt when perms arrive
 	workerRunner    runnersvc.TurnRunner // worker-process execution; nil unless worker mode selected
 
@@ -1174,13 +1173,14 @@ func (s *Server) runnerDeps() runnersvc.Deps {
 //     ALONGSIDE the in-process runner. The front door then picks per turn:
 //     turns that touch no host-side MCP tool run in the worker (a crash takes
 //     down only that turn's process; the host survives — see
-//     TestWorker_CrashMidTurnIsIsolated); MCP-involving turns fall back to
-//     in-process because the worker excludes host-side MCP tools.
+//     TestWorker_CrashMidTurnIsIsolated). MCP-involving turns run there too:
+//     host MCP tools are advertised into the worker and invoked back on the
+//     host over the turn stream.
 //
-// The per-turn pick (not a startup registry snapshot) is deliberate: MCP servers
-// connect in the BACKGROUND after this method runs, and AddMcpServer can register
-// tools at runtime — so a one-time check here would see zero MCP tools even when
-// servers are configured. hasMCPTools reads the live registry at turn time.
+// MCP advertisement happens per turn (not as a startup snapshot) for the same
+// reason the runner pick did: MCP servers connect in the BACKGROUND after this
+// method runs, and AddMcpServer can register tools at runtime — so a one-time
+// snapshot would advertise nothing even when servers are configured.
 //
 // Called from cmd/cercano/main.go's server wiring AFTER the real config,
 // permissions, and secrets are injected — so production arms worker mode while
@@ -1213,9 +1213,63 @@ func (s *Server) SelectExecutionMode() {
 		s.turnModelEvidence, // host-resolved capability evidence for every model the turn might address
 		s.restartRuntimeTool,
 	)
+	// Bridge host MCP tools into the worker. The host keeps sole ownership of
+	// every MCP subprocess, its ready-state machine and its restart semantics;
+	// the worker gets proxy tools that call back over the turn stream. Both
+	// closures read the LIVE registry per call, so servers that connect in the
+	// background or are added at runtime are picked up without a restart.
+	if bridge, ok := s.workerRunner.(worker.McpBridgeSetter); ok {
+		bridge.SetMCPBridge(s.advertiseMCPTools, s.callMCPTool)
+	}
+
 	s.configureWorkerAccounting()
 	log.Printf("[server] execution mode: worker (turns run in isolated child processes; " +
-		"MCP-involving turns fall back to in-process — worker MCP proxying is a future refinement)")
+		"host MCP tools are proxied into the worker)")
+}
+
+// advertiseMCPTools snapshots the live MCP-origin tools for a worker turn.
+func (s *Server) advertiseMCPTools() []worker.McpToolAdvert {
+	if s.toolSvc == nil || s.toolSvc.Registry() == nil {
+		return nil
+	}
+	var out []worker.McpToolAdvert
+	for _, t := range s.toolSvc.Registry().All() {
+		if agenttools.OriginOf(t) != agenttools.OriginMCP {
+			continue
+		}
+		out = append(out, worker.McpToolAdvert{
+			Name:        t.Name(),
+			Description: t.Description(),
+			Schema:      t.Schema(),
+			Destructive: agenttools.IsDestructive(t),
+		})
+	}
+	return out
+}
+
+// callMCPTool invokes one MCP tool on behalf of a worker and returns the
+// marshalled agenttools.Result. Resolution happens against the live registry at
+// call time, so a server restarted mid-turn is picked up and a removed one
+// yields a clean error the model can act on.
+func (s *Server) callMCPTool(ctx context.Context, name string, args json.RawMessage) (json.RawMessage, error) {
+	if s.toolSvc == nil || s.toolSvc.Registry() == nil {
+		return nil, fmt.Errorf("mcp tool %q unavailable: no tool registry", name)
+	}
+	t, ok := s.toolSvc.Registry().Get(name)
+	if !ok {
+		return nil, fmt.Errorf("mcp tool %q is no longer registered", name)
+	}
+	if agenttools.OriginOf(t) != agenttools.OriginMCP {
+		// Refuse to run a non-MCP tool through the MCP path: the worker has its
+		// own built-ins, and honoring this would let a stale advertisement reach
+		// a first-party tool under MCP naming.
+		return nil, fmt.Errorf("tool %q is not an MCP tool", name)
+	}
+	res, err := t.Execute(ctx, args)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(res)
 }
 
 // pickTurnRunner chooses the runner for THIS turn. Default: the in-process
@@ -1224,18 +1278,19 @@ func (s *Server) SelectExecutionMode() {
 // MCP tools, so an MCP-involving turn must run in-process to keep them. One
 // if-check on the hot path; no logging (the mode was logged once at selection).
 func (s *Server) pickTurnRunner() runnersvc.TurnRunner {
-	if s.workerRunner != nil && !s.hasMCPTools() {
+	if s.workerRunner != nil {
 		return s.workerRunner
 	}
 	return s.inProcessRunner
 }
 
 // hasMCPTools reports whether the host tool registry currently holds any
-// MCP-origin tool. Called per turn to route MCP-involving turns to the
-// in-process runner (the worker excludes host-side MCP tools). The registry read
-// is cheap and concurrency-safe (agenttools.Registry guards All() with an
-// RWMutex), so a concurrent AddMcpServer at worst yields a momentarily stale
-// answer — self-correcting on the next turn.
+// MCP-origin tool. It no longer influences runner selection — host MCP tools are
+// proxied into the worker, so MCP-involving turns keep their process isolation.
+// Retained as the canonical live-registry query (advertiseMCPTools applies the
+// same origin filter). The registry read is cheap and concurrency-safe
+// (agenttools.Registry guards All() with an RWMutex), so a concurrent
+// AddMcpServer at worst yields a momentarily stale answer.
 func (s *Server) hasMCPTools() bool {
 	if s.toolSvc == nil || s.toolSvc.Registry() == nil {
 		return false

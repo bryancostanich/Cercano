@@ -9,6 +9,7 @@ import (
 	"log"
 	"runtime/debug"
 	"sync"
+	"sync/atomic"
 
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/cloudfactory"
@@ -132,6 +133,17 @@ func (w *WorkerServer) runTurn(stream proto.Worker_RunTurnServer, authRecovery b
 	authRequest := newStreamAuthentication(sndr)
 	runtimeControl := newStreamRuntimeControl(sndr)
 
+	// MCP proxy: host-side MCP tools advertised in StartTurn become worker-side
+	// proxy tools that call back over this stream. The worker owns no MCP
+	// connections — the host does.
+	mcpControl := newStreamMCPControl(sndr)
+
+	// The permission store is built inside buildDeps (below), but the recv loop
+	// starts first and may receive a PermissionUpdate at any time. Publish the
+	// store through an atomic pointer so an update that races construction is
+	// simply dropped (StartTurn's values still apply) rather than panicking.
+	var permStoreRef atomic.Pointer[agent.PermissionStore]
+
 	// Recv loop: routes incoming HostToWorker messages from the host.
 	recvDone := make(chan struct{})
 	go func() {
@@ -144,6 +156,21 @@ func (w *WorkerServer) runTurn(stream proto.Worker_RunTurnServer, authRecovery b
 			switch {
 			case msg.GetRuntimeResponse() != nil:
 				runtimeControl.deliver(msg.GetRuntimeResponse())
+			case msg.GetMcpResponse() != nil:
+				mcpControl.deliver(msg.GetMcpResponse())
+			case msg.GetPermUpdate() != nil:
+				// Mid-turn permission change on the host. Apply it so the gate
+				// sees the same values an in-process turn would re-read from
+				// permissions.yaml on its NEXT decision — a tightening must not
+				// wait for the turn to end.
+				u := msg.GetPermUpdate()
+				if store := permStoreRef.Load(); store != nil {
+					m := agent.ModePermissive
+					if parsed, err := agent.ParseMode(u.GetMode()); err == nil {
+						m = parsed
+					}
+					store.ApplyRuntimeUpdate(m, u.GetMcpAllow())
+				}
 			case msg.GetAuthResponse() != nil:
 				authRequest.deliver(msg.GetAuthResponse())
 			case msg.GetPermResponse() != nil:
@@ -162,7 +189,7 @@ func (w *WorkerServer) runTurn(stream proto.Worker_RunTurnServer, authRecovery b
 	}()
 
 	// Build Deps from StartTurn.
-	deps, buildErr := w.buildDeps(ctx, start, credSource, openProxy, subPersist, profileCtl, runtimeControl.Restart)
+	deps, buildErr := w.buildDeps(ctx, start, credSource, openProxy, subPersist, profileCtl, mcpControl, &permStoreRef, runtimeControl.Restart)
 	if buildErr != nil {
 		sndr.close()
 		cancel() // returning finalizes the stream; the recv goroutine unwinds on the Recv error
@@ -274,7 +301,7 @@ func (w *WorkerServer) runTurn(stream proto.Worker_RunTurnServer, authRecovery b
 
 // ─── buildDeps ────────────────────────────────────────────────────────────────
 
-func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, credSource *streamCredentialSource, openProxy *streamOpenProvider, subPersist *streamSubagentPersist, profileCtl *streamSessionProfileController, restart ...runtimeRestartFunc) (runner.Deps, error) {
+func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, credSource *streamCredentialSource, openProxy *streamOpenProvider, subPersist *streamSubagentPersist, profileCtl *streamSessionProfileController, mcpControl *streamMCPControl, permStoreRef *atomic.Pointer[agent.PermissionStore], restart ...runtimeRestartFunc) (runner.Deps, error) {
 	// Build config from snapshot.
 	cfg := ConfigFromSnapshot(start.GetConfig())
 	cfgService := cfgsvc.New("", cfg, secrets.NewMemory())
@@ -342,8 +369,17 @@ func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, cr
 	if m, err := agent.ParseMode(start.GetPermissionMode()); err == nil {
 		mode = m
 	}
-	permStore := agent.NewStaticPermissionStore(mode)
+	// The allowlist travels with the mode for the same reason: the worker cannot
+	// read the host's permissions.yaml, and a store built without it reports
+	// NOTHING as allowlisted — so every allowlisted MCP tool would re-prompt on
+	// worker turns while behaving correctly in-process.
+	permStore := agent.NewStaticPermissionStoreWithMCPAllow(mode, start.GetMcpAllow())
 	permBroker := permissions.New(permStore, nil, nil)
+	// Publish for the recv loop so a mid-turn PermissionUpdate can tighten this
+	// store's mode/allowlist, matching the in-process per-decision re-read.
+	if permStoreRef != nil {
+		permStoreRef.Store(permStore)
+	}
 
 	// Build the worker's dispatch engine ONCE via the shared internal/toolstack
 	// builder — the SAME assembly the host uses — with a real project-context
@@ -408,6 +444,17 @@ func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, cr
 	} else {
 		diagnostic, _ := provSvc.(reasoningexperiment.Service)
 		toolSvc = buildWorkerToolSvcWithDiagnostic(permBroker, engine, ctxLoader, provSvc.Cloud(), provSvc.Open(), cfg, subPersist, profileCtl.SetProfile, visionSvc, failureLog, diagnostic, restart...)
+	}
+
+	// Register a proxy per host-advertised MCP tool. Done AFTER the built-in
+	// stack so built-ins win a name collision, matching the host ordering where
+	// the built-in registry is populated before MCP servers connect. Proxies
+	// report OriginMCP, so the tool loop's gate treats them as third-party
+	// exactly as the host does.
+	if mcpControl != nil && len(start.GetMcpTools()) > 0 && toolSvc != nil {
+		if n := registerMCPProxies(toolSvc.Registry(), start.GetMcpTools(), mcpControl); n > 0 {
+			log.Printf("[worker] registered %d host MCP tool proxies", n)
+		}
 	}
 
 	// Build the protocol-supervision watchdog from the snapshotted config

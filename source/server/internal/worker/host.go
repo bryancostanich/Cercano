@@ -91,6 +91,15 @@ type workerRunner struct {
 	// on dial-injected (test) runners (sub-agent rows are then not created).
 	ensureSubagent EnsureSubagentFunc
 
+	// mcpTools returns the host's live MCP-origin tools for advertisement to the
+	// worker, and mcpCall invokes one by fully-qualified name. The host owns
+	// every MCP subprocess and its session, so the worker holds no connections
+	// and proxies each call back here. Both nil on dial-injected test runners
+	// and whenever no MCP server is configured — the worker then simply sees no
+	// MCP tools, which is the pre-proxy behavior.
+	mcpTools func() []McpToolAdvert
+	mcpCall  func(ctx context.Context, name string, args json.RawMessage) (json.RawMessage, error)
+
 	// setProfile switches the host session's active capability profile when a
 	// worker-side session-control capability (suggest_plan/request_plan_approval)
 	// asks for it. The worker must not own this state. The convID scopes the
@@ -149,6 +158,77 @@ func NewWorkerRunner(
 		modelEvidence:  modelEvidence,
 		pool:           pool,
 	}
+}
+
+// McpBridgeSetter is implemented by turn runners that can proxy host MCP tools
+// into the worker. NewWorkerRunner returns a runner.TurnRunner, so the server
+// asserts against this narrow interface rather than widening TurnRunner itself
+// with a concept only the worker runner has.
+type McpBridgeSetter interface {
+	SetMCPBridge(
+		tools func() []McpToolAdvert,
+		call func(ctx context.Context, name string, args json.RawMessage) (json.RawMessage, error),
+	)
+}
+
+// SetMCPBridge wires host MCP advertisement + invocation into this runner.
+// Optional and set after construction (rather than as two more positional
+// constructor parameters) because MCP is configuration-dependent: no configured
+// server means no bridge, and every existing test runner keeps working with the
+// nil default. A nil bridge advertises no tools, which is exactly the behavior
+// before worker MCP proxying existed.
+func (w *workerRunner) SetMCPBridge(
+	tools func() []McpToolAdvert,
+	call func(ctx context.Context, name string, args json.RawMessage) (json.RawMessage, error),
+) {
+	w.mcpTools = tools
+	w.mcpCall = call
+}
+
+// McpToolAdvert is one host MCP tool described for the worker. The host builds
+// these from its live registry per turn (not once at startup): MCP servers
+// connect in the background and can be added at runtime, so a startup snapshot
+// would advertise nothing on an otherwise healthy setup.
+type McpToolAdvert struct {
+	Name        string
+	Description string
+	Schema      json.RawMessage
+	Destructive bool
+}
+
+// advertiseMCPTools snapshots the host's MCP tools for this turn's StartTurn.
+// Empty when no resolver is wired or no MCP server is connected.
+func (w *workerRunner) advertiseMCPTools() []*proto.McpToolDescriptor {
+	if w.mcpTools == nil {
+		return nil
+	}
+	adverts := w.mcpTools()
+	if len(adverts) == 0 {
+		return nil
+	}
+	out := make([]*proto.McpToolDescriptor, 0, len(adverts))
+	for _, a := range adverts {
+		out = append(out, &proto.McpToolDescriptor{
+			Name:        a.Name,
+			Description: a.Description,
+			Schema:      a.Schema,
+			Destructive: a.Destructive,
+		})
+	}
+	return out
+}
+
+// mcpAllowPatterns returns the host's MCP allowlist so worker-side gating
+// matches the host's. Nil when no permission broker is wired.
+func (w *workerRunner) mcpAllowPatterns() []string {
+	if w.perms == nil {
+		return nil
+	}
+	store := w.perms.Store()
+	if store == nil {
+		return nil
+	}
+	return store.MCPAllowPatterns()
 }
 
 // resolveOpenTiers returns the effective open model id per tier for the active
@@ -302,6 +382,8 @@ func (w *workerRunner) RunTurn(
 		History:        historyProto,
 		ProjectContext: projectCtx,
 		PermissionMode: permMode,
+		McpTools:       w.advertiseMCPTools(),
+		McpAllow:       w.mcpAllowPatterns(),
 	}
 
 	// ── 5. Acquire a warm worker (pool) or use injected dial ──────────────
@@ -553,6 +635,30 @@ func (w *workerRunner) RunTurn(
 					log.Printf("[workerRunner] runtime response: %v", err)
 				}
 			}()
+		case *proto.WorkerToHost_McpRequest:
+			// The worker invoked a proxied MCP tool. Resolve against the LIVE host
+			// registry (not the advertisement snapshot) so a server restarted
+			// mid-turn is picked up transparently and a vanished one errors
+			// cleanly. Runs in its own goroutine: an MCP call can block on server
+			// warm-up, and the stream reader must stay responsive to Cancel.
+			request := m.McpRequest
+			go func() {
+				response := &proto.McpCallResponse{Id: request.GetId()}
+				if w.mcpCall == nil {
+					response.Error = "mcp not configured on host"
+				} else {
+					result, err := w.mcpCall(ctx, request.GetName(), request.GetArgsJson())
+					if err != nil {
+						response.Error = err.Error()
+					} else {
+						response.ResultJson = result
+					}
+				}
+				if err := safeSend(&proto.HostToWorker{Msg: &proto.HostToWorker_McpResponse{McpResponse: response}}); err != nil {
+					log.Printf("[workerRunner] mcp response: %v", err)
+				}
+			}()
+
 		case *proto.WorkerToHost_ProfileRequest:
 			// Session-control capabilities run in the worker but own no session
 			// state. Apply profile changes on the host profile broker and respond so

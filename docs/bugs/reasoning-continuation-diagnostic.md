@@ -313,3 +313,48 @@ had not consumed the request body; consuming it let the server observe client
 cancellation. A separate failing named-pipe probe confirmed that ordinary
 `os.Open` could block before input validation; Unix input now uses a nonblocking
 open followed by a regular-file check, and the probe passes.
+
+
+## Audit preparation — 2026-09-16 (second session)
+
+The first live smoke pair (DeepInfra `zai-org/GLM-5.3`, fixture prompt) reached
+the endpoint through the confirmation-gated tool: the drop arm called the
+recorded tool once and stopped; the preserve arm received **no**
+`reasoning_content` on its first response, so the driver failed closed without
+a continuation. That pair validated plumbing only — wrong prompt shape for the
+bug and no reasoning to replay — and is not evidence about the audit loop.
+
+Changes made for a real experiment (committed with this note):
+
+- `ReasoningEvidence` on each capture/step distinguishes absent, null, empty
+  and nonempty `reasoning_content` chunks with counts/bytes, separate from the
+  replay boolean. Wire presence only; no reasoning text is reported.
+- Optional `reasoning_effort` (`none|low|medium|high`) pins that field on every
+  diagnostic request. DeepInfra documents it for chain-of-thought models
+  (docs.deepinfra.com/chat/reasoning; the GLM-5.3 model card documents
+  `low|high|max` with a `max` default — an unresolved discrepancy; unsupported
+  values are model-defaulted per z.ai). Diagnostic-only: normal client requests
+  are unchanged, and a conflicting caller-set value fails the session.
+- `baseline_only` runs a single drop arm (halved token exposure) for cheap
+  cycle-reproduction attempts before any paired preservation trial.
+- `source/server/scripts/prepare-reasoning-audit.py` (offline, read-only)
+  extracted the original audit `e0e7e7a3eac3775c38e11713` from
+  `conversations.db` into `~/.config/cercano/reasoning-experiment-e0e7e7a3/`
+  (0600, outside the repo): 151 turns, 75 batches, 81 recorded actions, and a
+  real detected cycle — period 6 batches starting at batch 43 with 5 complete
+  repetitions. One `Grep` action returned 4 result orderings (same length);
+  replay canonicalizes each action to its earliest recorded result. The seed is
+  a text-transcoded prefix (original system prompt, wire settings and
+  historical reasoning unavailable), so this is a fresh bounded capture, NOT an
+  exact historical replay; preserve arms use newly captured reasoning.
+
+Baseline gate (explicit): run `baseline.json` (12 requests × 8192 tokens,
+single drop arm) first. Only if the drop baseline reproduces a repeated
+action/result cycle AND nonempty reasoning arrives should the paired
+preserve experiment run. If the baseline does not reproduce, the missing
+pieces are the untransportable historical context — do not keep paying for
+repetitions of a non-reproducing fixture.
+
+Status: prepared but NOT run. The running agent predates `baseline_only` and
+`reasoning_effort` (strict input decoding would reject the fixture), so the
+rebuilt binary must be restarted into before the baseline attempt.

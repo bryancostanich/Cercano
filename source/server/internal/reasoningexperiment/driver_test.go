@@ -48,7 +48,7 @@ func TestPairRealTransport(t *testing.T) {
 				}
 				var body map[string]any
 				json.NewDecoder(r.Body).Decode(&body)
-				if body["max_tokens"] != float64(128) || body["temperature"] != float64(0) || body["model"] != "diagnostic" {
+				if body["reasoning_effort"] != "high" || body["max_tokens"] != float64(128) || body["temperature"] != float64(0) || body["model"] != "diagnostic" {
 					t.Error("settings changed")
 				}
 				preserved := false
@@ -70,6 +70,7 @@ func TestPairRealTransport(t *testing.T) {
 			}))
 			defer srv.Close()
 			s := fixtureSpec()
+			s.ReasoningEffort = "high"
 			s.PreserveFirst = reverse
 			builds := 0
 			report, err := Run(context.Background(), fixtureConfig(srv.URL+"/v1"), s, func(p config.CloudProfile) (inference.Provider, error) {
@@ -104,12 +105,14 @@ func TestPairRealTransport(t *testing.T) {
 	}
 }
 func TestRejectBeforeBuild(t *testing.T) {
-	for _, name := range []string{"unbounded", "total", "history", "duplicate", "local", "profile", "flavor", "endpoint", "cancelled"} {
+	for _, name := range []string{"unbounded", "total", "history", "duplicate", "local", "profile", "flavor", "endpoint", "cancelled", "effort"} {
 		t.Run(name, func(t *testing.T) {
 			s := fixtureSpec()
 			c := fixtureConfig("http://localhost/v1")
 			ctx := context.Background()
 			switch name {
+			case "effort":
+				s.ReasoningEffort = "unsupported"
 			case "unbounded":
 				s.MaxTokens = 0
 			case "total":
@@ -143,7 +146,7 @@ func TestRejectBeforeBuild(t *testing.T) {
 	}
 }
 func TestFailClosedOutcomes(t *testing.T) {
-	for _, tc := range []struct{ name, want string }{{"unknown", "unrecorded_tool_call"}, {"budget", "request_budget"}, {"length", "nonterminal_finish"}, {"incomplete", "provider_or_capture_error"}, {"http", "provider_or_capture_error"}, {"missing-reasoning", "provider_or_capture_error"}} {
+	for _, tc := range []struct{ name, want string }{{"unknown", "unrecorded_tool_call"}, {"budget", "request_budget"}, {"length", "nonterminal_finish"}, {"incomplete", "provider_or_capture_error"}, {"http", "provider_or_capture_error"}, {"missing-reasoning", "continuation_reasoning_unavailable"}} {
 		t.Run(tc.name, func(t *testing.T) {
 			var requests atomic.Int32
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -28,30 +28,33 @@ type RecordedResult struct {
 }
 
 type Spec struct {
-	Profile        string           `json:"profile"`
-	Model          string           `json:"model"`
-	System         string           `json:"system"`
-	Messages       []llm.Message    `json:"messages"`
-	Tools          []llm.Tool       `json:"tools"`
-	Results        []RecordedResult `json:"recorded_results"`
-	MaxRequests    int              `json:"max_requests"`    // per arm
-	MaxTokens      int              `json:"max_tokens"`      // per request, including provider reasoning
-	TimeoutSeconds int              `json:"timeout_seconds"` // entire pair
-	Temperature    *float64         `json:"temperature"`
-	PreserveFirst  bool             `json:"preserve_first,omitempty"`
+	BaselineOnly    bool             `json:"baseline_only,omitempty"`
+	ReasoningEffort string           `json:"reasoning_effort,omitempty"`
+	Profile         string           `json:"profile"`
+	Model           string           `json:"model"`
+	System          string           `json:"system"`
+	Messages        []llm.Message    `json:"messages"`
+	Tools           []llm.Tool       `json:"tools"`
+	Results         []RecordedResult `json:"recorded_results"`
+	MaxRequests     int              `json:"max_requests"`    // per arm
+	MaxTokens       int              `json:"max_tokens"`      // per request, including provider reasoning
+	TimeoutSeconds  int              `json:"timeout_seconds"` // entire pair
+	Temperature     *float64         `json:"temperature"`
+	PreserveFirst   bool             `json:"preserve_first,omitempty"`
 }
 
 type Step struct {
-	RequestHash           string         `json:"request_hash"`
-	ResponseHash          string         `json:"response_hash"`
-	NormalizedRequestHash string         `json:"normalized_request_hash"`
-	BatchHash             string         `json:"batch_hash,omitempty"`
-	ToolIDs               []string       `json:"tool_ids,omitempty"`
-	ReasoningArrived      bool           `json:"reasoning_arrived"`
-	ReasoningReplayed     bool           `json:"reasoning_replayed"`
-	Finish                string         `json:"finish"`
-	Usage                 llm.TokenUsage `json:"usage"`
-	ServedModel           string         `json:"served_model,omitempty"`
+	ReasoningEvidence     openai.ReasoningEvidence `json:"reasoning_evidence"`
+	RequestHash           string                   `json:"request_hash"`
+	ResponseHash          string                   `json:"response_hash"`
+	NormalizedRequestHash string                   `json:"normalized_request_hash"`
+	BatchHash             string                   `json:"batch_hash,omitempty"`
+	ToolIDs               []string                 `json:"tool_ids,omitempty"`
+	ReasoningArrived      bool                     `json:"reasoning_arrived"`
+	ReasoningReplayed     bool                     `json:"reasoning_replayed"`
+	Finish                string                   `json:"finish"`
+	Usage                 llm.TokenUsage           `json:"usage"`
+	ServedModel           string                   `json:"served_model,omitempty"`
 }
 type Arm struct {
 	Mode   openai.ReasoningDiagnosticMode `json:"mode"`
@@ -59,6 +62,7 @@ type Arm struct {
 	Steps  []Step                         `json:"steps"`
 }
 type Report struct {
+	ReasoningEffort          string `json:"reasoning_effort,omitempty"`
 	Profile                  string `json:"profile"`
 	Model                    string `json:"model"`
 	MaxRequestedOutputTokens int    `json:"max_requested_output_tokens"`
@@ -110,6 +114,9 @@ func key(name string, args json.RawMessage) (string, error) {
 }
 
 func validate(s Spec) (map[string]RecordedResult, error) {
+	if s.BaselineOnly && s.PreserveFirst {
+		return nil, errors.New("baseline_only cannot preserve_first")
+	}
 	encoded, err := json.Marshal(s)
 	if err != nil || len(encoded) > MaxInputBytes || len(s.Tools) > 64 || len(s.Results) > 1024 {
 		return nil, errors.New("diagnostic input exceeds finite size/count limits")
@@ -154,7 +161,10 @@ func validate(s Spec) (map[string]RecordedResult, error) {
 // Run builds exactly one profile without its backup chain. build MUST use the
 // existing authenticated profile factory, not a router/resilience wrapper.
 func Run(ctx context.Context, c config.Config, s Spec, build func(config.CloudProfile) (inference.Provider, error)) (Report, error) {
-	report := Report{Profile: s.Profile, Model: s.Model, MaxRequestedOutputTokens: 2 * s.MaxRequests * s.MaxTokens}
+	report := Report{ReasoningEffort: s.ReasoningEffort, Profile: s.Profile, Model: s.Model, MaxRequestedOutputTokens: 2 * s.MaxRequests * s.MaxTokens}
+	if s.BaselineOnly {
+		report.MaxRequestedOutputTokens = s.MaxRequests * s.MaxTokens
+	}
 	results, err := validate(s)
 	if err != nil {
 		return report, err
@@ -167,7 +177,7 @@ func Run(ctx context.Context, c config.Config, s Spec, build func(config.CloudPr
 		return report, errors.New("diagnostic requires an existing chat_completions profile")
 	}
 	// Validate the pinned endpoint before touching credentials.
-	bounds := openai.ReasoningDiagnosticConfig{Mode: openai.ReasoningDrop, BaseURL: p.BaseURL, Model: s.Model, MaxRequests: s.MaxRequests, MaxBodyBytes: 8 << 20, MaxMemoryBytes: 64 << 20, Timeout: time.Duration(s.TimeoutSeconds) * time.Second}
+	bounds := openai.ReasoningDiagnosticConfig{ReasoningEffort: s.ReasoningEffort, Mode: openai.ReasoningDrop, BaseURL: p.BaseURL, Model: s.Model, MaxRequests: s.MaxRequests, MaxBodyBytes: 8 << 20, MaxMemoryBytes: 64 << 20, Timeout: time.Duration(s.TimeoutSeconds) * time.Second}
 	probe, err := openai.NewReasoningDiagnostic(bounds)
 	if err != nil {
 		return report, err
@@ -184,12 +194,18 @@ func Run(ctx context.Context, c config.Config, s Spec, build func(config.CloudPr
 		return report, errors.New("diagnostic profile unavailable; check its normal authentication status")
 	}
 	modes := []openai.ReasoningDiagnosticMode{openai.ReasoningDrop, openai.ReasoningPreserve}
-	if s.PreserveFirst {
+	if s.BaselineOnly {
+		modes = modes[:1]
+	}
+	if s.PreserveFirst && !s.BaselineOnly {
 		modes[0], modes[1] = modes[1], modes[0]
 	}
 	for _, mode := range modes {
 		bounds.Mode = mode
 		report.Arms = append(report.Arms, runArm(ctx, provider, s, bounds, results))
+	}
+	if s.BaselineOnly {
+		return report, nil
 	}
 	a, b := report.Arms[0].Steps, report.Arms[1].Steps
 	for i := 0; i < len(a) && i < len(b); i++ {
@@ -252,7 +268,7 @@ func runArm(ctx context.Context, p inference.Provider, s Spec, bounds openai.Rea
 			}
 		}
 		normalized, _ := json.Marshal(wire)
-		step := Step{RequestHash: hash(cap.Request), ResponseHash: hash(cap.Response), NormalizedRequestHash: hash(normalized), ReasoningArrived: cap.ReasoningArrived, ReasoningReplayed: cap.ReasoningReplayed, Finish: cap.FinishReason, Usage: response.Usage, ServedModel: response.Model}
+		step := Step{ReasoningEvidence: cap.ReasoningEvidence, RequestHash: hash(cap.Request), ResponseHash: hash(cap.Response), NormalizedRequestHash: hash(normalized), ReasoningArrived: cap.ReasoningArrived, ReasoningReplayed: cap.ReasoningReplayed, Finish: cap.FinishReason, Usage: response.Usage, ServedModel: response.Model}
 		var toolResults []llm.Block
 		var batch []string
 		failure := ""
@@ -312,6 +328,10 @@ func runArm(ctx context.Context, p inference.Provider, s Spec, bounds openai.Rea
 			return arm
 		}
 		seen[step.BatchHash] = true
+		if bounds.Mode == openai.ReasoningPreserve && !cap.ReasoningArrived {
+			arm.Status = "continuation_reasoning_unavailable"
+			return arm
+		}
 		history = append(history, llm.Message{Role: llm.RoleAssistant, Blocks: response.Blocks}, llm.Message{Role: llm.RoleUser, Blocks: toolResults})
 	}
 	return arm

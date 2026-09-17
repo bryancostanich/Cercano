@@ -29,6 +29,7 @@ const (
 // BaseURL must match the selected client's base URL, without credentials or
 // query parameters. Limits are mandatory. Timeout bounds the entire session.
 type ReasoningDiagnosticConfig struct {
+	ReasoningEffort              string // Empty leaves the endpoint default unchanged; diagnostic-only.
 	Mode                         ReasoningDiagnosticMode
 	BaseURL, Model               string
 	MaxRequests                  int
@@ -40,6 +41,7 @@ type ReasoningDiagnosticConfig struct {
 // them to another provider. They exclude HTTP headers, not secrets a prompt or
 // endpoint may itself contain. Copies returned by Captures belong to the caller.
 type ReasoningDiagnosticCapture struct {
+	ReasoningEvidence                   ReasoningEvidence
 	Request, Response                   []byte
 	ReasoningArrived, ReasoningReplayed bool
 	FinishReason                        string
@@ -74,6 +76,11 @@ type ReasoningDiagnostic struct {
 }
 
 func NewReasoningDiagnostic(cfg ReasoningDiagnosticConfig) (*ReasoningDiagnostic, error) {
+	switch cfg.ReasoningEffort {
+	case "", "none", "low", "medium", "high":
+	default:
+		return nil, errors.New("reasoning diagnostic: unsupported reasoning effort")
+	}
 	u, err := url.Parse(cfg.BaseURL)
 	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
 		return nil, errors.New("reasoning diagnostic: invalid base URL")
@@ -196,6 +203,19 @@ func (s *ReasoningDiagnostic) do(req *http.Request, next goopenai.HTTPDoer) (res
 			return nil, errors.New("reasoning diagnostic: multiple choices unsupported")
 		}
 	}
+	if s.cfg.ReasoningEffort != "" {
+		if raw, exists := obj["reasoning_effort"]; exists {
+			var effort string
+			if json.Unmarshal(raw, &effort) != nil || effort != s.cfg.ReasoningEffort {
+				return nil, errors.New("reasoning diagnostic: reasoning effort changed")
+			}
+		}
+		obj["reasoning_effort"], _ = json.Marshal(s.cfg.ReasoningEffort)
+		b, err = json.Marshal(obj)
+		if err != nil {
+			return nil, errors.New("reasoning diagnostic: encoding failed")
+		}
+	}
 	var messages []map[string]json.RawMessage
 	if json.Unmarshal(obj["messages"], &messages) != nil {
 		return nil, errors.New("reasoning diagnostic: invalid messages")
@@ -315,7 +335,7 @@ func (s *ReasoningDiagnostic) do(req *http.Request, next goopenai.HTTPDoer) (res
 		s.continuations[call.ID] = capturedContinuation{reasoning: reason, batch: s.requests, call: call, count: len(ids), index: i}
 	}
 	s.used += added
-	s.captures = append(s.captures, ReasoningDiagnosticCapture{Request: b, Response: body, ReasoningArrived: reason != "", ReasoningReplayed: replayed, FinishReason: finish})
+	s.captures = append(s.captures, ReasoningDiagnosticCapture{Request: b, Response: body, ReasoningArrived: reason != "", ReasoningReplayed: replayed, FinishReason: finish, ReasoningEvidence: diagnosticReasoningEvidence(body)})
 	resp.Body = io.NopCloser(bytes.NewReader(body))
 	resp.ContentLength = int64(len(body))
 	return resp, nil

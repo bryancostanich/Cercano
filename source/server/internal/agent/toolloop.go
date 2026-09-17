@@ -169,6 +169,12 @@ type ToolLoopInput struct {
 	// 0 means use config.DefaultToolLoopMaxIterations; -1 means unlimited.
 	MaxIterations int
 
+	// TokenBudget caps cumulative provider-reported input+output tokens for
+	// the whole loop. 0 disables (main turns); >0 makes the loop stop with
+	// llm.ErrTokenBudgetExhausted after the response that crosses it, without
+	// executing that response's tool calls. See agent.TokenBudget.
+	TokenBudget int
+
 	// MaxTokensPerTurn sets the MaxTokens field on each llm.ChatRequest.
 	// 0 means use config.DefaultToolLoopMaxTokensPerTurn.
 	MaxTokensPerTurn int
@@ -438,6 +444,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (returned ToolLoopResult
 	}
 
 	maxIters, unlimitedIters := config.EffectiveMaxIterations(in.MaxIterations)
+	tokenBudget := TokenBudget{Limit: in.TokenBudget}
 	maxTokens := config.DefaultToolLoopMaxTokensPerTurn
 	if in.MaxTokensPerTurn > 0 {
 		maxTokens = in.MaxTokensPerTurn
@@ -648,6 +655,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (returned ToolLoopResult
 			return ToolLoopResult{Iterations: iter + 1, History: hist, InputTokens: providerInput, OutputTokens: providerOutput, LastRequestBudget: budget}, err
 		}
 		lastIn, lastOut = resp.InputTokens, resp.OutputTokens
+		tokenBudget.Add(resp.InputTokens, resp.OutputTokens)
 		noteAssembledTurn(in.ConversationID, resp.Blocks, seenToolUse)
 
 		flattenToolResults := in.flattenToolResults()
@@ -670,6 +678,17 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (returned ToolLoopResult
 		}
 		log.Printf("[tool-loop] model response: conv=%s provider=%s model=%s iter=%d tool_calls=%d text_len=%d tokens_in=%d tokens_out=%d text_prefix=%q",
 			in.ConversationID, in.Provider.Name(), in.Model, iter+1, len(toolCalls), len([]rune(finalText)), lastIn, lastOut, truncateRunes(strings.TrimSpace(finalText), 160))
+		if tokenBudget.Exhausted() && len(toolCalls) > 0 {
+			// The crossing response is kept (already billed and recorded above),
+			// but its tool calls never run: each executed call invites another
+			// model round-trip, and the budget exists to stop exactly that.
+			// A final no-tool-call answer is allowed to complete normally —
+			// failing a finished dispatch would waste the whole spend.
+			log.Printf("[tool-loop] token budget exhausted: conv=%s provider=%s model=%s iter=%d spent=%d budget=%d pending_tool_calls=%d",
+				in.ConversationID, in.Provider.Name(), in.Model, iter+1, tokenBudget.Spent, tokenBudget.Limit, len(toolCalls))
+			emit(LoopEvent{Kind: LoopNotice, Summary: fmt.Sprintf("dispatch stopped: token budget exhausted (~%d of %d tokens)", tokenBudget.Spent, tokenBudget.Limit)})
+			return ToolLoopResult{Iterations: iter + 1, History: hist, InputTokens: lastIn, OutputTokens: lastOut, CalledTools: calledTools, LastRequestBudget: budget}, tokenBudget.Err()
+		}
 		if len(toolCalls) == 0 {
 			if in.WatchdogTurnEnd != nil && strings.TrimSpace(finalText) != "" {
 				wd := in.WatchdogTurnEnd(ctx, finalText, hist)

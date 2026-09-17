@@ -9,6 +9,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"regexp"
@@ -579,6 +580,7 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 		Permissions:        perms,
 		UserInput:          spec.Task,
 		MaxIterations:      spec.MaxIterations,
+		TokenBudget:        spec.TokenBudget,
 		Temperature:        &greedy,
 		// Preserve the local runtime compatibility workaround, but never apply
 		// it to cloud-generated tool history. Startup fallback can switch the
@@ -631,6 +633,17 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 		addDispatchRequestBudgetFields(extra, res)
 		x.logDispatchFailure("dispatch.tool_loop_failed", spec, subConvID, provider, model, sel.IsCloud, granted, ignored, err, extra)
 		emitDispatchProgress(spec.Emit, agenttools.ProgressEvent{SubAgentID: subConvID, SubAgentParentID: spec.ConversationID, SubAgentTitle: subTitle, Kind: "error", Text: fmt.Sprintf("sub-agent failed: conv=%s err=%v", subConvID, err), GrantedTools: granted, IgnoredTools: ignored, IsError: true})
+		var le *llm.Error
+		if errors.As(err, &le) && le.Class == llm.ErrTokenBudgetExhausted {
+			// The budget stop is a cost guard, not a provider fault: the spent
+			// tokens bought real partial work. Surface a digest (iterations,
+			// tools called, persisted sub-conversation for post-mortem) so the
+			// parent can decide how to re-scope — while still failing the
+			// dispatch so completion can never be fabricated from partials.
+			return dispatch.Result{}, fmt.Errorf(
+				"%w (dispatch stopped after %d iterations; tools called: %s; sub-conversation %s holds the partial transcript)",
+				err, res.Iterations, strings.Join(res.CalledTools, ", "), subConvID)
+		}
 		return dispatch.Result{}, err
 	}
 	log.Printf("[dispatch] subagent done: conv=%s route=%s provider=%s model=%s tier=%s iterations=%d tokens_in=%d tokens_out=%d",

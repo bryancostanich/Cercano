@@ -97,6 +97,27 @@ func (c Config) TaskAssignment(task Task) TaskAssignment {
 	return a
 }
 
+// DispatchTokenBudget is the default cumulative billed-token cap (input +
+// output summed over every model call) for one delegated dispatch of this
+// cost class. Scale: a healthy recon dispatch bills well under 100K tokens;
+// the runaway that motivated the budget billed ~3.7M in one dispatch
+// (docs/bugs/deepinfra-dispatch-followups.md). UnlimitedDispatchTokenBudget
+// disables the cap; main turns — not dispatches — run uncapped.
+func (q CostTier) DispatchTokenBudget() int {
+	switch q {
+	case CostEconomy:
+		return 300_000
+	case CostStandard:
+		return 1_000_000
+	case CostPremium:
+		return 3_000_000
+	}
+	return 1_000_000
+}
+
+// UnlimitedDispatchTokenBudget explicitly disables the dispatch token cap.
+const UnlimitedDispatchTokenBudget = -1
+
 func (q CostTier) CapabilityTier() Tier {
 	switch q {
 	case CostEconomy:

@@ -85,6 +85,12 @@ type Spec struct {
 	// MaxIterations caps the number of LLM round-trips in the loop.
 	// 0 means use the package default (agent.MaxToolLoopIterations = 50).
 	MaxIterations int
+
+	// TokenBudget caps cumulative billed tokens (input+output over every model
+	// call) for this dispatch. 0 resolves the class default from the routing
+	// assignment's cost tier (CostTier.DispatchTokenBudget);
+	// config.UnlimitedDispatchTokenBudget disables the cap explicitly.
+	TokenBudget int
 	FallbackTier  config.Tier // per-invocation override fallback intent
 }
 
@@ -251,6 +257,7 @@ func (e *Engine) Dispatch(ctx context.Context, spec Spec) (Result, error) {
 		if e.agenticRunner == nil {
 			return Result{}, errors.New("dispatch: agentic runner not configured")
 		}
+		spec.TokenBudget = e.resolveTokenBudget(spec)
 		result, err := e.agenticRunner(ctx, spec, sel, model)
 		current, servedModel := CurrentRoute(sel, model)
 		if current.IsCloud != sel.IsCloud {
@@ -361,6 +368,25 @@ func avoidedTokens(tokens int, isCloud bool) int {
 func (e *Engine) SetTaskAssignment(fn func(config.Task) config.TaskAssignment) { e.taskAssignment = fn }
 func (e *Engine) SetDestinationModelFor(fn func(inference.Selection, config.Tier) string) {
 	e.destinationModelFor = fn
+}
+
+// resolveTokenBudget turns the spec's budget request into the enforced cap.
+// Explicit positive budgets and the explicit unlimited sentinel pass through
+// (unlimited becomes 0, the loop's "disabled" value); 0 resolves the class
+// default from the routing assignment's cost tier. Every agentic dispatch
+// therefore runs budgeted unless a caller explicitly opted out.
+func (e *Engine) resolveTokenBudget(spec Spec) int {
+	if spec.TokenBudget == config.UnlimitedDispatchTokenBudget {
+		return 0
+	}
+	if spec.TokenBudget > 0 {
+		return spec.TokenBudget
+	}
+	assignment := (config.Config{}).TaskAssignment(spec.RoutingTask)
+	if e.taskAssignment != nil && spec.RoutingTask != "" {
+		assignment = e.taskAssignment(spec.RoutingTask)
+	}
+	return assignment.Quality.DispatchTokenBudget()
 }
 
 func (e *Engine) resolve(spec Spec, mode locus.Mode, candidates inference.Tiers) (inference.Selection, config.Tier, string, error) {

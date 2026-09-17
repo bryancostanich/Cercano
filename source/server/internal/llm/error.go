@@ -43,6 +43,12 @@ const (
 	// tier) instead of a generic "bad request". When the provider reports token
 	// counts, Error.Used and Error.Limit carry them.
 	ErrContextOverflow ErrorClass = "context_overflow"
+	// ErrTokenBudgetExhausted: a delegated tool loop crossed its cumulative
+	// billed-token budget. Like ErrInvalidRequest it must surface to the
+	// caller, never retry or fail over — rerunning the same oversized work on
+	// another provider spends the same money again. Used/Limit carry the
+	// cumulative spent tokens and the budget.
+	ErrTokenBudgetExhausted ErrorClass = "token_budget_exhausted"
 	// ErrNetwork: transport-level failure before an HTTP response existed
 	// (DNS, connection refused/reset, TLS).
 	ErrNetwork ErrorClass = "network"
@@ -145,7 +151,9 @@ func Failoverable(class ErrorClass, err error) bool {
 // plausibly serve the failed request. Context overflow is allowed only when the
 // target window is known and strictly larger than the failed attempt's window.
 func FailoverableToWindow(class ErrorClass, err error, failedWindow, targetWindow int, targetWindowKnown bool) bool {
-	if class == ErrLoginRequired || class == ErrCredential || class == ErrPermission {
+	if class == ErrLoginRequired || class == ErrCredential || class == ErrPermission || class == ErrTokenBudgetExhausted {
+		// A budget-exhausted loop already billed its cap; re-serving the same
+		// work elsewhere doubles the spend the budget exists to stop.
 		return false
 	}
 	if class == ErrContextOverflow {

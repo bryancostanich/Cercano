@@ -47,6 +47,7 @@ import (
 	runtimemistralrs "cercano/source/server/internal/localruntime/mistralrs"
 	"cercano/source/server/internal/locus"
 	"cercano/source/server/internal/loop"
+	"cercano/source/server/internal/loopcompact"
 	mcpserver "cercano/source/server/internal/mcp"
 	mcphost "cercano/source/server/internal/mcp_host"
 	"cercano/source/server/internal/modelcatalog"
@@ -358,6 +359,8 @@ func startGRPCServer(cfg config.Config, bindAddr string, events *crashlog.Writer
 	// cloud fallback rides the economy tier instead of the premium chat model.
 	var cloudTierModel func(config.Tier) string
 	var compGen *compactiongen.Generator
+	// Set when compaction is enabled; installed on the server after construction.
+	var newLoopCompactor func() agent.LoopCompactor
 	if persistentStore != nil {
 		// Summarizer model precedence: explicit compaction.summarizer_model →
 		// the fast_light_text tier's open side → the interactive open model as
@@ -531,6 +534,25 @@ func startGRPCServer(cfg config.Config, bindAddr string, events *crashlog.Writer
 		// wired by the persistence service (SetCompactionGenerator).
 		compGen.SetToolElisionOnly(cfg.Compaction.ToolElisionOnly)
 		agentOpts = append(agentOpts, agent.WithCompactionScheduler(compGen))
+		// Sub-agent dispatches compact INLINE with the same algorithm, config and
+		// summarizer: their history is in-memory only and never read back, so the
+		// store-backed generator above cannot serve them. A fresh compactor per
+		// dispatch keeps frozen summary state from leaking between concurrent
+		// sub-agents. Installed on the server once it exists (below).
+		if cfg.Compaction.Enabled {
+			loopCompactCfg, loopSummarize := compCfg, compactSummarize
+			newLoopCompactor = func() agent.LoopCompactor {
+				c := loopcompact.New(loopcompact.Options{
+					Config:    loopCompactCfg,
+					Summarize: loopSummarize,
+					Tokenizer: contextmeter.Default(),
+				})
+				if c == nil {
+					return nil
+				}
+				return c
+			}
+		}
 	}
 	var sweeper *retention.Sweeper
 	if persistentStore != nil {
@@ -611,6 +633,9 @@ func startGRPCServer(cfg config.Config, bindAddr string, events *crashlog.Writer
 	}
 	if compGen != nil {
 		srv.SetCompactionGenerator(compGen)
+	}
+	if newLoopCompactor != nil {
+		srv.SetLoopCompactorFactory(newLoopCompactor)
 	}
 	srv.SetContextLoader(ctxLoader)
 	// Wire agent-offered session rollover (D). Zero thresholds leave it fully

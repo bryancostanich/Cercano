@@ -41,9 +41,39 @@ Fixed by a cumulative billed-token budget on delegated tool loops:
   doubles the spend), and the dispatch failure message carries iterations,
   called tools, and the persisted sub-conversation ID for post-mortem.
 
-Not done: in-loop compaction (would let long dispatches finish instead of
-failing at the cap) — deliberate follow-on, informed by budgeted telemetry.
-Live validation pending: no real dispatch has hit a budget yet.
+In-loop compaction now complements the budget (2026-09-17). Sub-agent
+dispatches never had compaction at all: main turns compact asynchronously via
+the store-backed compactiongen.Generator (~10s debounce, multi-minute budget),
+but sub-agent history lives only in memory, is never read back, and a dispatch
+usually finishes before a debounced background pass would even start.
+
+internal/loopcompact runs the SAME algorithm (compactor.Advance), the SAME
+config (cfg.Compaction) and the SAME local fast_light_text summarizer the main
+loop uses — only synchronously, between iterations, once history crosses the
+40K-token activation floor. Measured on a 43,680-token fixture: 43,680 -> 12,766
+tokens (71% reduction). Below the floor — the common case for short dispatches
+— it is a strict no-op that never calls the summarizer.
+
+Design points worth keeping:
+- agent.LoopCompactor is a callback seam because internal/compactor imports
+  internal/agent (BuildLLMHistory), so the loop cannot import it directly.
+- Compaction is defensive: any error, nil, or empty result leaves history
+  untouched, and results are pairing-repaired so a compacted view can never
+  orphan a tool_use. Compaction is an optimization, never a reason to fail
+  work already paid for.
+- Summarizer spend is charged to the dispatch token budget (even on failure),
+  so compaction cannot quietly erode the cap — and a pathological summarizer
+  can itself exhaust the budget rather than grind indefinitely.
+- Turn timestamps fed to Advance are synthetic and monotonic; real wall-clock
+  stamps cluster tool bursts into one second and stall the frozen boundary.
+- One compactor per dispatch: frozen summary state must not leak between
+  concurrent sub-agents.
+
+Still not done: worker-side wiring. The factory is installed in the host front
+door (cmd/cercano) where the summarizer and compaction config exist; worker
+processes have no local runtime handle, so dispatches executing there still
+run uncompacted. Live validation pending: no real dispatch has yet crossed
+either the budget or the activation floor in production.
 
 ## Follow-up 1 (original record): runaway context growth in sub-agent loops
 

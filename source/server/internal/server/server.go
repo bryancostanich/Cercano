@@ -988,6 +988,18 @@ func (s *Server) SetRetentionSweeper(sw *retention.Sweeper) { s.persistSvc.SetRe
 // trajectory exports. Empty versions fall back to "dev" at point of use.
 func (s *Server) SetBuildVersion(v string) { s.buildVersion = strings.TrimSpace(v) }
 
+// SetLoopCompactorFactory attaches the per-dispatch synchronous compactor
+// factory used by sub-agent tool loops. Main turns compact asynchronously via
+// the store-backed generator (SetCompactionGenerator); sub-agent history lives
+// only in memory and is never read back, so it needs an inline pass running
+// the same algorithm. The front door supplies the factory because it owns the
+// summarizer and compaction config.
+func (s *Server) SetLoopCompactorFactory(fn func() agent.LoopCompactor) {
+	if s.toolSvc != nil {
+		s.toolSvc.SetLoopCompactorFactory(fn)
+	}
+}
+
 // SetCompactionGenerator attaches the background compaction scheduler so that
 // /config compaction-enabled true|false flips it at runtime without a restart.
 func (s *Server) SetCompactionGenerator(g *compactiongen.Generator) {

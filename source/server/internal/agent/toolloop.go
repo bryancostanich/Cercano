@@ -169,6 +169,11 @@ type ToolLoopInput struct {
 	// 0 means use config.DefaultToolLoopMaxIterations; -1 means unlimited.
 	MaxIterations int
 
+	// LoopCompactor, when set, compacts in-memory history between iterations
+	// using the production compaction algorithm. Sub-agent dispatches set this;
+	// main turns leave it nil and use the store-backed background generator.
+	LoopCompactor LoopCompactor
+
 	// TokenBudget caps cumulative provider-reported input+output tokens for
 	// the whole loop. 0 disables (main turns); >0 makes the loop stop with
 	// llm.ErrTokenBudgetExhausted after the response that crosses it, without
@@ -578,6 +583,24 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (returned ToolLoopResult
 		if in.TightContextFallback {
 			effectiveSystem += compactToolDirectory(in.Registry, in.Profile, hydratedTools, in.DebugMode)
 			log.Printf("[tool-loop] compact fallback catalog: conv=%s provider=%s model=%s iter=%d tools=%d hydrated=%d names=%v", in.ConversationID, in.Provider.Name(), in.Model, iter+1, len(catalog), len(hydratedTools), toolNamesForLog(catalog))
+		}
+		// Compact BEFORE estimating the request budget so a compaction pass can
+		// actually relieve pressure, rather than running after mechanical
+		// trimming has already dropped messages. Sub-agent dispatches keep
+		// history only in memory, so this synchronous pass is their only
+		// compaction opportunity (the store-backed generator serves main turns).
+		if in.LoopCompactor != nil {
+			beforeCompact := len(hist)
+			hist = compactLoopHistory(ctx, in.LoopCompactor, hist, &tokenBudget)
+			if len(hist) != beforeCompact {
+				// priorHistoryCount indexes into hist for tail preservation; a
+				// compacted view invalidates it, so clamp instead of letting a
+				// stale count mispreserve (or over-preserve) the tail.
+				if priorHistoryCount > len(hist) {
+					priorHistoryCount = len(hist)
+				}
+				log.Printf("[tool-loop] compacted loop history: conv=%s model=%s iter=%d before_messages=%d after_messages=%d", in.ConversationID, in.Model, iter+1, beforeCompact, len(hist))
+			}
 		}
 		preserveTail := len(hist) - priorHistoryCount
 		if preserveTail < 1 {

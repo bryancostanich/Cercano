@@ -54,6 +54,9 @@ type Catalog interface {
 	SetContextWindowResolver(fn func(model string, isCloud bool) int)
 	// SetFailureLog installs the sanitized failure/degradation diagnostic sink.
 	SetFailureLog(w *failurelog.Writer)
+	// SetLoopCompactorFactory installs the per-dispatch synchronous history
+	// compactor factory for sub-agent tool loops. Unset = no compaction.
+	SetLoopCompactorFactory(fn func() agent.LoopCompactor)
 	// GrantedRegistry builds the least-privilege sub-registry for a dispatch.
 	// Returns the registry, the granted tool names, the ignored-unknown names,
 	// and any error (e.g. empty resulting catalog).
@@ -110,6 +113,22 @@ type Service struct {
 
 	// failureLog records sanitized dispatch failure/degradation events. Nil disables logging.
 	failureLog *failurelog.Writer
+
+	// newLoopCompactor builds a per-dispatch synchronous compactor for the
+	// sub-agent tool loop. Sub-agent history lives only in memory, so the
+	// store-backed background generator that compacts main turns cannot serve
+	// it; this runs the same algorithm inline. A func-value seam (like
+	// contextWindowFor) so this package need not import the compaction stack.
+	// nil, or a nil return, disables compaction and the loop runs uncompacted.
+	newLoopCompactor func() agent.LoopCompactor
+}
+
+// SetLoopCompactorFactory installs the per-dispatch compactor factory. The
+// factory is called once per dispatch because compaction state (frozen
+// segment summaries) is per-conversation and must not be shared across
+// concurrent sub-agents.
+func (x *Service) SetLoopCompactorFactory(fn func() agent.LoopCompactor) {
+	x.newLoopCompactor = fn
 }
 
 // SetContextWindowResolver installs the resolver that maps a dispatch
@@ -568,6 +587,11 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 	if route := inference.TargetForContext(ctx, sel.Provider, inference.Call{Model: model, Tier: string(spec.Tier), FallbackTier: string(spec.FallbackTier)}); route.Profile != "" {
 		contextWindow, contextWindowKnown = route.ContextWindow, route.ContextWindowKnown
 	}
+	// Per-dispatch compactor: state is per-conversation, never shared.
+	var loopCompactor agent.LoopCompactor
+	if x.newLoopCompactor != nil {
+		loopCompactor = x.newLoopCompactor()
+	}
 	res, err := agent.RunToolLoop(ctx, agent.ToolLoopInput{
 		Provider:           sel.Provider,
 		Model:              model,
@@ -581,6 +605,7 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 		UserInput:          spec.Task,
 		MaxIterations:      spec.MaxIterations,
 		TokenBudget:        spec.TokenBudget,
+		LoopCompactor:      loopCompactor,
 		Temperature:        &greedy,
 		// Preserve the local runtime compatibility workaround, but never apply
 		// it to cloud-generated tool history. Startup fallback can switch the

@@ -244,6 +244,34 @@ func TestPlanningModeTriggerNamesSuggestPlan(t *testing.T) {
 	}
 }
 
+// The always-on trigger is the copy the model reads on every turn, so it must
+// carry the same exclusions as the suggest_plan description. Derived from a
+// session where 12 of 15 planning proposals were denied: settled-approach
+// implementation, bare execute commands, "give me a plan" meaning prose, and
+// mid-debugging proposals.
+func TestPlanningModeTriggerExcludesObservedFalsePositives(t *testing.T) {
+	p, _ := Get("planning-mode")
+	for _, want := range []string{
+		"agreed in conversation",
+		"however many subsystems it spans",
+		"instruction to build, fix, do, or try",
+		"asks for prose in your reply",
+		"keep debugging and fixing",
+		"design itself is still open",
+	} {
+		if !strings.Contains(p.Trigger, want) {
+			t.Errorf("planning-mode trigger must exclude observed false positive; missing %q", want)
+		}
+	}
+	if strings.Contains(p.Trigger, "complex cross-subsystem sequencing") {
+		t.Error("cross-subsystem sequencing must not stand alone as a planning criterion")
+	}
+	// The approval fence and artifact rules must survive the rewrite.
+	if !strings.Contains(p.Trigger, "MUST call `suggest_plan`") {
+		t.Error("trigger must retain the imperative to call suggest_plan first")
+	}
+}
+
 // TestPlanningModeForbidsHandAuthoringOutsidePlanningMode locks the fix for the
 // observed failure where the model recognized planning work ("this is planning
 // work, so I'll write a spec + plan") and then hand-authored spec.md/plan.md
@@ -424,8 +452,8 @@ func TestPlanningModeTriggerDefaultsToDirectExecution(t *testing.T) {
 	p, _ := Get("planning-mode")
 	for _, want := range []string{
 		"Default to direct execution", "clear, bounded", "even across multiple files",
-		"File count or multiple steps alone", "substantial", "architecture",
-		"explicitly asks", "brief inspection or a focused question",
+		"never justify planning mode on their own", "architecture",
+		"design itself is still open", "asking a focused question",
 	} {
 		if !strings.Contains(p.Trigger, want) {
 			t.Errorf("planning trigger missing %q", want)

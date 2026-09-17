@@ -358,3 +358,53 @@ repetitions of a non-reproducing fixture.
 Status: prepared but NOT run. The running agent predates `baseline_only` and
 `reasoning_effort` (strict input decoding would reject the fixture), so the
 rebuilt binary must be restarted into before the baseline attempt.
+
+
+## Baseline outcome and live evidence pivot — 2026-09-16
+
+The prepared audit baseline ran once (drop arm, `deepinfra` /
+`zai-org/GLM-5.3`, `reasoning_effort: high`, ~101K input tokens): reasoning
+arrived properly (731 nonempty chunks, 8,383 bytes — confirming the smoke
+pair's missing reasoning was a settings/prompt artifact, not a transport bug),
+but the model made zero tool calls and finished `stop` on the first response.
+The recorded cycle did NOT reproduce. Per the baseline gate, no paired trial
+was run and no further replay spending is planned: the loop evidently depended
+on untransportable context (original system prompt, wire settings, historical
+reasoning), so the retroactive causal question is closed as unprovable with
+the data we retain. The offline mechanism finding stands; the live cause
+remains unproven.
+
+### Forward-looking wire evidence (implemented)
+
+So the next suspected loop carries its own data, every normal OpenAI-compatible
+call now records adapter-measured reasoning **wire presence** — no reasoning
+text, no behavior change:
+
+- `llm.TokenUsage.ReasoningChunks/ReasoningBytes`: nonempty `reasoning_content`
+  delta count and total UTF-8 bytes for one attempt. Known-zero means the
+  adapter confirmed absence; unknown means the adapter doesn't measure (other
+  adapters unchanged for now). Observations, never summed into token costs.
+- Streaming counts every nonempty delta (evidence is still recorded when the
+  buffered reasoning is later promoted to visible text); non-streaming records
+  0/1 chunks from the completion message. Values ride the existing terminal
+  usage event, `usage.Attempt` accounting, the worker wire batch
+  (proto fields 21/22), and two additive nullable `inference_attempts` columns
+  (`reasoning_chunks`, `reasoning_bytes`) with an idempotent duplicate-tolerant
+  migration. Legacy rows stay NULL rather than inventing confirmed absence.
+- Query per-conversation presence with `sqlite3
+  ~/.config/cercano/telemetry.db "SELECT model, outcome, reasoning_chunks,
+  reasoning_bytes FROM inference_attempts WHERE conversation_id=? ORDER BY
+  started_at"` — a repetition loop whose attempts show `reasoning_chunks=0`
+  under a model that normally reasons is the signature this exists to catch.
+
+Found while verifying: `TestCollectorOwnsAccountingLane` failed on clean HEAD
+before these changes — the telemetry store opened SQLite without a busy
+timeout, so concurrent legacy-event and accounting writers hit immediate
+SQLITE_BUSY drops (the logged `failed to record event: database is locked`).
+Fixed by carrying `busy_timeout(5000)` in the DSN so every pooled connection
+waits instead of dropping; the package now passes 10 consecutive runs.
+
+Verified: llm (all adapters), telemetry (×10), usage, worker,
+reasoningexperiment, server, agent, runner, hostsvc/... package tests;
+focused race runs on the openai/usage presence tests; proto regenerated;
+go vet; signed make build. Restart required to run the new binary.

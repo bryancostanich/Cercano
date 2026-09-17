@@ -68,7 +68,11 @@ type streamReader struct {
 	// buffer it and, only if no normal text delta was emitted, flush it as a
 	// visible text delta at EOF. emittedText tracks whether real content streamed.
 	reasoningBuf strings.Builder
-	emittedText  bool
+
+	// Wire-presence evidence: nonempty reasoning_content deltas and their bytes.
+	// Counted even when reasoningBuf is later promoted to visible text.
+	reasoningChunks int64
+	emittedText     bool
 
 	// emittedToolCall is set once any tool-call fragment is seen. A tool-use turn
 	// is an action, and its reasoning is just thinking — never promote reasoning
@@ -122,6 +126,10 @@ func (r *streamReader) Next() (llm.StreamEvent, bool, error) {
 			// Terminal event carries both token counts (OpenAI only reports usage
 			// on the final chunk, so both live on EventMessageStop rather than split
 			// across EventMessageStart/EventMessageStop as in the Anthropic contract).
+			// Reasoning presence is measured by this adapter itself, so confirmed
+			// absence (zero) is evidence too — unlike provider-reported counts.
+			r.usage.ReasoningChunks = llm.ReportedTokens(r.reasoningChunks)
+			r.usage.ReasoningBytes = llm.ReportedTokens(int64(r.reasoningBuf.Len()))
 			r.pending = append(r.pending, llm.StreamEvent{
 				Type:         llm.EventMessageStop,
 				StopReason:   r.stopReason,
@@ -188,6 +196,7 @@ func (r *streamReader) Next() (llm.StreamEvent, bool, error) {
 		// normal content may still arrive — and flush it at EOF only if no real
 		// text streamed. See reasoningBuf comment above.
 		if delta.ReasoningContent != "" {
+			r.reasoningChunks++
 			r.reasoningBuf.WriteString(delta.ReasoningContent)
 		}
 

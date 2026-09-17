@@ -16189,8 +16189,11 @@ type AccountingAttemptObservation struct {
 	CacheWriteTokens   *int64                 `protobuf:"varint,18,opt,name=cache_write_tokens,json=cacheWriteTokens,proto3,oneof" json:"cache_write_tokens,omitempty"`
 	ReasoningTokens    *int64                 `protobuf:"varint,19,opt,name=reasoning_tokens,json=reasoningTokens,proto3,oneof" json:"reasoning_tokens,omitempty"`
 	UsageFinal         bool                   `protobuf:"varint,20,opt,name=usage_final,json=usageFinal,proto3" json:"usage_final,omitempty"` // Explicit provider final-usage evidence, independent of outcome.
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// Adapter-measured wire presence of reasoning deltas; observations, not costs.
+	ReasoningChunks *int64 `protobuf:"varint,21,opt,name=reasoning_chunks,json=reasoningChunks,proto3,oneof" json:"reasoning_chunks,omitempty"`
+	ReasoningBytes  *int64 `protobuf:"varint,22,opt,name=reasoning_bytes,json=reasoningBytes,proto3,oneof" json:"reasoning_bytes,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *AccountingAttemptObservation) Reset() {
@@ -16361,6 +16364,20 @@ func (x *AccountingAttemptObservation) GetUsageFinal() bool {
 		return x.UsageFinal
 	}
 	return false
+}
+
+func (x *AccountingAttemptObservation) GetReasoningChunks() int64 {
+	if x != nil && x.ReasoningChunks != nil {
+		return *x.ReasoningChunks
+	}
+	return 0
+}
+
+func (x *AccountingAttemptObservation) GetReasoningBytes() int64 {
+	if x != nil && x.ReasoningBytes != nil {
+		return *x.ReasoningBytes
+	}
+	return 0
 }
 
 // Sender retains ownership until persisted=true is received. Receivers reject
@@ -18684,7 +18701,7 @@ const file_agent_proto_rawDesc = "" +
 	"\x05error\x18\x03 \x01(\tR\x05error\x12\x18\n" +
 	"\awarning\x18\x04 \x01(\tR\awarning\x12%\n" +
 	"\x0econfig_written\x18\x05 \x01(\bR\rconfigWritten\x12!\n" +
-	"\flive_applied\x18\x06 \x01(\bR\vliveApplied\"\xfc\x06\n" +
+	"\flive_applied\x18\x06 \x01(\bR\vliveApplied\"\x83\b\n" +
 	"\x1cAccountingAttemptObservation\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1a\n" +
 	"\brevision\x18\x02 \x01(\x04R\brevision\x12!\n" +
@@ -18708,14 +18725,18 @@ const file_agent_proto_rawDesc = "" +
 	"\x12cache_write_tokens\x18\x12 \x01(\x03H\x05R\x10cacheWriteTokens\x88\x01\x01\x12.\n" +
 	"\x10reasoning_tokens\x18\x13 \x01(\x03H\x06R\x0freasoningTokens\x88\x01\x01\x12\x1f\n" +
 	"\vusage_final\x18\x14 \x01(\bR\n" +
-	"usageFinalB\x18\n" +
+	"usageFinal\x12.\n" +
+	"\x10reasoning_chunks\x18\x15 \x01(\x03H\aR\x0freasoningChunks\x88\x01\x01\x12,\n" +
+	"\x0freasoning_bytes\x18\x16 \x01(\x03H\bR\x0ereasoningBytes\x88\x01\x01B\x18\n" +
 	"\x16_started_at_utc_microsB\x16\n" +
 	"\x14_ended_at_utc_microsB\x0f\n" +
 	"\r_input_tokensB\x10\n" +
 	"\x0e_output_tokensB\x14\n" +
 	"\x12_cache_read_tokensB\x15\n" +
 	"\x13_cache_write_tokensB\x13\n" +
-	"\x11_reasoning_tokens\"\xfa\x01\n" +
+	"\x11_reasoning_tokensB\x13\n" +
+	"\x11_reasoning_chunksB\x12\n" +
+	"\x10_reasoning_bytes\"\xfa\x01\n" +
 	"\x15WorkerAccountingBatch\x12\x19\n" +
 	"\bbatch_id\x18\x01 \x01(\tR\abatchId\x12G\n" +
 	"\fobservations\x18\x02 \x03(\v2#.agent.AccountingAttemptObservationR\fobservations\x125\n" +

@@ -2119,6 +2119,9 @@ message AccountingAttemptObservation {
   optional int64 cache_write_tokens = 18;
   optional int64 reasoning_tokens = 19;
   bool usage_final = 20; // Explicit provider final-usage evidence, independent of outcome.
+  // Adapter-measured wire presence of reasoning deltas; observations, not costs.
+  optional int64 reasoning_chunks = 21;
+  optional int64 reasoning_bytes = 22;
 }
 
 // Sender retains ownership until persisted=true is received. Receivers reject

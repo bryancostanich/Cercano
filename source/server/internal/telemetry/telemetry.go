@@ -145,7 +145,11 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 		return nil, fmt.Errorf("failed to create telemetry directory: %w", err)
 	}
 
-	db, err := sql.Open("sqlite", dbPath)
+	// busy_timeout rides the DSN so EVERY pooled connection gets it, not only
+	// the one that executes a startup pragma. The legacy event lane and the
+	// accounting lane write concurrently; without the timeout a colliding
+	// writer fails immediately with SQLITE_BUSY and the event is dropped.
+	db, err := sql.Open("sqlite", dbPath+"?_pragma=busy_timeout(5000)")
 	if err != nil {
 		return nil, fmt.Errorf("failed to open telemetry database: %w", err)
 	}

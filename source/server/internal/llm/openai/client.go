@@ -243,8 +243,20 @@ func (c *Client) Chat(ctx context.Context, req llm.ChatRequest) (out llm.ChatRes
 		log.Printf("[openai] request failed: conv=%s request_id=%s backend=%s model=%s stream=false error=%v", req.ConversationID, req.RequestID, c.backend, wire.Model, err)
 		return llm.ChatResponse{}, c.normalize(err)
 	}
+	usageOut := finalUsage(resp.Usage)
+	if len(resp.Choices) > 0 {
+		// Adapter-measured presence: one non-streaming message is at most one
+		// reasoning chunk; confirmed absence records known zero.
+		reasoning := resp.Choices[0].Message.ReasoningContent
+		usageOut.ReasoningChunks = llm.ReportedTokens(0)
+		usageOut.ReasoningBytes = llm.ReportedTokens(0)
+		if reasoning != "" {
+			usageOut.ReasoningChunks = llm.ReportedTokens(1)
+			usageOut.ReasoningBytes = llm.ReportedTokens(int64(len(reasoning)))
+		}
+	}
 	out = llm.ChatResponse{
-		Usage:        finalUsage(resp.Usage),
+		Usage:        usageOut,
 		InputTokens:  resp.Usage.PromptTokens,
 		OutputTokens: resp.Usage.CompletionTokens,
 		Model:        resp.Model,

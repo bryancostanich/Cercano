@@ -30,6 +30,14 @@ type TokenUsage struct {
 	CacheRead  TokenCount `json:"cache_read"`
 	CacheWrite TokenCount `json:"cache_write"`
 	Reasoning  TokenCount `json:"reasoning"`
+
+	// ReasoningChunks/ReasoningBytes are WIRE-PRESENCE evidence for one attempt:
+	// how many nonempty reasoning_content deltas arrived and their total UTF-8
+	// bytes. They are observations, not consumed-token counts, and are never
+	// summed into Input/Output. Known with value 0 records confirmed absence on
+	// an adapter that inspects reasoning; unknown means the adapter does not.
+	ReasoningChunks TokenCount `json:"reasoning_chunks"`
+	ReasoningBytes  TokenCount `json:"reasoning_bytes"`
 }
 
 // Merge replaces reported fields, including legitimate zero. Missing fields do
@@ -50,6 +58,12 @@ func (u TokenUsage) Merge(next TokenUsage) TokenUsage {
 	}
 	if next.Reasoning.Known {
 		u.Reasoning = next.Reasoning
+	}
+	if next.ReasoningChunks.Known {
+		u.ReasoningChunks = next.ReasoningChunks
+	}
+	if next.ReasoningBytes.Known {
+		u.ReasoningBytes = next.ReasoningBytes
 	}
 	return u
 }

@@ -22,6 +22,11 @@ type Config struct {
 	APIKey  string
 	Model   string
 	Backend string // selects per-backend quirks; empty → defensive default
+	// AccountingProfile is the cloud profile's name, used as accounting
+	// metadata only — never for routing or quirks. It labels attempts from
+	// custom OpenAI-compatible endpoints (DeepInfra, Together, …) that carry
+	// no Backend selector, so their usage is not recorded as unknown.
+	AccountingProfile string
 	// OnHTTPError receives sanitized HTTP failure facts for OpenAI-compatible
 	// backends. It is called only for non-2xx HTTP responses and transport
 	// failures; request bodies and successful response bodies are never passed.
@@ -53,6 +58,9 @@ func NewClient(cfg Config) *Client {
 	accountingProvider := cfg.Backend
 	if accountingProvider == "" && (cfg.BaseURL == "" || strings.TrimRight(cfg.BaseURL, "/") == strings.TrimRight(c.BaseURL, "/")) {
 		accountingProvider = "openai"
+	}
+	if accountingProvider == "" {
+		accountingProvider = cfg.AccountingProfile
 	}
 
 	if cfg.BaseURL != "" {

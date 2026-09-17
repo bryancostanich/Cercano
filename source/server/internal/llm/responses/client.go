@@ -53,17 +53,23 @@ type Config struct {
 	// field exists so the outbound image-strip gate reads one uniform source of
 	// truth across both OpenAI-compatible clients.
 	SupportsVision bool
+	// AccountingProfile is the cloud profile's name, used as accounting
+	// metadata only — never for routing or auth. It labels attempts from
+	// custom Responses-compatible endpoints so usage is not recorded as
+	// unknown.
+	AccountingProfile string
 }
 
 // Client implements inference.Provider using the OpenAI Responses API.
 type Client struct {
-	http           httpx.Doer
-	baseURL        string
-	apiKey         string
-	model          string
-	route          string
-	tokens         TokenSource
-	supportsVision bool
+	http              httpx.Doer
+	baseURL           string
+	accountingProfile string
+	apiKey            string
+	model             string
+	route             string
+	tokens            TokenSource
+	supportsVision    bool
 	// tempUnsupported remembers models that rejected an explicit temperature
 	// ("Unsupported parameter: temperature" — the gpt-5-family reasoning
 	// models), so later calls skip the doomed attempt.
@@ -107,7 +113,7 @@ func NewClient(cfg Config) *Client {
 	if base == "" {
 		base = defaultBaseURL
 	}
-	return &Client{http: &http.Client{}, baseURL: base, apiKey: cfg.APIKey, model: cfg.Model, route: cfg.Route, tokens: cfg.TokenSource, supportsVision: cfg.SupportsVision}
+	return &Client{http: &http.Client{}, baseURL: base, accountingProfile: cfg.AccountingProfile, apiKey: cfg.APIKey, model: cfg.Model, route: cfg.Route, tokens: cfg.TokenSource, supportsVision: cfg.SupportsVision}
 }
 
 func (c *Client) Name() string { return "openai-responses" }
@@ -410,5 +416,5 @@ func (c *Client) accountingProviderName() string {
 	if base == defaultBaseURL || base == CodexBaseURL {
 		return c.Name()
 	}
-	return "" // preserve unknown identity for custom compatible endpoints
+	return c.accountingProfile // profile name when configured; else unknown
 }

@@ -102,7 +102,7 @@ func TestBlocksFromOpenAI_SuppressesLeakedToolCallText(t *testing.T) {
 		Content:   `[{"name":"Glob","arguments":{"pattern":"scratch/*"}}]`,
 		ToolCalls: []goopenai.ToolCall{toolCall},
 	}
-	b1 := blocksFromOpenAI(m1)
+	b1 := blocksFromOpenAI(m1, false)
 	if len(b1) != 1 || b1[0].Type != llm.BlockToolUse {
 		t.Fatalf("case1: expected only the tool_use block, got %+v", b1)
 	}
@@ -113,7 +113,7 @@ func TestBlocksFromOpenAI_SuppressesLeakedToolCallText(t *testing.T) {
 		Content:   `[{"name":"Bash","arguments":{"cmd":["ls"]}}]`,
 		ToolCalls: []goopenai.ToolCall{toolCall},
 	}
-	b2 := blocksFromOpenAI(m2)
+	b2 := blocksFromOpenAI(m2, false)
 	if len(b2) != 1 || b2[0].Type != llm.BlockToolUse {
 		t.Fatalf("case2: expected only the tool_use block, got %+v", b2)
 	}
@@ -123,7 +123,7 @@ func TestBlocksFromOpenAI_SuppressesLeakedToolCallText(t *testing.T) {
 		Content:   "Let me search the scratch directory.",
 		ToolCalls: []goopenai.ToolCall{toolCall},
 	}
-	b3 := blocksFromOpenAI(m3)
+	b3 := blocksFromOpenAI(m3, false)
 	if len(b3) != 2 || b3[0].Type != llm.BlockText || b3[1].Type != llm.BlockToolUse {
 		t.Fatalf("case3: expected text + tool_use, got %+v", b3)
 	}
@@ -134,7 +134,7 @@ func TestBlocksFromOpenAI_SuppressesLeakedToolCallText(t *testing.T) {
 	m4 := goopenai.ChatCompletionMessage{
 		Content: `[{"name":"Glob","arguments":{"pattern":"scratch/*"}}]`,
 	}
-	b4 := blocksFromOpenAI(m4)
+	b4 := blocksFromOpenAI(m4, false)
 	if len(b4) != 1 || b4[0].Type != llm.BlockText {
 		t.Fatalf("case4: expected the text block preserved, got %+v", b4)
 	}
@@ -145,7 +145,7 @@ func TestBlocksFromOpenAI_SuppressesLeakedToolCallText(t *testing.T) {
 		Content:   `[{"result":42}]`,
 		ToolCalls: []goopenai.ToolCall{toolCall},
 	}
-	b5 := blocksFromOpenAI(m5)
+	b5 := blocksFromOpenAI(m5, false)
 	if len(b5) != 2 || b5[0].Type != llm.BlockText {
 		t.Fatalf("case5: expected text + tool_use, got %+v", b5)
 	}
@@ -161,7 +161,7 @@ func TestBlocksFromOpenAI_RecoversReasoningWhenContentEmpty(t *testing.T) {
 		Content:          "",
 		ReasoningContent: "The answer is 42.",
 	}
-	bA := blocksFromOpenAI(mA)
+	bA := blocksFromOpenAI(mA, false)
 	if len(bA) != 1 || bA[0].Type != llm.BlockText || bA[0].Text != "The answer is 42." {
 		t.Fatalf("caseA: expected one recovered text block, got %+v", bA)
 	}
@@ -171,14 +171,14 @@ func TestBlocksFromOpenAI_RecoversReasoningWhenContentEmpty(t *testing.T) {
 		Content:          "Real answer.",
 		ReasoningContent: "internal thinking",
 	}
-	bB := blocksFromOpenAI(mB)
+	bB := blocksFromOpenAI(mB, false)
 	if len(bB) != 1 || bB[0].Type != llm.BlockText || bB[0].Text != "Real answer." {
 		t.Fatalf("caseB: expected only the content text block, got %+v", bB)
 	}
 
 	// Case C: both empty -> no blocks.
 	mC := goopenai.ChatCompletionMessage{}
-	bC := blocksFromOpenAI(mC)
+	bC := blocksFromOpenAI(mC, false)
 	if len(bC) != 0 {
 		t.Fatalf("caseC: expected no blocks, got %+v", bC)
 	}
@@ -194,7 +194,7 @@ func TestBlocksFromOpenAI_RecoversReasoningWhenContentEmpty(t *testing.T) {
 		ReasoningContent: "I should search scratch.",
 		ToolCalls:        []goopenai.ToolCall{toolCall},
 	}
-	bD := blocksFromOpenAI(mD)
+	bD := blocksFromOpenAI(mD, false)
 	if len(bD) != 1 || bD[0].Type != llm.BlockToolUse {
 		t.Fatalf("caseD: expected only the tool_use block, got %+v", bD)
 	}

@@ -53,6 +53,13 @@ func messagesToInput(msgs []llm.Message) ([]inputItem, error) {
 				out, _ := json.Marshal(b.Content)
 				items = append(items, inputItem{Type: "function_call_output", CallID: b.ToolUseRef, Output: json.RawMessage(out)})
 			case llm.BlockReasoning:
+				// Reasoning captured on the chat_completions wire (GLM-style:
+				// plaintext data, no item ID) is meaningless to the Responses
+				// API and would be rejected as a malformed reasoning item.
+				// Only replay genuine Responses items, which always carry IDs.
+				if b.ReasoningID == "" {
+					continue
+				}
 				flush()
 				items = append(items, inputItem{Type: "reasoning", ID: b.ReasoningID, EncryptedContent: b.ReasoningData, Summary: json.RawMessage("[]")})
 			}

@@ -332,7 +332,18 @@ func runArm(ctx context.Context, p inference.Provider, s Spec, bounds openai.Rea
 			arm.Status = "continuation_reasoning_unavailable"
 			return arm
 		}
-		history = append(history, llm.Message{Role: llm.RoleAssistant, Blocks: response.Blocks}, llm.Message{Role: llm.RoleUser, Blocks: toolResults})
+		// The production GLM path now captures reasoning as a round-trip block
+		// and the adapter would replay it itself — making the session see
+		// preexisting reasoning and fail closed. The experiment requires the
+		// diagnostic session to be the ONLY reasoning intervention, so strip
+		// captured reasoning blocks from the driver-built history.
+		assistant := make([]llm.Block, 0, len(response.Blocks))
+		for _, b := range response.Blocks {
+			if b.Type != llm.BlockReasoning {
+				assistant = append(assistant, b)
+			}
+		}
+		history = append(history, llm.Message{Role: llm.RoleAssistant, Blocks: assistant}, llm.Message{Role: llm.RoleUser, Blocks: toolResults})
 	}
 	return arm
 }

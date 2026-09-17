@@ -171,6 +171,14 @@ func (c *Client) buildRequest(req llm.ChatRequest, stream bool) goopenai.ChatCom
 	if req.DisableThinking && c.backend == "llama_server" {
 		r.ChatTemplateKwargs = map[string]any{"enable_thinking": false}
 	}
+	// Hosted GLM chain-of-thought models degrade badly when the provider
+	// default leaves thinking off (verified by the reasoning diagnostic:
+	// zero reasoning_content arrived until the effort was pinned). Pin it
+	// for the GLM family on non-local backends only; DisableThinking (used
+	// by deliberately non-reasoning surfaces like the watchdog) wins.
+	if c.backend != "llama_server" && !req.DisableThinking && glmReasoningModel(r.Model) {
+		r.ReasoningEffort = glmReasoningEffort
+	}
 	if stream {
 		// Request usage on the final chunk so InputTokens/OutputTokens are
 		// available for EventMessageStop.
@@ -192,6 +200,12 @@ func (c *Client) buildRequest(req llm.ChatRequest, stream bool) goopenai.ChatCom
 		}
 	}
 	return r
+}
+
+// keepsToolReasoning mirrors the buildRequest reasoning-effort gate: only
+// GLM-family cloud calls capture tool-call reasoning for round-trip.
+func (c *Client) keepsToolReasoning(req llm.ChatRequest) bool {
+	return c.backend != "llama_server" && !req.DisableThinking && glmReasoningModel(modelOr(c.model, req.Model))
 }
 
 func modelOr(def, override string) string {
@@ -262,7 +276,7 @@ func (c *Client) Chat(ctx context.Context, req llm.ChatRequest) (out llm.ChatRes
 		Model:        resp.Model,
 	}
 	if len(resp.Choices) > 0 {
-		out.Blocks = blocksFromOpenAI(resp.Choices[0].Message)
+		out.Blocks = blocksFromOpenAI(resp.Choices[0].Message, c.keepsToolReasoning(req))
 		out.StopReason = string(resp.Choices[0].FinishReason)
 	}
 	return out, nil
@@ -290,7 +304,7 @@ func (c *Client) StreamChat(ctx context.Context, req llm.ChatRequest) (llm.Strea
 		a.FinishResponse(llm.ChatResponse{}, c.normalize(err))
 		return nil, c.normalize(err)
 	}
-	r := newStreamReader(stream)
+	r := newStreamReaderRoundTrip(stream, c.keepsToolReasoning(req))
 	r.normalize = c.normalize
 	if a != nil {
 		r.observeModel = func(model string) { a.Observe(llm.TokenUsage{}, &llm.ServingRoute{Model: model}) }

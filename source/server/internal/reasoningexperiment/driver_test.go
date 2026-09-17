@@ -266,3 +266,44 @@ func TestPairDeadline(t *testing.T) {
 		}
 	}
 }
+
+// The production GLM client now pins reasoning_effort and replays captured
+// reasoning itself. Diagnostic sessions must stay the only intervention:
+// against a GLM model the pair must still run without tripping the
+// preexisting-reasoning guard, in both arms.
+func TestPairWithGLMProductionCaptureStaysIsolated(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			ReasoningEffort string           `json:"reasoning_effort"`
+			Messages        []map[string]any `json:"messages"`
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+		if body.ReasoningEffort != "high" {
+			t.Error("production effort pin missing")
+		}
+		if len(body.Messages) == 1 {
+			callSSE(w, "first", "Read", `{"path":"fixture.txt"}`)
+			return
+		}
+		send(w, `{"choices":[{"index":0,"delta":{"content":"done"},"finish_reason":"stop"}]}`, "[DONE]")
+	}))
+	defer srv.Close()
+	s := fixtureSpec()
+	s.Model = "zai-org/GLM-5.3"
+	s.ReasoningEffort = "high"
+	report, err := Run(t.Context(), fixtureConfig(srv.URL+"/v1"), s, func(p config.CloudProfile) (inference.Provider, error) {
+		return openai.NewClient(openai.Config{BaseURL: p.BaseURL, Model: p.Model, APIKey: "k"}), nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range report.Arms {
+		if a.Status != "terminal_stop" || len(a.Steps) != 2 {
+			t.Fatalf("arm %+v", a)
+		}
+	}
+	// Preserve arm replayed via the session; drop arm removed reasoning.
+	if !report.Arms[1].Steps[1].ReasoningReplayed || report.Arms[0].Steps[1].ReasoningReplayed {
+		t.Fatalf("replay flags wrong: %+v", report.Arms)
+	}
+}

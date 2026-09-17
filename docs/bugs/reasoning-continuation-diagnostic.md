@@ -408,3 +408,40 @@ Verified: llm (all adapters), telemetry (×10), usage, worker,
 reasoningexperiment, server, agent, runner, hostsvc/... package tests;
 focused race runs on the openai/usage presence tests; proto regenerated;
 go vet; signed make build. Restart required to run the new binary.
+
+
+## Production fix: GLM effort pin + reasoning round-trip — 2026-09-17
+
+Investigating the CERCANO-PUBLISHING dispatch failures showed hosted GLM
+dispatches degrading exactly as a no-thinking profile predicts (refusals from
+priors, malformed tool calls, synthetic-summary echoes), while the diagnostic
+had already proven DeepInfra serves zero reasoning until the effort field is
+pinned. The production chat_completions client now:
+
+- pins `reasoning_effort: high` for GLM-family models (`glm-*` basename) on
+  non-llama-server backends; `DisableThinking` surfaces (e.g. watchdog) win
+  and remain reasoning-free. Other models' requests are byte-identical.
+- captures `reasoning_content` that accompanies tool calls as an opaque
+  `BlockReasoning` round-trip block (streaming and non-streaming), and the
+  adapter returns it verbatim on the continuation's assistant tool-call
+  message, per z.ai's protocol. Terminal no-tool-call answers keep the
+  existing promote-to-text recovery. Non-GLM and local paths are unchanged.
+- Responses-flavor replay now requires a reasoning item ID, so chat-captured
+  plaintext state can never be sent to the Responses API.
+- the experiment driver strips production-captured reasoning from its built
+  history so diagnostic sessions remain the only intervention (guarded by
+  `TestPairWithGLMProductionCaptureStaysIsolated`).
+
+Caveats: reasoning tokens are now billed on every GLM cloud call; the pinned
+`high` is the overlap of DeepInfra's documented values and the GLM card's —
+the card's `max` is not sent. Live effect on dispatch quality is unmeasured
+until real dispatches run; the presence columns in telemetry.db are the
+measurement. Remaining non-reasoning failure classes (context runaway, large
+payload provider kills) are tracked in docs/bugs/deepinfra-dispatch-followups.md.
+
+Verified: family gating table; effort pin + round-trip + isolation gates
+(cloud GLM / flash / DisableThinking / non-GLM / llama-server); replay lands
+only on the assistant tool-call turn, exactly once; terminal promotion
+regression; non-streaming mirror; presence accounting agreement; full llm,
+agent, worker, runner, trajectory, reasoningexperiment suites; focused race
+runs; go vet; signed make build.

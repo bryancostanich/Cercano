@@ -211,4 +211,3 @@ func TestStrippedMessagesHaveNoImageParts(t *testing.T) {
 		}
 	}
 }
-

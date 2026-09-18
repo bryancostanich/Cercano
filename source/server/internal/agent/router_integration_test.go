@@ -33,63 +33,63 @@ func TestSmartRouter_Integration_SelectProvider(t *testing.T) {
 	}
 
 	testCases := []struct {
-		name                 string
-		input                string
+		name                   string
+		input                  string
 		expectedClassification string
 	}{
 		// --- OpenModel (Novel Phrasings) ---
 		{
-			name:                 "Refactor: Extract method",
-			input:                "Pull the logic inside this for-loop out into a separate function called 'processItem'.",
+			name:                   "Refactor: Extract method",
+			input:                  "Pull the logic inside this for-loop out into a separate function called 'processItem'.",
 			expectedClassification: "OpenModel",
 		},
 		{
-			name:                 "File System: Cleanup",
-			input:                "Get rid of all the .tmp files in the current folder.",
+			name:                   "File System: Cleanup",
+			input:                  "Get rid of all the .tmp files in the current folder.",
 			expectedClassification: "OpenModel",
 		},
 		{
-			name:                 "Analysis: Complexity",
-			input:                "Calculate the cyclomatic complexity of the 'NewSmartRouter' function.",
+			name:                   "Analysis: Complexity",
+			input:                  "Calculate the cyclomatic complexity of the 'NewSmartRouter' function.",
 			expectedClassification: "OpenModel",
 		},
 		{
-			name:                 "Editing: Typo fix",
-			input:                "Fix the spelling mistake in the variable 'threshold'.",
+			name:                   "Editing: Typo fix",
+			input:                  "Fix the spelling mistake in the variable 'threshold'.",
 			expectedClassification: "OpenModel",
 		},
 
 		// --- CloudModel (Novel Phrasings) ---
 		{
-			name:                 "Knowledge: Algorithms",
-			input:                "Explain how a bloom filter works and when I should use one.",
+			name:                   "Knowledge: Algorithms",
+			input:                  "Explain how a bloom filter works and when I should use one.",
 			expectedClassification: "CloudModel",
 		},
 		{
-			name:                 "System Design: Scalability",
-			input:                "What strategies can I use to shard a Postgres database without downtime?",
+			name:                   "System Design: Scalability",
+			input:                  "What strategies can I use to shard a Postgres database without downtime?",
 			expectedClassification: "CloudModel",
 		},
 		{
-			name:                 "Creative: Marketing",
-			input:                "Draft a tweet announcing the launch of our new AI tool.",
+			name:                   "Creative: Marketing",
+			input:                  "Draft a tweet announcing the launch of our new AI tool.",
 			expectedClassification: "CloudModel",
 		},
-		
+
 		// --- Fallback / Ambiguous (Should default to CloudModel) ---
 		{
-			name:                 "Ambiguous: Hello",
-			input:                "Hello there.",
+			name:                   "Ambiguous: Hello",
+			input:                  "Hello there.",
 			expectedClassification: "CloudModel",
 		},
 		{
-			name:                 "Ambiguous: Gibberish",
-			input:                "xyz 123 foo bar baz qux.",
+			name:                   "Ambiguous: Gibberish",
+			input:                  "xyz 123 foo bar baz qux.",
 			expectedClassification: "CloudModel",
 		},
 		{
-			name:                 "Ambiguous: Philosophical",
-			input:                "What is the meaning of life?",
+			name:                   "Ambiguous: Philosophical",
+			input:                  "What is the meaning of life?",
 			expectedClassification: "CloudModel",
 		},
 	}
@@ -112,7 +112,8 @@ func TestSmartRouter_Integration_SelectProvider(t *testing.T) {
 				t.Errorf("Incorrect classification. Expected '%s', got '%s'", tc.expectedClassification, selectedProvider.Name())
 			}
 		})
-	}}
+	}
+}
 
 // mockModelProvider is a mock implementation of the agent.TurnRunner interface for testing.
 type mockModelProvider struct {

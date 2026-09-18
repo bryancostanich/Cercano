@@ -52,7 +52,7 @@ func TestRouter_ClassifiesUnitTestGenerationAsLocal(t *testing.T) {
 
 		// High Complexity Tasks
 		"Refactor this massive monolithic": `{"embedding": [0.5, 0.5]}`,
-		"Implement a complex raft":        `{"embedding": [0.5, 0.5]}`,
+		"Implement a complex raft":         `{"embedding": [0.5, 0.5]}`,
 	}
 
 	embedder := &mockEmbedder{responses: mockResponses}
@@ -95,7 +95,7 @@ func TestRouter_ClassifiesUnitTestGenerationAsLocal(t *testing.T) {
 		mockResponses[tc.input] = tc.mockEmbedding
 
 		req := &Request{Input: tc.input}
-		
+
 		intent, err := r.ClassifyIntent(req)
 		if err != nil {
 			t.Errorf("ClassifyIntent failed for input '%s': %v", tc.input, err)

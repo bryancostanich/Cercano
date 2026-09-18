@@ -3,7 +3,6 @@ package tools
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"strings"
 )
 
@@ -17,29 +16,30 @@ func NewGoValidator() *GoValidator {
 
 // Validate runs 'go test' if tests exist, or 'go build' otherwise.
 func (v *GoValidator) Validate(ctx context.Context, dir string) (Decision, error) {
-	cmd := exec.CommandContext(ctx, "go", "test", "-c", "-o", "/dev/null")
-	cmd.Dir = dir
-	output, err := cmd.CombinedOutput()
-
+	outStr, ok, err := runValidator(ctx, goValidateTimeout, dir, "go", "test", "-c", "-o", "/dev/null")
 	if err != nil {
-		outStr := string(output)
+		return Failed, fmt.Errorf("compilation failed:\n%s", outStr)
+	}
+	if !ok {
 		if strings.Contains(outStr, "no test files") {
-			buildCmd := exec.CommandContext(ctx, "go", "build", "-o", "/dev/null", "./...")
-			buildCmd.Dir = dir
-			buildOutput, buildErr := buildCmd.CombinedOutput()
+			buildOut, buildOK, buildErr := runValidator(ctx, goValidateTimeout, dir, "go", "build", "-o", "/dev/null", "./...")
 			if buildErr != nil {
-				return Failed, fmt.Errorf("build failed:\n%s", cleanOutput(string(buildOutput)))
+				return Failed, fmt.Errorf("build failed:\n%s", buildOut)
+			}
+			if !buildOK {
+				return Failed, fmt.Errorf("build failed:\n%s", buildOut)
 			}
 			return Passed, nil
 		}
-		return Failed, fmt.Errorf("compilation failed:\n%s", cleanOutput(outStr))
+		return Failed, fmt.Errorf("compilation failed:\n%s", outStr)
 	}
 
-	cmdRun := exec.CommandContext(ctx, "go", "test", "-v")
-	cmdRun.Dir = dir
-	outputRun, err := cmdRun.CombinedOutput()
+	runOut, runOK, err := runValidator(ctx, goValidateTimeout, dir, "go", "test", "-v")
 	if err != nil {
-		return Failed, fmt.Errorf("tests failed:\n%s", cleanOutput(string(outputRun)))
+		return Failed, fmt.Errorf("tests failed:\n%s", runOut)
+	}
+	if !runOK {
+		return Failed, fmt.Errorf("tests failed:\n%s", runOut)
 	}
 
 	return Passed, nil

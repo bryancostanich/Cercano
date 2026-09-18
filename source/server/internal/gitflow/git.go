@@ -5,12 +5,24 @@
 package gitflow
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"os/exec"
 	"strconv"
 	"strings"
+	"time"
+
+	"cercano/source/server/internal/procx"
+)
+
+// Timeouts for shelling out to git. Plain porcelain/plumbing queries are
+// local and near-instant, so a small bound catches a wedged git (an index
+// lock held by another process, a credential prompt waiting on a tty that
+// will never answer) instead of hanging the turn. Network-capable and
+// history-rewriting operations get a much larger bound: they can legitimately
+// take minutes on a big repo, and killing one midway is worse than waiting.
+const (
+	gitQueryTimeout = 30 * time.Second
+	gitWriteTimeout = 10 * time.Minute
 )
 
 // Repo is a working directory backed by a git repository.
@@ -27,17 +39,28 @@ func Open(dir string) (*Repo, error) {
 	return r, nil
 }
 
-// run executes git with args in the repo dir and returns trimmed combined output.
+// run executes git with args in the repo dir and returns trimmed combined
+// output, bounded by gitQueryTimeout. Use runFor when the operation can
+// legitimately run long.
 func (r *Repo) run(ctx context.Context, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = r.Dir
-	var buf bytes.Buffer
-	cmd.Stdout = &buf
-	cmd.Stderr = &buf
-	err := cmd.Run()
-	out := strings.TrimSpace(buf.String())
+	return r.runFor(ctx, gitQueryTimeout, args...)
+}
+
+// runFor is run with an explicit timeout.
+func (r *Repo) runFor(ctx context.Context, timeout time.Duration, args ...string) (string, error) {
+	res, err := procx.Run(ctx, procx.Options{
+		Args:    append([]string{"git"}, args...),
+		Dir:     r.Dir,
+		Timeout: timeout,
+	})
+	out := strings.TrimSpace(string(res.Combined()))
 	if err != nil {
+		// Timeout/cancel: out still holds whatever git managed to print,
+		// which is usually the only clue about where it wedged.
 		return out, fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, out)
+	}
+	if res.ExitCode != 0 {
+		return out, fmt.Errorf("git %s: exit status %d: %s", strings.Join(args, " "), res.ExitCode, out)
 	}
 	return out, nil
 }
@@ -94,16 +117,25 @@ func (r *Repo) RevParse(ctx context.Context, ref string) (string, error) {
 
 // IsAncestor reports whether a is an ancestor of b (a..b fast-forwardable).
 func (r *Repo) IsAncestor(ctx context.Context, a, b string) (bool, error) {
-	cmd := exec.CommandContext(ctx, "git", "merge-base", "--is-ancestor", a, b)
-	cmd.Dir = r.Dir
-	err := cmd.Run()
-	if err == nil {
+	// Exit 1 is the legitimate "no" answer here, not a failure — procx
+	// reports a clean non-zero exit with a nil error for exactly this case.
+	res, err := procx.Run(ctx, procx.Options{
+		Args:    []string{"git", "merge-base", "--is-ancestor", a, b},
+		Dir:     r.Dir,
+		Timeout: gitQueryTimeout,
+	})
+	if err != nil {
+		return false, fmt.Errorf("git merge-base --is-ancestor: %w", err)
+	}
+	switch res.ExitCode {
+	case 0:
 		return true, nil
-	}
-	if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 1 {
+	case 1:
 		return false, nil
+	default:
+		return false, fmt.Errorf("git merge-base --is-ancestor: exit status %d: %s",
+			res.ExitCode, strings.TrimSpace(string(res.Combined())))
 	}
-	return false, fmt.Errorf("git merge-base --is-ancestor: %w", err)
 }
 
 // MergeBase returns the best common ancestor of a and b.

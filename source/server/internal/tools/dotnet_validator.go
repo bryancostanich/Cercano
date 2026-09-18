@@ -16,11 +16,12 @@ func (v *DotnetValidator) Validate(ctx context.Context, workDir string) (Decisio
 	if _, err := exec.LookPath("dotnet"); err != nil {
 		return Failed, errors.New("dotnet validator: command 'dotnet' not found in PATH — install .NET SDK or set validator.command in .cercano/config.yaml to override")
 	}
-	cmd := exec.CommandContext(ctx, "dotnet", "build", "--nologo", "-clp:NoSummary")
-	cmd.Dir = workDir
-	out, err := cmd.CombinedOutput()
+	out, ok, err := runValidator(ctx, dotnetValidateTimeout, workDir, "dotnet", "build", "--nologo", "-clp:NoSummary")
 	if err != nil {
-		return Failed, fmt.Errorf("dotnet build failed:\n%s", cleanOutput(string(out)))
+		return Failed, fmt.Errorf("dotnet build failed: %w\n%s", err, out)
+	}
+	if !ok {
+		return Failed, fmt.Errorf("dotnet build failed:\n%s", out)
 	}
 	return Passed, nil
 }

@@ -23,11 +23,12 @@ func (v *PythonValidator) Validate(ctx context.Context, workDir string) (Decisio
 	} else {
 		return Failed, errors.New("python validator: neither 'python3' nor 'python' found in PATH — install Python 3 or set validator.command in .cercano/config.yaml to override")
 	}
-	cmd := exec.CommandContext(ctx, bin, "-m", "compileall", "-q", ".")
-	cmd.Dir = workDir
-	out, err := cmd.CombinedOutput()
+	out, ok, err := runValidator(ctx, pyValidateTimeout, workDir, bin, "-m", "compileall", "-q", ".")
 	if err != nil {
-		return Failed, fmt.Errorf("python compile failed:\n%s", cleanOutput(string(out)))
+		return Failed, fmt.Errorf("python compile failed: %w\n%s", err, out)
+	}
+	if !ok {
+		return Failed, fmt.Errorf("python compile failed:\n%s", out)
 	}
 	return Passed, nil
 }

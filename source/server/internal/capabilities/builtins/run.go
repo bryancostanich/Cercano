@@ -26,7 +26,7 @@ func (runCommandCap) Name() string                  { return "run_command" }
 func (runCommandCap) Tier() capabilities.Tier        { return capabilities.TierW }
 func (runCommandCap) Surfaces() capabilities.Surface { return capabilities.SurfaceAgent | capabilities.SurfaceMCP }
 func (runCommandCap) Description() string {
-	return "Run a shell command and capture its output. Args: {cmd: [argv strings], cwd?: string, timeout_seconds?: int (default 60), env?: {key: value}}."
+	return "Run a shell command and capture its output. Args: {cmd: [argv strings], cwd?: string, timeout_seconds?: int (omit for the 60s default; -1 runs with no timeout), env?: {key: value}}. Use -1 for genuinely unbounded work (long builds, migrations); the command is still killed if the turn is cancelled."
 }
 func (runCommandCap) Schema() capabilities.Schema {
 	return capabilities.Schema(`{
@@ -35,7 +35,8 @@ func (runCommandCap) Schema() capabilities.Schema {
 		"properties": {
 			"cmd":             {"type": "array", "items": {"type": "string"}, "minItems": 1},
 			"cwd":             {"type": "string"},
-			"timeout_seconds": {"type": "integer", "minimum": 1, "default": 60},
+			"timeout_seconds": {"type": "integer", "minimum": -1, "default": 60,
+			                    "description": "Seconds before the command is killed. Omit or 0 for the 60s default. -1 disables the timeout entirely."},
 			"env":             {"type": "object", "additionalProperties": {"type": "string"}}
 		}
 	}`)
@@ -57,12 +58,27 @@ func (runCommandCap) Execute(ctx context.Context, call *capabilities.Call) (*cap
 		return nil, errors.New("run_command: cmd is required and must have at least one element")
 	}
 
-	timeout := time.Duration(a.TimeoutSeconds) * time.Second
-	if timeout <= 0 {
-		timeout = 60 * time.Second
+	// Timeout semantics:
+	//   omitted / 0 -> default (Go's zero value makes "absent" and "explicit
+	//                  0" indistinguishable, which is exactly why the
+	//                  unbounded sentinel is -1 and not 0)
+	//   > 0         -> that many seconds
+	//   -1          -> no timeout; run to completion
+	//   < -1        -> rejected, so a typo'd -60 can't silently mean "forever"
+	timeout, err := runCmdResolveTimeout(a.TimeoutSeconds)
+	if err != nil {
+		return nil, err
 	}
 
-	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	// Unbounded still derives from ctx: no deadline, but turn cancellation
+	// (Esc) and shutdown continue to reap the process group.
+	var runCtx context.Context
+	var cancel context.CancelFunc
+	if timeout == noRunTimeout {
+		runCtx, cancel = context.WithCancel(ctx)
+	} else {
+		runCtx, cancel = context.WithTimeout(ctx, timeout)
+	}
 	defer cancel()
 
 	cmd := exec.CommandContext(runCtx, a.Cmd[0], a.Cmd[1:]...)
@@ -95,7 +111,7 @@ func (runCommandCap) Execute(ctx context.Context, call *capabilities.Call) (*cap
 	cmd.Stderr = &stderr
 
 	startedAt := time.Now()
-	err := cmd.Run()
+	err = cmd.Run()
 	elapsed := time.Since(startedAt)
 
 	// Final sweep: WaitDelay's escalation only SIGKILLs the direct child, so
@@ -116,6 +132,14 @@ func (runCommandCap) Execute(ctx context.Context, call *capabilities.Call) (*cap
 			// killed: on a hang, that partial output is usually the only
 			// evidence of where it got stuck.
 			return nil, fmt.Errorf("run_command: timed out after %s%s", timeout,
+				runCmdPartialOutput(stdout.Bytes(), stderr.Bytes()))
+		}
+		// Turn cancelled (Esc) or server shutdown. Worth distinguishing from a
+		// plain non-zero exit: with timeout_seconds=-1 this is the *only* way
+		// a long run ends early, so it should not look like the command
+		// itself failed.
+		if errors.Is(runCtx.Err(), context.Canceled) {
+			return nil, fmt.Errorf("run_command: cancelled after %s%s", elapsed.Round(time.Millisecond),
 				runCmdPartialOutput(stdout.Bytes(), stderr.Bytes()))
 		}
 		var ee *exec.ExitError
@@ -154,6 +178,31 @@ func (runCommandCap) Execute(ctx context.Context, call *capabilities.Call) (*cap
 	}
 
 	return res, nil
+}
+
+// noRunTimeout is the sentinel Duration meaning "no deadline", produced by
+// timeout_seconds = -1. Distinct from 0, which means "use the default".
+const noRunTimeout = time.Duration(-1)
+
+// runCmdDefaultTimeout is used when timeout_seconds is omitted or 0.
+const runCmdDefaultTimeout = 60 * time.Second
+
+// runCmdResolveTimeout maps the raw timeout_seconds argument onto a Duration.
+// See the call site for the full semantics table.
+func runCmdResolveTimeout(secs int) (time.Duration, error) {
+	switch {
+	case secs == 0:
+		return runCmdDefaultTimeout, nil
+	case secs > 0:
+		return time.Duration(secs) * time.Second, nil
+	case secs == -1:
+		return noRunTimeout, nil
+	default:
+		// Only -1 is a valid negative. Anything else is far more likely a
+		// typo or a sign error than a deliberate request, and silently
+		// treating it as unbounded would turn a slip into a hung turn.
+		return 0, fmt.Errorf("run_command: invalid timeout_seconds %d: use a positive number of seconds, 0 for the default (%s), or -1 for no timeout", secs, runCmdDefaultTimeout)
+	}
 }
 
 // runCommandWaitDelay bounds how long os/exec waits, after cancellation, for

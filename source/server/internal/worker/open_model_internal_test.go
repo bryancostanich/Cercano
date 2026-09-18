@@ -25,7 +25,11 @@ func TestWorkerResolver_OpenModelFromEverydayTier(t *testing.T) {
 		LocusMode:   "open_only",
 		OpenRuntime: "llama_server",
 		OpenModel:   "", // finalizeModelTiers blanks this on every load path
-		Models:      workerTestModels("llama_server", map[pkgcfg.Tier]string{pkgcfg.TierMostCapable: "qwen3-coder"}),
+		// The guard is "read the active runtime override, not the blanked legacy
+		// field". Pin Chat to premium so the most_capable override is the tier
+		// actually requested.
+		TaskAssignments: map[pkgcfg.Task]pkgcfg.TaskAssignment{pkgcfg.TaskChat: {Quality: pkgcfg.CostPremium}},
+		Models:          workerTestModels("llama_server", map[pkgcfg.Tier]string{pkgcfg.TierMostCapable: "qwen3-coder"}),
 	}
 	r := &workerResolver{cfgSvc: cfgsvc.New("", cfg, secrets.NewMemory())}
 
@@ -40,7 +44,11 @@ func TestWorkerResolver_OpenModelFromEverydayTier(t *testing.T) {
 }
 
 func TestMainAvailabilityUsesSelectedTaskQuality(t *testing.T) {
-	c := pkgcfg.Config{OpenRuntime: "ollama", LocusMode: "open_only", Models: pkgcfg.ModelsConfig{Open: pkgcfg.OpenModels{Overrides: map[string]map[string]string{"ollama": {string(pkgcfg.TierMostCapable): "premium-only"}}}}}
+	c := pkgcfg.Config{OpenRuntime: "ollama", LocusMode: "open_only",
+		// Named for the premium/everyday split: Chat is pinned premium so the
+		// "premium-only" model is the one selected task quality asks for.
+		TaskAssignments: map[pkgcfg.Task]pkgcfg.TaskAssignment{pkgcfg.TaskChat: {Quality: pkgcfg.CostPremium}},
+		Models:          pkgcfg.ModelsConfig{Open: pkgcfg.OpenModels{Overrides: map[string]map[string]string{"ollama": {string(pkgcfg.TierMostCapable): "premium-only"}}}}}
 	r := &workerResolver{cfgSvc: cfgsvc.New("", c, nil), openProv: &readinessStub{}}
 	provider, isCloud, _, err := r.Main()
 	if err != nil || isCloud || provider == nil {

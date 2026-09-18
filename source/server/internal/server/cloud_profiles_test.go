@@ -417,8 +417,11 @@ func TestUpsertCloudProfileRebuildsActiveProvider(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Make messages-one the active profile and trigger an initial rebuild.
+	// premiumChoices sets only a premium override, so pin Chat to premium:
+	// this test is about rebuild-on-upsert, not the default Chat quality.
 	s.cfgSvc.Mutate(func(c *config.Config) {
 		c.ActiveCloudProfile = "messages-one"
+		c.TaskAssignments = map[config.Task]config.TaskAssignment{config.TaskChat: {Quality: config.CostPremium}}
 	})
 	if err := s.rebuildCloud(); err != nil {
 		t.Fatalf("initial rebuildCloud: %v", err)
@@ -578,8 +581,11 @@ func TestUpsertCloudProfile_ActiveBroadcastsCloudModel(t *testing.T) {
 	if err := s.cfgSvc.Secrets().Set("messages-one", "sk-test"); err != nil {
 		t.Fatal(err)
 	}
+	// premiumChoices sets only a premium override, so pin Chat to premium:
+	// this test is about the broadcast, not the default Chat quality.
 	s.cfgSvc.Mutate(func(c *config.Config) {
 		c.ActiveCloudProfile = "messages-one"
+		c.TaskAssignments = map[config.Task]config.TaskAssignment{config.TaskChat: {Quality: config.CostPremium}}
 	})
 	if err := s.rebuildCloud(); err != nil {
 		t.Fatalf("initial rebuildCloud: %v", err)

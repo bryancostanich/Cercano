@@ -9,6 +9,9 @@ import (
 func TestRoutingContractMainAndMeterUsePremium(t *testing.T) {
 	c := config.Defaults()
 	c.LocusMode = "cloud_only"
+	// The contract under test is "main and meter agree with selected task
+	// quality"; pin Chat to premium rather than inherit the product default.
+	c.TaskAssignments = map[config.Task]config.TaskAssignment{config.TaskChat: {Quality: config.CostPremium}}
 	c.ActiveCloudProfile = "fixture"
 	c.CloudProfiles = []config.CloudProfile{{Name: "fixture", Provider: "fixture"}}
 	c.ModelProfiles.Cloud.Providers["fixture"] = config.VendorCostTiers{

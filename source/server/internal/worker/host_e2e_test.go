@@ -148,6 +148,11 @@ func TestWorker_RealProcess_CrashIsolated(t *testing.T) {
 		OpenRuntime: "ollama",
 		OllamaURL:   ollamaURL,
 		Models:      models,
+		// Chat must be pinned premium: the fixture defines only a most_capable
+		// override, and the turn has to reach the blackhole provider call and
+		// BLOCK there so the 300ms kill lands mid-turn. Without this the turn
+		// fails in ~5ms on "no model for tier" and no crash is ever observed.
+		TaskAssignments: map[config.Task]config.TaskAssignment{config.TaskChat: {Quality: config.CostPremium}},
 	}, secrets.NewMemory())
 
 	runnerA := worker.NewWorkerRunnerWithDial(&recordingHistory{}, cfg, newTestBroker(), dialA)

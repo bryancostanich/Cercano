@@ -3,8 +3,14 @@ package builtins
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"cercano/source/server/internal/capabilities"
 )
@@ -96,6 +102,89 @@ func TestRunCommandCapability_Timeout(t *testing.T) {
 	if !strings.Contains(err.Error(), "timed out") {
 		t.Fatalf("expected 'timed out' in error, got: %v", err)
 	}
+}
+
+// Regression: a command that backgrounds a long-lived grandchild used to
+// defeat the timeout entirely. exec.CommandContext killed only the direct
+// shell, while the grandchild kept the inherited stdout pipe open, so Wait
+// blocked until the grandchild exited — a 2s cap took 60s to return.
+func TestRunCommandCapability_TimeoutWithBackgroundedChild(t *testing.T) {
+	restore := runCommandWaitDelay
+	runCommandWaitDelay = 500 * time.Millisecond
+	t.Cleanup(func() { runCommandWaitDelay = restore })
+
+	cap := RunCommand()
+	args, _ := json.Marshal(map[string]any{
+		// The backgrounded sleep inherits stdout and outlives the shell.
+		"cmd":             []string{"/bin/sh", "-c", "sleep 30 & echo started; sleep 30"},
+		"timeout_seconds": 1,
+	})
+
+	start := time.Now()
+	_, err := cap.Execute(context.Background(), &capabilities.Call{Args: args})
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+	if !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("expected 'timed out' in error, got: %v", err)
+	}
+	// Must return promptly: 1s timeout + WaitDelay, not the 30s grandchild.
+	if elapsed > 10*time.Second {
+		t.Fatalf("timeout not enforced: returned after %s, want ~1s", elapsed.Round(time.Millisecond))
+	}
+	// Output captured before the kill should survive into the error.
+	if !strings.Contains(err.Error(), "started") {
+		t.Errorf("expected partial stdout in timeout error, got: %v", err)
+	}
+}
+
+// The timed-out command's whole process group must be dead on return, not
+// leaked as orphans still holding resources.
+func TestRunCommandCapability_TimeoutKillsProcessGroup(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("process groups are unix-only")
+	}
+	restore := runCommandWaitDelay
+	runCommandWaitDelay = 500 * time.Millisecond
+	t.Cleanup(func() { runCommandWaitDelay = restore })
+
+	// The grandchild writes a marker file, then sleeps well past the timeout.
+	// If it is still alive after we return, it deletes nothing — so we probe
+	// liveness by pid instead, recorded into the marker.
+	dir := t.TempDir()
+	pidFile := filepath.Join(dir, "grandchild.pid")
+	script := "sh -c 'echo $$ > " + pidFile + "; sleep 30' & echo spawned; sleep 30"
+
+	cap := RunCommand()
+	args, _ := json.Marshal(map[string]any{
+		"cmd":             []string{"/bin/sh", "-c", script},
+		"timeout_seconds": 1,
+	})
+	if _, err := cap.Execute(context.Background(), &capabilities.Call{Args: args}); err == nil {
+		t.Fatal("expected timeout error")
+	}
+
+	raw, err := os.ReadFile(pidFile)
+	if err != nil {
+		t.Skipf("grandchild never recorded its pid: %v", err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	if err != nil {
+		t.Skipf("unreadable pid: %v", err)
+	}
+
+	// Give the group-kill a moment to land, then assert the pid is gone.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if syscall.Kill(pid, 0) != nil {
+			return // reaped
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	_ = syscall.Kill(pid, syscall.SIGKILL) // don't leak it out of the test
+	t.Fatalf("grandchild pid %d survived the timeout: process group was not killed", pid)
 }
 
 func TestRun_DefaultsCwdToWorkDir(t *testing.T) {

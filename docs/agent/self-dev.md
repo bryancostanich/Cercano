@@ -176,8 +176,12 @@ background job (recap, compaction, watchdog) fails, triage by the error's
 | `llama-server exited during startup: exit status 1` | the file or binary is the problem, not Cercano — reproduce manually (below) | GGUF/llama.cpp compatibility |
 | `chat error (status 400) … exceeds the available context size` | config — `llama_server.context_size` must exceed the caller's prompt (compaction sends ~8k-token segments plus overhead, so 8192 can never fit; 16384+ works) | `llama_server.context_size` |
 
-Reproduce a spawn failure outside the agent (macOS has no `timeout`; use
-background + kill):
+Reproduce a spawn failure outside the agent. macOS has no coreutils `timeout`,
+but you do **not** need the old background-and-kill dance from a Cercano tool
+call: the `Bash` tool enforces `timeout_seconds` itself (default 60), killing
+the command's whole process group and returning any partial output. Pass
+`timeout_seconds` rather than hand-rolling a cap. The background + kill form
+below is for running this by hand in a plain shell:
 
 ```bash
 /opt/homebrew/bin/llama-server -m ~/.cercano/models/<file>.gguf \

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sync"
 	"time"
 
 	"cercano/source/server/internal/capabilities"
@@ -65,6 +66,15 @@ func (runCommandCap) Execute(ctx context.Context, call *capabilities.Call) (*cap
 	defer cancel()
 
 	cmd := exec.CommandContext(runCtx, a.Cmd[0], a.Cmd[1:]...)
+	// Own process group + group-wide SIGTERM on cancel, so a timeout reaps
+	// backgrounded grandchildren instead of just the direct child.
+	setRunProcessGroup(cmd)
+	cmd.Cancel = func() error { return terminateRunGroup(cmd.Process) }
+	// Bound the post-cancel wait. This is the load-bearing part: a grandchild
+	// that inherited the stdout/stderr pipe keeps the write end open, so
+	// without WaitDelay, Wait blocks until that grandchild exits — the
+	// timeout would be silently ignored (observed: 60s elapsed on a 2s cap).
+	cmd.WaitDelay = runCommandWaitDelay
 	dir := a.Cwd
 	if dir == "" {
 		dir = call.WorkDir
@@ -77,7 +87,10 @@ func (runCommandCap) Execute(ctx context.Context, call *capabilities.Call) (*cap
 		cmd.Env = runCmdEnvOf(a.Env)
 	}
 
-	var stdout, stderr bytes.Buffer
+	// syncBuffer, not bytes.Buffer: when WaitDelay fires, os/exec abandons the
+	// output-copying goroutines and returns while they may still be writing.
+	// Reading a plain buffer here would be a data race.
+	var stdout, stderr syncBuffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
@@ -85,13 +98,25 @@ func (runCommandCap) Execute(ctx context.Context, call *capabilities.Call) (*cap
 	err := cmd.Run()
 	elapsed := time.Since(startedAt)
 
+	// Final sweep: WaitDelay's escalation only SIGKILLs the direct child, so
+	// anything left in the group after a timeout is killed here. Harmless on
+	// the success path — by then the group is empty and the signal is ESRCH.
+	timedOut := errors.Is(runCtx.Err(), context.DeadlineExceeded)
+	if timedOut && cmd.Process != nil {
+		killRunGroup(cmd.Process.Pid)
+	}
+
 	exitCode := 0
 	if err != nil {
 		// Check context deadline FIRST — exec.CommandContext kills the child
 		// on timeout, which surfaces as a non-nil ExitError. Without this
 		// guard the ExitError branch would swallow the timeout.
-		if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
-			return nil, fmt.Errorf("run_command: timed out after %s", timeout)
+		if timedOut {
+			// Surface whatever the command managed to print before it was
+			// killed: on a hang, that partial output is usually the only
+			// evidence of where it got stuck.
+			return nil, fmt.Errorf("run_command: timed out after %s%s", timeout,
+				runCmdPartialOutput(stdout.Bytes(), stderr.Bytes()))
 		}
 		var ee *exec.ExitError
 		if errors.As(err, &ee) {
@@ -129,6 +154,47 @@ func (runCommandCap) Execute(ctx context.Context, call *capabilities.Call) (*cap
 	}
 
 	return res, nil
+}
+
+// runCommandWaitDelay bounds how long os/exec waits, after cancellation, for
+// the child's I/O pipes to close before abandoning them and returning. It only
+// elapses on the timeout path; normal completion is unaffected. Variable so
+// tests can shorten it.
+var runCommandWaitDelay = 2 * time.Second
+
+// syncBuffer is a bytes.Buffer safe for concurrent write-while-read. os/exec
+// may still be copying child output when WaitDelay forces Wait to return.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+// Bytes returns a copy, so the caller never aliases memory a late-arriving
+// write could mutate.
+func (b *syncBuffer) Bytes() []byte {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]byte(nil), b.buf.Bytes()...)
+}
+
+// runCmdPartialOutput renders any output captured before a timeout, for
+// appending to the timeout error. Returns "" when the command printed nothing.
+func runCmdPartialOutput(stdout, stderr []byte) string {
+	const partialCap = 4 * 1024
+	out := ""
+	if s := runCmdTruncateBytes(stdout, partialCap); s != "" {
+		out += "\npartial stdout:\n" + s
+	}
+	if s := runCmdTruncateBytes(stderr, partialCap); s != "" {
+		out += "\npartial stderr:\n" + s
+	}
+	return out
 }
 
 // runCmdEnvOf builds the "K=V" env slice, prepending the process's existing

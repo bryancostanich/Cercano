@@ -607,12 +607,13 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 		TokenBudget:        spec.TokenBudget,
 		LoopCompactor:      loopCompactor,
 		Temperature:        &greedy,
-		// Preserve the local runtime compatibility workaround, but never apply
-		// it to cloud-generated tool history. Startup fallback can switch the
-		// serving location inside this loop, so consult the current route.
+		// Only mistral.rs needs the flattened tool-history workaround. Other
+		// providers support native history; synthetic assistant summaries can
+		// instead induce premature completion. Consult the current route because
+		// startup fallback can change providers inside this loop.
 		FlattenToolResultsFor: func() bool {
 			current, _ := dispatch.CurrentRoute(sel, model)
-			return !current.IsCloud
+			return !current.IsCloud && current.Provider != nil && current.Provider.Name() == "mistralrs"
 		},
 		WorkDir:            spec.WorkDir,
 		ConversationID:     subConvID, // nested dispatches link to this sub-conversation

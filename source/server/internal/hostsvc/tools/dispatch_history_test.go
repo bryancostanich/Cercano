@@ -19,10 +19,14 @@ import (
 // not demonstrate that the model receives usable continuation history.
 type historyProbeProvider struct {
 	requests []llm.ChatRequest
+	name     string
 	answer   string
 }
 
-func (*historyProbeProvider) Name() string { return "history-probe" }
+func (p *historyProbeProvider) Name() string { return p.name }
+func (*historyProbeProvider) RuntimeContext(context.Context, string, bool) (llm.RuntimeContext, error) {
+	return llm.RuntimeContext{Window: 16384, InstanceID: "history-fixture"}, nil
+}
 func (*historyProbeProvider) Capabilities() inference.Capabilities {
 	return inference.Capabilities{SupportsTools: true}
 }
@@ -69,18 +73,28 @@ func assertHistoryFormat(t *testing.T, p *historyProbeProvider, native bool) {
 		}
 	}
 }
-func TestDispatchHistoryCloudNativeLocalCompatible(t *testing.T) {
-	for _, cloud := range []bool{true, false} {
-		t.Run(fmt.Sprintf("cloud=%t", cloud), func(t *testing.T) {
-			p := &historyProbeProvider{answer: "The configuration is loaded in config.go:42."}
+func TestDispatchHistoryProviderCompatibility(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		cloud  bool
+		native bool
+	}{
+		{"anthropic", true, true},
+		{"llama_server", false, true},
+		{"ollama", false, true},
+		{"mistralrs", false, false},
+		{"mistralrs", true, true},
+	} {
+		t.Run(fmt.Sprintf("%s/cloud=%t", tc.name, tc.cloud), func(t *testing.T) {
+			p := &historyProbeProvider{name: tc.name, answer: "The configuration is loaded in config.go:42."}
 			svc := New(nil, nil, nil, nil)
 			installTestFailureLog(t, svc)
 			svc.SetRegistry(historyProbeRegistry())
-			res, err := svc.RunAgenticDispatch(t.Context(), dispatch.Spec{Mode: dispatch.Agentic, Task: "Trace configuration loading.", Tools: []string{"Read", "Grep"}, MaxIterations: 4}, inference.Selection{Provider: p, IsCloud: cloud}, "same-model")
+			res, err := svc.RunAgenticDispatch(t.Context(), dispatch.Spec{Mode: dispatch.Agentic, Task: "Trace configuration loading.", Tools: []string{"Read", "Grep"}, MaxIterations: 4}, inference.Selection{Provider: p, IsCloud: tc.cloud}, "same-model")
 			if err != nil || res.Text != p.answer {
 				t.Fatalf("result=%+v error=%v", res, err)
 			}
-			assertHistoryFormat(t, p, cloud)
+			assertHistoryFormat(t, p, tc.native)
 		})
 	}
 }

@@ -66,9 +66,9 @@ func (p *cloudFinisher) StreamChat(_ context.Context, req llm.ChatRequest) (llm.
 	p.calls++
 	for _, m := range req.Messages {
 		for _, b := range m.Blocks {
-			// This loop flattens tool results into text, so the completed
-			// action survives as content rather than a tool_result block.
-			if b.Type == llm.BlockToolResult && strings.Contains(b.Text, "edited") {
+			// Native tool results store their payload in Content, not Text.
+			// Also accept text history from compatibility-only providers.
+			if b.Type == llm.BlockToolResult && strings.Contains(b.Content, "edited") {
 				p.sawCompletedWork = true
 			}
 			if b.Type == llm.BlockText && strings.Contains(b.Text, "edited") {

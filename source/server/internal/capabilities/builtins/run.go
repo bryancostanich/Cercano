@@ -26,14 +26,15 @@ func (runCommandCap) Name() string                  { return "run_command" }
 func (runCommandCap) Tier() capabilities.Tier        { return capabilities.TierW }
 func (runCommandCap) Surfaces() capabilities.Surface { return capabilities.SurfaceAgent | capabilities.SurfaceMCP }
 func (runCommandCap) Description() string {
-	return "Run a shell command and capture its output. Args: {cmd: [argv strings], cwd?: string, timeout_seconds?: int (omit for the 60s default; -1 runs with no timeout), env?: {key: value}}. Use -1 for genuinely unbounded work (long builds, migrations); the command is still killed if the turn is cancelled."
+	return "Run a command and capture its output. cmd is an argv array: the first element is the executable (name or path — paths with spaces are used as-is, never split) and the remaining elements are its arguments. There is no implicit shell: no word splitting, quoting, pipes, or operators. Example: [\"ls\", \"/some/path\"]. To run shell syntax, invoke a shell explicitly, e.g. [\"bash\", \"-lc\", \"pwd && ls ..\"]. A whole command as one string (e.g. [\"ls /some/path\"]) or a list of separate commands is NOT interpreted and will fail. Other args: {cwd?: string, timeout_seconds?: int (omit for the 60s default; -1 runs with no timeout), env?: {key: value}}. Use -1 for genuinely unbounded work (long builds, migrations); the command is still killed if the turn is cancelled."
 }
 func (runCommandCap) Schema() capabilities.Schema {
 	return capabilities.Schema(`{
 		"type": "object",
 		"required": ["cmd"],
 		"properties": {
-			"cmd":             {"type": "array", "items": {"type": "string"}, "minItems": 1},
+			"cmd":             {"type": "array", "items": {"type": "string"}, "minItems": 1,
+			                    "description": "argv array: first element is the executable (name or path; a path with spaces is used as-is, never split), the rest are its arguments. No implicit shell — no splitting, quoting, pipes, or operators. Run a program directly: [\"ls\", \"/some/path\"]. Run shell syntax explicitly: [\"bash\", \"-lc\", \"pwd && ls ..\"]. A whole command in one string or a list of separate commands is not interpreted and will fail."},
 			"cwd":             {"type": "string"},
 			"timeout_seconds": {"type": "integer", "minimum": -1, "default": 60,
 			                    "description": "Seconds before the command is killed. Omit or 0 for the 60s default. -1 disables the timeout entirely."},
@@ -145,7 +146,15 @@ func (runCommandCap) Execute(ctx context.Context, call *capabilities.Call) (*cap
 		var ee *exec.ExitError
 		if errors.As(err, &ee) {
 			exitCode = ee.ExitCode()
+		} else if runCmdExecutableMissing(err) {
+			// Executable lookup/start failed because the executable could not
+			// be found. The dominant cause is contract misuse — a whole
+			// command or a list of commands where the executable belongs —
+			// so keep the original error and append the argv contract.
+			return nil, fmt.Errorf("run_command: %w%s", err, runCmdArgvHint)
 		} else {
+			// Other start failures (permissions, I/O, ...) are not lookup
+			// errors; do not mislabel them with the argv hint.
 			return nil, fmt.Errorf("run_command: %w", err)
 		}
 	}
@@ -178,6 +187,29 @@ func (runCommandCap) Execute(ctx context.Context, call *capabilities.Call) (*cap
 	}
 
 	return res, nil
+}
+
+// runCmdArgvHint is appended to executable-not-found errors. It explains the
+// argv contract because the dominant cause of such errors is a whole command
+// (or a list of commands) passed where the executable belongs. Pure text —
+// never wrapped, so the original error stays the primary payload.
+const runCmdArgvHint = `
+cmd is an argv array, not a shell line: the first element is the executable (name or path) and the remaining elements are its arguments. There is no implicit shell — no splitting, quoting, or shell operators.
+  - run a program directly:      ["ls", "/some/path"]
+  - run shell syntax explicitly: ["bash", "-lc", "pwd && ls .."]
+A whole command as one string (["ls /some/path"]) or a list of separate commands is not interpreted. If the executable truly should exist, check its name or path.`
+
+// runCmdExecutableMissing reports whether err means "the executable could not
+// be found" — a PATH lookup failure (exec.Error wrapping ErrNotFound) or a
+// start failure for a missing file (fs.ErrNotExist). It deliberately excludes
+// everything else: normal non-zero exits (ExitError), permission failures,
+// and other start errors must not be mislabeled as lookup problems.
+func runCmdExecutableMissing(err error) bool {
+	var execErr *exec.Error
+	if errors.As(err, &execErr) {
+		return errors.Is(execErr.Err, exec.ErrNotFound) || errors.Is(execErr.Err, os.ErrNotExist)
+	}
+	return errors.Is(err, os.ErrNotExist)
 }
 
 // noRunTimeout is the sentinel Duration meaning "no deadline", produced by

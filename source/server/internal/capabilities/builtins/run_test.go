@@ -202,3 +202,175 @@ func TestRun_DefaultsCwdToWorkDir(t *testing.T) {
 		t.Errorf("pwd = %q, want WorkDir %q in output", got, dir)
 	}
 }
+
+// The tool contract must teach the argv form up front: cmd is the executable
+// plus its arguments, with no implicit shell, and the docs must show both a
+// direct invocation and an explicit shell invocation.
+func TestRunCommandCapability_ArgvContractDocs(t *testing.T) {
+	cap := RunCommand()
+	desc := cap.Description()
+	for _, want := range []string{
+		"argv",
+		`["ls", "/some/path"]`,
+		`["bash", "-lc", "pwd && ls .."]`,
+		"no implicit shell",
+	} {
+		if !strings.Contains(desc, want) {
+			t.Errorf("Description missing %q:\n%s", want, desc)
+		}
+	}
+
+	var schema struct {
+		Properties map[string]struct {
+			Description string `json:"description"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal([]byte(cap.Schema()), &schema); err != nil {
+		t.Fatalf("schema is not valid JSON: %v", err)
+	}
+	cmdProp, ok := schema.Properties["cmd"]
+	if !ok {
+		t.Fatal("schema has no cmd property")
+	}
+	for _, want := range []string{"argv", `["ls", "/some/path"]`, `["bash", "-lc", "pwd && ls .."]`} {
+		if !strings.Contains(cmdProp.Description, want) {
+			t.Errorf("cmd schema description missing %q:\n%s", want, cmdProp.Description)
+		}
+	}
+}
+
+// The exact failure mode from dispatch c090721b6cc1ea8754993cde: an entire
+// command as the sole cmd element. The executable-lookup error must be
+// retained verbatim and gain an actionable argv/explicit-shell hint.
+func TestRunCommandCapability_WholeCommandStringGetsArgvHint(t *testing.T) {
+	cap := RunCommand()
+	args, _ := json.Marshal(map[string]any{"cmd": []string{"ls /tmp"}})
+	_, err := cap.Execute(context.Background(), &capabilities.Call{Args: args})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	msg := err.Error()
+	// Original error preserved...
+	if !strings.Contains(msg, "no such file or directory") || !strings.Contains(msg, "ls /tmp") {
+		t.Errorf("original lookup error not retained: %q", msg)
+	}
+	// ...plus the argv contract and the explicit-shell escape hatch.
+	for _, want := range []string{"argv", `["bash", "-lc", "pwd && ls .."]`} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error missing argv hint element %q:\n%s", want, msg)
+		}
+	}
+}
+
+// The iteration-3 variant: a list of separate shell commands, where the first
+// element is itself shell syntax. Same lookup failure, same hint.
+func TestRunCommandCapability_ListOfCommandsGetsArgvHint(t *testing.T) {
+	cap := RunCommand()
+	args, _ := json.Marshal(map[string]any{"cmd": []string{"pwd && ls ..", "echo done"}})
+	_, err := cap.Execute(context.Background(), &capabilities.Call{Args: args})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "argv") {
+		t.Errorf("expected argv hint for list-of-commands misuse, got: %v", err)
+	}
+}
+
+// A missing absolute path is a start failure, not a PATH lookup miss, but
+// it is still executable-not-found and deserves the same hint.
+func TestRunCommandCapability_MissingAbsolutePathGetsArgvHint(t *testing.T) {
+	cap := RunCommand()
+	args, _ := json.Marshal(map[string]any{"cmd": []string{"/nonexistent/definitely-not-here"}})
+	_, err := cap.Execute(context.Background(), &capabilities.Call{Args: args})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "argv") || !strings.Contains(msg, "/nonexistent/definitely-not-here") {
+		t.Errorf("expected original error + argv hint, got: %v", err)
+	}
+}
+
+// The hint is the recovery path the docs point to: shell syntax works when a
+// shell is invoked explicitly. `&&` and friends must be honored by that shell.
+func TestRunCommandCapability_ExplicitShellRunsShellSyntax(t *testing.T) {
+	cap := RunCommand()
+	// bash -lc: login shell executing a compound command, as documented.
+	args, _ := json.Marshal(map[string]any{"cmd": []string{"bash", "-lc", "printf one && printf two"}})
+	res, err := cap.Execute(context.Background(), &capabilities.Call{Args: args})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Text, "onetwo") {
+		t.Fatalf("expected compound shell output 'onetwo', got: %s", res.Text)
+	}
+	if res.Detail != "exit 0" {
+		t.Fatalf("expected exit 0, got detail %q", res.Detail)
+	}
+}
+
+// Executable paths containing spaces must work: the first argv element is
+// used as-is, never split or re-wrapped.
+func TestRunCommandCapability_ExecutablePathWithSpaces(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script executable is unix-only")
+	}
+	dir := t.TempDir()
+	spaced := filepath.Join(dir, "my tools", "run me.sh")
+	if err := os.MkdirAll(filepath.Dir(spaced), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := "#!/bin/sh\nprintf 'argv0=%s arg=%s' \"$0\" \"$1\"\n"
+	if err := os.WriteFile(spaced, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cap := RunCommand()
+	args, _ := json.Marshal(map[string]any{"cmd": []string{spaced, "hello world"}})
+	res, err := cap.Execute(context.Background(), &capabilities.Call{Args: args})
+	if err != nil {
+		t.Fatalf("executable path with spaces failed: %v", err)
+	}
+	// The whole path ran as argv[0]; its argument arrived unsplit.
+	if !strings.Contains(res.Text, "argv0="+spaced+" arg=hello world") {
+		t.Fatalf("expected unsplit path and argument, got: %s", res.Text)
+	}
+}
+
+// Ordinary failures must NOT be mislabeled as lookup errors: a non-zero exit
+// is a normal result, and a permission failure keeps its original error
+// without the argv hint.
+func TestRunCommandCapability_OrdinaryFailuresNotMislabeled(t *testing.T) {
+	cap := RunCommand()
+
+	// Non-zero exit: a successful tool call carrying the exit code, no error.
+	args, _ := json.Marshal(map[string]any{"cmd": []string{"sh", "-c", "printf oops >&2; exit 3"}})
+	res, err := cap.Execute(context.Background(), &capabilities.Call{Args: args})
+	if err != nil {
+		t.Fatalf("non-zero exit must not be an error, got: %v", err)
+	}
+	if res.Detail != "exit 3" {
+		t.Errorf("expected detail 'exit 3', got %q", res.Detail)
+	}
+	if !strings.Contains(res.Text, "oops") {
+		t.Errorf("expected stderr 'oops' in output, got: %s", res.Text)
+	}
+
+	// Permission failure on an existing file: original error, no argv hint.
+	dir := t.TempDir()
+	notExec := filepath.Join(dir, "noexec.sh")
+	if err := os.WriteFile(notExec, []byte("#!/bin/sh\necho hi\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	args, _ = json.Marshal(map[string]any{"cmd": []string{notExec}})
+	_, err = cap.Execute(context.Background(), &capabilities.Call{Args: args})
+	if err == nil {
+		t.Fatal("expected permission error, got nil")
+	}
+	if strings.Contains(err.Error(), "argv") {
+		t.Errorf("permission failure mislabeled as executable-not-found: %v", err)
+	}
+	if !strings.Contains(err.Error(), "permission denied") {
+		t.Errorf("original permission error not retained: %v", err)
+	}
+}

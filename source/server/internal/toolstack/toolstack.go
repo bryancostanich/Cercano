@@ -80,10 +80,13 @@ type CapDeps struct {
 	Open      inference.Provider
 	Config    *config.Config
 	CtxLoader *projectctx.Loader
-	// Conversations is the durable conversation store used by capabilities that
-	// persist conversation-scoped side ledgers. Optional; nil means those ledgers
-	// are unavailable in this execution environment.
-	Conversations conversation.Store
+	// Autonomy is the narrow durable-ledger seam the autonomous-mode builtins
+	// (entry, capture_decision, exit) read and write. The host wires its
+	// conversation store directly; the crash-isolated worker wires a
+	// per-operation proxy to that same host-owned store, because it must not
+	// open SQLite. Optional; nil means those ledgers are unavailable in this
+	// execution environment and the autonomous tools error clearly.
+	Autonomy conversation.AutonomyLedger
 	// EnterProfile switches one conversation's active capability profile (used by
 	// the suggest_plan capability to enter planning mode on user approval). The
 	// convID scopes the switch to the calling conversation. Optional; nil means
@@ -116,7 +119,7 @@ func InstallCapabilities(svc tools.Catalog, d CapDeps) {
 		CloudProvider: d.Cloud,
 		OpenProvider:  d.Open,
 		Config:        d.Config,
-		Conversations: d.Conversations,
+		Autonomy:      d.Autonomy,
 		ProjectCtx:    d.CtxLoader,
 		Dispatch: func(ctx context.Context, spec dispatch.Spec) (dispatch.Result, error) {
 			e := svc.Engine()

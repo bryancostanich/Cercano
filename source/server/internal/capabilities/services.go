@@ -22,8 +22,15 @@ type Services struct {
 	OpenProvider  inference.Provider
 	Engine        engine.InferenceEngine
 	Config        *config.Config
-	Conversations conversation.Store
-	ProjectCtx    *projectctx.Loader
+	// Autonomy is the narrow durable-ledger seam the autonomous-mode builtins
+	// (suggest_autonomous, request_autonomous_execution, capture_decision,
+	// auto_exit, request_autonomous_exit) read and write. The host wires its
+	// conversation store; the crash-isolated worker wires a per-operation proxy
+	// to that same host-owned store (it must not open SQLite). Optional; nil
+	// means the autonomy ledger is unavailable in this execution environment
+	// and those capabilities error clearly.
+	Autonomy   conversation.AutonomyLedger
+	ProjectCtx *projectctx.Loader
 
 	// Dispatch runs an agentic (or one-shot) unit of delegated model work through
 	// the unified dispatch engine. Nil until wired by the server.

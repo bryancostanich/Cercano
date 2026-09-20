@@ -278,7 +278,7 @@ func (s *Server) InstallCapabilities() {
 		Cloud:         s.providerSvc.Cloud(),
 		Open:          s.providerSvc.Open(),
 		Config:        &cfgSnapshot,
-		Conversations: s.persistSvc.Store(),
+		Autonomy:      s.persistSvc.Store(),
 		CtxLoader:     s.persistSvc.ContextLoader(),
 		// suggest_plan enters planning mode via the profile broker once the user
 		// approves the suggestion at the confirm gate.
@@ -1220,6 +1220,14 @@ func (s *Server) SelectExecutionMode() {
 	// background or are added at runtime are picked up without a restart.
 	if bridge, ok := s.workerRunner.(worker.McpBridgeSetter); ok {
 		bridge.SetMCPBridge(s.advertiseMCPTools, s.callMCPTool)
+	}
+
+	// Wire the host conversation store as the autonomy ledger the worker's
+	// autonomous-mode capabilities proxy to over the turn stream. The ledger is
+	// durable, user-visible state, so it stays host-owned; the worker never
+	// opens SQLite.
+	if ledger, ok := s.workerRunner.(worker.AutonomyLedgerSetter); ok {
+		ledger.SetAutonomyLedger(worker.HostAutonomyLedger(s.persistSvc.Store()))
 	}
 
 	s.configureWorkerAccounting()

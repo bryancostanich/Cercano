@@ -290,21 +290,21 @@ func compactStrings(in []string) []string {
 	return out
 }
 
-func requireAutonomyStore(call *capabilities.Call, prefix string) (conversation.Store, string, error) {
+func requireAutonomyStore(call *capabilities.Call, prefix string) (conversation.AutonomyLedger, string, error) {
 	if call == nil {
 		return nil, "", fmt.Errorf("%s: capability call is required", prefix)
 	}
-	if call.Svc.Conversations == nil {
+	if call.Svc.Autonomy == nil {
 		return nil, "", fmt.Errorf("%s: autonomy ledger is not available", prefix)
 	}
 	convID := strings.TrimSpace(call.ConversationID)
 	if convID == "" {
 		return nil, "", fmt.Errorf("%s: conversation id is required", prefix)
 	}
-	return call.Svc.Conversations, convID, nil
+	return call.Svc.Autonomy, convID, nil
 }
 
-func requireActiveAutonomyRun(ctx context.Context, call *capabilities.Call, prefix string, states ...string) (conversation.Store, conversation.AutonomyRun, error) {
+func requireActiveAutonomyRun(ctx context.Context, call *capabilities.Call, prefix string, states ...string) (conversation.AutonomyLedger, conversation.AutonomyRun, error) {
 	store, convID, err := requireAutonomyStore(call, prefix)
 	if err != nil {
 		return nil, conversation.AutonomyRun{}, err
@@ -333,7 +333,7 @@ func autonomyStateAllowed(state string, states ...string) bool {
 
 func isNoRows(err error) bool { return errors.Is(err, sql.ErrNoRows) }
 
-func markAutonomyRunAbandoned(ctx context.Context, store conversation.Store, run conversation.AutonomyRun) {
+func markAutonomyRunAbandoned(ctx context.Context, store conversation.AutonomyLedger, run conversation.AutonomyRun) {
 	run.State = "abandoned"
 	run.UpdatedAt = time.Now()
 	_ = store.UpdateAutonomyRun(ctx, run)

@@ -22,6 +22,7 @@ package worker
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -39,6 +40,7 @@ import (
 	"cercano/source/server/internal/anthropicauth"
 	"cercano/source/server/internal/chatgptauth"
 	"cercano/source/server/internal/cloudfactory"
+	"cercano/source/server/internal/conversation"
 	cfgsvc "cercano/source/server/internal/hostsvc/config"
 	"cercano/source/server/internal/hostsvc/credentials"
 	"cercano/source/server/internal/hostsvc/permissions"
@@ -105,6 +107,15 @@ type workerRunner struct {
 	// asks for it. The worker must not own this state. The convID scopes the
 	// switch to the worker's conversation so planning mode stays per-conversation.
 	setProfile func(ctx context.Context, convID, name string) error
+
+	// autonomyLedger applies autonomy-ledger operations (create / update /
+	// get_active) to the host-owned conversation store when a worker-side
+	// autonomous-mode capability asks for one over the stream. The ledger is
+	// durable, user-visible state, so it has exactly one owner — the host —
+	// and the crash-isolated worker never opens SQLite. Wired via
+	// SetAutonomyLedger from the server's store; nil on dial-injected (test)
+	// runners (ledger operations then error clearly, as pre-fix).
+	autonomyLedger AutonomyLedgerFunc
 
 	// dial is called instead of the pool when non-nil (test injection). When
 	// nil, RunTurn acquires a warm worker from the per-conversation pool.
@@ -183,6 +194,96 @@ func (w *workerRunner) SetMCPBridge(
 ) {
 	w.mcpTools = tools
 	w.mcpCall = call
+}
+
+// AutonomyLedgerFunc applies one autonomy-ledger operation to the host-owned
+// conversation store: op is "create" | "update" | "get_active", runJSON is the
+// JSON-encoded conversation.AutonomyRun for create/update, convID scopes
+// get_active. It returns the stored/loaded run JSON ("" on a get_active miss)
+// and whether an active run was found.
+type AutonomyLedgerFunc func(ctx context.Context, op, runJSON, convID string) (storedRunJSON string, found bool, err error)
+
+// AutonomyLedgerSetter is implemented by turn runners that proxy autonomy-ledger
+// operations from the worker to the host store. The server asserts against this
+// narrow interface rather than widening the constructor with another positional
+// parameter every test call site would have to repeat.
+type AutonomyLedgerSetter interface {
+	SetAutonomyLedger(fn AutonomyLedgerFunc)
+}
+
+// SetAutonomyLedger wires the host's conversation store as the autonomy ledger
+// the worker's autonomous-mode capabilities proxy to over the stream. Not wired
+// means those capabilities error clearly in worker turns.
+func (w *workerRunner) SetAutonomyLedger(fn AutonomyLedgerFunc) {
+	w.autonomyLedger = fn
+}
+
+// ProfileHandlerSetter is implemented by turn runners that proxy host session
+// profile switches from worker session-control capabilities. The server asserts
+// against this narrow interface rather than widening the constructor; the
+// dial-injected test constructor has no profile handler parameter.
+type ProfileHandlerSetter interface {
+	SetProfileHandler(fn func(ctx context.Context, convID, name string) error)
+}
+
+// SetProfileHandler wires the host's profile switch handler (the production
+// NewWorkerRunner setProfile parameter) into a runner built without it, such as
+// the dial-injected test constructor. Nil means worker profile requests fail
+// with "session profile control not configured".
+func (w *workerRunner) SetProfileHandler(fn func(ctx context.Context, convID, name string) error) {
+	w.setProfile = fn
+}
+
+// HostAutonomyLedger adapts a conversation store to AutonomyLedgerFunc. A nil
+// store yields a func that errors clearly (the ledger is unavailable in this
+// execution environment), so the worker capability sees the same error an
+// in-process turn without a store would.
+func HostAutonomyLedger(store conversation.Store) AutonomyLedgerFunc {
+	return func(ctx context.Context, op, runJSON, convID string) (string, bool, error) {
+		if store == nil {
+			return "", false, errors.New("autonomy ledger is not available")
+		}
+		switch op {
+		case autonomyOpCreate:
+			var r conversation.AutonomyRun
+			if err := json.Unmarshal([]byte(runJSON), &r); err != nil {
+				return "", false, fmt.Errorf("decode autonomy run: %w", err)
+			}
+			stored, err := store.CreateAutonomyRun(ctx, r)
+			if err != nil {
+				return "", false, err
+			}
+			b, err := json.Marshal(stored)
+			if err != nil {
+				return "", false, fmt.Errorf("encode stored autonomy run: %w", err)
+			}
+			return string(b), true, nil
+		case autonomyOpUpdate:
+			var r conversation.AutonomyRun
+			if err := json.Unmarshal([]byte(runJSON), &r); err != nil {
+				return "", false, fmt.Errorf("decode autonomy run: %w", err)
+			}
+			if err := store.UpdateAutonomyRun(ctx, r); err != nil {
+				return "", false, err
+			}
+			return runJSON, true, nil // acknowledged; echo the updated run
+		case autonomyOpGetActive:
+			run, err := store.GetActiveAutonomyRun(ctx, convID)
+			if errors.Is(err, sql.ErrNoRows) {
+				return "", false, nil
+			}
+			if err != nil {
+				return "", false, err
+			}
+			b, err := json.Marshal(run)
+			if err != nil {
+				return "", false, fmt.Errorf("encode active autonomy run: %w", err)
+			}
+			return string(b), true, nil
+		default:
+			return "", false, fmt.Errorf("unknown autonomy ledger op %q", op)
+		}
+	}
 }
 
 // McpToolAdvert is one host MCP tool described for the worker. The host builds
@@ -656,6 +757,30 @@ func (w *workerRunner) RunTurn(
 				}
 				if err := safeSend(&proto.HostToWorker{Msg: &proto.HostToWorker_McpResponse{McpResponse: response}}); err != nil {
 					log.Printf("[workerRunner] mcp response: %v", err)
+				}
+			}()
+
+		case *proto.WorkerToHost_AutonomyRequest:
+			// A worker-side autonomous-mode capability touched the autonomy
+			// ledger. Apply the operation to the host-owned conversation store
+			// (the ledger's only owner) and acknowledge, so the capability's
+			// control flow depends on the durable write completing.
+			request := m.AutonomyRequest
+			go func() {
+				response := &proto.AutonomyLedgerResponse{Id: request.GetId()}
+				if w.autonomyLedger == nil {
+					response.Error = "autonomy ledger is not available"
+				} else {
+					runJSON, found, err := w.autonomyLedger(ctx, request.GetOp(), string(request.GetRunJson()), request.GetConversationId())
+					if err != nil {
+						response.Error = err.Error()
+					} else {
+						response.RunJson = []byte(runJSON)
+						response.Found = found
+					}
+				}
+				if err := safeSend(&proto.HostToWorker{Msg: &proto.HostToWorker_AutonomyResponse{AutonomyResponse: response}}); err != nil {
+					log.Printf("[workerRunner] autonomy ledger response: %v", err)
 				}
 			}()
 

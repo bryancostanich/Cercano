@@ -14,6 +14,7 @@ import (
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/cloudfactory"
 	projectctx "cercano/source/server/internal/context"
+	"cercano/source/server/internal/conversation"
 	"cercano/source/server/internal/dispatch"
 	"cercano/source/server/internal/engine"
 	"cercano/source/server/internal/failurelog"
@@ -133,6 +134,15 @@ func (w *WorkerServer) runTurn(stream proto.Worker_RunTurnServer, authRecovery b
 	authRequest := newStreamAuthentication(sndr)
 	runtimeControl := newStreamRuntimeControl(sndr)
 
+	// Autonomy ledger proxy: autonomous-mode session-control capabilities
+	// (suggest_autonomous / request_autonomous_execution, capture_decision,
+	// auto_exit / request_autonomous_exit) read and write the host-owned
+	// autonomy ledger over this stream. The worker never opens SQLite: every
+	// operation round-trips and the capability proceeds only on the host's
+	// acknowledgment. Built before buildDeps so the tool stack can wire it,
+	// same as credSource.
+	autonomyLedger := newStreamAutonomyLedger(sndr)
+
 	// MCP proxy: host-side MCP tools advertised in StartTurn become worker-side
 	// proxy tools that call back over this stream. The worker owns no MCP
 	// connections — the host does.
@@ -158,6 +168,8 @@ func (w *WorkerServer) runTurn(stream proto.Worker_RunTurnServer, authRecovery b
 				runtimeControl.deliver(msg.GetRuntimeResponse())
 			case msg.GetMcpResponse() != nil:
 				mcpControl.deliver(msg.GetMcpResponse())
+			case msg.GetAutonomyResponse() != nil:
+				autonomyLedger.deliver(msg.GetAutonomyResponse())
 			case msg.GetPermUpdate() != nil:
 				// Mid-turn permission change on the host. Apply it so the gate
 				// sees the same values an in-process turn would re-read from
@@ -195,7 +207,7 @@ func (w *WorkerServer) runTurn(stream proto.Worker_RunTurnServer, authRecovery b
 	}()
 
 	// Build Deps from StartTurn.
-	deps, buildErr := w.buildDeps(ctx, start, credSource, openProxy, subPersist, profileCtl, mcpControl, &permStoreRef, runtimeControl.Restart)
+	deps, buildErr := w.buildDeps(ctx, start, credSource, openProxy, subPersist, profileCtl, mcpControl, autonomyLedger, &permStoreRef, runtimeControl.Restart)
 	if buildErr != nil {
 		sndr.close()
 		cancel() // returning finalizes the stream; the recv goroutine unwinds on the Recv error
@@ -307,7 +319,7 @@ func (w *WorkerServer) runTurn(stream proto.Worker_RunTurnServer, authRecovery b
 
 // ─── buildDeps ────────────────────────────────────────────────────────────────
 
-func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, credSource *streamCredentialSource, openProxy *streamOpenProvider, subPersist *streamSubagentPersist, profileCtl *streamSessionProfileController, mcpControl *streamMCPControl, permStoreRef *atomic.Pointer[agent.PermissionStore], restart ...runtimeRestartFunc) (runner.Deps, error) {
+func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, credSource *streamCredentialSource, openProxy *streamOpenProvider, subPersist *streamSubagentPersist, profileCtl *streamSessionProfileController, mcpControl *streamMCPControl, autonomyLedger *streamAutonomyLedger, permStoreRef *atomic.Pointer[agent.PermissionStore], restart ...runtimeRestartFunc) (runner.Deps, error) {
 	// Build config from snapshot.
 	cfg := ConfigFromSnapshot(start.GetConfig())
 	cfgService := cfgsvc.New("", cfg, secrets.NewMemory())
@@ -449,7 +461,14 @@ func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, cr
 		}
 	} else {
 		diagnostic, _ := provSvc.(reasoningexperiment.Service)
-		toolSvc = buildWorkerToolSvcWithDiagnostic(permBroker, engine, ctxLoader, provSvc.Cloud(), provSvc.Open(), cfg, subPersist, profileCtl.SetProfile, visionSvc, failureLog, diagnostic, restart...)
+		// Autonomy seam: wire the stream ledger proxy as the capabilities'
+		// AutonomyLedger (typed-nil guard keeps a missing proxy an unwired
+		// seam rather than a panic).
+		var autonomy conversation.AutonomyLedger
+		if autonomyLedger != nil {
+			autonomy = autonomyLedger
+		}
+		toolSvc = buildWorkerToolSvcWithDiagnostic(permBroker, engine, ctxLoader, provSvc.Cloud(), provSvc.Open(), cfg, subPersist, profileCtl.SetProfile, visionSvc, failureLog, diagnostic, autonomy, restart...)
 	}
 
 	// Register a proxy per host-advertised MCP tool. Done AFTER the built-in

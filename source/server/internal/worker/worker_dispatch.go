@@ -8,6 +8,7 @@ import (
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/capabilities"
 	projectctx "cercano/source/server/internal/context"
+	"cercano/source/server/internal/conversation"
 	"cercano/source/server/internal/dispatch"
 	"cercano/source/server/internal/failurelog"
 	"cercano/source/server/internal/hostsvc/permissions"
@@ -42,6 +43,10 @@ func openTierModel(cfg pkgcfg.Config, t pkgcfg.Tier) string {
 // RunAgenticDispatch already degrades cleanly when the store is nil. The
 // sub-agent system prompt reuses the runner's builder via a context-only history
 // shim so it still gets env grounding + project context.
+//
+// autonomy is the streamAutonomyLedger proxy (as conversation.AutonomyLedger):
+// the durable ledger for the autonomous-mode capabilities is host-owned, and
+// worker turns reach it over the acknowledged stream proxy rather than SQLite.
 func buildWorkerToolSvc(
 	permBroker permissions.Broker,
 	engine *dispatch.Engine,
@@ -52,16 +57,17 @@ func buildWorkerToolSvc(
 	enterProfile func(context.Context, string) error,
 	vision capabilities.VisionService,
 	failures *failurelog.Writer,
+	autonomy conversation.AutonomyLedger,
 	restart ...runtimeRestartFunc,
 ) runner.ToolSvc {
-	return buildWorkerToolSvcWithDiagnostic(permBroker, engine, ctxLoader, cloud, open, cfg, subPersist, enterProfile, vision, failures, nil, restart...)
+	return buildWorkerToolSvcWithDiagnostic(permBroker, engine, ctxLoader, cloud, open, cfg, subPersist, enterProfile, vision, failures, nil, autonomy, restart...)
 }
 
 func buildWorkerToolSvcWithDiagnostic(
 	permBroker permissions.Broker, engine *dispatch.Engine, ctxLoader *projectctx.Loader,
 	cloud, open inference.Provider, cfg pkgcfg.Config, subPersist *streamSubagentPersist,
 	enterProfile func(context.Context, string) error, vision capabilities.VisionService,
-	failures *failurelog.Writer, diagnostic reasoningexperiment.Service, restart ...runtimeRestartFunc,
+	failures *failurelog.Writer, diagnostic reasoningexperiment.Service, autonomy conversation.AutonomyLedger, restart ...runtimeRestartFunc,
 ) runner.ToolSvc {
 	var runDiagnostic func(context.Context, reasoningexperiment.Spec) (reasoningexperiment.Report, error)
 	if diagnostic != nil {
@@ -90,6 +96,7 @@ func buildWorkerToolSvcWithDiagnostic(
 		Open:                open,
 		Config:              &cfg,
 		CtxLoader:           ctxLoader,
+		Autonomy:            autonomy,
 		EnterProfile: func(convID, name string) error {
 			if enterProfile == nil {
 				return fmt.Errorf("session profile control not configured")

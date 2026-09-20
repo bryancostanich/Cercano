@@ -44,7 +44,7 @@ func TestWorkerReasoningDiagnosticAuthenticatedNoFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	zero := 0.0
-	toolSvc := buildWorkerToolSvcWithDiagnostic(nil, nil, nil, resolver.Cloud(), resolver.Open(), c, nil, nil, nil, nil, resolver.(reasoningexperiment.Service))
+	toolSvc := buildWorkerToolSvcWithDiagnostic(nil, nil, nil, resolver.Cloud(), resolver.Open(), c, nil, nil, nil, nil, resolver.(reasoningexperiment.Service), nil)
 	run := toolSvc.(toolssvc.Catalog).CapRegistry().Services().ReasoningDiagnostic
 	if run == nil {
 		t.Fatal("worker capability stack dropped diagnostic service")

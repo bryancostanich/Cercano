@@ -22,7 +22,7 @@ func TestSuggestAutonomous_EntersAutonomousProfile(t *testing.T) {
 		t.Fatalf("EnsureConversation: %v", err)
 	}
 	var entered string
-	svc := capabilities.Services{Conversations: store, EnterProfile: func(convID, name string) error { entered = name; return nil }}
+	svc := capabilities.Services{Autonomy: store, EnterProfile: func(convID, name string) error { entered = name; return nil }}
 	res, err := SuggestAutonomous().Execute(ctx, &capabilities.Call{
 		ConversationID: "conv-1",
 		Args:           []byte(`{"reason":"multi-step implementation","goal":"ship autonomous profile","done_when":["tests pass"],"constraints":["do not push"],"review_points":["API shape"]}`),
@@ -50,7 +50,7 @@ func TestSuggestAutonomous_PersistsRunBriefWhenStoreWired(t *testing.T) {
 		t.Fatalf("EnsureConversation: %v", err)
 	}
 	svc := capabilities.Services{
-		Conversations: store,
+		Autonomy: store,
 		EnterProfile:  func(convID, name string) error { return nil },
 	}
 	_, err = SuggestAutonomous().Execute(ctx, &capabilities.Call{
@@ -104,7 +104,7 @@ func TestSuggestAutonomous_ErrorsWithoutProfileHook(t *testing.T) {
 	if err := store.EnsureConversation(ctx, "conv", "/proj", "model"); err != nil {
 		t.Fatalf("EnsureConversation: %v", err)
 	}
-	_, err = SuggestAutonomous().Execute(ctx, &capabilities.Call{ConversationID: "conv", Args: []byte(`{"goal":"ship"}`), Svc: capabilities.Services{Conversations: store}})
+	_, err = SuggestAutonomous().Execute(ctx, &capabilities.Call{ConversationID: "conv", Args: []byte(`{"goal":"ship"}`), Svc: capabilities.Services{Autonomy: store}})
 	if err == nil || !strings.Contains(err.Error(), "no profile broker") {
 		t.Fatalf("expected missing hook error, got %v", err)
 	}
@@ -127,7 +127,7 @@ func TestSuggestAutonomous_RequiresConversationStoreAndID(t *testing.T) {
 		t.Fatalf("open store: %v", openErr)
 	}
 	defer store.Close()
-	_, err = SuggestAutonomous().Execute(context.Background(), &capabilities.Call{Args: []byte(`{"goal":"ship"}`), Svc: capabilities.Services{Conversations: store, EnterProfile: func(string, string) error { return nil }}})
+	_, err = SuggestAutonomous().Execute(context.Background(), &capabilities.Call{Args: []byte(`{"goal":"ship"}`), Svc: capabilities.Services{Autonomy: store, EnterProfile: func(string, string) error { return nil }}})
 	if err == nil || !strings.Contains(err.Error(), "conversation id is required") {
 		t.Fatalf("expected missing conversation id error, got %v", err)
 	}
@@ -147,7 +147,7 @@ func TestAutoExit_LeavesAutonomousProfile(t *testing.T) {
 		t.Fatalf("SaveAutonomyRun: %v", err)
 	}
 	var entered string
-	svc := capabilities.Services{Conversations: store, EnterProfile: func(convID, name string) error { entered = name; return nil }}
+	svc := capabilities.Services{Autonomy: store, EnterProfile: func(convID, name string) error { entered = name; return nil }}
 	res, err := AutoExit().Execute(ctx, &capabilities.Call{ConversationID: "conv", Args: []byte(`{"reason":"blocked"}`), Svc: svc})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -182,7 +182,7 @@ func TestRequestAutonomousExit_CompletesWithoutDecisionReplay(t *testing.T) {
 		t.Fatalf("SaveAutonomyRun: %v", err)
 	}
 	var entered string
-	svc := capabilities.Services{Conversations: store, EnterProfile: func(convID, name string) error { entered = name; return nil }}
+	svc := capabilities.Services{Autonomy: store, EnterProfile: func(convID, name string) error { entered = name; return nil }}
 	res, err := RequestAutonomousExit().Execute(ctx, &capabilities.Call{ConversationID: "conv", Args: []byte(`{"summary":"done","verification":"targeted tests passed"}`), Svc: svc})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -247,7 +247,7 @@ func completionTestCall(t *testing.T, state string) (conversation.Store, *capabi
 	if _, err := store.CreateAutonomyRun(ctx, conversation.AutonomyRun{ConversationID: "conv", State: state, BriefJSON: `{"goal":"ship"}`, DecisionsJSON: "[]", ReviewJSON: `{"legacy_detail":"preserved"}`}); err != nil {
 		t.Fatal(err)
 	}
-	return store, &capabilities.Call{ConversationID: "conv", Args: []byte(`{"summary":"done","verification":"tests passed"}`), Svc: capabilities.Services{Conversations: store, EnterProfile: func(string, string) error { return nil }}}
+	return store, &capabilities.Call{ConversationID: "conv", Args: []byte(`{"summary":"done","verification":"tests passed"}`), Svc: capabilities.Services{Autonomy: store, EnterProfile: func(string, string) error { return nil }}}
 }
 
 func TestRequestAutonomousExit_FailuresPreserveActiveRun(t *testing.T) {
@@ -265,7 +265,7 @@ func TestRequestAutonomousExit_FailuresPreserveActiveRun(t *testing.T) {
 				case "profile error":
 					call.Svc.EnterProfile = func(string, string) error { return fmt.Errorf("profile unavailable") }
 				case "write error":
-					call.Svc.Conversations = completionWriteFailure{Store: store}
+					call.Svc.Autonomy = completionWriteFailure{Store: store}
 				case "bad args":
 					call.Args = []byte("{")
 				case "missing verification":

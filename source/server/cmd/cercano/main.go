@@ -1032,15 +1032,6 @@ func main() {
 			return
 		case "version":
 			fmt.Printf("cercano v%s\n", version)
-			if info := update.CheckForUpdate(version); info != nil {
-				if info.UpdateAvailable {
-					fmt.Printf("\nA newer version is available: v%s\n", info.LatestVersion)
-					fmt.Printf("  Upgrade: %s\n", info.UpgradeCommand())
-					fmt.Printf("  Release: %s\n", info.ReleaseURL)
-				} else {
-					fmt.Println("(up to date)")
-				}
-			}
 			return
 		case "stats":
 			runStats()
@@ -1129,15 +1120,6 @@ func main() {
 
 	if *showVersion {
 		fmt.Printf("cercano v%s\n", version)
-		if info := update.CheckForUpdate(version); info != nil {
-			if info.UpdateAvailable {
-				fmt.Printf("\nA newer version is available: v%s\n", info.LatestVersion)
-				fmt.Printf("  Upgrade: %s\n", info.UpgradeCommand())
-				fmt.Printf("  Release: %s\n", info.ReleaseURL)
-			} else {
-				fmt.Println("(up to date)")
-			}
-		}
 		return
 	}
 

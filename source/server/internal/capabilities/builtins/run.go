@@ -22,9 +22,11 @@ type runCommandCap struct{}
 // RunCommand constructs the run_command capability (display name "Bash").
 func RunCommand() capabilities.Capability { return runCommandCap{} }
 
-func (runCommandCap) Name() string                  { return "run_command" }
-func (runCommandCap) Tier() capabilities.Tier        { return capabilities.TierW }
-func (runCommandCap) Surfaces() capabilities.Surface { return capabilities.SurfaceAgent | capabilities.SurfaceMCP }
+func (runCommandCap) Name() string            { return "run_command" }
+func (runCommandCap) Tier() capabilities.Tier { return capabilities.TierW }
+func (runCommandCap) Surfaces() capabilities.Surface {
+	return capabilities.SurfaceAgent | capabilities.SurfaceMCP
+}
 func (runCommandCap) Description() string {
 	return "Run a command and capture its output. cmd is an argv array: the first element is the executable (name or path — paths with spaces are used as-is, never split) and the remaining elements are its arguments. There is no implicit shell: no word splitting, quoting, pipes, or operators. Example: [\"ls\", \"/some/path\"]. To run shell syntax, invoke a shell explicitly, e.g. [\"bash\", \"-lc\", \"pwd && ls ..\"]. A whole command as one string (e.g. [\"ls /some/path\"]) or a list of separate commands is NOT interpreted and will fail. Other args: {cwd?: string, timeout_seconds?: int (omit for the 60s default; -1 runs with no timeout), env?: {key: value}}. Use -1 for genuinely unbounded work (long builds, migrations); the command is still killed if the turn is cancelled."
 }
@@ -146,11 +148,15 @@ func (runCommandCap) Execute(ctx context.Context, call *capabilities.Call) (*cap
 		var ee *exec.ExitError
 		if errors.As(err, &ee) {
 			exitCode = ee.ExitCode()
-		} else if runCmdExecutableMissing(err) {
-			// Executable lookup/start failed because the executable could not
-			// be found. The dominant cause is contract misuse — a whole
-			// command or a list of commands where the executable belongs —
-			// so keep the original error and append the argv contract.
+		} else if runCmdExecutableMissing(err) && runCmdDirUsable(dir) {
+			// Start failed with "not found". A common cause is contract
+			// misuse — a whole command or a list of commands where the
+			// executable belongs — but ENOENT at fork/exec is ambiguous: a
+			// missing or non-directory cwd produces the same error (ruled
+			// out by runCmdDirUsable), and a script whose interpreter is
+			// missing is indistinguishable from a missing executable, so
+			// the hint stays for that case. Keep the original error and
+			// append the argv contract.
 			return nil, fmt.Errorf("run_command: %w%s", err, runCmdArgvHint)
 		} else {
 			// Other start failures (permissions, I/O, ...) are not lookup
@@ -190,8 +196,8 @@ func (runCommandCap) Execute(ctx context.Context, call *capabilities.Call) (*cap
 }
 
 // runCmdArgvHint is appended to executable-not-found errors. It explains the
-// argv contract because the dominant cause of such errors is a whole command
-// (or a list of commands) passed where the executable belongs. Pure text —
+// argv contract because a common cause of such errors is a whole command (or
+// a list of commands) passed where the executable belongs. Pure text —
 // never wrapped, so the original error stays the primary payload.
 const runCmdArgvHint = `
 cmd is an argv array, not a shell line: the first element is the executable (name or path) and the remaining elements are its arguments. There is no implicit shell — no splitting, quoting, or shell operators.
@@ -201,15 +207,34 @@ A whole command as one string (["ls /some/path"]) or a list of separate commands
 
 // runCmdExecutableMissing reports whether err means "the executable could not
 // be found" — a PATH lookup failure (exec.Error wrapping ErrNotFound) or a
-// start failure for a missing file (fs.ErrNotExist). It deliberately excludes
-// everything else: normal non-zero exits (ExitError), permission failures,
-// and other start errors must not be mislabeled as lookup problems.
+// start failure for a missing file (fs.ErrNotExist). On Unix, an ENOENT at
+// fork/exec is ambiguous: it also occurs when the working directory is
+// missing or not a directory (the caller disambiguates that case by checking
+// the cwd), and when a script's interpreter is missing — the latter is
+// indistinguishable from a missing executable, so it falls in here. It
+// deliberately excludes everything else: normal non-zero exits (ExitError),
+// permission failures, and other start errors must not be mislabeled as
+// lookup problems.
 func runCmdExecutableMissing(err error) bool {
 	var execErr *exec.Error
 	if errors.As(err, &execErr) {
 		return errors.Is(execErr.Err, exec.ErrNotFound) || errors.Is(execErr.Err, os.ErrNotExist)
 	}
 	return errors.Is(err, os.ErrNotExist)
+}
+
+// runCmdDirUsable reports whether dir is a known-usable working directory:
+// present and actually a directory. An empty dir (cwd default) is usable.
+// On Unix, starting a valid executable in a missing or non-directory cwd
+// fails at fork/exec with ENOENT/ENOTDIR — indistinguishable from a missing
+// executable by the error alone — so this check lets the caller avoid
+// mislabeling such failures as argv-contract misuse.
+func runCmdDirUsable(dir string) bool {
+	if dir == "" {
+		return true
+	}
+	info, err := os.Stat(dir)
+	return err == nil && info.IsDir()
 }
 
 // noRunTimeout is the sentinel Duration meaning "no deadline", produced by

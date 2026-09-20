@@ -337,6 +337,49 @@ func TestRunCommandCapability_ExecutablePathWithSpaces(t *testing.T) {
 	}
 }
 
+// Regression (review finding): a valid executable started with a missing or
+// non-directory cwd also fails at fork/exec with ENOENT on Unix, which is
+// indistinguishable from a missing executable by the error alone. The argv
+// hint must not fire there — the cwd, not the argv contract, is the problem,
+// and the original error must be preserved.
+func TestRunCommandCapability_MissingCwdNoArgvHint(t *testing.T) {
+	dir := t.TempDir()
+	cap := RunCommand()
+
+	// Case 1: cwd does not exist, executable does.
+	missing := filepath.Join(dir, "no", "such", "dir")
+	args, _ := json.Marshal(map[string]any{"cmd": []string{"echo", "hi"}, "cwd": missing})
+	_, err := cap.Execute(context.Background(), &capabilities.Call{Args: args})
+	if err == nil {
+		t.Fatal("expected error for missing cwd, got nil")
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "argv") {
+		t.Errorf("missing-cwd failure mislabeled with the argv hint: %v", err)
+	}
+	if !strings.Contains(msg, "fork/exec") || !strings.Contains(msg, "no such file or directory") {
+		t.Errorf("original start error not retained for missing cwd: %q", msg)
+	}
+
+	// Case 2: cwd is a regular file, not a directory.
+	notDir := filepath.Join(dir, "file-not-dir")
+	if err := os.WriteFile(notDir, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	args, _ = json.Marshal(map[string]any{"cmd": []string{"echo", "hi"}, "cwd": notDir})
+	_, err = cap.Execute(context.Background(), &capabilities.Call{Args: args})
+	if err == nil {
+		t.Fatal("expected error for non-directory cwd, got nil")
+	}
+	msg = err.Error()
+	if strings.Contains(msg, "argv") {
+		t.Errorf("non-directory-cwd failure mislabeled with the argv hint: %v", err)
+	}
+	if !strings.Contains(msg, "fork/exec") || !strings.Contains(msg, "not a directory") {
+		t.Errorf("original start error not retained for non-directory cwd: %q", msg)
+	}
+}
+
 // Ordinary failures must NOT be mislabeled as lookup errors: a non-zero exit
 // is a normal result, and a permission failure keeps its original error
 // without the argv hint.

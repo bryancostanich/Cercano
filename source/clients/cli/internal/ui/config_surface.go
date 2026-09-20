@@ -116,7 +116,7 @@ func (m *Model) buildConfigTabPage(tab configTab) (contentPage, tea.Cmd) {
 		if m.agent != nil {
 			client = m.agent
 		}
-		return newTokenMetricsPage(client, m.styles, m.width, h)
+		return newTokenMetricsPage(client, m.palette, m.styles, m.width, h)
 	case configTabContext:
 		cv, cmd := newContextView(m.agent, m.palette, m.styles, m.convID, m.width, h)
 		return cv, tea.Batch(cmd, contextRefreshTick())

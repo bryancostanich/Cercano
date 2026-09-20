@@ -28,6 +28,7 @@ var metricsPresets = []string{"today", "7d", "30d", "all", "custom"}
 var metricsPresetLabels = []string{"Today", "Past 7 days", "Past 30 days", "All time", "Custom inclusive dates"}
 
 type tokenMetricsPage struct {
+	palette                                   theme.Palette
 	agent                                     tokenMetricsClient
 	styles                                    theme.Styles
 	width, height, offset, cursor, preset     int
@@ -64,16 +65,32 @@ func viewerMetricsTimezone() (string, string) {
 	}
 	return "UTC", "Viewer timezone could not be detected; using UTC. Edit Timezone to your IANA zone."
 }
-func newTokenMetricsPage(agent tokenMetricsClient, s theme.Styles, w, h int) (*tokenMetricsPage, tea.Cmd) {
-	p := &tokenMetricsPage{agent: agent, styles: s, width: w, height: h, id: metricsPageIDs.Add(1), preset: 1}
+
+// newTokenMetricsPage takes the theme palette alongside the prebuilt styles
+// (matching every other config-surface page constructor) so the embedded text
+// editors can adopt theme-compatible foregrounds instead of the bubbles
+// default — which is plain terminal white and unreadable on light themes.
+func newTokenMetricsPage(agent tokenMetricsClient, palette theme.Palette, s theme.Styles, w, h int) (*tokenMetricsPage, tea.Cmd) {
+	p := &tokenMetricsPage{agent: agent, palette: palette, styles: s, width: w, height: h, id: metricsPageIDs.Add(1), preset: 1}
 	zone, note := viewerMetricsTimezone()
 	p.timezoneNote = note
 	values := []string{"*", "*", "*", time.Now().Format("2006-01-02"), time.Now().Format("2006-01-02"), zone}
 	for i := range p.fields {
-		p.fields[i] = textinput.New()
-		p.fields[i].CharLimit = 1025
-		p.fields[i].SetValue(values[i])
-		p.fields[i].SetWidth(maxInt(1, w-20))
+		field := textinput.New()
+		field.CharLimit = 1025
+		// The editing row already renders its own "> label: " prefix, so the
+		// widget's built-in prompt would only duplicate it.
+		field.Prompt = ""
+		field.SetValue(values[i])
+		field.SetWidth(maxInt(1, w-20))
+		st := field.Styles()
+		st.Focused.Text = s.Primary
+		st.Blurred.Text = s.Primary
+		st.Focused.Prompt = s.Bright
+		st.Blurred.Prompt = s.Muted
+		st.Cursor.Color = palette.SelectionCaret
+		field.SetStyles(st)
+		p.fields[i] = field
 	}
 	return p, p.load()
 }
@@ -305,21 +322,48 @@ func metricBar(t *proto.TokenMetricTotals, peak float64, width int) string {
 	return strings.Repeat("█", n)
 }
 func (p *tokenMetricsPage) lines() []string {
-	w := maxInt(1, p.width-2)
-	var lines []string
-	add := func(text string) { lines = append(lines, strings.Split(ansi.Wrap(text, w, ""), "\n")...) }
-	section := func(label string) { add(""); add(p.heading(label, w)) }
-	add(p.styles.Accent.Bold(true).Render("◈ Token Metrics") + p.styles.Dim.Render("  /  reported consumption"))
-	add(p.styles.Dim.Render("↑↓ select · Enter edit · ←→ options · r refresh · PgUp/PgDn scroll · Shift+Tab tabs"))
+	totalW := maxInt(1, p.width-2)
+	w := maxInt(1, totalW-4)
+	var lines, body []string
+	title := ""
+	controlIndex := -1
+	add := func(text string) { body = append(body, metricsWrapStyled(text, w)...) }
+	flush := func() {
+		if title == "" {
+			lines = append(lines, body...)
+			body = nil
+			return
+		}
+		lines = append(lines, "")
+		if totalW >= 16 {
+			if controlIndex >= 0 {
+				p.controlRow = len(lines) + 2 + controlIndex
+			}
+			lines = append(lines, strings.Split(renderRuntimeDashboardTextBlock(title, body, totalW, 0, p.palette, p.styles), "\n")...)
+		} else {
+			lines = append(lines, metricsWrapStyled(p.styles.Accent.Render(title), totalW)...)
+			if controlIndex >= 0 {
+				p.controlRow = len(lines) + controlIndex
+			}
+			lines = append(lines, body...)
+		}
+		body = nil
+		controlIndex = -1
+	}
+	section := func(label string) { flush(); title = label }
+	add(p.styles.Accent.Bold(true).Render("◈ Token Metrics") + p.styles.Muted.Render("  /  reported consumption"))
+	add(p.styles.Muted.Render("↑↓ select · Enter edit · ←→ options · r refresh · PgUp/PgDn scroll · Shift+Tab tabs"))
+	section("Filters")
 	controls, focus := p.filterRows(w)
 	for i, row := range controls {
 		if i == focus {
-			p.controlRow = len(lines)
+			controlIndex = len(body)
 		}
 		add(row)
 	}
 	if p.dirty {
 		add(p.styles.Warn.Render("Filters changed — press Enter or refresh to apply."))
+		flush()
 		return lines
 	}
 	if p.loading {
@@ -327,11 +371,13 @@ func (p *tokenMetricsPage) lines() []string {
 	}
 	if p.err != nil {
 		add(p.styles.Error.Render("Query error: " + metricsSafe(p.err.Error())))
-		add("Press r to retry. No zero-usage claim is made while metrics are unavailable.")
+		add(p.styles.Muted.Render("Press r to retry. No zero-usage claim is made while metrics are unavailable."))
+		flush()
 		return lines
 	}
 	r := p.response
 	if r == nil {
+		flush()
 		return lines
 	}
 	t, h := r.GetTotals(), r.GetHealth()
@@ -348,7 +394,8 @@ func (p *tokenMetricsPage) lines() []string {
 		state = "Pending persistence"
 		statusStyle = p.styles.Info
 	}
-	add(statusStyle.Render("● "+state) + p.styles.Dim.Render(fmt.Sprintf("  ·  %d incomplete  ·  %d unknown attribution", t.GetIncomplete(), t.GetUnknownAttribution())))
+	section("Summary")
+	add(statusStyle.Render("● "+state) + p.styles.Muted.Render(fmt.Sprintf("  ·  %d incomplete  ·  %d unknown attribution", t.GetIncomplete(), t.GetUnknownAttribution())))
 	if h.GetCoverageIncomplete() || h.GetLost() > 0 || h.GetUncertain() > 0 {
 		add(p.styles.Warn.Render("! Coverage gaps — gap timing unknown; empty periods are not measured zeros."))
 	}
@@ -365,47 +412,29 @@ func (p *tokenMetricsPage) lines() []string {
 	for _, row := range p.timeline(r.Buckets, w) {
 		add(row)
 	}
-	add(p.styles.Dim.Render("Tracking since: " + metricsSafe(r.TrackingSince) + " · timezone " + metricsSafe(r.Timezone)))
+	add(p.styles.Muted.Render("Tracking since: " + metricsSafe(r.TrackingSince) + " · timezone " + metricsSafe(r.Timezone)))
 	if records == 0 {
-		add("No recorded usage in this range. This is not evidence of measured zero usage.")
+		add(p.styles.Muted.Render("No recorded usage in this range. This is not evidence of measured zero usage."))
 	}
-	// Side-by-side rankings on wide terminals; stacked on narrow terminals.
-	if w >= 90 {
-		half := (w - 3) / 2
-		left := append([]string{p.heading("By provider", half)}, p.breakdown("provider", r, half)...)
-		right := append([]string{p.heading("By model", half)}, p.breakdown("model", r, half)...)
-		add("")
-		for i := 0; i < maxInt(len(left), len(right)); i++ {
-			l, rr := "", ""
-			if i < len(left) {
-				l = left[i]
-			}
-			if i < len(right) {
-				rr = right[i]
-			}
-			add(metricsPad(l, half) + "   " + rr)
-		}
-	} else {
-		for _, dimension := range []string{"provider", "model"} {
-			section("By " + dimension)
-			for _, row := range p.breakdown(dimension, r, w) {
-				add(row)
-			}
+	for _, dimension := range []string{"provider", "model"} {
+		section("By " + dimension)
+		for _, row := range p.breakdown(dimension, r, w) {
+			add(row)
 		}
 	}
 	if r.BreakdownsTruncated {
-		add("Breakdowns show the top 50 values per dimension; totals include all matching records.")
+		add(p.styles.Muted.Render("Breakdowns show the top 50 values per dimension; totals include all matching records."))
 	}
 	section("Exact reported usage")
 	noun := "Inference attempts"
 	if r.Population == "external" {
 		noun = "External reports (not internal attempts)"
 	}
-	add(fmt.Sprintf("%s: %d", noun, records))
-	add("Input: " + metricNumber(t.GetInput(), records) + " · Output: " + metricNumber(t.GetOutput(), records))
-	add("Total reported input + output: " + metricTotal(t) + " (partial when usage is incomplete)")
-	add("Cache read: " + metricNumber(t.GetCacheRead(), records) + " · Cache write: " + metricNumber(t.GetCacheWrite(), records) + " · Reasoning: " + metricNumber(t.GetReasoning(), records))
-	add(fmt.Sprintf("Incomplete usage: %d · Unknown attribution: %d · Unfinished: %d", t.GetIncomplete(), t.GetUnknownAttribution(), t.GetUnfinished()))
+	add(p.styles.Primary.Render(fmt.Sprintf("%s: %d", noun, records)))
+	add(p.styles.Primary.Render("Input: " + metricNumber(t.GetInput(), records) + " · Output: " + metricNumber(t.GetOutput(), records)))
+	add(p.styles.Primary.Render("Total reported input + output: " + metricTotal(t) + " (partial when usage is incomplete)"))
+	add(p.styles.Primary.Render("Cache read: " + metricNumber(t.GetCacheRead(), records) + " · Cache write: " + metricNumber(t.GetCacheWrite(), records) + " · Reasoning: " + metricNumber(t.GetReasoning(), records)))
+	add(p.styles.Primary.Render(fmt.Sprintf("Incomplete usage: %d · Unknown attribution: %d · Unfinished: %d", t.GetIncomplete(), t.GetUnknownAttribution(), t.GetUnfinished())))
 	// Per-bucket details retain exact amounts and calendar labels below the plot.
 	for _, b := range r.Buckets {
 		label := metricsSafe(b.Label)
@@ -419,35 +448,36 @@ func (p *tokenMetricsPage) lines() []string {
 		if b.GetTotals().GetRecords() == 0 {
 			value = "no records"
 		}
-		add(p.styles.Dim.Render(label) + "  " + value)
+		add(p.styles.Muted.Render(label) + "  " + p.styles.Primary.Render(value))
 	}
 	section("Accounting notes")
-	add("Accounting health (global): " + state)
-	add(fmt.Sprintf("Pending: %d · Retries: %d · Write failures: %d · Lost observations: %d · Uncertain: %d", h.GetPending(), h.GetRetries(), h.GetWriteFailures(), h.GetLost(), h.GetUncertain()))
+	add(p.styles.Primary.Render("Accounting health (global): ") + statusStyle.Render(state))
+	add(p.styles.Primary.Render(fmt.Sprintf("Pending: %d · Retries: %d · Write failures: %d · Lost observations: %d · Uncertain: %d", h.GetPending(), h.GetRetries(), h.GetWriteFailures(), h.GetLost(), h.GetUncertain())))
 	last := h.GetLastPersistence()
 	if last == "" {
 		last = "none recorded"
 	}
-	add("Last persistence: " + metricsSafe(last))
+	add(p.styles.Primary.Render("Last persistence: " + metricsSafe(last)))
 	if h.GetOldestPending() != "" {
-		add("Oldest pending: " + metricsSafe(h.GetOldestPending()))
+		add(p.styles.Primary.Render("Oldest pending: " + metricsSafe(h.GetOldestPending())))
 	}
 	if h.GetLastError() != "" {
-		add("Persistence warning: " + metricsSafe(h.LastError))
+		add(p.styles.Warn.Render("Persistence warning: " + metricsSafe(h.LastError)))
 	}
 	for _, warning := range r.Warnings {
-		add("Note: " + metricsSafe(warning))
+		add(p.styles.Muted.Render("Note: " + metricsSafe(warning)))
 	}
 	loc, e := time.LoadLocation(r.Timezone)
 	if e != nil {
 		loc = time.UTC
 	}
-	add(fmt.Sprintf("Window: %s to %s (exclusive)", time.UnixMicro(r.StartUnixMicros).In(loc).Format("2006-01-02 15:04 MST"), time.UnixMicro(r.EndUnixMicros).In(loc).Format("2006-01-02 15:04 MST")))
-	add("Snapshot: " + metricsSafe(r.GeneratedAt) + " · updates every 5s while open")
-	add("Filters: * all, ? unknown, =literal for reserved values. Custom dates include both endpoints.")
+	add(p.styles.Primary.Render(fmt.Sprintf("Window: %s to %s (exclusive)", time.UnixMicro(r.StartUnixMicros).In(loc).Format("2006-01-02 15:04 MST"), time.UnixMicro(r.EndUnixMicros).In(loc).Format("2006-01-02 15:04 MST"))))
+	add(p.styles.Muted.Render("Snapshot: " + metricsSafe(r.GeneratedAt) + " · updates every 5s while open"))
+	add(p.styles.Muted.Render("Filters: * all, ? unknown, =literal for reserved values. Custom dates include both endpoints."))
 	if p.timezoneNote != "" {
-		add(p.timezoneNote)
+		add(p.styles.Muted.Render(p.timezoneNote))
 	}
+	flush()
 	return lines
 }
 func (p *tokenMetricsPage) ScrollState() contentPageScrollState {

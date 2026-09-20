@@ -66,7 +66,7 @@ func TestMetricsPlotUnknownEmptyAndZeroDistinct(t *testing.T) {
 	}
 }
 func TestMetricsDashboardResponsiveAndFocus(t *testing.T) {
-	p, _ := newTokenMetricsPage(nil, theme.Styles{}, 110, 38)
+	p, _ := newTokenMetricsPage(nil, theme.Cracker(), theme.Styles{}, 110, 38)
 	defer p.Close()
 	r := metricsTestResponse()
 	r.Totals.Input.Tokens = 17000
@@ -86,9 +86,16 @@ func TestMetricsDashboardResponsiveAndFocus(t *testing.T) {
 	p.SetSize(110, 38)
 	p.ScrollTo(0)
 	view := ansi.Strip(p.View())
-	for _, want := range []string{"╭", "INPUT", "OUTPUT", "TOTAL", "ATTEMPTS", "17.0k", "Usage over time", "█ input", "█ output", "By provider", "By model"} {
+	for _, want := range []string{"╭", "INPUT", "OUTPUT", "TOTAL", "ATTEMPTS", "17.0k", "Usage over time", "█ input", "█ output"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("missing above-fold %s:\n%s", want, view)
+		}
+	}
+	// Bordered sections consume additional rows; rankings remain reachable by scrolling.
+	all := ansi.Strip(strings.Join(p.lines(), "\n"))
+	for _, want := range []string{"By provider", "By model"} {
+		if !strings.Contains(all, want) {
+			t.Fatalf("missing scrollable section %s", want)
 		}
 	}
 	for cursor := 0; cursor < 9; cursor++ {
@@ -107,7 +114,7 @@ func TestMetricsDashboardResponsiveAndFocus(t *testing.T) {
 	}
 }
 func TestMetricsDashboardWarningsBeforeChart(t *testing.T) {
-	p, _ := newTokenMetricsPage(nil, theme.Styles{}, 100, 40)
+	p, _ := newTokenMetricsPage(nil, theme.Cracker(), theme.Styles{}, 100, 40)
 	defer p.Close()
 	r := metricsTestResponse()
 	r.Health.CoverageIncomplete = true
@@ -130,7 +137,7 @@ func TestMetricsDashboardWarningsBeforeChart(t *testing.T) {
 	}
 }
 func TestMetricsDashboardPreview(t *testing.T) {
-	p, _ := newTokenMetricsPage(nil, theme.NewStyles(theme.Cracker()), 104, 42)
+	p, _ := newTokenMetricsPage(nil, theme.Cracker(), theme.NewStyles(theme.Cracker()), 104, 42)
 	defer p.Close()
 	r := metricsTestResponse()
 	r.Totals = &proto.TokenMetricTotals{Records: 7, Input: &proto.TokenMetricCount{KnownRecords: 7}, Output: &proto.TokenMetricCount{KnownRecords: 7}}

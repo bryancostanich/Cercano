@@ -37,7 +37,7 @@ func metricsTestResponse() *proto.GetTokenMetricsResponse {
 }
 func TestTokenMetricsAsyncFiltersAndStaleResults(t *testing.T) {
 	client := &metricsTestClient{request: make(chan *proto.GetTokenMetricsRequest, 4)}
-	p, cmd := newTokenMetricsPage(client, theme.Styles{}, 100, 40)
+	p, cmd := newTokenMetricsPage(client, theme.Cracker(), theme.Styles{}, 100, 40)
 	defer p.Close()
 	if client.calls.Load() != 0 || !p.loading {
 		t.Fatal("constructor must not block on RPC")
@@ -70,7 +70,7 @@ func TestTokenMetricsAsyncFiltersAndStaleResults(t *testing.T) {
 	if p.tick(tokenMetricsTickMsg{id: p.id, revision: second.revision}) != nil || p.apply(second) != nil {
 		t.Fatal("closed page restarted")
 	}
-	next, _ := newTokenMetricsPage(client, theme.Styles{}, 80, 25)
+	next, _ := newTokenMetricsPage(client, theme.Cracker(), theme.Styles{}, 80, 25)
 	defer next.Close()
 	if next.apply(second) != nil {
 		t.Fatal("reopened page accepted previous page response")
@@ -78,7 +78,7 @@ func TestTokenMetricsAsyncFiltersAndStaleResults(t *testing.T) {
 }
 func TestTokenMetricsCloseCancelsRPC(t *testing.T) {
 	client := &metricsTestClient{request: make(chan *proto.GetTokenMetricsRequest, 1), block: true}
-	p, cmd := newTokenMetricsPage(client, theme.Styles{}, 80, 25)
+	p, cmd := newTokenMetricsPage(client, theme.Cracker(), theme.Styles{}, 80, 25)
 	done := make(chan tea.Msg, 1)
 	go func() { done <- cmd() }()
 	<-client.request
@@ -97,7 +97,7 @@ func TestTokenMetricsCloseCancelsRPC(t *testing.T) {
 	}
 }
 func TestTokenMetricsRenderStatesAndWidth(t *testing.T) {
-	p, _ := newTokenMetricsPage(nil, theme.Styles{}, 90, 45)
+	p, _ := newTokenMetricsPage(nil, theme.Cracker(), theme.Styles{}, 90, 45)
 	defer p.Close()
 	if !strings.Contains(strings.Join(p.lines(), "\n"), "Loading") {
 		t.Fatal("loading missing")
@@ -206,7 +206,7 @@ func TestTokenMetricsKeyboardAndTabNavigation(t *testing.T) {
 	}
 }
 func TestTokenMetricsNoRefreshAfterFilterEditing(t *testing.T) {
-	p, cmd := newTokenMetricsPage(&metricsTestClient{}, theme.Styles{}, 80, 30)
+	p, cmd := newTokenMetricsPage(&metricsTestClient{}, theme.Cracker(), theme.Styles{}, 80, 30)
 	defer p.Close()
 	msg := cmd().(tokenMetricsResultMsg)
 	p.apply(msg)
@@ -226,7 +226,7 @@ func TestTokenMetricsNoRefreshAfterFilterEditing(t *testing.T) {
 }
 
 func TestTokenMetricsNarrowFocusedFieldVisible(t *testing.T) {
-	p, _ := newTokenMetricsPage(nil, theme.Styles{}, 30, 10)
+	p, _ := newTokenMetricsPage(nil, theme.Cracker(), theme.Styles{}, 30, 10)
 	defer p.Close()
 	for i := 0; i < 7; i++ {
 		p.Update(tea.KeyPressMsg{Code: tea.KeyDown})
@@ -237,7 +237,7 @@ func TestTokenMetricsNarrowFocusedFieldVisible(t *testing.T) {
 }
 
 func TestTokenMetricsShiftTabDoesNotLoseRefresh(t *testing.T) {
-	p, cmd := newTokenMetricsPage(&metricsTestClient{}, theme.Styles{}, 80, 30)
+	p, cmd := newTokenMetricsPage(&metricsTestClient{}, theme.Cracker(), theme.Styles{}, 80, 30)
 	defer p.Close()
 	p.apply(cmd().(tokenMetricsResultMsg))
 	p.cursor = 2

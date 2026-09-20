@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"math"
+	"regexp"
 	"strings"
 
 	"cercano/source/server/pkg/proto"
@@ -25,10 +26,38 @@ func metricsPad(s string, w int) string {
 	s = ansi.Truncate(s, maxInt(0, w), "…")
 	return s + strings.Repeat(" ", maxInt(0, w-ansi.StringWidth(s)))
 }
-func (p *tokenMetricsPage) heading(label string, w int) string {
-	title := p.styles.Accent.Bold(true).Render(label)
-	return title + " " + p.styles.BorderDim.Render(strings.Repeat("─", maxInt(0, w-ansi.StringWidth(label)-1)))
+
+var metricsSGRSequence = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+// metricsWrapStyled wraps one already-styled logical line at the given cell
+// width. ansi.Wrap keeps escape codes but does not re-open an unterminated SGR
+// state on wrapped continuation lines, so those tails would inherit the
+// terminal default foreground — terminal white, unreadable on light themes.
+// This re-emits the carried SGR state at each wrap so every continuation line
+// keeps its theme foreground (the responsive narrow layout included).
+func metricsWrapStyled(text string, width int) []string {
+	wrapped := strings.Split(ansi.Wrap(text, width, ""), "\n")
+	if len(wrapped) < 2 {
+		return wrapped
+	}
+	pen := ""
+	for i, line := range wrapped {
+		if i > 0 && pen != "" {
+			wrapped[i] = pen + line
+		}
+		// Track the SGR state of the original line contents only — the
+		// prepended pen is the carried state, not a new transition.
+		for _, seq := range metricsSGRSequence.FindAllString(line, -1) {
+			if seq == "\x1b[m" || seq == "\x1b[0m" {
+				pen = ""
+				continue
+			}
+			pen += seq
+		}
+	}
+	return wrapped
 }
+
 func (p *tokenMetricsPage) cards(t *proto.TokenMetricTotals, population string, w int) []string {
 	count := t.GetRecords()
 	noun := "ATTEMPTS"
@@ -68,7 +97,7 @@ func (p *tokenMetricsPage) cards(t *proto.TokenMetricTotals, population string, 
 		for _, c := range cards[start:minInt(len(cards), start+columns)] {
 			inside := maxInt(1, width-4)
 			rows[0] = append(rows[0], p.styles.BorderDim.Render("╭"+strings.Repeat("─", maxInt(0, width-2))+"╮"))
-			rows[1] = append(rows[1], p.styles.BorderDim.Render("│")+" "+p.styles.Dim.Render(metricsPad(c.label, inside))+" "+p.styles.BorderDim.Render("│"))
+			rows[1] = append(rows[1], p.styles.BorderDim.Render("│")+" "+p.styles.Muted.Render(metricsPad(c.label, inside))+" "+p.styles.BorderDim.Render("│"))
 			rows[2] = append(rows[2], p.styles.BorderDim.Render("│")+" "+c.style.Bold(true).Render(metricsPad(c.value, inside))+" "+p.styles.BorderDim.Render("│"))
 			rows[3] = append(rows[3], p.styles.BorderDim.Render("│")+" "+p.styles.Muted.Render(metricsPad(c.note, inside))+" "+p.styles.BorderDim.Render("│"))
 			rows[4] = append(rows[4], p.styles.BorderDim.Render("╰"+strings.Repeat("─", maxInt(0, width-2))+"╯"))
@@ -125,7 +154,7 @@ func (p *tokenMetricsPage) timeline(buckets []*proto.TokenMetricBucket, w int) [
 	}
 	cellWidth := maxInt(2, (w-8)/len(samples))
 	height := 5
-	out := []string{p.styles.Accent.Render("█ input") + "  " + p.styles.Info.Render("█ output") + p.styles.Dim.Render("  · reported tokens")}
+	out := []string{p.styles.Accent.Render("█ input") + "  " + p.styles.Info.Render("█ output") + p.styles.Muted.Render("  · reported tokens")}
 	scale := peak
 	if scale == 0 {
 		scale = 1
@@ -135,7 +164,7 @@ func (p *tokenMetricsPage) timeline(buckets []*proto.TokenMetricBucket, w int) [
 		if row == height-1 {
 			label = metricsPad(metricsCompact(peak), 6)
 		}
-		line := p.styles.Dim.Render(label + "│ ")
+		line := p.styles.Muted.Render(label + "│ ")
 		for _, s := range samples {
 			amount := (s.input+s.output)/scale*float64(height) - float64(row)
 			level := int(math.Ceil(math.Min(1, math.Max(0, amount)) * 8))
@@ -151,7 +180,7 @@ func (p *tokenMetricsPage) timeline(buckets []*proto.TokenMetricBucket, w int) [
 		}
 		out = append(out, line)
 	}
-	baseline := p.styles.Dim.Render("     0└ ")
+	baseline := p.styles.Muted.Render("     0└ ")
 	for _, s := range samples {
 		glyph := "─"
 		style := p.styles.Border
@@ -180,10 +209,10 @@ func (p *tokenMetricsPage) timeline(buckets []*proto.TokenMetricBucket, w int) [
 	if plotWidth >= len(first)+len(last)+2 {
 		dates = metricsPad(first, plotWidth-len(last)) + last
 	}
-	out = append(out, p.styles.Dim.Render("        "+dates))
-	out = append(out, p.styles.Dim.Render("· no records   ? unknown   0 reported zero   ! partial / incomplete"))
+	out = append(out, p.styles.Muted.Render("        "+dates))
+	out = append(out, p.styles.Muted.Render("· no records   ? unknown   0 reported zero   ! partial / incomplete"))
 	if len(samples) < len(buckets) {
-		out = append(out, p.styles.Dim.Render(fmt.Sprintf("%d calendar buckets → %d contiguous summed columns", len(buckets), len(samples))))
+		out = append(out, p.styles.Muted.Render(fmt.Sprintf("%d calendar buckets → %d contiguous summed columns", len(buckets), len(samples))))
 	}
 	return out
 }
@@ -219,10 +248,10 @@ func (p *tokenMetricsPage) breakdown(dimension string, r *proto.GetTokenMetricsR
 			display = metricsCompact(metricMagnitude(b.Totals))
 		}
 		if w < 34 {
-			lines = append(lines, fmt.Sprintf("%s  %s", label, total))
+			lines = append(lines, p.styles.Primary.Render(label)+"  "+p.styles.Bright.Render(total))
 			continue
 		}
-		lines = append(lines, p.styles.Dim.Render(fmt.Sprintf("%2d ", i+1))+metricsPad(label, labelWidth)+" "+style.Render(bar)+track+" "+p.styles.Bright.Render(display))
+		lines = append(lines, p.styles.Muted.Render(fmt.Sprintf("%2d ", i+1))+p.styles.Primary.Render(metricsPad(label, labelWidth))+" "+style.Render(bar)+track+" "+p.styles.Bright.Render(display))
 	}
 	return lines
 }
@@ -255,7 +284,7 @@ func (p *tokenMetricsPage) filterRows(w int) ([]string, int) {
 		if p.editing && i == p.cursor && i >= 2 && i < 8 {
 			flush()
 			focus = len(out)
-			out = append(out, "> "+label+": "+p.fields[i-2].View())
+			out = append(out, p.styles.Primary.Render("> "+label+": ")+p.fields[i-2].View())
 			continue
 		}
 		prefix := "  "

@@ -23,6 +23,7 @@ import (
 	"cercano/source/server/internal/capabilities"
 	"cercano/source/server/internal/conversation"
 	"cercano/source/server/internal/dispatch"
+	"cercano/source/server/internal/dispatchtrace"
 	"cercano/source/server/internal/failurelog"
 	"cercano/source/server/internal/hostsvc/permissions"
 	"cercano/source/server/internal/inference"
@@ -597,6 +598,29 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 	if route := inference.TargetForContext(ctx, sel.Provider, inference.Call{Model: model, Tier: string(spec.Tier), FallbackTier: string(spec.FallbackTier)}); route.Profile != "" {
 		contextWindow, contextWindowKnown = route.ContextWindow, route.ContextWindowKnown
 	}
+	// Scoped diagnostic trace for THIS dispatch only: nil (and every record a
+	// no-op) unless the operator selected this parent conversation. A private
+	// persistent claim bounds capture to one dispatch; see internal/dispatchtrace.
+	tr := dispatchtrace.Begin(subConvID, spec.ConversationID)
+	ctx = dispatchtrace.WithTrace(ctx, tr)
+	tr.DispatchStart(dispatchtrace.DispatchStartEvent{
+		Mode:               "agentic",
+		Task:               spec.Task,
+		WorkDir:            spec.WorkDir,
+		ParentConversation: spec.ConversationID,
+		Provider:           provider,
+		Model:              model,
+		Tier:               string(spec.Tier),
+		FallbackTier:       string(spec.FallbackTier),
+		IsCloud:            sel.IsCloud,
+		GrantedTools:       granted,
+		IgnoredTools:       ignored,
+		MaxIterations:      spec.MaxIterations,
+		TokenBudget:        spec.TokenBudget,
+		ContextWindow:      contextWindow,
+		ContextWindowKnown: contextWindowKnown,
+	})
+	defer tr.Close()
 	// Per-dispatch compactor: state is per-conversation, never shared.
 	var loopCompactor agent.LoopCompactor
 	if x.newLoopCompactor != nil {
@@ -665,6 +689,13 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 
 	if err != nil {
 		log.Printf("[dispatch] subagent done: conv=%s err=%v", subConvID, err)
+		tr.DispatchDone(dispatchtrace.DispatchDoneEvent{
+			Err:          dispatchtrace.ErrorCode(err),
+			Iterations:   res.Iterations,
+			InputTokens:  res.InputTokens,
+			OutputTokens: res.OutputTokens,
+			CalledTools:  res.CalledTools,
+		})
 		extra := failurelog.Event{}
 		addDispatchRequestBudgetFields(extra, res)
 		x.logDispatchFailure("dispatch.tool_loop_failed", spec, subConvID, provider, model, sel.IsCloud, granted, ignored, err, extra)
@@ -720,6 +751,7 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 	if suspicious {
 		log.Printf("[dispatch] subagent SUSPICIOUS no-op: conv=%s granted_write=%v called=%v reason=%q",
 			subConvID, sortedKeys(mutating), sortedKeys(called), reason)
+		tr.DispatchDone(dispatchtrace.DispatchDoneEvent{Err: "suspicious_noop", Iterations: res.Iterations, InputTokens: res.InputTokens, OutputTokens: res.OutputTokens, CalledTools: res.CalledTools})
 		x.logDispatchFailure("dispatch.degraded", spec, subConvID, provider, model, sel.IsCloud, granted, ignored, nil, failurelog.Event{
 			"error_class":        "suspicious_noop",
 			"message":            suspiciousNoOpMessage(reason),
@@ -755,6 +787,12 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 		})
 	}
 
+	tr.DispatchDone(dispatchtrace.DispatchDoneEvent{
+		Iterations:   res.Iterations,
+		InputTokens:  res.InputTokens,
+		OutputTokens: res.OutputTokens,
+		CalledTools:  res.CalledTools,
+	})
 	route := llm.ServingRoute{Profile: sel.Profile, Destination: string(sel.Destination), ContextWindow: contextWindow, ContextWindowKnown: contextWindowKnown}
 	if res.Route != nil {
 		route = *res.Route

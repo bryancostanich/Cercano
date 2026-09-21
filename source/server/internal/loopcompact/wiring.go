@@ -10,6 +10,7 @@ import (
 	"cercano/source/server/internal/compaction"
 	"cercano/source/server/internal/compactor"
 	"cercano/source/server/internal/contextmeter"
+	"cercano/source/server/internal/dispatchtrace"
 	"cercano/source/server/internal/engine"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/locus"
@@ -120,11 +121,23 @@ func BuildSummarizer(deps WiringDeps) Summarize {
 		}
 		convID, iteration := scopeFrom(ctx)
 		requestID := fmt.Sprintf("compaction-%s-%d-%d", convID, iteration, time.Now().UnixNano())
+		// Scoped dispatch trace (nil unless the dispatch front door opted in
+		// for this dispatch): records the exact summarizer prompts and raw
+		// responses, correlated by conversation and iteration.
+		tr := dispatchtrace.From(ctx)
+		summaryCall := 0
 		summary, stats, err := compaction.SummarizeBudgetedLocal(ctx, msgs, localSummaryWindow, compaction.DefaultSummaryOutputReserve, func(ctx context.Context, prompt string, maxTokens int) (compaction.StructuredSummary, error) {
+			summaryCall++
+			callID := fmt.Sprintf("%s:%d", requestID, summaryCall)
 			budget := compaction.EstimateSummaryBudget(prompt, maxTokens, localSummaryWindow)
 			deps.logf("[compaction] local summarizer request: request_id=%s route=local prompt_tokens=%d output_reserve=%d limit=%d budget=%d fits=%t",
 				requestID, budget.PromptTokens, compaction.DefaultSummaryOutputReserve, budget.Limit, budget.Budget, budget.Fits)
-			req := &agent.Request{Input: prompt, Temperature: greedy.Temperature, Tier: string(config.TierFastLightText), MaxTokens: maxTokens, RequestID: requestID, ConversationID: convID}
+			tr.SummarizerRequest(dispatchtrace.SummarizerRequestEvent{
+				Route: "local", RequestID: callID, Model: summarizerModel,
+				Tier: string(config.TierFastLightText), MaxTokens: maxTokens, Temperature: greedy.Temperature,
+				Prompt: prompt, ConversationID: convID, Iteration: iteration,
+			})
+			req := &agent.Request{Input: prompt, Temperature: greedy.Temperature, Tier: string(config.TierFastLightText), MaxTokens: maxTokens, RequestID: callID, ConversationID: convID}
 			if summarizerModel != "" {
 				req.ModelOverride = summarizerModel
 			}
@@ -137,8 +150,17 @@ func BuildSummarizer(deps WiringDeps) Summarize {
 			}
 			resp, err := open.Process(ctx, req)
 			if err != nil {
+				tr.SummarizerResponse(dispatchtrace.SummarizerResponseEvent{
+					Route: "local", RequestID: callID, Model: summarizerModel,
+					Err: classifyFailure(err), ConversationID: convID, Iteration: iteration,
+				})
 				return compaction.StructuredSummary{}, err
 			}
+			tr.SummarizerResponse(dispatchtrace.SummarizerResponseEvent{
+				Route: "local", RequestID: callID, Model: summarizerModel,
+				Output: resp.Output, InputTokens: resp.InputTokens, OutputTokens: resp.OutputTokens,
+				ConversationID: convID, Iteration: iteration,
+			})
 			// Provider usage vs estimate, per request: the seam reports no usage,
 			// so the budget attributes the chunk's ESTIMATED input; the actual
 			// provider-reported counters land here for comparison. Metadata only.
@@ -174,6 +196,11 @@ func BuildSummarizer(deps WiringDeps) Summarize {
 				}
 			}
 			deps.logf("[compaction] local summarizer failed (%s) — falling back to cloud", classifyFailure(err))
+			tr.SummarizerRequest(dispatchtrace.SummarizerRequestEvent{
+				Route: "cloud", RequestID: cloudReq.RequestID, Model: cloudReq.ModelOverride,
+				Tier: string(config.TierFastLightText), MaxTokens: cloudReq.MaxTokens, Temperature: cloudReq.Temperature,
+				Prompt: cloudReq.Input, ConversationID: convID, Iteration: iteration,
+			})
 			// Detach from the pass deadline but keep cancellation: the pass
 			// deadline is exactly what this call is meant to outlive, while
 			// shutdown must still be able to stop it.
@@ -187,11 +214,20 @@ func BuildSummarizer(deps WiringDeps) Summarize {
 			stopPropagate()
 			cancelCloud()
 			if cerr == nil {
+				tr.SummarizerResponse(dispatchtrace.SummarizerResponseEvent{
+					Route: "cloud", RequestID: cloudReq.RequestID, Model: cloudReq.ModelOverride,
+					Output: cresp.Output, InputTokens: cresp.InputTokens, OutputTokens: cresp.OutputTokens,
+					ConversationID: convID, Iteration: iteration,
+				})
 				deps.logf("[compaction] summarizer usage: request_id=%s route=cloud input_tokens_reported=%d output_tokens_reported=%d", cloudReq.RequestID, cresp.InputTokens, cresp.OutputTokens)
 				return parseLogged(cresp.Output, "cloud fallback"), nil
 			}
 			// Both failures classified, never echoed raw — provider errors can
 			// carry content.
+			tr.SummarizerResponse(dispatchtrace.SummarizerResponseEvent{
+				Route: "cloud", RequestID: cloudReq.RequestID, Model: cloudReq.ModelOverride,
+				Err: classifyFailure(cerr), ConversationID: convID, Iteration: iteration,
+			})
 			deps.logf("[compaction] cloud fallback FAILED: reason=%s", classifyFailure(cerr))
 			return compaction.StructuredSummary{}, fmt.Errorf("local summarizer: %w; cloud fallback: %v", err, cerr)
 		}

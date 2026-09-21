@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"cercano/source/server/internal/agenttools"
+	"cercano/source/server/internal/dispatchtrace"
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/pkg/config"
@@ -555,6 +556,12 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (returned ToolLoopResult
 		}
 	}
 
+	// Scoped diagnostic trace for this loop: nil (all records no-ops) unless
+	// the dispatch front door enabled one via ctx (internal/dispatchtrace).
+	// Main turns and un-traced dispatches pay one context lookup and nothing
+	// else; ordinary logs stay metadata-only by design.
+	tr := dispatchtrace.From(ctx)
+
 	for iter := 0; unlimitedIters || iter < maxIters; iter++ {
 		target := inference.TargetForContext(ctx, in.Provider, inference.Call{Model: requestedModel, Tier: in.Tier, FallbackTier: in.FallbackTier})
 		if target.Profile != "" || target.Destination == "local" {
@@ -594,6 +601,14 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (returned ToolLoopResult
 		}
 		if in.LoopCompactor != nil {
 			beforeCompact := len(hist)
+			// Trace-only copy of the pre-compaction history; skipped entirely
+			// (no allocation) when tracing is off.
+			var beforeForTrace []llm.Message
+			spentBeforeTrace := 0
+			if tr != nil {
+				beforeForTrace = dispatchtrace.Snapshot(hist)
+				spentBeforeTrace = tokenBudget.Spent
+			}
 			// Stamp dispatch correlation so the compactor's metadata telemetry
 			// names the conversation and iteration every pass belongs to.
 			compactCtx := WithLoopCompactionScope(ctx, LoopCompactionScope{ConversationID: in.ConversationID, Iteration: iter + 1})
@@ -607,6 +622,8 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (returned ToolLoopResult
 				}
 				log.Printf("[tool-loop] compacted loop history: conv=%s model=%s iter=%d before_messages=%d after_messages=%d", in.ConversationID, in.Model, iter+1, beforeCompact, len(hist))
 			}
+			// Include no-op/failing passes and same-size rewrites as well.
+			tr.Compaction(iter+1, beforeForTrace, hist, tokenBudget.Spent-spentBeforeTrace)
 		}
 		preserveTail := len(hist) - priorHistoryCount
 		if preserveTail < 1 {
@@ -661,8 +678,22 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (returned ToolLoopResult
 		}
 		log.Printf("[tool-loop] model request: conv=%s provider=%s model=%s iter=%d stream=true temp=%s max_tokens=%d tools=%v lean_subagent_prompt=%t flatten_tool_results=%t system_prefix=%q user_prefix=%q history=%d message_tokens=%d system_tokens=%d tool_schema_tokens=%d output_reserve_tokens=%d estimated_request_tokens=%d context_window=%d context_window_known=%t prompt_budget=%d",
 			in.ConversationID, in.Provider.Name(), in.Model, iter+1, temperatureForLog(req.Temperature), req.MaxTokens, toolNamesForLog(req.Tools), systemHasLeanSubagentMarker(req.System), in.flattenToolResults(), truncateRunes(strings.TrimSpace(req.System), 120), truncateRunes(strings.TrimSpace(in.UserInput), 120), len(req.Messages), budget.MessageTokens, budget.SystemTokens, budget.ToolTokens, budget.OutputReserve, budget.EstimatedUsed, budget.Limit, in.ContextWindowKnown, budget.PromptBudget)
+		// The exact model-facing request (post-compaction, post-trim, pre
+		// provider serialization) plus the budget accounting that produced it.
+		tr.ModelRequest(iter+1, in.Provider.Name(), req, dispatchtrace.BudgetView{
+			MessageTokens:          budget.MessageTokens,
+			SystemTokens:           budget.SystemTokens,
+			ToolTokens:             budget.ToolTokens,
+			OutputReserve:          budget.OutputReserve,
+			EstimatedRequestTokens: budget.EstimatedUsed,
+			ContextWindow:          budget.Limit,
+			ContextWindowKnown:     in.ContextWindowKnown,
+			PromptBudget:           budget.PromptBudget,
+			TrimmedMessages:        budget.TrimmedMessages,
+		})
 		rdr, err := in.Provider.StreamChat(ctx, req)
 		if err != nil {
+			tr.ModelResponse(iter+1, in.Provider.Name(), in.Model, llm.ChatResponse{}, err)
 			return ToolLoopResult{Iterations: iter + 1, History: hist, InputTokens: lastIn, OutputTokens: lastOut, LastRequestBudget: budget}, err
 		}
 		resp, err := collectStream(ctx, rdr, in.OnTextDelta, noticeSink(in))
@@ -672,6 +703,10 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (returned ToolLoopResult
 			in.ContextWindow = resp.Route.ContextWindow
 			in.ContextWindowKnown = resp.Route.ContextWindowKnown
 		}
+		// The aggregated provider response: finish/stop reason, normalized
+		// usage, actual serving route, and the exact returned blocks (partial
+		// responses and stream errors are recorded too, with safe error codes).
+		tr.ModelResponse(iter+1, in.Provider.Name(), resp.Model, resp, err)
 		if err != nil {
 			providerInput := lastIn
 			if resp.InputTokens > 0 {
@@ -768,6 +803,9 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (returned ToolLoopResult
 		}
 		var rCalls, wxCalls []pendingCall
 		for _, tc := range toolCalls {
+			// Ordered exactly as the model requested the calls, with the raw
+			// arguments it emitted — the trace's tool-call record.
+			tr.ToolCall(iter+1, tc.ToolUseID, tc.ToolName, string(tc.ToolInput))
 			// A wrapped malformed input never reaches the tool: answer with
 			// the raw text so the model can see exactly what it emitted.
 			if raw, malformed := llm.MalformedToolInput(tc.ToolInput); malformed {
@@ -864,6 +902,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (returned ToolLoopResult
 				if err != nil {
 					out.Content = err.Error()
 					out.IsError = true
+					tr.ToolResult(iter+1, pc.block.ToolUseID, pc.block.ToolName, out.Content, true, 0, false)
 					blocks = []llm.Block{out}
 					emit(LoopEvent{Kind: LoopToolExecComplete, ToolUseID: pc.block.ToolUseID, ToolName: pc.block.ToolName, Summary: err.Error(), IsError: true})
 				} else {
@@ -871,11 +910,15 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (returned ToolLoopResult
 					// reads run here, and this is the path the production
 					// incident took: one unscoped Grep returning ~346 KB into a
 					// 32k window. See capToolResultForWindow.
-					content, capped := capToolResultForWindow(res.LLMContent(), in.ContextWindow)
+					orig := res.LLMContent()
+					content, capped := capToolResultForWindow(orig, in.ContextWindow)
 					if capped {
 						log.Printf("[tool-loop] tool result capped to window: conv=%s tool=%s window=%d final_bytes=%d",
 							in.ConversationID, pc.block.ToolName, in.ContextWindow, len(content))
 					}
+					// Exact model-facing result content (truncation marker
+					// included) plus the cap evidence.
+					tr.ToolResult(iter+1, pc.block.ToolUseID, pc.block.ToolName, content, false, len(orig), capped)
 					out.Content = content
 					out.StartLine = res.StartLine
 					blocks = toolResultBlocks(out, res, preserveImages)
@@ -1016,6 +1059,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (returned ToolLoopResult
 			if err != nil {
 				out.Content = err.Error()
 				out.IsError = true
+				tr.ToolResult(iter+1, pc.block.ToolUseID, pc.block.ToolName, out.Content, true, 0, false)
 				emit(LoopEvent{Kind: LoopToolExecComplete, ToolUseID: pc.block.ToolUseID, ToolName: pc.block.ToolName, Summary: err.Error(), IsError: true})
 				results = append(results, out)
 				if IsSessionControlTool(pc.block.ToolName) {
@@ -1031,11 +1075,15 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (returned ToolLoopResult
 				// can exceed the window outright — and it cannot be recovered
 				// from, because history trimming must preserve the newest
 				// message, which is exactly this one.
-				content, capped := capToolResultForWindow(res.LLMContent(), in.ContextWindow)
+				orig := res.LLMContent()
+				content, capped := capToolResultForWindow(orig, in.ContextWindow)
 				if capped {
 					log.Printf("[tool-loop] tool result capped to window: conv=%s tool=%s window=%d final_bytes=%d",
 						in.ConversationID, pc.block.ToolName, in.ContextWindow, len(content))
 				}
+				// Exact model-facing result content (truncation marker
+				// included) plus the cap evidence.
+				tr.ToolResult(iter+1, pc.block.ToolUseID, pc.block.ToolName, content, false, len(orig), capped)
 				out.Content = content
 				out.StartLine = res.StartLine
 				emit(LoopEvent{Kind: LoopToolExecComplete, ToolUseID: pc.block.ToolUseID, ToolName: pc.block.ToolName, Summary: summarizeResult(res), Detail: res.Detail, StartLine: res.StartLine, IsError: false})
@@ -1095,6 +1143,9 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (returned ToolLoopResult
 			maxIters)}},
 	})
 	finalReq := llm.ChatRequest{Model: in.Model, Tier: in.Tier, FallbackTier: in.FallbackTier, System: in.System, Messages: hist, MaxTokens: maxTokens, Temperature: in.Temperature}
+	// Trace the iteration-cap degradation pass too: the exact no-tools request
+	// the model sees here is part of the dispatch's story.
+	tr.ModelRequest(maxIters+1, in.Provider.Name(), finalReq, dispatchtrace.BudgetView{})
 	rdr, err := in.Provider.StreamChat(ctx, finalReq)
 	if err != nil {
 		finalBudget := EstimateRequestBudget(RequestBudgetInput{System: in.System, Messages: hist, MaxTokens: maxTokens, ContextWindow: in.ContextWindow})
@@ -1102,6 +1153,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (returned ToolLoopResult
 	}
 	resp, err := collectStream(ctx, rdr, in.OnTextDelta, noticeSink(in))
 	rdr.Close()
+	tr.ModelResponse(maxIters+1, in.Provider.Name(), resp.Model, resp, err)
 	if err != nil {
 		providerInput := lastIn
 		if resp.InputTokens > 0 {

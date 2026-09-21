@@ -1,86 +1,59 @@
-# Single-dispatch diagnostic tracing
+# Database-backed dispatch evidence
 
-Use this to investigate a capable model that repeatedly explores instead of implementing. The persisted conversation is not necessarily the model's actual request after compaction, trimming, compatibility transforms, and image rewriting.
+Every agentic dispatch with conversation persistence now records its request-construction evidence automatically in the existing host-owned conversation database. There are no arming files, parent allowlists, environment switches, capture slots, or separate JSONL trace files. The former one-shot file collector has been removed. The live worker log-forwarding fix is retained.
 
-## Privacy and scope
+## Storage and lifecycle
 
-OFF by default. Captures only the **first agentic dispatch from each selected parent conversation**. The private `armed` file accepts newline-separated exact IDs (maximum 4096 bytes; blank lines and duplicates ignored). Each parent has an exclusive `.claimed-<SHA256-of-parent-ID>` file, so concurrent conversations cannot consume each other's capture. Single-ID and environment selection also create the legacy `.claimed` global claim. Any existing global claim blocks capture conservatively, even after editing the list, because old claims do not identify their parent. Nested dispatches and unrelated parents do not inherit capture permission. A trace already in progress continues to its end if the arming file is removed.
+`dispatch_events` is an additive table installed by normal `conversation.Open` initialization, including when opening an existing database. Its key is `(conversation_id, seq)`; duplicates are rejected, not overwritten. Each fresh dispatch has its own child conversation ID and its own event sequence. Records retain all earlier requests and compaction passes rather than overwriting the latest summary. Deleting a conversation cascades deletion of its event records. Parent and child conversation deletion otherwise follows existing conversation-store behavior.
 
-Trace content includes source, prompts and tool output verbatim and **can contain secrets embedded in that content**. This is not a secret scrubber. Do not upload or commit traces. No HTTP authentication headers, client configuration objects or raw transport-error strings are captured. Images, image URLs and opaque provider reasoning blobs are omitted. Ordinary diagnostic events introduced here are metadata-only.
+The host remains the only SQLite owner. In-process dispatches append through the narrow `conversation.DispatchEventStore` interface. Worker dispatches use correlated request/response messages over their existing host stream. The host acknowledges a write only after the database operation returns. Only child conversations successfully created under the current turn or its authorized descendants can write events through that stream.
 
-The output directory must be owner-only (normally 0700) and not a symlink; trace files are 0600 and exclusively created. Insecure existing directories are refused rather than silently chmodded. Use a trusted, owner-controlled parent directory. This does not defend against another process already running as your user. No automatic upload, retention cleanup or disk-quota policy is introduced: inspect file size during the bounded reproduction, then archive privately or delete deliberately. Setup/write failure is advisory, never a reason to fail the dispatch; a consumed claim is not automatically reset on failure.
+Writes have a bounded wait and respect cancellation. Recording failures do not abort the task: they are logged without payload content, counted in the recorder, reported in the final dispatch result/progress, and recorded in the failure log. Later successful events retain sequence gaps, and a successfully written `dispatch_done` includes the preceding persistence-failure count. A failed final append, cancelled stream or process crash can leave no terminal event; absence of one is not evidence of success. Existing ordinary turn persistence remains best-effort; this change does not claim to repair all historical turn accounting.
 
-## Enable on the running agent
+## Evidence retained
 
-The updated binary must first be deployed and the old singleton restarted once. After that, arming does **not** require another restart:
+- `dispatch_start` / `dispatch_done`: task, parent, grants, selected model/route, limits, result accounting and safe failure classification.
+- `model_request`: messages after loop compaction, mechanical trimming and compatibility conversion; system prompt, tool definitions and choice; model settings and request-budget estimates.
+- `model_response`: collected response blocks, stop reason, usage, serving route and safe error classification, including partial responses and stream-open errors.
+- `compaction`: the accepted before/after histories for every configured pass, including same-size rewrites, no-ops and history preserved after failure; attributed summarizer spend.
+- `summarizer_request` / `summarizer_response`: prompt and raw summary text, selection/settings and available usage, correlated by dispatch, iteration and request ID. Earlier summaries survive later reductions.
+- `tool_call` / `tool_result`: emitted arguments, executed outcomes and window-cap truncation metadata. Ordinary conversation turns continue to retain the transcript. Pre-execution rejections remain visible in subsequent model requests rather than executed-result events.
 
-```bash
-# Substitute the PARENT conversation ID, not the previous child dispatch ID.
-# Default location unless the agent inherited CERCANO_DISPATCH_TRACE_DIR.
-umask 077
-trace_dir="$HOME/.cercano/trace/dispatch"
-mkdir -p "$trace_dir"
-# If this existing directory is not private, choose/fix its permissions
-# deliberately before continuing; the collector will otherwise refuse it.
-printf '%s\n' 'FIRST_PARENT_CONVERSATION_ID' 'SECOND_PARENT_CONVERSATION_ID' > "$trace_dir/armed"
-chmod 600 "$trace_dir/armed"
+Request snapshots intentionally retain the actual text view instead of trying to regenerate it later from changed source files, tool schemas or current compaction settings. This increases database size. There is no separate one-shot or silent capture cap; evidence has the same conversation lifetime. Storage deduplication and a new retention policy are not part of this change.
+
+## Reading the evidence
+
+No model run or arming step is needed. After deploying and restarting onto this version, dispatches record automatically.
+
+For a dispatch ID, using SQLite in read-only mode:
+
+```sql
+SELECT seq, kind, iteration, created_at, payload
+FROM dispatch_events
+WHERE conversation_id = 'DISPATCH_CONVERSATION_ID'
+ORDER BY seq;
 ```
 
-Then start the desired agentic dispatch from that conversation. Other conversations cannot claim it. If several dispatches from the selected parent start concurrently, the first to claim wins; avoid doing that during the reproduction.
+To enumerate dispatches for a parent:
 
-A metadata log identifies `capture opened: dispatch=...`. The trace is `<dispatch-id>-<timestamp>.jsonl`. A parent-specific `.claimed-<hash>` file (or legacy global `.claimed`) means the one-shot capture has been consumed, even if the dispatch subsequently failed. Removing `armed` disables future file-based arming; it does not stop an ongoing capture. Never remove claim files or change selection modes while a captured run is active.
-
-For another deliberate capture, remove `armed`, wait for the captured run to finish, preserve/delete its trace as appropriate, remove **only** the intended parent's `.claimed-<hash>` and, if present, the global `.claimed`, and then re-create `armed`. Do not clear the directory indiscriminately.
-
-Environment opt-in is also supported for an agent launched with:
-
-```bash
-CERCANO_DISPATCH_TRACE=1
-CERCANO_DISPATCH_TRACE_PARENT=PARENT_CONVERSATION_ID
-CERCANO_DISPATCH_TRACE_DIR=/absolute/private/new-capture-directory
+```sql
+SELECT c.id, c.title, COUNT(e.seq) AS evidence_records
+FROM conversations c
+LEFT JOIN dispatch_events e ON e.conversation_id = c.id
+WHERE c.parent_id = 'PARENT_CONVERSATION_ID'
+GROUP BY c.id, c.title;
 ```
 
-Export these variables in the agent's launch environment. Setting them only in a tool subprocess does not update a running singleton or warm worker. Environment opt-in takes precedence over the arming file. Unset `CERCANO_DISPATCH_TRACE` to disable that path; removing `armed` alone does not override it.
+The store API also exposes `ListDispatchEvents`. No new UI or public retrieval RPC is introduced. To investigate rereading, compare the relevant `model_request` with earlier tool results, then inspect the preceding compaction and summarizer records. Do not infer final HTTP serialization from the loop-level request snapshot.
 
-## What is captured
+## Privacy and fidelity boundaries
 
-JSONL records have sequence number, timestamp, dispatch ID, event kind and (where applicable) iteration:
+Like ordinary conversation turns, these records contain sensitive prompts, source code and tool results. They stay in the existing local database and its backups; do not upload or commit them. No transport authentication headers, provider configuration objects or arbitrary transport-error bodies are recorded. This is not a secret scrubber for secrets embedded in task/source/tool content.
 
-- `dispatch_open`, `dispatch_start`, `dispatch_done`: task, grants, selected route, limits and outcome. Final token counters retain the existing tool-loop result semantics; they are not a new cumulative accounting source.
-- `model_request`: system prompt, messages, tool schemas/choice, model, quality routing hints, temperature, output limit, thinking flag, request IDs and request-budget estimates. Captured after compaction, mechanical trimming and loop-side compatibility transforms.
-- `model_response`: aggregated returned blocks, stop reason, usage, actual serving route when supplied, and safe error code. Includes initial stream-open failures and partial collected responses.
-- `compaction`: before/after history and attributed spend for **every configured pass**, including same-size rewrites, no-ops and history preserved after failure. These describe the accepted post-pass history; summarizer response events expose the raw proposed summary separately.
-- `summarizer_request` / `summarizer_response`: exact prompt passed to the summarizer runner, raw returned text before parsing, temperature/output limit, model selection, reported usage and safe failure classification. Correlated by dispatch, loop iteration and per-call request ID, including chunked local calls and cloud fallback.
-- `tool_call` / `tool_result`: requested arguments, executed outcomes, window-cap truncation markers and original sizes where known. Result events arrive in execution completion order; model requests show the actual ordered, paired history. Pre-execution rejections appear in the subsequent model request rather than an executed-result event.
+Images/image URLs and opaque provider reasoning blobs are omitted with explicit markers. Provider-specific extras and final wire serialization are not captured. Summarizer prompts are captured at the runner boundary; runner-added system prompts and finish reasons unavailable there are not fabricated. Ordinary chat and one-shot non-agentic calls are outside this dispatch-loop feature. Historical lost compaction state cannot be reconstructed retroactively.
 
-## Fidelity limits
+Existing JSONL captures on disk are not imported or deleted. Their old selectors and claim files are ignored by this version. Deployment may archive the obsolete `armed` file to disarm an old binary without deleting its evidence or interrupting active work.
 
-This is the exact **tool-loop adapter input**, not the final HTTP payload. Provider adapters and failover routing can still transform it. Provider-specific `ProviderExtras`, images and opaque reasoning are not serialized. Summarizer prompts are captured at the TurnRunner boundary; runner-added system prompts, final wire formatting and finish reasons unavailable at that seam are not claimed as captured. If evidence points at adapter formatting, add a narrowly scoped adapter-level capture rather than inferring wire correctness from these records.
+## Verification
 
-Tracing is for agentic dispatches, not ordinary chat or one-shot dispatches. It does not reconstruct old in-memory summaries, recover already-buffered logs from the old worker host, change compaction policy, retry requests, increase budgets or introduce stuck detection.
-
-## Bounded reproduction and analysis
-
-Before a real-model run, state the predicted observation and a stopping bound. Do not repeat an hour-long dispatch blindly. Use a disposable worktree for writes and preserve the same task/model/settings to avoid confounding the comparison.
-
-1. Arm the original parent immediately before the intended dispatch. Avoid intervening helper dispatches from that parent.
-2. Watch the live log and trace. Stop the experiment at the first repeated unchanged read cycle or an agreed time/cost bound. The collector itself is not a watchdog and does not cancel work.
-3. Compare the repeated read's outgoing request with the prior tool result. Was the evidence still present verbatim, retained accurately in a summary, truncated, or absent?
-4. Locate the immediately preceding compaction and summarizer events. Distinguish missing task intent, lost findings and same-size rewrites from a model that had adequate context but still repeated itself.
-5. If needed, perform a short controlled continuation with only the suspected missing history restored. Keep model, task and settings fixed. This patch supplies evidence, not an automated replay engine.
-
-Expected discriminators: missing evidence before repetition supports a history-loss hypothesis; intact paired evidence weakens it; repeated capped outputs point at read scope/truncation; intact loop inputs do not by themselves rule out provider serialization defects.
-
-## Deterministic verification
-
-No live model is needed for the regression tests:
-
-```bash
-cd source/server
-go test ./internal/dispatchtrace ./internal/agent ./internal/loopcompact ./internal/hostsvc/tools ./internal/worker ./internal/server ./cmd/cercano -count=1
-go test -race ./internal/dispatchtrace ./internal/hostsvc/tools ./internal/loopcompact -run 'Test(DispatchTrace|SummarizerDispatchTrace|Capture|Scoped|Disabled|Reject|LiveArm|UnsafeArm)' -count=1
-```
-
-Coverage includes private modes, unsafe-directory/arming rejection, concurrent one-shot claims, disabled mode, context isolation, post-close safety, payload omissions, exact scripted-provider input fidelity, same-size compaction changes, production summarizer capture and unrelated/repeated dispatch isolation.
-
-Multi-parent regression coverage verifies independent concurrent one-shot claims, exact parent matching, bounded list parsing, and legacy-claim preservation. Multi-parent support requires deploying this version once; updating the arming file afterward needs no restart.
+Deterministic tests cover additive old-database migration and reopen, ordering/duplicate rejection, cascade deletion, per-dispatch isolation, immutable earlier snapshots, scripted-provider request fidelity, successive compaction and summarizer records, failure visibility and sequence gaps, concurrent recording, cancellation, worker-built service wiring, and the real host receive loop over an in-memory gRPC stream. No live model is required.

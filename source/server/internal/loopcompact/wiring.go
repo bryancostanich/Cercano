@@ -10,7 +10,7 @@ import (
 	"cercano/source/server/internal/compaction"
 	"cercano/source/server/internal/compactor"
 	"cercano/source/server/internal/contextmeter"
-	"cercano/source/server/internal/dispatchtrace"
+	"cercano/source/server/internal/dispatchhistory"
 	"cercano/source/server/internal/engine"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/locus"
@@ -124,7 +124,7 @@ func BuildSummarizer(deps WiringDeps) Summarize {
 		// Scoped dispatch trace (nil unless the dispatch front door opted in
 		// for this dispatch): records the exact summarizer prompts and raw
 		// responses, correlated by conversation and iteration.
-		tr := dispatchtrace.From(ctx)
+		tr := dispatchhistory.From(ctx)
 		summaryCall := 0
 		summary, stats, err := compaction.SummarizeBudgetedLocal(ctx, msgs, localSummaryWindow, compaction.DefaultSummaryOutputReserve, func(ctx context.Context, prompt string, maxTokens int) (compaction.StructuredSummary, error) {
 			summaryCall++
@@ -132,7 +132,7 @@ func BuildSummarizer(deps WiringDeps) Summarize {
 			budget := compaction.EstimateSummaryBudget(prompt, maxTokens, localSummaryWindow)
 			deps.logf("[compaction] local summarizer request: request_id=%s route=local prompt_tokens=%d output_reserve=%d limit=%d budget=%d fits=%t",
 				requestID, budget.PromptTokens, compaction.DefaultSummaryOutputReserve, budget.Limit, budget.Budget, budget.Fits)
-			tr.SummarizerRequest(dispatchtrace.SummarizerRequestEvent{
+			tr.SummarizerRequest(dispatchhistory.SummarizerRequestEvent{
 				Route: "local", RequestID: callID, Model: summarizerModel,
 				Tier: string(config.TierFastLightText), MaxTokens: maxTokens, Temperature: greedy.Temperature,
 				Prompt: prompt, ConversationID: convID, Iteration: iteration,
@@ -150,13 +150,13 @@ func BuildSummarizer(deps WiringDeps) Summarize {
 			}
 			resp, err := open.Process(ctx, req)
 			if err != nil {
-				tr.SummarizerResponse(dispatchtrace.SummarizerResponseEvent{
+				tr.SummarizerResponse(dispatchhistory.SummarizerResponseEvent{
 					Route: "local", RequestID: callID, Model: summarizerModel,
 					Err: classifyFailure(err), ConversationID: convID, Iteration: iteration,
 				})
 				return compaction.StructuredSummary{}, err
 			}
-			tr.SummarizerResponse(dispatchtrace.SummarizerResponseEvent{
+			tr.SummarizerResponse(dispatchhistory.SummarizerResponseEvent{
 				Route: "local", RequestID: callID, Model: summarizerModel,
 				Output: resp.Output, InputTokens: resp.InputTokens, OutputTokens: resp.OutputTokens,
 				ConversationID: convID, Iteration: iteration,
@@ -196,7 +196,7 @@ func BuildSummarizer(deps WiringDeps) Summarize {
 				}
 			}
 			deps.logf("[compaction] local summarizer failed (%s) — falling back to cloud", classifyFailure(err))
-			tr.SummarizerRequest(dispatchtrace.SummarizerRequestEvent{
+			tr.SummarizerRequest(dispatchhistory.SummarizerRequestEvent{
 				Route: "cloud", RequestID: cloudReq.RequestID, Model: cloudReq.ModelOverride,
 				Tier: string(config.TierFastLightText), MaxTokens: cloudReq.MaxTokens, Temperature: cloudReq.Temperature,
 				Prompt: cloudReq.Input, ConversationID: convID, Iteration: iteration,
@@ -214,7 +214,7 @@ func BuildSummarizer(deps WiringDeps) Summarize {
 			stopPropagate()
 			cancelCloud()
 			if cerr == nil {
-				tr.SummarizerResponse(dispatchtrace.SummarizerResponseEvent{
+				tr.SummarizerResponse(dispatchhistory.SummarizerResponseEvent{
 					Route: "cloud", RequestID: cloudReq.RequestID, Model: cloudReq.ModelOverride,
 					Output: cresp.Output, InputTokens: cresp.InputTokens, OutputTokens: cresp.OutputTokens,
 					ConversationID: convID, Iteration: iteration,
@@ -224,7 +224,7 @@ func BuildSummarizer(deps WiringDeps) Summarize {
 			}
 			// Both failures classified, never echoed raw — provider errors can
 			// carry content.
-			tr.SummarizerResponse(dispatchtrace.SummarizerResponseEvent{
+			tr.SummarizerResponse(dispatchhistory.SummarizerResponseEvent{
 				Route: "cloud", RequestID: cloudReq.RequestID, Model: cloudReq.ModelOverride,
 				Err: classifyFailure(cerr), ConversationID: convID, Iteration: iteration,
 			})

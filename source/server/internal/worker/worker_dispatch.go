@@ -97,6 +97,7 @@ func buildWorkerToolSvcWithDiagnostic(
 		svc.SetLoopCompactorFactory(factory)
 	}
 	if subPersist != nil {
+		svc.SetDispatchEventSink(subagentDispatchEventSink(subPersist))
 		svc.SetEnsureSubagent(subPersist.ensure) // worker creates sub-agent conversation rows on the host
 	}
 	toolstack.InstallCapabilities(svc, toolstack.CapDeps{

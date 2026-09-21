@@ -1,264 +1,88 @@
-// Package dispatchtrace records an opt-in diagnostic trace of the first agentic
-// dispatch from a selected parent conversation. Content is restricted to local
-// owner-only files, never emitted by this package to ordinary logs. It records
-// adapter inputs, not final provider wire serialization. Images and opaque
-// reasoning are omitted. Prompt/tool content is otherwise verbatim and MAY
-// contain secrets: this is not a general-purpose secret scrubber. Transport
-// headers, provider config objects, and raw transport errors are not captured.
-package dispatchtrace
+// Package dispatchhistory preserves automatic append-only evidence for agentic
+// dispatches in the host-owned conversation database. No arming files, process
+// environment switches, per-parent selection, or one-shot claims are used.
+package dispatchhistory
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log"
-	"os"
-	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
+	"cercano/source/server/internal/conversation"
 	"cercano/source/server/internal/llm"
 )
 
-// EnableEnv opts in via environment; ParentEnv must also match.
-// Alternatively an owner-only armed file selects the parent at runtime.
-const EnableEnv = "CERCANO_DISPATCH_TRACE"
+type Sink func(context.Context, conversation.DispatchEvent) error
 
-// ParentEnv selects the parent conversation whose first agentic dispatch is captured.
-const ParentEnv = "CERCANO_DISPATCH_TRACE_PARENT"
-
-// DirEnv overrides the trace output directory (tests, or a workspace-local
-// location). Empty uses DefaultDir().
-const DirEnv = "CERCANO_DISPATCH_TRACE_DIR"
-
-// Enabled reports environment opt-in (the live arming file is checked separately).
-func Enabled() bool { return os.Getenv(EnableEnv) == "1" }
-
-// DefaultDir is the default restricted output directory.
-func DefaultDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		return ""
-	}
-	return filepath.Join(home, ".cercano", "trace", "dispatch")
-}
-
-func outputDir() string {
-	if d := os.Getenv(DirEnv); d != "" {
-		return d
-	}
-	return DefaultDir()
-}
-
-// Trace records one dispatch's diagnostic trace. A nil *Trace is valid and
-// every method is a no-op, so callers wire unconditionally and pay nothing
-// when tracing is off.
-type Trace struct {
+type Recorder struct {
 	mu       sync.Mutex
-	f        *os.File
-	enc      *json.Encoder
-	seq      int
+	ctx      context.Context
+	sink     Sink
 	dispatch string
+	seq      int64
+	closed   bool
+	failures int
 }
 
-type record struct {
-	Time     time.Time `json:"ts"`
-	Seq      int       `json:"seq"`
-	Kind     string    `json:"kind"`
-	Dispatch string    `json:"dispatch_id"`
-	Iter     int       `json:"iteration,omitempty"`
-	Event    any       `json:"event"`
+// Begin is automatic whenever dispatch conversation persistence is available.
+// The host acknowledges each write; failures are metadata-only logged and
+// exposed to the dispatch result. Evidence must not fail the user's task.
+func Begin(ctx context.Context, dispatchID string, sink Sink) *Recorder {
+	if sink == nil {
+		return nil
+	}
+	return &Recorder{ctx: ctx, sink: sink, dispatch: dispatchID}
 }
 
-// Begin starts a trace for one dispatch. It returns nil — a fully functional
-// no-op — unless the local operator enabled tracing via EnableEnv. Trace
-// setup failures (unwritable dir) also degrade to nil rather than failing the
-// dispatch: diagnostics must never break work.
-func Begin(dispatchID, conversationID string) *Trace {
-	dir := outputDir()
-	selected, multi := selection(dir, conversationID)
-	if !selected {
-		return nil
-	}
-	if dir == "" {
-		return nil
-	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return nil
-	}
-	// Refuse existing loose permissions and symlink leaves; do not chmod a
-	// directory the operator may be using for something else. Use a trusted
-	// owner-controlled parent directory (same-user filesystem races are outside
-	// this diagnostic facility's threat boundary).
-	info, err := os.Lstat(dir)
-	if err != nil || !info.IsDir() || info.Mode().Perm()&0o077 != 0 {
-		log.Print("[dispatch-trace] refused unsafe output directory")
-		return nil
-	}
-	// Persistent, exclusive claim bounds collection to ONE dispatch, even across
-	// worker processes or restarts. A fresh output directory explicitly rearms.
-	// For multi-parent lists, use per-parent claims; for legacy, use global claim.
-	// Environment mode uses a global claim file.
-	if err := claimDispatch(dir, conversationID, multi); err != nil {
-		return nil
-	}
-	path := filepath.Join(dir, fmt.Sprintf("%s-%d.jsonl", sanitizeID(dispatchID), time.Now().UnixNano()))
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		return nil
-	}
-	// Explicit chmod: the process umask may already be tighter, and the file
-	// MUST be owner-only regardless.
-	if err := f.Chmod(0o600); err != nil {
-		_ = f.Close()
-		return nil
-	}
-	t := &Trace{f: f, enc: json.NewEncoder(f), dispatch: dispatchID}
-	log.Printf("[dispatch-trace] capture opened: dispatch=%s", sanitizeID(dispatchID))
-	t.write(0, "dispatch_open", map[string]string{
-		"dispatch_id":     dispatchID,
-		"conversation_id": conversationID,
-		"format":          "1",
-	})
-	return t
-}
-
-// selected supports explicit environment opt-in or a private live arming file.
-// The latter is checked per dispatch so a warm agent need not restart merely
-// to enable diagnostics. The persistent claim still limits both paths to one.
-func selection(dir, parent string) (selected, multi bool) {
-	if parent == "" || dir == "" {
-		return false, false
-	}
-	if Enabled() {
-		return os.Getenv(ParentEnv) == parent, false
-	}
-	info, err := os.Lstat(dir)
-	if err != nil || !info.IsDir() || info.Mode().Perm()&0o077 != 0 {
-		return false, false
-	}
-	path := filepath.Join(dir, "armed")
-	info, err = os.Lstat(path)
-	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 || info.Size() > 4096 {
-		return false, false
-	}
-	f, err := os.Open(path)
-	if err != nil {
-		return false, false
-	}
-	defer f.Close()
-	data, err := io.ReadAll(io.LimitReader(f, 4097))
-	if err != nil || len(data) > 4096 {
-		return false, false
-	}
-	parents := make(map[string]bool)
-	for _, line := range strings.Split(string(data), "\n") {
-		if id := strings.TrimSpace(line); id != "" {
-			parents[id] = true
-		}
-	}
-	return parents[parent], len(parents) > 1
-}
-
-// claimDispatch keeps one independent claim per parent. Single-parent callers
-// also keep the historical global claim. Any old global claim conservatively
-// blocks capture: its parent is unknown and must not be silently rearmed.
-// Read the selector once per Begin so selection and claim mode cannot disagree.
-func claimDispatch(dir, parent string, multi bool) error {
-	global := filepath.Join(dir, ".claimed")
-	if _, err := os.Lstat(global); !os.IsNotExist(err) {
-		return os.ErrExist
-	}
-	key := fmt.Sprintf(".claimed-%x", sha256.Sum256([]byte(parent)))
-	claim, err := os.OpenFile(filepath.Join(dir, key), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
-	if err != nil {
-		return err
-	}
-	if err = claim.Close(); err != nil {
-		return err
-	}
-	if !multi {
-		claim, err = os.OpenFile(global, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
-		if err != nil {
-			return err
-		}
-		return claim.Close()
-	}
-	return nil
-}
-
-// sanitizeID keeps the dispatch id out of path traversal territory (sub-agent
-// conversation ids are minted hex, but the trace must be safe by construction).
-func sanitizeID(id string) string {
-	var b strings.Builder
-	for _, r := range id {
-		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_', r == '.':
-			b.WriteRune(r)
-		default:
-			b.WriteByte('_')
-		}
-	}
-	if b.Len() == 0 {
-		return "dispatch"
-	}
-	return b.String()
-}
-
-// write emits one JSONL record. Best-effort: an encoding error is swallowed
-// (a broken trace must never fail the dispatch).
-func (t *Trace) write(iter int, kind string, ev any) {
+func (t *Recorder) write(iter int, kind string, event any) {
 	if t == nil {
 		return
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if t.enc == nil {
+	if t.closed {
 		return
 	}
 	t.seq++
-	if err := t.enc.Encode(record{Time: time.Now().UTC(), Seq: t.seq, Kind: kind, Dispatch: t.dispatch, Iter: iter, Event: ev}); err != nil {
-		log.Print("[dispatch-trace] write failed; capture disabled")
-		_ = t.f.Close()
-		t.f = nil
-		t.enc = nil
-		return
+	data, err := json.Marshal(event)
+	if err == nil {
+		ctx, cancel := context.WithTimeout(t.ctx, 5*time.Second)
+		err = t.sink(ctx, conversation.DispatchEvent{ConversationID: t.dispatch, Seq: t.seq, Kind: kind, Iteration: iter, Timestamp: time.Now().UTC(), PayloadJSON: string(data)})
+		cancel()
+	}
+	if err != nil {
+		t.failures++
+		log.Printf("[dispatch-history] persistence failed: dispatch=%s seq=%d kind=%s error=%s", t.dispatch, t.seq, kind, ErrorCode(err))
 	}
 }
-
-// Close flushes and closes the trace file. Nil-safe.
-func (t *Trace) Close() {
+func (t *Recorder) Close() {
 	if t == nil {
 		return
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if t.f != nil {
-		_ = t.f.Close()
-		t.f = nil
-		t.enc = nil
+	t.closed = true
+}
+func (t *Recorder) Failures() int {
+	if t == nil {
+		return 0
 	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.failures
 }
 
-// --- context plumbing -------------------------------------------------------
+type recorderKey struct{}
 
-type traceKey struct{}
-
-// WithTrace stamps the trace onto ctx so the tool loop, compaction passes and
-// summarizer seam can record without any new parameter threading.
-func WithTrace(ctx context.Context, t *Trace) context.Context {
-	return context.WithValue(ctx, traceKey{}, t)
+func WithRecorder(ctx context.Context, t *Recorder) context.Context {
+	return context.WithValue(ctx, recorderKey{}, t)
 }
-
-// From reads the trace stamped on ctx (nil when absent or disabled).
-func From(ctx context.Context) *Trace {
-	t, _ := ctx.Value(traceKey{}).(*Trace)
-	return t
-}
+func From(ctx context.Context) *Recorder { t, _ := ctx.Value(recorderKey{}).(*Recorder); return t }
 
 // --- event payloads ---------------------------------------------------------
 
@@ -283,28 +107,30 @@ type DispatchStartEvent struct {
 }
 
 // DispatchStart records the dispatch's configuration and task.
-func (t *Trace) DispatchStart(ev DispatchStartEvent) {
+func (t *Recorder) DispatchStart(ev DispatchStartEvent) {
 	t.write(0, "dispatch_start", ev)
 }
 
 // DispatchDoneEvent closes the trace with the loop's accounting. Err is the
 // safe failure code, empty on success.
 type DispatchDoneEvent struct {
-	Err          string   `json:"error,omitempty"`
-	Iterations   int      `json:"iterations,omitempty"`
-	InputTokens  int      `json:"input_tokens,omitempty"`
-	OutputTokens int      `json:"output_tokens,omitempty"`
-	CalledTools  []string `json:"called_tools,omitempty"`
+	Err                 string   `json:"error,omitempty"`
+	PersistenceFailures int      `json:"persistence_failures,omitempty"`
+	Iterations          int      `json:"iterations,omitempty"`
+	InputTokens         int      `json:"input_tokens,omitempty"`
+	OutputTokens        int      `json:"output_tokens,omitempty"`
+	CalledTools         []string `json:"called_tools,omitempty"`
 }
 
 // DispatchDone records the dispatch outcome.
-func (t *Trace) DispatchDone(ev DispatchDoneEvent) {
+func (t *Recorder) DispatchDone(ev DispatchDoneEvent) {
+	ev.PersistenceFailures = t.Failures()
 	t.write(0, "dispatch_done", ev)
 }
 
 // Note records an out-of-band observation (e.g. a degraded result) correlated
 // to the dispatch.
-func (t *Trace) Note(kind, text string) {
+func (t *Recorder) Note(kind, text string) {
 	t.write(0, "note", map[string]string{"note_kind": kind, "text": text})
 }
 
@@ -348,7 +174,7 @@ type modelRequestEvent struct {
 // ModelRequest records the exact model-facing ChatRequest (post-compaction,
 // post-trim, pre-provider-serialization) plus the budget accounting that
 // produced it.
-func (t *Trace) ModelRequest(iter int, provider string, req llm.ChatRequest, budget BudgetView) {
+func (t *Recorder) ModelRequest(iter int, provider string, req llm.ChatRequest, budget BudgetView) {
 	if t == nil {
 		return
 	}
@@ -411,7 +237,7 @@ type modelResponseEvent struct {
 // ModelResponse records the aggregated provider response — finish/stop reason,
 // normalized usage, the actual serving route, and the exact returned blocks.
 // err is recorded alongside so failed/partial responses are visible.
-func (t *Trace) ModelResponse(iter int, provider, model string, resp llm.ChatResponse, err error) {
+func (t *Recorder) ModelResponse(iter int, provider, model string, resp llm.ChatResponse, err error) {
 	if t == nil {
 		return
 	}
@@ -434,7 +260,7 @@ func (t *Trace) ModelResponse(iter int, provider, model string, resp llm.ChatRes
 // Compaction records history before and after ONE inline compaction pass
 // within the dispatch, correlated by iteration. spentTokens is the budget
 // delta the pass billed (summarizer spend).
-func (t *Trace) Compaction(iter int, before, after []llm.Message, spentTokens int) {
+func (t *Recorder) Compaction(iter int, before, after []llm.Message, spentTokens int) {
 	if t == nil {
 		return
 	}
@@ -461,7 +287,7 @@ type SummarizerRequestEvent struct {
 }
 
 // SummarizerRequest records the exact prompt handed to the summarizer.
-func (t *Trace) SummarizerRequest(ev SummarizerRequestEvent) {
+func (t *Recorder) SummarizerRequest(ev SummarizerRequestEvent) {
 	t.write(ev.Iteration, "summarizer_request", ev)
 }
 
@@ -480,7 +306,7 @@ type SummarizerResponseEvent struct {
 
 // SummarizerResponse records the raw summarizer output (pre-parse) and the
 // provider-reported usage, when the runner reports it.
-func (t *Trace) SummarizerResponse(ev SummarizerResponseEvent) {
+func (t *Recorder) SummarizerResponse(ev SummarizerResponseEvent) {
 	t.write(ev.Iteration, "summarizer_response", ev)
 }
 
@@ -491,7 +317,7 @@ type toolCallEvent struct {
 }
 
 // ToolCall records a requested tool call in the model's requested order.
-func (t *Trace) ToolCall(iter int, toolUseID, toolName, args string) {
+func (t *Recorder) ToolCall(iter int, toolUseID, toolName, args string) {
 	t.write(iter, "tool_call", toolCallEvent{ToolUseID: toolUseID, ToolName: toolName, Args: args})
 }
 
@@ -507,7 +333,7 @@ type toolResultEvent struct {
 // ToolResult records a tool execution outcome in completion order. Content is
 // what the model sees; when the window cap fired, the content already carries
 // the truncation marker and truncated reports it.
-func (t *Trace) ToolResult(iter int, toolUseID, toolName, content string, isError bool, originalBytes int, truncated bool) {
+func (t *Recorder) ToolResult(iter int, toolUseID, toolName, content string, isError bool, originalBytes int, truncated bool) {
 	t.write(iter, "tool_result", toolResultEvent{
 		ToolUseID: toolUseID, ToolName: toolName, Content: content,
 		IsError: isError, Truncated: truncated, OriginalBytes: originalBytes,
@@ -518,11 +344,11 @@ func (t *Trace) ToolResult(iter int, toolUseID, toolName, content string, isErro
 
 // imageOmissionMarker documents an elided image without recording its bytes.
 func imageOmissionMarker(b llm.Block) string {
-	return fmt.Sprintf("[dispatchtrace: image omitted (media_type=%q, %d base64 bytes not recorded)]", b.MediaType, len(b.ImageData))
+	return fmt.Sprintf("[dispatchhistory: image omitted (media_type=%q, %d base64 bytes not recorded)]", b.MediaType, len(b.ImageData))
 }
 
 func reasoningOmissionMarker(b llm.Block) string {
-	return fmt.Sprintf("[dispatchtrace: reasoning blob omitted (%d bytes not recorded; id=%q)]", len(b.ReasoningData), b.ReasoningID)
+	return fmt.Sprintf("[dispatchhistory: reasoning blob omitted (%d bytes not recorded; id=%q)]", len(b.ReasoningData), b.ReasoningID)
 }
 
 // sanitizeBlocks deep-copies blocks, replacing image bytes / URLs and opaque

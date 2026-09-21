@@ -3,13 +3,13 @@ package loopcompact
 import (
 	"context"
 	"encoding/json"
-	"os"
-	"path/filepath"
+
 	"strings"
 	"testing"
 
 	"cercano/source/server/internal/agent"
-	"cercano/source/server/internal/dispatchtrace"
+	"cercano/source/server/internal/conversation"
+	"cercano/source/server/internal/dispatchhistory"
 	"cercano/source/server/internal/llm"
 )
 
@@ -21,21 +21,24 @@ func (r *traceSummaryRunner) Process(_ context.Context, req *agent.Request) (*ag
 	return &agent.Response{Output: "<goal>implement task</goal><state>exact summary evidence</state>", InputTokens: 37, OutputTokens: 11}, nil
 }
 
-func TestSummarizerDispatchTraceWiring(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "trace")
-	t.Setenv(dispatchtrace.EnableEnv, "1")
-	t.Setenv(dispatchtrace.ParentEnv, "parent")
-	t.Setenv(dispatchtrace.DirEnv, dir)
-	tr := dispatchtrace.Begin("child", "parent")
-	if tr == nil {
-		t.Fatal("trace disabled")
+func TestSummarizerDispatchHistoryWiring(t *testing.T) {
+	store, err := conversation.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
 	}
+	defer store.Close()
+	if err := store.EnsureConversation(t.Context(), "child", "", "model"); err != nil {
+		t.Fatal(err)
+	}
+	events := store.(conversation.DispatchEventStore)
+	tr := dispatchhistory.Begin(t.Context(), "child", events.AppendDispatchEvent)
 	defer tr.Close()
+
 	runner := &traceSummaryRunner{}
 	summarize := BuildSummarizer(WiringDeps{OpenRunner: func() agent.TurnRunner { return runner }})
-	ctx := dispatchtrace.WithTrace(t.Context(), tr)
+	ctx := dispatchhistory.WithRecorder(t.Context(), tr)
 	ctx = agent.WithLoopCompactionScope(ctx, agent.LoopCompactionScope{ConversationID: "child", Iteration: 4})
-	_, err := summarize(ctx, []llm.Message{{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: "exact task evidence"}}}})
+	_, err = summarize(ctx, []llm.Message{{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: "exact task evidence"}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,16 +46,13 @@ func TestSummarizerDispatchTraceWiring(t *testing.T) {
 	if len(runner.requests) != 1 {
 		t.Fatalf("runner calls=%d", len(runner.requests))
 	}
-	files, _ := filepath.Glob(filepath.Join(dir, "*.jsonl"))
-	if len(files) != 1 {
-		t.Fatal(files)
-	}
-	data, err := os.ReadFile(files[0])
+	rows, err := events.ListDispatchEvents(t.Context(), "child")
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	seen := map[string]bool{}
-	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+	for _, row := range rows {
 		var rec struct {
 			Kind      string `json:"kind"`
 			Iteration int    `json:"iteration"`
@@ -64,7 +64,9 @@ func TestSummarizerDispatchTraceWiring(t *testing.T) {
 				Temperature *float64 `json:"temperature"`
 			} `json:"event"`
 		}
-		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+		rec.Kind = row.Kind
+		rec.Iteration = row.Iteration
+		if err := json.Unmarshal([]byte(row.PayloadJSON), &rec.Event); err != nil {
 			t.Fatal(err)
 		}
 		if !strings.HasPrefix(rec.Kind, "summarizer_") {

@@ -3,27 +3,38 @@ package tools
 import (
 	"context"
 	"encoding/json"
-	"os"
-	"path/filepath"
-	"reflect"
+	"errors"
 	"strings"
+
+	"reflect"
+
 	"testing"
 
 	"cercano/source/server/internal/agent"
+	"cercano/source/server/internal/conversation"
 	"cercano/source/server/internal/dispatch"
-	"cercano/source/server/internal/dispatchtrace"
+	"cercano/source/server/internal/dispatchhistory"
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 )
 
 // Exercise the production dispatch entry, actual tool loop, and provider seam.
 // Assert the trace describes what the provider received, not stored history.
-func TestDispatchTraceMatchesProviderAndIsolatesDispatches(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "private")
-	t.Setenv(dispatchtrace.EnableEnv, "1")
-	t.Setenv(dispatchtrace.ParentEnv, "trace-parent")
-	t.Setenv(dispatchtrace.DirEnv, dir)
-	svc := New(nil, nil, nil, nil)
+func TestDispatchHistoryMatchesProviderAndRecordsEveryDispatch(t *testing.T) {
+	store, err := conversation.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	for _, id := range []string{"unrelated", "trace-parent"} {
+		if err := store.EnsureConversation(t.Context(), id, "", "model"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	svc := New(nil, nil, func() conversation.Store { return store }, nil)
+	events := store.(conversation.DispatchEventStore)
+	var ids []string
+
 	installTestFailureLog(t, svc)
 	svc.SetRegistry(historyProbeRegistry())
 	svc.SetLoopCompactorFactory(func() agent.LoopCompactor {
@@ -37,36 +48,35 @@ func TestDispatchTraceMatchesProviderAndIsolatesDispatches(t *testing.T) {
 	run := func(parent string) *traceHistoryProvider {
 		t.Helper()
 		p := &traceHistoryProvider{historyProbeProvider: historyProbeProvider{name: "llama_server", answer: "The configuration is loaded in config.go:42."}}
-		_, err := svc.RunAgenticDispatch(t.Context(), dispatch.Spec{Mode: dispatch.Agentic, ConversationID: parent, Task: "Trace configuration loading.", Tools: []string{"Read", "Grep"}, MaxIterations: 4}, inference.Selection{Provider: p}, "same-model")
+		result, err := svc.RunAgenticDispatch(t.Context(), dispatch.Spec{Mode: dispatch.Agentic, ConversationID: parent, Task: "Trace configuration loading.", Tools: []string{"Read", "Grep"}, MaxIterations: 4}, inference.Selection{Provider: p}, "same-model")
 		if err != nil {
 			t.Fatal(err)
 		}
+		ids = append(ids, result.SubConversationID)
 		return p
 	}
 	run("unrelated")
-	if _, err := os.Stat(dir); !os.IsNotExist(err) {
-		t.Fatal("unrelated dispatch captured")
-	}
 	p := run("trace-parent")
 	run("trace-parent")
-	paths, err := filepath.Glob(filepath.Join(dir, "*.jsonl"))
-	if err != nil || len(paths) != 1 {
-		t.Fatalf("want one trace: %v %v", paths, err)
+	for _, id := range ids {
+		rows, err := events.ListDispatchEvents(t.Context(), id)
+		if err != nil || len(rows) == 0 {
+			t.Fatalf("dispatch %s not recorded: %v", id, err)
+		}
 	}
-	data, err := os.ReadFile(paths[0])
+	rows, err := events.ListDispatchEvents(t.Context(), ids[1])
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	counts := map[string]int{}
-	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
-		var r struct {
-			Kind      string          `json:"kind"`
-			Iteration int             `json:"iteration"`
-			Event     json.RawMessage `json:"event"`
-		}
-		if err := json.Unmarshal([]byte(line), &r); err != nil {
-			t.Fatal(err)
-		}
+	for _, row := range rows {
+		r := struct {
+			Kind      string
+			Iteration int
+			Event     json.RawMessage
+		}{row.Kind, row.Iteration, json.RawMessage(row.PayloadJSON)}
+
 		counts[r.Kind]++
 		switch r.Kind {
 		case "model_request":
@@ -122,6 +132,21 @@ type traceHistoryProvider struct{ historyProbeProvider }
 
 func (p *traceHistoryProvider) StreamChat(ctx context.Context, r llm.ChatRequest) (llm.StreamReader, error) {
 	reader, err := p.historyProbeProvider.StreamChat(ctx, r)
-	p.requests[len(p.requests)-1].Messages = dispatchtrace.Snapshot(r.Messages)
+	p.requests[len(p.requests)-1].Messages = dispatchhistory.Snapshot(r.Messages)
 	return reader, err
+}
+
+func TestDispatchHistoryFailureIsVisibleWithoutFailingTask(t *testing.T) {
+	svc := New(nil, nil, nil, nil)
+	installTestFailureLog(t, svc)
+	svc.SetRegistry(historyProbeRegistry())
+	svc.SetDispatchEventSink(func(context.Context, conversation.DispatchEvent) error { return errors.New("disk failure SECRET") })
+	p := &historyProbeProvider{name: "llama_server", answer: "The configuration is loaded in config.go:42."}
+	result, err := svc.RunAgenticDispatch(t.Context(), dispatch.Spec{Mode: dispatch.Agentic, Task: "Trace configuration loading", Tools: []string{"Read", "Grep"}, MaxIterations: 4}, inference.Selection{Provider: p}, "model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.Text, "Dispatch evidence incomplete") || strings.Contains(result.Text, "SECRET") {
+		t.Fatal("missing safe failure warning")
+	}
 }

@@ -275,11 +275,11 @@ func (s *Server) ToolRegistry() *agenttools.Registry { return s.toolSvc.Registry
 func (s *Server) InstallCapabilities() {
 	cfgSnapshot := s.cfgSvc.Get()
 	toolstack.InstallCapabilities(s.toolSvc, toolstack.CapDeps{
-		Cloud:         s.providerSvc.Cloud(),
-		Open:          s.providerSvc.Open(),
-		Config:        &cfgSnapshot,
-		Autonomy:      s.persistSvc.Store(),
-		CtxLoader:     s.persistSvc.ContextLoader(),
+		Cloud:     s.providerSvc.Cloud(),
+		Open:      s.providerSvc.Open(),
+		Config:    &cfgSnapshot,
+		Autonomy:  s.persistSvc.Store(),
+		CtxLoader: s.persistSvc.ContextLoader(),
 		// suggest_plan enters planning mode via the profile broker once the user
 		// approves the suggestion at the confirm gate.
 		EnterProfile: func(convID, name string) error {
@@ -1228,6 +1228,12 @@ func (s *Server) SelectExecutionMode() {
 	// opens SQLite.
 	if ledger, ok := s.workerRunner.(worker.AutonomyLedgerSetter); ok {
 		ledger.SetAutonomyLedger(worker.HostAutonomyLedger(s.persistSvc.Store()))
+	}
+
+	if recorder, ok := s.workerRunner.(worker.DispatchEventSinkSetter); ok {
+		if store, ok := s.persistSvc.Store().(conversation.DispatchEventStore); ok {
+			recorder.SetDispatchEventSink(worker.HostDispatchEventSink(store))
+		}
 	}
 
 	s.configureWorkerAccounting()

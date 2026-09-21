@@ -23,7 +23,7 @@ import (
 	"cercano/source/server/internal/capabilities"
 	"cercano/source/server/internal/conversation"
 	"cercano/source/server/internal/dispatch"
-	"cercano/source/server/internal/dispatchtrace"
+	"cercano/source/server/internal/dispatchhistory"
 	"cercano/source/server/internal/failurelog"
 	"cercano/source/server/internal/hostsvc/permissions"
 	"cercano/source/server/internal/inference"
@@ -94,10 +94,11 @@ type Service struct {
 	// persistence.Service interface. hostsvc/persistence doesn't exist yet
 	// (Task 5); the func-value seam keeps this package from importing it, so
 	// tools depends only on the closures it is handed.
-	permBroker   permissions.Broker
-	systemPrompt func(workDir string) string
-	store        func() conversation.Store
-	persistTurn  func(ctx context.Context, convID string, m llm.Message)
+	permBroker        permissions.Broker
+	systemPrompt      func(workDir string) string
+	store             func() conversation.Store
+	persistTurn       func(ctx context.Context, convID string, m llm.Message)
+	dispatchEventSink func(context.Context, conversation.DispatchEvent) error
 
 	// ensureSubagent creates the sub-agent conversation row. In-process this is
 	// unset and RunAgenticDispatch falls back to the store directly; the worker
@@ -500,7 +501,7 @@ func (x *Service) ensureSubagentConv(ctx context.Context, id, parentID, projectD
 //
 // It builds a least-privilege registry, assembles a system prompt, and runs
 // agent.RunToolLoop, returning the final text and token counts.
-func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, sel inference.Selection, model string) (dispatch.Result, error) {
+func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, sel inference.Selection, model string) (out dispatch.Result, dispatchErr error) {
 	// 1. Build the least-privilege tool registry. W/X grants are legitimate
 	// here: the dispatch call itself gated as X at the parent when the grant
 	// was write-capable, so execution implies human approval (or bypass).
@@ -598,12 +599,22 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 	if route := inference.TargetForContext(ctx, sel.Provider, inference.Call{Model: model, Tier: string(spec.Tier), FallbackTier: string(spec.FallbackTier)}); route.Profile != "" {
 		contextWindow, contextWindowKnown = route.ContextWindow, route.ContextWindowKnown
 	}
-	// Scoped diagnostic trace for THIS dispatch only: nil (and every record a
-	// no-op) unless the operator selected this parent conversation. A private
-	// persistent claim bounds capture to one dispatch; see internal/dispatchtrace.
-	tr := dispatchtrace.Begin(subConvID, spec.ConversationID)
-	ctx = dispatchtrace.WithTrace(ctx, tr)
-	tr.DispatchStart(dispatchtrace.DispatchStartEvent{
+	// Every persisted dispatch retains its evidence in the conversation DB.
+	sink := x.dispatchEventSink
+	if sink == nil && x.store != nil {
+		if store, ok := x.store().(conversation.DispatchEventStore); ok {
+			sink = store.AppendDispatchEvent
+		}
+	}
+	if sink == nil && persisted {
+		sink = func(context.Context, conversation.DispatchEvent) error {
+			return errors.New("dispatch event store unavailable")
+		}
+	}
+	tr := dispatchhistory.Begin(ctx, subConvID, sink)
+
+	ctx = dispatchhistory.WithRecorder(ctx, tr)
+	tr.DispatchStart(dispatchhistory.DispatchStartEvent{
 		Mode:               "agentic",
 		Task:               spec.Task,
 		WorkDir:            spec.WorkDir,
@@ -620,7 +631,15 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 		ContextWindow:      contextWindow,
 		ContextWindowKnown: contextWindowKnown,
 	})
-	defer tr.Close()
+	defer func() {
+		tr.Close()
+		if n := tr.Failures(); n > 0 {
+			warning := fmt.Sprintf("Dispatch evidence incomplete: %d database writes failed.", n)
+			out.Text += "\n\n[" + warning + "]"
+			emitDispatchProgress(spec.Emit, agenttools.ProgressEvent{SubAgentID: subConvID, Kind: "error", Text: warning, IsError: true})
+			x.logDispatchFailure("dispatch.degraded", spec, subConvID, provider, model, sel.IsCloud, granted, ignored, nil, failurelog.Event{"error_class": "dispatch_persistence_failed", "failed_writes": n})
+		}
+	}()
 	// Per-dispatch compactor: state is per-conversation, never shared.
 	var loopCompactor agent.LoopCompactor
 	if x.newLoopCompactor != nil {
@@ -689,8 +708,8 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 
 	if err != nil {
 		log.Printf("[dispatch] subagent done: conv=%s err=%v", subConvID, err)
-		tr.DispatchDone(dispatchtrace.DispatchDoneEvent{
-			Err:          dispatchtrace.ErrorCode(err),
+		tr.DispatchDone(dispatchhistory.DispatchDoneEvent{
+			Err:          dispatchhistory.ErrorCode(err),
 			Iterations:   res.Iterations,
 			InputTokens:  res.InputTokens,
 			OutputTokens: res.OutputTokens,
@@ -751,7 +770,7 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 	if suspicious {
 		log.Printf("[dispatch] subagent SUSPICIOUS no-op: conv=%s granted_write=%v called=%v reason=%q",
 			subConvID, sortedKeys(mutating), sortedKeys(called), reason)
-		tr.DispatchDone(dispatchtrace.DispatchDoneEvent{Err: "suspicious_noop", Iterations: res.Iterations, InputTokens: res.InputTokens, OutputTokens: res.OutputTokens, CalledTools: res.CalledTools})
+		tr.DispatchDone(dispatchhistory.DispatchDoneEvent{Err: "suspicious_noop", Iterations: res.Iterations, InputTokens: res.InputTokens, OutputTokens: res.OutputTokens, CalledTools: res.CalledTools})
 		x.logDispatchFailure("dispatch.degraded", spec, subConvID, provider, model, sel.IsCloud, granted, ignored, nil, failurelog.Event{
 			"error_class":        "suspicious_noop",
 			"message":            suspiciousNoOpMessage(reason),
@@ -787,7 +806,7 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 		})
 	}
 
-	tr.DispatchDone(dispatchtrace.DispatchDoneEvent{
+	tr.DispatchDone(dispatchhistory.DispatchDoneEvent{
 		Iterations:   res.Iterations,
 		InputTokens:  res.InputTokens,
 		OutputTokens: res.OutputTokens,
@@ -945,4 +964,9 @@ func (x *Service) InvokeCapability(ctx context.Context, name string, argsJSON js
 		return nil, true, "marshal result: " + err.Error()
 	}
 	return b, false, ""
+}
+
+// SetDispatchEventSink injects the acknowledged host proxy for worker dispatches.
+func (x *Service) SetDispatchEventSink(fn func(context.Context, conversation.DispatchEvent) error) {
+	x.dispatchEventSink = fn
 }

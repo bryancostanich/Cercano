@@ -1628,6 +1628,7 @@ message HostToWorker {
     McpCallResponse        mcp_response     = 9;
     PermissionUpdate       perm_update      = 10;
     AutonomyLedgerResponse autonomy_response = 11;
+    DispatchEventResponse  dispatch_event_response = 12;
   }
 }
 
@@ -1659,6 +1660,7 @@ message WorkerToHost {
  RuntimeRestartToolRequest runtime_request = 12;
     McpCallRequest           mcp_request     = 13;
     AutonomyLedgerRequest    autonomy_request = 14;
+    DispatchEventRequest     dispatch_event  = 15;
   }
 }
 
@@ -2175,6 +2177,33 @@ message AutonomyLedgerResponse {
   bytes  run_json = 2;
   bool   found    = 3;
   string error    = 4;
+}
+
+// DispatchEventRequest carries one append-only dispatch-evidence event from a
+// worker-side dispatch loop to the HOST-OWNED store (the host's
+// conversation.DispatchEventStore). The worker never opens SQLite: the append
+// happens on the host and the worker proceeds only on the acknowledged
+// DispatchEventResponse, so evidence is never silently dropped. The host
+// authorizes the conversation — this turn's conversation or a child id created
+// on this stream via EnsureSubagentConversation — and acknowledges only after
+// the store write completed. id correlates the response.
+message DispatchEventRequest {
+  uint64 id              = 1;
+  string conversation_id = 2;
+  int64  seq             = 3; // monotonic per-conversation dispatch sequence, >= 1
+  string kind            = 4;
+  int32  iteration       = 5;
+  int64  timestamp_unix  = 6; // Unix seconds; 0 = host stamps now
+  string payload_json    = 7;
+}
+
+// DispatchEventResponse acknowledges one DispatchEventRequest. error is empty
+// on success. Failures are sanitized before crossing the wire: duplicates
+// carry the well-formed conversation/seq report, everything else a stable
+// generic message — driver internals never reach the worker.
+message DispatchEventResponse {
+  uint64 id    = 1;
+  string error = 2;
 }
 
 // Terminal confirmation is required before requesting this developer operation.

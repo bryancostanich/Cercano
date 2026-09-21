@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"cercano/source/server/internal/agenttools"
-	"cercano/source/server/internal/dispatchtrace"
+	"cercano/source/server/internal/dispatchhistory"
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/pkg/config"
@@ -557,10 +557,10 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (returned ToolLoopResult
 	}
 
 	// Scoped diagnostic trace for this loop: nil (all records no-ops) unless
-	// the dispatch front door enabled one via ctx (internal/dispatchtrace).
+	// the dispatch front door enabled one via ctx (internal/dispatchhistory).
 	// Main turns and un-traced dispatches pay one context lookup and nothing
 	// else; ordinary logs stay metadata-only by design.
-	tr := dispatchtrace.From(ctx)
+	tr := dispatchhistory.From(ctx)
 
 	for iter := 0; unlimitedIters || iter < maxIters; iter++ {
 		target := inference.TargetForContext(ctx, in.Provider, inference.Call{Model: requestedModel, Tier: in.Tier, FallbackTier: in.FallbackTier})
@@ -606,7 +606,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (returned ToolLoopResult
 			var beforeForTrace []llm.Message
 			spentBeforeTrace := 0
 			if tr != nil {
-				beforeForTrace = dispatchtrace.Snapshot(hist)
+				beforeForTrace = dispatchhistory.Snapshot(hist)
 				spentBeforeTrace = tokenBudget.Spent
 			}
 			// Stamp dispatch correlation so the compactor's metadata telemetry
@@ -680,7 +680,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (returned ToolLoopResult
 			in.ConversationID, in.Provider.Name(), in.Model, iter+1, temperatureForLog(req.Temperature), req.MaxTokens, toolNamesForLog(req.Tools), systemHasLeanSubagentMarker(req.System), in.flattenToolResults(), truncateRunes(strings.TrimSpace(req.System), 120), truncateRunes(strings.TrimSpace(in.UserInput), 120), len(req.Messages), budget.MessageTokens, budget.SystemTokens, budget.ToolTokens, budget.OutputReserve, budget.EstimatedUsed, budget.Limit, in.ContextWindowKnown, budget.PromptBudget)
 		// The exact model-facing request (post-compaction, post-trim, pre
 		// provider serialization) plus the budget accounting that produced it.
-		tr.ModelRequest(iter+1, in.Provider.Name(), req, dispatchtrace.BudgetView{
+		tr.ModelRequest(iter+1, in.Provider.Name(), req, dispatchhistory.BudgetView{
 			MessageTokens:          budget.MessageTokens,
 			SystemTokens:           budget.SystemTokens,
 			ToolTokens:             budget.ToolTokens,
@@ -1145,7 +1145,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (returned ToolLoopResult
 	finalReq := llm.ChatRequest{Model: in.Model, Tier: in.Tier, FallbackTier: in.FallbackTier, System: in.System, Messages: hist, MaxTokens: maxTokens, Temperature: in.Temperature}
 	// Trace the iteration-cap degradation pass too: the exact no-tools request
 	// the model sees here is part of the dispatch's story.
-	tr.ModelRequest(maxIters+1, in.Provider.Name(), finalReq, dispatchtrace.BudgetView{})
+	tr.ModelRequest(maxIters+1, in.Provider.Name(), finalReq, dispatchhistory.BudgetView{})
 	rdr, err := in.Provider.StreamChat(ctx, finalReq)
 	if err != nil {
 		finalBudget := EstimateRequestBudget(RequestBudgetInput{System: in.System, Messages: hist, MaxTokens: maxTokens, ContextWindow: in.ContextWindow})

@@ -30,6 +30,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -116,6 +117,15 @@ type workerRunner struct {
 	// SetAutonomyLedger from the server's store; nil on dial-injected (test)
 	// runners (ledger operations then error clearly, as pre-fix).
 	autonomyLedger AutonomyLedgerFunc
+
+	// dispatchEventSink appends one dispatch-evidence event to the host-owned
+	// append-only store when a worker-side dispatch loop sends one over the
+	// stream. Same single-owner rule as the autonomy ledger: durable, user-
+	// visible evidence has exactly one owner — the host — and the crash-
+	// isolated worker never opens SQLite. Wired via SetDispatchEventSink from
+	// the server's store; nil on dial-injected (test) runners (appends then
+	// error clearly instead of silently dropping evidence).
+	dispatchEventSink DispatchEventFunc
 
 	// dial is called instead of the pool when non-nil (test injection). When
 	// nil, RunTurn acquires a warm worker from the per-conversation pool.
@@ -216,6 +226,87 @@ type AutonomyLedgerSetter interface {
 // means those capabilities error clearly in worker turns.
 func (w *workerRunner) SetAutonomyLedger(fn AutonomyLedgerFunc) {
 	w.autonomyLedger = fn
+}
+
+// DispatchEventFunc appends one dispatch-evidence event to the host-owned
+// append-only store (conversation.DispatchEventStore.AppendDispatchEvent).
+// Acknowledged by contract: the worker's dispatch loop proceeds only after this
+// returns nil, so evidence is never silently lost.
+type DispatchEventFunc func(ctx context.Context, ev conversation.DispatchEvent) error
+
+// DispatchEventSinkSetter is implemented by turn runners that proxy
+// dispatch-evidence appends from the worker to the host store. The server
+// asserts against this narrow interface rather than widening the constructor
+// with another positional parameter every test call site would have to repeat —
+// same pattern as AutonomyLedgerSetter.
+type DispatchEventSinkSetter interface {
+	SetDispatchEventSink(fn DispatchEventFunc)
+}
+
+// SetDispatchEventSink wires the host's dispatch-event store as the sink a
+// worker-side dispatch loop proxies to over the stream. Not wired means the
+// loop's evidence appends error clearly instead of silently dropping evidence.
+func (w *workerRunner) SetDispatchEventSink(fn DispatchEventFunc) {
+	w.dispatchEventSink = fn
+}
+
+// HostDispatchEventSink adapts the host's conversation store to
+// DispatchEventFunc. The parameter is the NARROW DispatchEventStore interface
+// (not the full Store), so callers type-assert just this slice and any durable
+// host implementing it can be wired. A nil store still yields a callable sink
+// that errors clearly — dispatch evidence must never be silently dropped.
+func HostDispatchEventSink(store conversation.DispatchEventStore) DispatchEventFunc {
+	return func(ctx context.Context, ev conversation.DispatchEvent) error {
+		if store == nil {
+			return errors.New("dispatch event store is not available")
+		}
+		return store.AppendDispatchEvent(ctx, ev)
+	}
+}
+
+// handleDispatchEvent processes one WorkerToHost_DispatchEvent on the drain path
+// and builds the acknowledgment. It authorizes the conversation against scope —
+// child ids successfully created under this turn or its descendants on this
+// stream (see the EnsureSubagent case in RunTurn) — then appends through the
+// host sink and acknowledges only after the store write completed. Store errors
+// are sanitized before crossing the wire: the well-formed duplicate report
+// is reduced to a stable code; other driver-level failures are logged as
+// metadata only and reduced to a generic message.
+func (w *workerRunner) handleDispatchEvent(ctx context.Context, req *proto.DispatchEventRequest, scope map[string]bool) *proto.DispatchEventResponse {
+	response := &proto.DispatchEventResponse{Id: req.GetId()}
+	if req == nil {
+		response.Error = "dispatch event request is empty"
+		return response
+	}
+	if !scope[req.GetConversationId()] {
+		response.Error = "dispatch event conversation not authorized for this turn"
+		return response
+	}
+	if w.dispatchEventSink == nil {
+		response.Error = "dispatch event store is not available"
+		return response
+	}
+	ts := req.GetTimestampUnix()
+	ev := conversation.DispatchEvent{
+		ConversationID: req.GetConversationId(),
+		Seq:            req.GetSeq(),
+		Kind:           req.GetKind(),
+		Iteration:      int(req.GetIteration()),
+		Timestamp:      time.Unix(ts, 0),
+		PayloadJSON:    req.GetPayloadJson(),
+	}
+	if ts == 0 {
+		ev.Timestamp = time.Time{} // host stamps now
+	}
+	if err := w.dispatchEventSink(ctx, ev); err != nil {
+		if errors.Is(err, conversation.ErrDispatchEventDuplicate) {
+			response.Error = "dispatch event already exists"
+			return response
+		}
+		log.Printf("[workerRunner] append dispatch event failed: seq=%d", req.GetSeq())
+		response.Error = "dispatch event append failed"
+	}
+	return response
 }
 
 // ProfileHandlerSetter is implemented by turn runners that proxy host session
@@ -575,6 +666,11 @@ func (w *workerRunner) RunTurn(
 	var turnDone bool
 	var result runner.Result
 
+	// dispatchScope contains only successfully ensured descendants. The current
+	// turn is a permitted parent for creation, not itself a dispatch-event target.
+
+	dispatchScope := map[string]bool{}
+
 	for {
 		// Check for context cancellation before blocking on Recv.
 		select {
@@ -711,10 +807,21 @@ func (w *workerRunner) RunTurn(
 		case *proto.WorkerToHost_EnsureSubagent:
 			// A worker-side dispatch created a sub-agent: persist its conversation
 			// row on the host so the tab survives restart and is post-mortemable.
-			if w.ensureSubagent != nil && m.EnsureSubagent != nil {
-				e := m.EnsureSubagent
-				if err := w.ensureSubagent(ctx, e.GetId(), e.GetParentId(), e.GetProjectDir(), e.GetModel(), e.GetGrantedTools()); err != nil {
-					log.Printf("[workerRunner] ensure subagent conversation: %v", err)
+			if err := w.ensureDispatchChild(ctx, m.EnsureSubagent, req.ConversationID, dispatchScope); err != nil {
+				log.Print("[workerRunner] dispatch child creation failed")
+			}
+
+		case *proto.WorkerToHost_DispatchEvent:
+			// A worker-side dispatch loop appended one evidence event. Handled ON
+			// the drain path (not a goroutine) so any EnsureSubagent that created
+			// the child conversation on this stream has already run — scope
+			// authorization therefore sees the child. The ack is sent only after
+			// the host store write completed; the worker never treats evidence as
+			// recorded before this acknowledgment.
+			if m.DispatchEvent != nil {
+				resp := w.handleDispatchEvent(ctx, m.DispatchEvent, dispatchScope)
+				if err := safeSend(&proto.HostToWorker{Msg: &proto.HostToWorker_DispatchEventResponse{DispatchEventResponse: resp}}); err != nil {
+					log.Printf("[workerRunner] send dispatch event response: %v", err)
 				}
 			}
 
@@ -1016,4 +1123,20 @@ func (w *workerRunner) serveOpenInference(ctx context.Context, req *proto.OpenIn
 		}
 		emit(&proto.OpenInferenceEvent{Kind: &proto.OpenInferenceEvent_Event{Event: MarshalStreamEvent(ev)}})
 	}
+}
+
+// ensureDispatchChild runs on the stream drain path, before evidence appends.
+// Only successfully created descendants can acquire an event-writing scope.
+func (w *workerRunner) ensureDispatchChild(ctx context.Context, e *proto.EnsureSubagentConversation, parent string, scope map[string]bool) error {
+	if e == nil || e.GetId() == "" || e.GetId() == parent || e.GetId() == e.GetParentId() || (e.GetParentId() != parent && !scope[e.GetParentId()]) {
+		return errors.New("dispatch parent not authorized")
+	}
+	if w.ensureSubagent == nil {
+		return errors.New("dispatch conversation store unavailable")
+	}
+	if err := w.ensureSubagent(ctx, e.GetId(), e.GetParentId(), e.GetProjectDir(), e.GetModel(), e.GetGrantedTools()); err != nil {
+		return err
+	}
+	scope[e.GetId()] = true
+	return nil
 }

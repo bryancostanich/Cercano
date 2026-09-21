@@ -124,9 +124,10 @@ func (w *WorkerServer) runTurn(stream proto.Worker_RunTurnServer, authRecovery b
 
 	// Sub-agent persistence proxy: a worker-side dispatch creates its sub-agent
 	// conversation row and persists its turns on the host via this stream proxy
-	// (the worker has no local store). Built before buildDeps so the tool stack
-	// can wire it, same as credSource.
-	subPersist := &streamSubagentPersist{sndr: sndr, gen: start.GetGen()}
+	// (the worker has no local store). Dispatch-evidence appends ride the same
+	// proxy as acknowledged round-trips. Built before buildDeps so the tool
+	// stack can wire it, same as credSource.
+	subPersist := newStreamSubagentPersist(sndr, start.GetGen())
 
 	// Session profile proxy: session-control capabilities such as suggest_plan
 	// must mutate the host's live profile broker, not a worker-local copy.
@@ -170,6 +171,10 @@ func (w *WorkerServer) runTurn(stream proto.Worker_RunTurnServer, authRecovery b
 				mcpControl.deliver(msg.GetMcpResponse())
 			case msg.GetAutonomyResponse() != nil:
 				autonomyLedger.deliver(msg.GetAutonomyResponse())
+			case msg.GetDispatchEventResponse() != nil:
+				// The host acknowledged one dispatch-evidence append; route it
+				// to the waiting dispatch loop.
+				subPersist.deliverDispatchEvent(msg.GetDispatchEventResponse())
 			case msg.GetPermUpdate() != nil:
 				// Mid-turn permission change on the host. Apply it so the gate
 				// sees the same values an in-process turn would re-read from

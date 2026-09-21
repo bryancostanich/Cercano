@@ -119,6 +119,25 @@ CREATE TABLE IF NOT EXISTS autonomy_runs (
 );
 CREATE INDEX IF NOT EXISTS idx_autonomy_runs_conversation_updated
     ON autonomy_runs(conversation_id, updated_at DESC, created_at DESC, run_id DESC);
+
+-- dispatch_events: append-only automatic dispatch evidence. One row per event
+-- emitted while a dispatch loop runs inside a conversation. The composite
+-- primary key makes (conversation_id, seq) unique, so a replayed or duplicated
+-- event is rejected instead of overwriting the earlier snapshot: seq is a
+-- monotonic, caller-assigned per-dispatch sequence. payload is opaque JSON so
+-- the store never needs to know event internals; kind/iteration are plain
+-- columns so later queries can filter without parsing JSON. CREATE IF NOT
+-- EXISTS runs on every Open, so pre-existing DBs gain the table on next start
+-- with no destructive migration.
+CREATE TABLE IF NOT EXISTS dispatch_events (
+    conversation_id TEXT    NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    seq             INTEGER NOT NULL CHECK (seq > 0),
+    kind            TEXT    NOT NULL,
+    iteration       INTEGER NOT NULL DEFAULT 0,
+    created_at      INTEGER NOT NULL,
+    payload         TEXT    NOT NULL,
+    PRIMARY KEY (conversation_id, seq)
+);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_autonomy_runs_one_active
     ON autonomy_runs(conversation_id)
     WHERE state IN ('running', 'review_pending');

@@ -131,6 +131,14 @@ func (x *Service) SetLoopCompactorFactory(fn func() agent.LoopCompactor) {
 	x.newLoopCompactor = fn
 }
 
+// LoopCompactorFactory returns the installed per-dispatch compactor factory,
+// or nil when none is wired. Read-only observation seam for construction-parity
+// tests (the worker assembles this service itself and must install the same
+// factory the host front door does).
+func (x *Service) LoopCompactorFactory() func() agent.LoopCompactor {
+	return x.newLoopCompactor
+}
+
 // SetContextWindowResolver installs the resolver that maps a dispatch
 // sub-agent's resolved model to its input context window in tokens. The front
 // door wires this from runtime/provider evidence. The tool loop independently

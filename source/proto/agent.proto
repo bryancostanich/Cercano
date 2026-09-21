@@ -1883,6 +1883,10 @@ message ConfigSnapshot {
   double compaction_hard_override_pct     = 29;
   bool   elide_tool_results               = 30;
   bool   lossy_tool_elision               = 31;
+  // Additional compaction fields for worker parity
+  string compaction_summarizer_model      = 50;
+  double compaction_compacted_budget_pct  = 51;
+  int32  compaction_tiered_retention_segments = 52;
 
   // Watchdog — supervisor reads these live during the turn.
   bool     watchdog_enabled        = 32;

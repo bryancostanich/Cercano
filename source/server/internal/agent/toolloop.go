@@ -589,9 +589,15 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (returned ToolLoopResult
 		// trimming has already dropped messages. Sub-agent dispatches keep
 		// history only in memory, so this synchronous pass is their only
 		// compaction opportunity (the store-backed generator serves main turns).
+		if iter == 0 {
+			log.Printf("[loop-compaction] dispatch: conv=%s configured=%t", in.ConversationID, in.LoopCompactor != nil)
+		}
 		if in.LoopCompactor != nil {
 			beforeCompact := len(hist)
-			hist = compactLoopHistory(ctx, in.LoopCompactor, hist, &tokenBudget)
+			// Stamp dispatch correlation so the compactor's metadata telemetry
+			// names the conversation and iteration every pass belongs to.
+			compactCtx := WithLoopCompactionScope(ctx, LoopCompactionScope{ConversationID: in.ConversationID, Iteration: iter + 1})
+			hist = compactLoopHistory(compactCtx, in.LoopCompactor, hist, &tokenBudget)
 			if len(hist) != beforeCompact {
 				// priorHistoryCount indexes into hist for tail preservation; a
 				// compacted view invalidates it, so clamp instead of letting a

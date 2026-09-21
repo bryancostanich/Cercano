@@ -26,9 +26,7 @@ import (
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/catalog"
 	"cercano/source/server/internal/cloudfactory"
-	"cercano/source/server/internal/compaction"
 	"cercano/source/server/internal/compactiongen"
-	"cercano/source/server/internal/compactor"
 	projectctx "cercano/source/server/internal/context"
 	"cercano/source/server/internal/contextmeter"
 	"cercano/source/server/internal/conversation"
@@ -39,7 +37,6 @@ import (
 	mistralengine "cercano/source/server/internal/engine/mistralrs"
 	"cercano/source/server/internal/engine/ollama"
 	"cercano/source/server/internal/inference"
-	"cercano/source/server/internal/llm"
 	ollamallm "cercano/source/server/internal/llm/ollama"
 	"cercano/source/server/internal/localruntime"
 	"cercano/source/server/internal/localruntime/catalogdefaults"
@@ -51,7 +48,6 @@ import (
 	mcpserver "cercano/source/server/internal/mcp"
 	mcphost "cercano/source/server/internal/mcp_host"
 	"cercano/source/server/internal/modelcatalog"
-	"cercano/source/server/internal/modelwindow"
 	"cercano/source/server/internal/ollamacatalog"
 	"cercano/source/server/internal/openmodels"
 	"cercano/source/server/internal/protocols"
@@ -195,43 +191,6 @@ func ollamaStartupWarning(check func(string) error, baseURL string) string {
 // handler should ever hit this. A second signal forces immediate exit.
 const drainGrace = 10 * time.Minute
 
-// compactedBudgetDefaultPct is the default fraction of the chat model's context
-// window the compacted backlog may occupy when compaction.compacted_budget_pct
-// is unset. 0.30 of a 200k window ≈ 60k tokens — generous enough that
-// normal-length sessions never trip the deterministic prune, replacing the old
-// fixed 16k ceiling. compactedBudgetFloorTokens keeps a tiny-window local model
-// from getting a uselessly small budget.
-const (
-	compactedBudgetDefaultPct  = 0.30
-	compactedBudgetFloorTokens = 16000
-)
-
-// cloudFallbackTimeout bounds the compaction cloud fallback on its own clock.
-// The fallback previously inherited the pass context, so a local summarizer
-// that burned most of the pass deadline handed the cloud call whatever was
-// left — often seconds — and it died with "context deadline exceeded" before
-// the request was even sent. The fallback is a fresh piece of work and gets a
-// fresh budget. Kept well under drainGrace so a shutdown still drains cleanly.
-const cloudFallbackTimeout = 2 * time.Minute
-
-// cloudIsPrimaryLocus reports whether the configured locus puts the cloud in
-// front for compaction's summarization work. It is the gate for spending cloud
-// tokens on a segment the LOCAL summarizer declined on size (a DeferralError):
-// worth it when the user already pays for cloud-first, wrong when they asked to
-// stay open/local.
-//
-// This is deliberately Coproc(), not Main(): summarization is one-shot
-// co-processor work, and under cloud_primary the locus package keeps that kind
-// of grunt work local while the main LLM runs on cloud. An unparseable mode
-// falls back to the package default rather than silently enabling cloud spend.
-func cloudIsPrimaryLocus(cfg config.Config) bool {
-	mode, err := locus.ParseMode(cfg.LocusMode)
-	if err != nil {
-		mode = locus.DefaultMode
-	}
-	return mode.Coproc().Preferred == locus.TierCloud
-}
-
 // startGRPCServer initializes all providers and starts the gRPC server.
 // Returns the listener address and a cleanup function.
 // events may be nil (MCP embedded mode opens no log); a nil writer makes
@@ -362,162 +321,38 @@ func startGRPCServer(cfg config.Config, bindAddr string, events *crashlog.Writer
 	// Set when compaction is enabled; installed on the server after construction.
 	var newLoopCompactor func() agent.LoopCompactor
 	if persistentStore != nil {
-		// Summarizer model precedence: explicit compaction.summarizer_model →
-		// the fast_light_text tier's open side → the interactive open model as
-		// the fallback of last resort. Summaries are prose-quality judgment
-		// work — the fast_light_text charter — matching recap above (small
-		// coder models drop anchors; see capability-tier-audit.md).
-		summarizerModel := cfg.Compaction.SummarizerModel
-		if summarizerModel == "" {
-			if id, ok := openTierModelOK(cfg, config.TierFastLightText); ok {
-				summarizerModel = id
-			}
-		}
-		compactSummarize := func(ctx context.Context, msgs []llm.Message) (compaction.StructuredSummary, error) {
-			// Greedy decoding is a correctness requirement here, not a tuning
-			// choice: the frames-matrix bakeoff (compaction-bakeoff-findings.md)
-			// showed default-temperature summarization is a coin flip — the same
-			// window swung 0/7 to 7/7 on anchor retention between samples, while
-			// temperature 0 reproduced exactly and kept every proposal anchor.
-			greedy := engine.Greedy()
-			localSummaryWindow := modelwindow.LocalRuntimeWindow(cfg, summarizerModel)
-			if cfg.OpenRuntime == "llama_server" {
-				capacity, err := llamaEng.RuntimeContext(ctx, summarizerModel, true)
-				if err != nil {
-					return compaction.StructuredSummary{}, err
+		// The compaction summarizer, the compactor config and the per-dispatch
+		// loop-compaction factory are assembled by the ONE shared construction in
+		// internal/loopcompact (wiring.go) — the same construction the worker
+		// front door uses — so host and worker compaction can never drift. The
+		// store-backed generator for main turns and the inline compactor for
+		// sub-agent dispatches below share the resulting seams.
+		loopDeps := loopcompact.WiringDeps{
+			Cfg:       cfg,
+			ChatModel: openChatModel(cfg),
+			OpenTierModel: func(t config.Tier) string {
+				id, _ := openTierModelOK(cfg, t)
+				return id
+			},
+			// The host's open provider is already a TurnRunner (the interactive
+			// provider); the summarizer reuses it directly.
+			OpenRunner:  func() agent.TurnRunner { return openProvider },
+			CloudRunner: func() agent.TurnRunner { return lazyRouter.Tiers().Cloud },
+			// Late-bound on purpose: read at pass time, after srv is constructed.
+			CloudModelForTier: func(t config.Tier) string {
+				if cloudTierModel == nil {
+					return ""
 				}
-				localSummaryWindow = capacity.Window
-				ctx = llm.WithRuntimeContext(ctx, capacity)
-			}
-			parseLogged := func(output, via string) compaction.StructuredSummary {
-				s := compaction.ParseSummary(output)
-				if s.IsEmpty() {
-					// The Advance guard will refuse this; log the raw head so
-					// the "why was it empty" question is answerable from the
-					// server log instead of needing a debugging session.
-					head := output
-					if len(head) > 300 {
-						head = head[:300] + "…"
-					}
-					fmt.Fprintf(os.Stderr, "[compaction] summarizer (%s) output parsed EMPTY; raw head: %q\n", via, head)
-				}
-				return s
-			}
-			compactionReqID := fmt.Sprintf("compaction-%d", time.Now().UnixNano())
-			summary, stats, err := compaction.SummarizeBudgetedLocal(ctx, msgs, localSummaryWindow, compaction.DefaultSummaryOutputReserve, func(ctx context.Context, prompt string, maxTokens int) (compaction.StructuredSummary, error) {
-				budget := compaction.EstimateSummaryBudget(prompt, maxTokens, localSummaryWindow)
-				fmt.Fprintf(os.Stderr, "[compaction] local summarizer request: request_id=%s route=local prompt_tokens=%d output_reserve=%d limit=%d budget=%d fits=%t\n", compactionReqID, budget.PromptTokens, budget.OutputReserve, budget.Limit, budget.Budget, budget.Fits)
-				req := &agent.Request{Input: prompt, Temperature: greedy.Temperature, Tier: string(config.TierFastLightText), MaxTokens: maxTokens, RequestID: compactionReqID}
-				if summarizerModel != "" {
-					req.ModelOverride = summarizerModel
-				}
-				resp, err := openProvider.Process(ctx, req)
-				if err != nil {
-					return compaction.StructuredSummary{}, err
-				}
-				return parseLogged(resp.Output, "local"), nil
-			})
-			if err == nil {
-				fmt.Fprintf(os.Stderr, "[compaction] local summarizer complete: request_id=%s chunks=%d merged=%t prompt_tokens=%v output_reserve=%d limit=%d\n", compactionReqID, stats.Chunks, stats.Merged, stats.PromptTokens, compaction.DefaultSummaryOutputReserve, localSummaryWindow)
-				return summary, nil
-			}
-			if err != nil {
-				// Local summarizer unavailable (e.g. the fast-light-text model is
-				// still downloading, or the runtime is down). Fall back to the
-				// active cloud provider so compaction keeps working instead of
-				// stalling until a local model lands. Tiers()
-				// ["CloudModel"] is kept live by RebuildCloud
-				// (providers.SetCloudProvider); an absent/failed cloud surfaces
-				// the original local error. No ModelOverride — the cloud provider
-				// uses its configured model, not the local summarizer id.
-
-				// A DeferralError is not a liveness failure — the local
-				// summarizer worked fine and refused on size. The cloud's
-				// window is larger, so the segment might fit there, but
-				// spending cloud tokens on an oversized segment is only
-				// consistent with the user's intent when the cloud is their
-				// primary locus. Under open_* the answer is to defer and let
-				// the segmenter produce something that fits.
-				var deferral *compaction.DeferralError
-				if errors.As(err, &deferral) && !cloudIsPrimaryLocus(cfg) {
-					fmt.Fprintf(os.Stderr, "[compaction] local summarizer deferred (%v) — not falling back to cloud under locus_mode=%q\n", err, cfg.LocusMode)
-					return compaction.StructuredSummary{}, err
-				}
-				if cloud := lazyRouter.Tiers().Cloud; cloud != nil {
-					// Tier rides along so a mid-call failover re-resolves the
-					// backup vendor's economy model instead of its default.
-					cloudReq := &agent.Request{Input: compaction.BuildSummaryPrompt(msgs), Temperature: greedy.Temperature, Tier: string(config.TierFastLightText), MaxTokens: compaction.DefaultSummaryOutputReserve, RequestID: compactionReqID + ":cloud"}
-					// Summarization is fast_light_text work — resolve the
-					// vendor's economy model (live, follows profile switches)
-					// instead of burning the premium chat model on it.
-					if cloudTierModel != nil {
-						if m := cloudTierModel(config.TierFastLightText); m != "" {
-							cloudReq.ModelOverride = m
-						}
-					}
-					fmt.Fprintf(os.Stderr, "[compaction] local summarizer failed (%v) — falling back to cloud (model %q)\n", err, cloudReq.ModelOverride)
-					// Detach from the pass deadline (see cloudFallbackTimeout)
-					// but keep cancellation: context.WithoutCancel would let
-					// the call outlive a shutdown, so derive from the parent's
-					// cancellation while replacing its deadline.
-					cloudCtx, cancelCloud := context.WithTimeout(context.WithoutCancel(ctx), cloudFallbackTimeout)
-					// Propagate real cancellation (shutdown) but NOT deadline
-					// expiry — the pass deadline is exactly what this call is
-					// meant to outlive, and ctx.Done() fires for both.
-					stopPropagate := context.AfterFunc(ctx, func() {
-						if !errors.Is(context.Cause(ctx), context.DeadlineExceeded) {
-							cancelCloud()
-						}
-					})
-					cresp, cerr := cloud.Process(cloudCtx, cloudReq)
-					stopPropagate()
-					cancelCloud()
-					if cerr == nil {
-						return parseLogged(cresp.Output, "cloud fallback"), nil
-					}
-					// Surface BOTH failures: the pass error names the local
-					// cause, and the cloud fallback's own error — previously
-					// swallowed, which made "it should have used the cloud"
-					// undiagnosable from the log.
-					fmt.Fprintf(os.Stderr, "[compaction] cloud fallback FAILED: %v\n", cerr)
-					return compaction.StructuredSummary{}, fmt.Errorf("local summarizer: %w; cloud fallback: %v", err, cerr)
-				}
-				return compaction.StructuredSummary{}, err
-			}
-			return compaction.StructuredSummary{}, fmt.Errorf("local summarizer returned without summary or error")
+				return cloudTierModel(t)
+			},
+			OpenRuntimeContext: llamaEng.RuntimeContext,
+			Log: func(format string, args ...any) {
+				fmt.Fprintf(os.Stderr, format+"\n", args...)
+			},
 		}
-		// Budget the compacted backlog as a fraction of the chat model's context
-		// window (default compactedBudgetDefaultPct), never below a floor so a
-		// tiny-window local model still gets a workable summary. This replaces
-		// the old fixed ~16k ceiling that over-compacted long sessions on
-		// large-window models. Keyed off the open chat model; the cloud window
-		// is typically larger, so this is the conservative denominator.
-		budgetPct := cfg.Compaction.CompactedBudgetPct
-		if budgetPct <= 0 {
-			budgetPct = compactedBudgetDefaultPct
-		}
-		budgetWindow := modelwindow.LocalRuntimeWindow(cfg, openChatModel(cfg))
-		if cfg.OpenRuntime == "llama_server" {
-			capacity, err := llamaEng.RuntimeContext(context.Background(), openChatModel(cfg), false)
-			if err == nil {
-				budgetWindow = capacity.Window
-			}
-		}
-		if budgetWindow <= 0 && cfg.OpenRuntime != "llama_server" {
-			budgetWindow = contextmeter.ModelMax(openChatModel(cfg))
-		}
-		budgetTokens := int(float64(budgetWindow) * budgetPct)
-		if budgetTokens < compactedBudgetFloorTokens {
-			budgetTokens = compactedBudgetFloorTokens
-		}
-		compCfg := compactor.Config{
-			ActivationFloorTokens:   cfg.Compaction.ActivationFloorTokens,
-			SegmentTokens:           cfg.Compaction.SegmentTokens,
-			VerbatimRecent:          cfg.Compaction.VerbatimRecent,
-			CompactedBudgetTokens:   budgetTokens,
-			TieredRetentionSegments: cfg.Compaction.TieredRetentionSegments,
-		}
-		// No warning when summarizerModel is empty: an unset fast_light_text.open
+		compactSummarize := loopcompact.BuildSummarizer(loopDeps)
+		compCfg := loopcompact.BuildConfig(loopDeps)
+		// No warning when the summarizer model is empty: an unset fast_light_text.open
 		// is the recommended default, not a misconfiguration. The bakeoff
 		// (compaction-bakeoff-findings.md, "Summarizer model selection") found
 		// the interactive open model to be the best-measured summarizer on both
@@ -538,21 +373,9 @@ func startGRPCServer(cfg config.Config, bindAddr string, events *crashlog.Writer
 		// summarizer: their history is in-memory only and never read back, so the
 		// store-backed generator above cannot serve them. A fresh compactor per
 		// dispatch keeps frozen summary state from leaking between concurrent
-		// sub-agents. Installed on the server once it exists (below).
-		if cfg.Compaction.Enabled {
-			loopCompactCfg, loopSummarize := compCfg, compactSummarize
-			newLoopCompactor = func() agent.LoopCompactor {
-				c := loopcompact.New(loopcompact.Options{
-					Config:    loopCompactCfg,
-					Summarize: loopSummarize,
-					Tokenizer: contextmeter.Default(),
-				})
-				if c == nil {
-					return nil
-				}
-				return c
-			}
-		}
+		// sub-agents. Installed on the server once it exists (below); nil when
+		// compaction is disabled in config.
+		newLoopCompactor = loopcompact.NewFactory(loopDeps)
 	}
 	var sweeper *retention.Sweeper
 	if persistentStore != nil {

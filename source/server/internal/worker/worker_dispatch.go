@@ -4,6 +4,7 @@ import (
 	"cercano/source/server/internal/reasoningexperiment"
 	"context"
 	"fmt"
+	"log"
 
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/capabilities"
@@ -15,6 +16,7 @@ import (
 	toolssvc "cercano/source/server/internal/hostsvc/tools"
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
+	"cercano/source/server/internal/loopcompact"
 	"cercano/source/server/internal/runner"
 	"cercano/source/server/internal/toolstack"
 	pkgcfg "cercano/source/server/pkg/config"
@@ -86,6 +88,14 @@ func buildWorkerToolSvcWithDiagnostic(
 	svc := toolssvc.New(permBroker, systemPrompt, nil, subagentPersistTurn(subPersist))
 	svc.SetFailureLog(failures)
 	svc.SetEngine(engine) // installs the agentic runner for sub-agent dispatch
+	// Sub-agent dispatches compact INLINE exactly as in-process: the worker
+	// installs the SAME per-dispatch factory the host front door does, built
+	// from the shared internal/loopcompact wiring (no worker-specific policy).
+	// The worker's providers are host-streamed inference.Proxies; they adapt
+	// to the summarizer's TurnRunner seam via agent.InferenceTurnRunner.
+	if factory := loopcompact.NewFactory(workerLoopCompactDeps(cfg, cloud, open)); factory != nil {
+		svc.SetLoopCompactorFactory(factory)
+	}
 	if subPersist != nil {
 		svc.SetEnsureSubagent(subPersist.ensure) // worker creates sub-agent conversation rows on the host
 	}
@@ -109,6 +119,54 @@ func buildWorkerToolSvcWithDiagnostic(
 		Vision: vision,
 	})
 	return svc
+}
+
+// workerLoopCompactDeps assembles the shared loopcompact.WiringDeps from the
+// worker's snapshotted config and host-streamed providers. Every seam resolves
+// through worker-held state: the open lane is the host-proxied open runtime
+// (the summarizer's fast_light_text lane), the cloud lane is the active cloud
+// proxy for fallback, and the chat-model denominator is the host-resolved
+// everyday override snapshotted into cfg (see openTierModel).
+func workerLoopCompactDeps(cfg pkgcfg.Config, cloud, open inference.Provider) loopcompact.WiringDeps {
+	// buildDeps may pass an absent host proxy as a typed nil interface.
+	if proxy, ok := open.(*streamOpenProvider); ok && proxy == nil {
+		open = nil
+	}
+	deps := loopcompact.WiringDeps{
+		Cfg:           cfg,
+		ChatModel:     openTierModel(cfg, pkgcfg.TierEveryday),
+		OpenTierModel: func(t pkgcfg.Tier) string { return openTierModel(cfg, t) },
+		OpenRunner: func() agent.TurnRunner {
+			if open == nil {
+				return nil
+			}
+			return agent.InferenceTurnRunner(open, openTierModel(cfg, pkgcfg.TierEveryday))
+		},
+		CloudRunner: func() agent.TurnRunner {
+			if cloud == nil {
+				return nil
+			}
+			model := ""
+			if profile, ok := profileByName(cfg.CloudProfiles, cfg.ActiveCloudProfile); ok {
+				model = profile.Model
+			}
+			return agent.InferenceTurnRunner(cloud, model)
+		},
+		CloudModelForTier: func(t pkgcfg.Tier) string { return workerDispatchModelFor(cfg)(true, t) },
+		Log:               func(format string, args ...any) { log.Printf(format, args...) },
+	}
+	if open == nil {
+		deps.OpenRunner = nil
+	}
+	if cloud == nil {
+		deps.CloudRunner = nil
+	}
+	if runtime, ok := open.(interface {
+		RuntimeContext(context.Context, string, bool) (llm.RuntimeContext, error)
+	}); ok {
+		deps.OpenRuntimeContext = runtime.RuntimeContext
+	}
+	return deps
 }
 
 // workerCtxHistory adapts the project-context Loader to runner.TurnHistory so

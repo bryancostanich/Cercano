@@ -6,47 +6,19 @@ import (
 	"testing"
 	"time"
 
-	"cercano/source/server/internal/locus"
-	"cercano/source/server/pkg/config"
+	"cercano/source/server/internal/loopcompact"
 )
 
-// The DeferralError gate: a size refusal from the local summarizer should only
-// reach the cloud when the user's locus actually puts co-processor work there.
-func TestCloudIsPrimaryLocus(t *testing.T) {
-	for _, tc := range []struct {
-		mode string
-		want bool
-	}{
-		// cloud_only has nowhere else to go — deferral must be allowed to
-		// spend cloud tokens or compaction cannot make progress at all.
-		{string(locus.CloudOnly), true},
-		// cloud_primary keeps grunt work local via Coproc(), so an oversized
-		// segment defers rather than silently billing the cloud.
-		{string(locus.CloudPrimary), false},
-		{string(locus.OpenPrimary), false},
-		{string(locus.OpenOnly), false},
-		// Empty resolves to DefaultMode (cloud_primary) → local coproc.
-		{"", false},
-		// Garbage must not fail open into cloud spend.
-		{"not_a_mode", false},
-		// Legacy aliases are normalized at load time, not here; verify the
-		// raw legacy string still does not fail open.
-		{"local_only", false},
-	} {
-		if got := cloudIsPrimaryLocus(config.Config{LocusMode: tc.mode}); got != tc.want {
-			t.Errorf("cloudIsPrimaryLocus(%q) = %v, want %v", tc.mode, got, tc.want)
-		}
-	}
-}
-
 // cloudFallbackTimeout must outlive a slow cloud call but stay well inside the
-// shutdown drain, or a fallback in flight blocks a clean exit.
+// shutdown drain, or a fallback in flight blocks a clean exit. The constant
+// itself now lives in internal/loopcompact (the ONE shared summarizer
+// construction), so this asserts against the shared policy value.
 func TestCloudFallbackTimeoutFitsDrainGrace(t *testing.T) {
-	if cloudFallbackTimeout >= drainGrace {
-		t.Fatalf("cloudFallbackTimeout %v must be < drainGrace %v", cloudFallbackTimeout, drainGrace)
+	if loopcompact.CloudFallbackTimeout >= drainGrace {
+		t.Fatalf("cloudFallbackTimeout %v must be < drainGrace %v", loopcompact.CloudFallbackTimeout, drainGrace)
 	}
-	if cloudFallbackTimeout < 30*time.Second {
-		t.Fatalf("cloudFallbackTimeout %v is too tight to be worth detaching for", cloudFallbackTimeout)
+	if loopcompact.CloudFallbackTimeout < 30*time.Second {
+		t.Fatalf("cloudFallbackTimeout %v is too tight to be worth detaching for", loopcompact.CloudFallbackTimeout)
 	}
 }
 

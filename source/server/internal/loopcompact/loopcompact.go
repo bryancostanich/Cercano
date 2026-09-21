@@ -17,6 +17,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"time"
 
 	"cercano/source/server/internal/agent"
@@ -43,12 +44,12 @@ type Compactor struct {
 	summarize Summarize
 	tok       contextmeter.Tokenizer
 	timeout   time.Duration
+	// onPass receives metadata-only telemetry for every attempt; nil disables.
+	onPass func(PassEvent)
 
 	// state carries frozen boundaries and summaries between passes. It is the
 	// in-memory analogue of the persisted conversation.Compaction row.
 	state conversation.Compaction
-	// synthetic monotonic clock for turn timestamps; see toTurns.
-	seq int64
 }
 
 // Options configures a loop compactor. Zero values fall back to production
@@ -61,6 +62,9 @@ type Options struct {
 	// multi-minute budget, an inline pass blocks the dispatch, so it must be
 	// short: a slow summarizer should cost a little latency, never a stall.
 	Timeout time.Duration
+	// OnPass receives metadata-only telemetry for every compaction attempt
+	// (below-floor no-ops included). Nil disables telemetry.
+	OnPass func(PassEvent)
 }
 
 // DefaultTimeout bounds one inline pass.
@@ -94,7 +98,7 @@ func New(opts Options) *Compactor {
 	if timeout <= 0 {
 		timeout = DefaultTimeout
 	}
-	return &Compactor{cfg: cfg, summarize: opts.Summarize, tok: tok, timeout: timeout}
+	return &Compactor{cfg: cfg, summarize: opts.Summarize, tok: tok, timeout: timeout, onPass: opts.OnPass}
 }
 
 // CompactLoopHistory implements agent.LoopCompactor.
@@ -106,16 +110,45 @@ func (c *Compactor) CompactLoopHistory(ctx context.Context, history []llm.Messag
 	if c == nil || len(history) == 0 {
 		return history, 0, nil
 	}
+	// Metadata-only telemetry: counts, thresholds and outcome codes for every
+	// attempt, correlated to the dispatch via the scope the tool loop stamped.
+	started := time.Now()
+	ev := PassEvent{
+		Enabled:               true,
+		ActivationFloorTokens: c.cfg.ActivationFloorTokens,
+		SegmentTokens:         c.cfg.SegmentTokens,
+		VerbatimRecent:        c.cfg.VerbatimRecent,
+		CompactedBudgetTokens: c.cfg.CompactedBudgetTokens,
+		HistoryMessagesBefore: len(history),
+		EstimatedTokensBefore: compaction.TotalTokens(c.tok, history),
+		ToolResultCharsBefore: toolResultChars(history),
+		ToolResultsBefore:     toolResultCount(history),
+	}
+	ev.ConversationID, ev.Iteration = scopeFrom(ctx)
+
+	out, spent := history, 0
+	defer func() {
+		ev.HistoryMessagesAfter = len(out)
+		ev.EstimatedTokensAfter = compaction.TotalTokens(c.tok, out)
+		ev.ToolResultCharsAfter = toolResultChars(out)
+		ev.ToolResultsAfter = toolResultCount(out)
+		ev.SpentTokensEstimated = spent
+		ev.Duration = time.Since(started)
+		c.emitPass(ev)
+	}()
+
 	// Cheap pre-gate: Advance applies the same floor, but this avoids building
 	// synthetic turns on every iteration of a small dispatch.
-	if compaction.TotalTokens(c.tok, history) < c.cfg.ActivationFloorTokens {
+	if ev.EstimatedTokensBefore < c.cfg.ActivationFloorTokens {
+		ev.Outcome = OutcomeBelowFloor
+		ev.Reason = reasonBelowFloor
 		return history, 0, nil
 	}
 	turns := c.toTurns(history)
 
-	spent := 0
 	// Wrap the summarizer to attribute its spend to the dispatch budget.
 	metered := func(ctx context.Context, msgs []llm.Message) (compaction.StructuredSummary, error) {
+		ev.SummarizerCalls++
 		summary, err := c.summarize(ctx, msgs)
 		// Conservative attribution: the summarizer seam reports no usage, so
 		// charge the estimated input it consumed. Undercounting spend would
@@ -128,21 +161,32 @@ func (c *Compactor) CompactLoopHistory(ctx context.Context, history []llm.Messag
 	defer cancel()
 	state, changed, _, err := compactor.Advance(passCtx, turns, c.state, metered, c.cfg, c.tok)
 	if err != nil {
+		// NONFATAL by contract: the history is preserved (below) and the
+		// dispatch continues; the failure is observable only via the event.
+		ev.Outcome = OutcomeFailed
+		ev.Reason = classifyFailure(err)
 		return history, spent, fmt.Errorf("loop compaction pass: %w", err)
 	}
 	if !changed {
+		ev.Outcome = OutcomeUnchanged
+		ev.Reason = reasonNoProgress
 		return history, spent, nil
 	}
-	c.state = state
-
 	view, err := compactor.BuildSendView(turns, state)
 	if err != nil {
+		ev.Outcome = OutcomeFailed
+		ev.Reason = classifyFailure(err)
 		return history, spent, fmt.Errorf("loop compaction send view: %w", err)
 	}
 	if len(view) == 0 {
 		// Never hand back an empty view; the caller would discard it anyway.
+		ev.Outcome = OutcomeUnchanged
+		ev.Reason = reasonEmptyView
 		return history, spent, nil
 	}
+	c.state = state
+	out = view
+	ev.Outcome = OutcomeCompacted
 	return view, spent, nil
 }
 
@@ -152,11 +196,21 @@ func (c *Compactor) CompactLoopHistory(ctx context.Context, history []llm.Messag
 // boundary, and it refuses to freeze turns sharing the boundary second. Real
 // wall-clock stamps would cluster many turns into one second (tool bursts
 // persist fast) and stall the boundary; a synthetic clock keeps every turn
-// separable. The sequence is stable across passes because index i always maps
-// to timestamp i.
+// separable. Reduced views are rebased at the existing frozen boundary.
 func (c *Compactor) toTurns(msgs []llm.Message) []conversation.Turn {
 	turns := make([]conversation.Turn, 0, len(msgs))
-	base := time.Unix(0, 0).UTC()
+	// Zero is the initial frozen boundary: the first real message must be
+	// strictly after it. When the loop feeds back a reduced view, its summary
+	// represents the frozen prefix. Anchor that preamble at the boundary and
+	// renumber its live tail AFTER it, rather than reusing old array indices
+	// that would cause unsummarized messages to fall behind FrozenThrough.
+	base := time.Unix(1, 0).UTC()
+	if len(msgs) > 0 && c.state.ConsolidatedJSON != "" {
+		var summary compaction.StructuredSummary
+		if json.Unmarshal([]byte(c.state.ConsolidatedJSON), &summary) == nil && !summary.IsEmpty() && reflect.DeepEqual(msgs[0].Blocks, []llm.Block{summary.RenderBlock()}) {
+			base = time.Unix(c.state.FrozenThrough, 0).UTC()
+		}
+	}
 	for i, m := range msgs {
 		t := conversation.Turn{
 			Role:      string(m.Role),

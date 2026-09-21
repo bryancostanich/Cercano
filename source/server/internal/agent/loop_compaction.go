@@ -40,6 +40,30 @@ func (f LoopCompactorFunc) CompactLoopHistory(ctx context.Context, history []llm
 	return f(ctx, history)
 }
 
+// LoopCompactionScope carries the dispatch correlation an inline compaction
+// pass should report with its telemetry: which conversation's sub-agent, at
+// which tool-loop iteration, the pass ran. Values only — no content.
+type LoopCompactionScope struct {
+	ConversationID string
+	Iteration      int
+}
+
+type loopCompactionScopeKey struct{}
+
+// WithLoopCompactionScope stamps dispatch correlation onto a context so a
+// LoopCompactor implementation can attribute its telemetry without the seam
+// itself carrying logging concerns.
+func WithLoopCompactionScope(ctx context.Context, s LoopCompactionScope) context.Context {
+	return context.WithValue(ctx, loopCompactionScopeKey{}, s)
+}
+
+// LoopCompactionScopeFrom reads the stamped correlation; ok is false when the
+// caller (tests, direct seam use) did not stamp one.
+func LoopCompactionScopeFrom(ctx context.Context) (LoopCompactionScope, bool) {
+	s, ok := ctx.Value(loopCompactionScopeKey{}).(LoopCompactionScope)
+	return s, ok
+}
+
 // compactLoopHistory applies the compactor defensively: any error, nil result,
 // or empty result leaves the history untouched. Compaction must never be able
 // to destroy a dispatch's working context.

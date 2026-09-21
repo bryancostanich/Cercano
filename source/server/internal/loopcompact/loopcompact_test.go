@@ -173,3 +173,57 @@ func TestSyntheticTimestampsAreSeparable(t *testing.T) {
 		t.Fatal("text-only turn lost its Content fallback")
 	}
 }
+
+// Dispatches feed the reduced view back, unlike the store-backed full history.
+func TestRepeatedPassOnReducedHistory(t *testing.T) {
+	calls := 0
+	c := testCompactor(t, countingSummarizer(&calls))
+	hist := bigHistory(60, 60)
+	out, _, err := c.CompactLoopHistory(t.Context(), hist)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeCalls := calls
+	grown := append(out, bigHistory(60, 60)...)
+	next, _, err := c.CompactLoopHistory(t.Context(), grown)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls == beforeCalls || compaction.TotalTokens(c.tok, next) >= compaction.TotalTokens(c.tok, grown) {
+		t.Fatal("second pass did not reduce newly accumulated history")
+	}
+}
+
+func TestRepeatedPassDoesNotSkipUnsummarizedMessages(t *testing.T) {
+	seen := map[string]bool{}
+	c := testCompactor(t, func(_ context.Context, msgs []llm.Message) (compaction.StructuredSummary, error) {
+		for _, m := range msgs {
+			for _, b := range m.Blocks {
+				seen[b.Text] = true
+			}
+		}
+		return compaction.StructuredSummary{Goal: "preserve evidence"}, nil
+	})
+	hist := bigHistory(60, 60)
+	out, _, err := c.CompactLoopHistory(t.Context(), hist)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out = append(out, bigHistory(60, 61)...)
+	next, _, err := c.CompactLoopHistory(t.Context(), out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range next {
+		for _, b := range m.Blocks {
+			seen[b.Text] = true
+		}
+	}
+	for i, m := range append(hist, bigHistory(60, 61)...) {
+		for _, b := range m.Blocks {
+			if !seen[b.Text] {
+				t.Fatalf("message %d neither summarized nor retained", i)
+			}
+		}
+	}
+}

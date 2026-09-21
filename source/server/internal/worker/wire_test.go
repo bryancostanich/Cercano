@@ -595,3 +595,103 @@ func TestTaskTaxonomyWorkerSnapshot(t *testing.T) {
 		}
 	}
 }
+
+// TestSnapshotConfigRoundTrip_ExtendedCompactionFields verifies that the new
+// compaction fields (SummarizerModel, CompactedBudgetPct, TieredRetentionSegments)
+// are properly round-tripped through the wire codec.
+func TestSnapshotConfigRoundTrip_ExtendedCompactionFields(t *testing.T) {
+	orig := config.Config{
+		LocusMode:          "cloud_primary",
+		ActiveCloudProfile: "myprofile",
+		OllamaURL:          "http://localhost:11434",
+		OpenRuntime:        "ollama",
+		CloudProfiles: []config.CloudProfile{
+			{
+				Name:       "myprofile",
+				Flavor:     "messages",
+				Backend:    "",
+				Route:      "meridian",
+				BaseURL:    "https://api.anthropic.com",
+				Model:      "claude-opus-4.5",
+				Region:     "",
+				AWSProfile: "",
+			},
+		},
+		Models: workerTestModels("llama_server", map[config.Tier]string{
+			config.TierMostCapable:   "qwen3-72b",
+			config.TierEveryday:      "qwen3-coder",
+			config.TierFastLight:     "qwen3-1.7b",
+			config.TierFastLightText: "phi4-mini",
+			config.TierEmbedding:     "nomic-embed-text",
+		}),
+		Compaction: config.CompactionConfig{
+			Enabled:                 true,
+			ActivationFloorTokens:   8000,
+			SegmentTokens:           4000,
+			VerbatimRecent:          10,
+			HardOverridePct:         0.85,
+			CompactedBudgetPct:      0.75,        // Test non-default value
+			TieredRetentionSegments: 5,           // Test non-default value
+			SummarizerModel:         "phi4-mini", // Test non-default value
+			ElideToolResults:        true,
+			LossyToolElision:        false,
+		},
+		Watchdog: config.WatchdogConfig{
+			Enabled:       true,
+			Mode:          "challenge-and-justify",
+			Checks:        []string{"debug-loop", "commit-checkpoint"},
+			Model:         "phi4-mini",
+			EscalateAfter: 2,
+			Echo:          true,
+		},
+		ToolLoop: config.ToolLoopConfig{MaxIterations: 37},
+	}
+
+	cred := "sk-ant-test-credential"
+	openTiers := map[string]string{
+		string(config.TierMostCapable):   "qwen3-72b",
+		string(config.TierEveryday):      "qwen3-coder",
+		string(config.TierFastLight):     "qwen3-1.7b",
+		string(config.TierFastLightText): "phi4-mini",
+		string(config.TierEmbedding):     "nomic-embed-text",
+	}
+
+	p := SnapshotConfig(orig, cred, openTiers)
+	got := ConfigFromSnapshot(p)
+
+	// Check that all compaction fields are preserved in round-trip
+	if got.Compaction.Enabled != orig.Compaction.Enabled {
+		t.Errorf("Enabled: got %v want %v", got.Compaction.Enabled, orig.Compaction.Enabled)
+	}
+	if got.Compaction.ActivationFloorTokens != orig.Compaction.ActivationFloorTokens {
+		t.Errorf("ActivationFloorTokens: got %d want %d", got.Compaction.ActivationFloorTokens, orig.Compaction.ActivationFloorTokens)
+	}
+	if got.Compaction.SegmentTokens != orig.Compaction.SegmentTokens {
+		t.Errorf("SegmentTokens: got %d want %d", got.Compaction.SegmentTokens, orig.Compaction.SegmentTokens)
+	}
+	if got.Compaction.VerbatimRecent != orig.Compaction.VerbatimRecent {
+		t.Errorf("VerbatimRecent: got %d want %d", got.Compaction.VerbatimRecent, orig.Compaction.VerbatimRecent)
+	}
+	if got.Compaction.HardOverridePct != orig.Compaction.HardOverridePct {
+		t.Errorf("HardOverridePct: got %v want %v", got.Compaction.HardOverridePct, orig.Compaction.HardOverridePct)
+	}
+
+	// Check the newly added fields
+	if got.Compaction.CompactedBudgetPct != orig.Compaction.CompactedBudgetPct {
+		t.Errorf("CompactedBudgetPct: got %v want %v", got.Compaction.CompactedBudgetPct, orig.Compaction.CompactedBudgetPct)
+	}
+	if got.Compaction.TieredRetentionSegments != orig.Compaction.TieredRetentionSegments {
+		t.Errorf("TieredRetentionSegments: got %d want %d", got.Compaction.TieredRetentionSegments, orig.Compaction.TieredRetentionSegments)
+	}
+	if got.Compaction.SummarizerModel != orig.Compaction.SummarizerModel {
+		t.Errorf("SummarizerModel: got %q want %q", got.Compaction.SummarizerModel, orig.Compaction.SummarizerModel)
+	}
+
+	// Check other fields are still working
+	if got.Compaction.ElideToolResults != orig.Compaction.ElideToolResults {
+		t.Errorf("ElideToolResults: got %v want %v", got.Compaction.ElideToolResults, orig.Compaction.ElideToolResults)
+	}
+	if got.Compaction.LossyToolElision != orig.Compaction.LossyToolElision {
+		t.Errorf("LossyToolElision: got %v want %v", got.Compaction.LossyToolElision, orig.Compaction.LossyToolElision)
+	}
+}

@@ -101,7 +101,7 @@ func humanizeArgs(tool, argsJSON, root, home string) string {
 	}
 
 	switch tool {
-	case "Bash":
+	case "Bash", "RunCommand", "run_command":
 		return shellJoin(toStrings(m["cmd"]))
 	case "Read", "Write", "Edit", "LS", "stat_file", "rm_file":
 		return relPath(str("path"), root, home)

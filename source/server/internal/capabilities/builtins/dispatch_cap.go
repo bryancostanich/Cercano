@@ -25,7 +25,7 @@ func (dispatchCap) Surfaces() capabilities.Surface {
 	return capabilities.SurfaceAgent | capabilities.SurfaceMCP
 }
 func (dispatchCap) Description() string {
-	return "Run a sub-agent: hand off an open-ended task to a bounded tool-use loop over a granted set of tools (default: read-only tools). Include a concise human-facing `intent` when asking for approval if it clarifies why the delegation is needed. Returns the sub-agent's final result. Tool names passed in `tools` must be the plain registered names (e.g. \"Read\", \"Glob\") — do NOT include any host/MCP prefix like \"mcp__oc__\". Prefer scoped tools such as git_info, git_status, git_diff_stat, git_push, and github_issue_close over Bash inside delegated workflows. For a direct user request to push/publish the current branch, prefer calling git_push directly so the confirmation prompt authorizes the actual push attempt. Granting write-capable tools (Edit, Write, Bash, git_*, github_issue_close) escalates this call to a confirm prompt; one approval authorizes the sub-agent's whole toolset for the run."
+	return "Run a sub-agent: hand off an open-ended task to a bounded tool-use loop over a granted set of tools (default: read-only tools). Include a concise human-facing `intent` when asking for approval if it clarifies why the delegation is needed. Returns the sub-agent's final result. Tool names passed in `tools` must be the plain registered names (e.g. \"Read\", \"Glob\") — do NOT include any host/MCP prefix like \"mcp__oc__\". Prefer scoped tools such as git_info, git_status, git_diff_stat, git_push, and github_issue_close over RunCommand inside delegated workflows. For a direct user request to push/publish the current branch, prefer calling git_push directly so the confirmation prompt authorizes the actual push attempt. Granting write-capable tools (Edit, Write, RunCommand, git_*, github_issue_close) escalates this call to a confirm prompt; one approval authorizes the sub-agent's whole toolset for the run."
 }
 func (dispatchCap) Schema() capabilities.Schema {
 	classes := []config.Task{}
@@ -39,7 +39,7 @@ func (dispatchCap) Schema() capabilities.Schema {
 		"properties": {
 			"class": {"type":"string", "enum":` + string(keys) + `, "description":"Choose a class by work: reconnaissance for narrow read-only tracing/extraction; mechanical_development for specified edits; investigation for diagnosis; implementation for substantial coding. Dedicated Review, Research and Git land use review/research/git_land. Omission uses Default dispatch."},
  "task":            {"type": "string", "description": "Open-ended instruction for the sub-agent tool loop."},
-			"tools":           {"type": "array", "items": {"type": "string"}, "description": "Tool or capability names to grant, using the plain registered names (e.g. \"Read\", \"Glob\", \"Grep\", \"Bash\") — no host or MCP prefix. Omit to default to read-only tools."},
+			"tools":           {"type": "array", "items": {"type": "string"}, "description": "Tool or capability names to grant, using the plain registered names (e.g. \"Read\", \"Glob\", \"Grep\", \"RunCommand\") — no host or MCP prefix. Omit to default to read-only tools."},
 			"tier":            {"type": "string", "enum": ["light", "standard", "deep"], "description": "Omit to use the selected class's saved quality. Default dispatch is Premium. An optional class selects the saved task routing; omitted class uses Default dispatch. Explicit light selects Economy, standard selects Standard, and deep selects Premium. The saved dispatch destination controls placement, subject to locality policy. For routine recon/tracing/extraction select class reconnaissance and normally omit tier."},
 			"cwd":             {"type": "string", "description": "Optional absolute project working directory for the sub-agent. Use this for git/GitHub workflows so scoped tools run in the intended repository."},
 			"path":            {"type": "string", "description": "Alias for cwd."},
@@ -138,7 +138,7 @@ func (dispatchCap) Execute(ctx context.Context, call *capabilities.Call) (*capab
 	// quietly changed the sub-agent's capabilities.
 	header := ""
 	// A suspected no-op leads the header: the sub-agent reported completion but
-	// its tool record contradicts the claim (e.g. granted Edit/Bash, called
+	// its tool record contradicts the claim (e.g. granted Edit/RunCommand, called
 	// neither). Surface it first so the parent does not blindly trust res.Text.
 	if res.Suspicious {
 		reason := res.SuspicionReason
@@ -205,6 +205,11 @@ func agentGrantTiers() map[string]capabilities.Tier {
 				display = d
 			}
 			grantTiers[display] = c.Tier()
+			if legacy, ok := c.(capabilities.LegacyAgentNamer); ok {
+				for _, name := range legacy.LegacyAgentNames() {
+					grantTiers[name] = c.Tier()
+				}
+			}
 			for _, s := range syns[c.Name()] {
 				grantTiers[s] = c.Tier()
 			}

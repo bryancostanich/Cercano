@@ -277,7 +277,7 @@ func TestRenderConfirmPrompt_DispatchBashUsesShellRiskNotDestructiveLabel(t *tes
 		Args:       `{"intent":"Check branch state before pushing","tools":["git_info","git_status","Bash"]}`,
 		Permission: "X",
 	}))
-	for _, want := range []string{"DELEGATED dispatch wants to run a delegated agent", "Risk: Bash grants shell access; approve only trusted tasks."} {
+	for _, want := range []string{"DELEGATED dispatch wants to run a delegated agent", "Risk: RunCommand grants arbitrary command execution; approve only trusted tasks."} {
 		if !strings.Contains(s, want) {
 			t.Errorf("expected %q in prompt, got: %q", want, s)
 		}

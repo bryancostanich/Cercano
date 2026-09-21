@@ -117,6 +117,13 @@ func BuildAgentRegistry(reg *capabilities.Registry, aliases AliasMap, synonyms S
 	for _, c := range reg.ForSurface(capabilities.SurfaceAgent) {
 		primary := aliases.display(c.Name())
 		ar.MustRegister(AsTool(c, primary, svc))
+		if legacy, ok := c.(capabilities.LegacyAgentNamer); ok {
+			for _, name := range legacy.LegacyAgentNames() {
+				if err := ar.RegisterAlias(name, primary); err != nil {
+					panic(err)
+				}
+			}
+		}
 		for _, syn := range synonyms[c.Name()] {
 			if syn == "" || syn == primary {
 				continue

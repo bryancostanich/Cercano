@@ -96,7 +96,7 @@ func AgentAliases() map[string]string {
 		"grep":        "Grep",
 		"write_file":  "Write",
 		"edit_file":   "Edit",
-		"run_command": "Bash",
+		"run_command": "RunCommand",
 		// stat_file, git_*, rm_file keep their canonical names as display names.
 	}
 }

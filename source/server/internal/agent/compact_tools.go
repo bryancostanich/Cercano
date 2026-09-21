@@ -20,7 +20,7 @@ var compactFallbackTools = map[string]bool{
 	"stat_file": true, "inspect_image": true, "fetch": true,
 	// Focused local code changes and checks. Existing permission/profile gates
 	// still decide whether W/X tools may actually execute.
-	"Edit": true, "Write": true, "Bash": true, "rm_file": true,
+	"Edit": true, "Write": true, "RunCommand": true, "rm_file": true,
 	// Git inspection and local checkpointing used by Cercano's workflow. Push,
 	// reset, recover, land, and other branch-mutating operations stay hidden in
 	// compact fallback unless explicitly hydrated later.

@@ -222,15 +222,15 @@ func (x *Service) GetToolCallStore() conversation.Store {
 //
 // Returns the resolved name and true on success, or ("", false) on miss.
 func (x *Service) resolveGrantName(requested string) (string, bool) {
-	if _, ok := x.toolRegistry.Get(requested); ok {
-		return requested, true
+	if t, ok := x.toolRegistry.Get(requested); ok {
+		return t.Name(), true
 	}
 	if rest, ok := strings.CutPrefix(requested, "mcp__"); ok {
 		if idx := strings.Index(rest, "__"); idx >= 0 {
 			stripped := rest[idx+2:]
 			if stripped != "" {
-				if _, ok := x.toolRegistry.Get(stripped); ok {
-					return stripped, true
+				if t, ok := x.toolRegistry.Get(stripped); ok {
+					return t.Name(), true
 				}
 			}
 		}
@@ -288,6 +288,8 @@ func (x *Service) GrantedRegistry(tools []string) (*agenttools.Registry, []strin
 			)
 		}
 	}
+	// Preserve lookup-only compatibility names without advertising them.
+	reg = x.toolRegistry.Subset(registryToolNames(reg))
 	logGrantSuccess(reg, normalized)
 	return reg, registryToolNames(reg), ignored, nil
 }

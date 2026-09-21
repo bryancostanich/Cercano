@@ -4196,7 +4196,7 @@ func (m Model) confirmPromptHints(p *pendingToolCall) string {
 // gitStashCommand recognizes the argv form used by the automatic stash gate.
 // Do not infer stash operations from shell strings or incidental argument text.
 func gitStashCommand(p *pendingToolCall) string {
-	if p.Name != "Bash" {
+	if p.Name != "Bash" && p.Name != "RunCommand" && p.Name != "run_command" {
 		return ""
 	}
 	obj, ok := decodeArgObject(p.Args)
@@ -4462,8 +4462,8 @@ func confirmPromptDetails(p *pendingToolCall) []string {
 func dispatchToolRisk(tools string) string {
 	parts := strings.Split(tools, ",")
 	for _, part := range parts {
-		if strings.TrimSpace(part) == "Bash" {
-			return "Bash grants shell access; approve only trusted tasks."
+		if name := strings.TrimSpace(part); name == "Bash" || name == "RunCommand" || name == "run_command" {
+			return "RunCommand grants arbitrary command execution; approve only trusted tasks."
 		}
 	}
 	if tools != "" {

@@ -412,7 +412,7 @@ sub-agent that might fail before pushing.
 
 - Prefer scoped git/GitHub capabilities (git_info, git_status,
   github_issue_close, and git_push when a delegated workflow truly needs to
-  publish) over Bash whenever they cover the job. Use Bash only when no scoped
+  publish) over RunCommand whenever they cover the job. Use RunCommand only when no scoped
   capability exists.
 - The sub-agent must scope every command with ` + "`git -C <abs-worktree>`" + ` or scope
   every scoped tool with the absolute worktree path, then report the exact

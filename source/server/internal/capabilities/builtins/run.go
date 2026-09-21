@@ -8,19 +8,23 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sync"
 	"time"
 
 	"cercano/source/server/internal/capabilities"
 )
 
-// runCommandCap is the generic shell-out escape hatch. Stdout + stderr are
+// runCommandCap executes a program directly; shell evaluation is explicit. Stdout + stderr are
 // captured (NOT streamed) so they can be size-bounded before hitting the
 // model context. Each stream is capped at 16 KiB independently.
 type runCommandCap struct{}
 
-// RunCommand constructs the run_command capability (display name "Bash").
+// RunCommand constructs the run_command capability (display name "RunCommand").
 func RunCommand() capabilities.Capability { return runCommandCap{} }
+
+// LegacyAgentNames preserves old transcripts and dispatch grants without advertising Bash.
+func (runCommandCap) LegacyAgentNames() []string { return []string{"Bash"} }
 
 func (runCommandCap) Name() string            { return "run_command" }
 func (runCommandCap) Tier() capabilities.Tier { return capabilities.TierW }
@@ -28,7 +32,7 @@ func (runCommandCap) Surfaces() capabilities.Surface {
 	return capabilities.SurfaceAgent | capabilities.SurfaceMCP
 }
 func (runCommandCap) Description() string {
-	return "Run a command and capture its output. cmd is an argv array: the first element is the executable (name or path — paths with spaces are used as-is, never split) and the remaining elements are its arguments. There is no implicit shell: no word splitting, quoting, pipes, or operators. Example: [\"ls\", \"/some/path\"]. To run shell syntax, invoke a shell explicitly, e.g. [\"bash\", \"-lc\", \"pwd && ls ..\"]. A whole command as one string (e.g. [\"ls /some/path\"]) or a list of separate commands is NOT interpreted and will fail. Other args: {cwd?: string, timeout_seconds?: int (omit for the 60s default; -1 runs with no timeout), env?: {key: value}}. Use -1 for genuinely unbounded work (long builds, migrations); the command is still killed if the turn is cancelled."
+	return "Execute a program directly (not a Bash shell) and capture its output. Set cwd to change working directory; do not invoke cd. cmd is an argv array: the first element is the executable (name or path — paths with spaces are used as-is, never split) and the remaining elements are its arguments. There is no implicit shell: no word splitting, quoting, pipes, or operators. Example: [\"ls\", \"/some/path\"]. To run shell syntax, invoke a shell explicitly, e.g. [\"bash\", \"-lc\", \"pwd && ls ..\"]. A whole command as one string (e.g. [\"ls /some/path\"]) or a list of separate commands is NOT interpreted and will fail. Other args: {cwd?: string, timeout_seconds?: int (omit for the 60s default; -1 runs with no timeout), env?: {key: value}}. Use -1 for genuinely unbounded work (long builds, migrations); the command is still killed if the turn is cancelled."
 }
 func (runCommandCap) Schema() capabilities.Schema {
 	return capabilities.Schema(`{
@@ -37,7 +41,7 @@ func (runCommandCap) Schema() capabilities.Schema {
 		"properties": {
 			"cmd":             {"type": "array", "items": {"type": "string"}, "minItems": 1,
 			                    "description": "argv array: first element is the executable (name or path; a path with spaces is used as-is, never split), the rest are its arguments. No implicit shell — no splitting, quoting, pipes, or operators. Run a program directly: [\"ls\", \"/some/path\"]. Run shell syntax explicitly: [\"bash\", \"-lc\", \"pwd && ls ..\"]. A whole command in one string or a list of separate commands is not interpreted and will fail."},
-			"cwd":             {"type": "string"},
+			"cwd":             {"type": "string", "description": "Working directory for the command. Use this instead of invoking cd; defaults to the project working directory."},
 			"timeout_seconds": {"type": "integer", "minimum": -1, "default": 60,
 			                    "description": "Seconds before the command is killed. Omit or 0 for the 60s default. -1 disables the timeout entirely."},
 			"env":             {"type": "object", "additionalProperties": {"type": "string"}}
@@ -59,6 +63,10 @@ func (runCommandCap) Execute(ctx context.Context, call *capabilities.Call) (*cap
 	}
 	if len(a.Cmd) == 0 {
 		return nil, errors.New("run_command: cmd is required and must have at least one element")
+	}
+
+	if filepath.Base(a.Cmd[0]) == "cd" {
+		return nil, errors.New(`run_command: standalone cd cannot change the working directory of subsequent commands. No command after cd was executed. Use cwd with cmd:["go","test",...] or explicitly invoke a shell with cmd:["bash","-lc","cd /path && go test ..."]. cmd is an executable and arguments, not shell syntax`)
 	}
 
 	// Timeout semantics:

@@ -58,7 +58,7 @@ func TestAgentAliases_Entries(t *testing.T) {
 		"grep":        "Grep",
 		"write_file":  "Write",
 		"edit_file":   "Edit",
-		"run_command": "Bash",
+		"run_command": "RunCommand",
 	}
 	for k, v := range expected {
 		got, ok := aliases[k]

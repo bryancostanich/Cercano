@@ -9,13 +9,14 @@ import (
 
 // Registry holds the set of available Tools. Thread-safe.
 type Registry struct {
-	mu    sync.RWMutex
-	tools map[string]Tool
+	mu      sync.RWMutex
+	tools   map[string]Tool
+	aliases map[string]string
 }
 
 // NewRegistry returns an empty Registry.
 func NewRegistry() *Registry {
-	return &Registry{tools: map[string]Tool{}}
+	return &Registry{tools: map[string]Tool{}, aliases: map[string]string{}}
 }
 
 // Register adds a Tool. Returns an error on duplicate name so misconfig
@@ -30,7 +31,7 @@ func (r *Registry) Register(t Tool) error {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.tools[name]; ok {
+	if _, ok := r.tools[name]; ok || r.aliases[name] != "" {
 		return fmt.Errorf("agenttools: duplicate Tool name %q", name)
 	}
 	r.tools[name] = t
@@ -49,6 +50,9 @@ func (r *Registry) MustRegister(t Tool) {
 func (r *Registry) Get(name string) (Tool, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+	if primary, ok := r.aliases[name]; ok {
+		name = primary
+	}
 	t, ok := r.tools[name]
 	return t, ok
 }
@@ -71,7 +75,16 @@ func (r *Registry) All() []Tool {
 func (r *Registry) Unregister(name string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if _, ok := r.aliases[name]; ok {
+		delete(r.aliases, name)
+		return
+	}
 	delete(r.tools, name)
+	for alias, primary := range r.aliases {
+		if primary == name {
+			delete(r.aliases, alias)
+		}
+	}
 }
 
 // Subset returns a new Registry containing only the named tools that exist in
@@ -79,9 +92,19 @@ func (r *Registry) Unregister(name string) {
 // grant a least-privilege tool set to a dispatched subagent.
 func (r *Registry) Subset(names []string) *Registry {
 	out := NewRegistry()
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	for _, name := range names {
-		if t, ok := r.Get(name); ok {
+		if primary, ok := r.aliases[name]; ok {
+			name = primary
+		}
+		if t, ok := r.tools[name]; ok {
 			_ = out.Register(t)
+		}
+	}
+	for alias, primary := range r.aliases {
+		if _, ok := out.Get(primary); ok {
+			_ = out.RegisterAlias(alias, primary)
 		}
 	}
 	return out
@@ -101,4 +124,22 @@ func (r *Registry) Filter(perm Permission) []Tool {
 		}
 	}
 	return out
+}
+
+// RegisterAlias adds a lookup-only compatibility name. Catalogs advertise only
+// the primary tool; permissions and execution use the same underlying tool.
+func (r *Registry) RegisterAlias(alias, primary string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if alias == "" {
+		return errors.New("agenttools: empty alias")
+	}
+	if _, ok := r.tools[primary]; !ok {
+		return fmt.Errorf("agenttools: missing primary %q", primary)
+	}
+	if _, ok := r.tools[alias]; ok || r.aliases[alias] != "" {
+		return fmt.Errorf("agenttools: duplicate alias %q", alias)
+	}
+	r.aliases[alias] = primary
+	return nil
 }

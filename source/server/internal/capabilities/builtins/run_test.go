@@ -417,3 +417,34 @@ func TestRunCommandCapability_OrdinaryFailuresNotMislabeled(t *testing.T) {
 		t.Errorf("original permission error not retained: %v", err)
 	}
 }
+
+func TestRunCommandRejectsStandaloneCd(t *testing.T) {
+	for _, exe := range []string{"cd", "/usr/bin/cd"} {
+		args, _ := json.Marshal(map[string]any{"cmd": []string{exe, t.TempDir(), "&&", "echo", "not-run"}})
+		_, err := RunCommand().Execute(context.Background(), &capabilities.Call{Args: args})
+		if err == nil || !strings.Contains(err.Error(), "cwd") || !strings.Contains(err.Error(), "bash") {
+			t.Fatalf("%s: expected actionable cd error, got %v", exe, err)
+		}
+	}
+}
+
+func TestRunCommandExplicitShellAndLiteralOperators(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix shell")
+	}
+	dir := t.TempDir()
+	for _, cmd := range [][]string{{"sh", "-c", `cd "$1" && printf SHELL_EXECUTED`, "sh", dir}, {"printf", "%s", "&&"}} {
+		args, _ := json.Marshal(map[string]any{"cmd": cmd, "cwd": dir})
+		res, err := RunCommand().Execute(context.Background(), &capabilities.Call{Args: args})
+		if err != nil || res.Detail != "exit 0" {
+			t.Fatalf("%v: %v %v", cmd, res, err)
+		}
+		want := "SHELL_EXECUTED"
+		if cmd[0] == "printf" {
+			want = "&&"
+		}
+		if !strings.Contains(res.Text, "stdout:\n"+want) {
+			t.Fatalf("missing actual output %q: %s", want, res.Text)
+		}
+	}
+}

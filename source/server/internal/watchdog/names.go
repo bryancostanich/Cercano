@@ -11,7 +11,7 @@ import "sync"
 // waited for "run_command" while the registry only ever emitted "Bash".
 var (
 	aliasMu          sync.RWMutex
-	aliasToCanonical = map[string]string{}
+	aliasToCanonical = map[string]string{"Bash": "run_command"}
 )
 
 // SetDisplayAliases records the canonical→display alias table (as exported by

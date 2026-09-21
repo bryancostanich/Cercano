@@ -9,6 +9,7 @@ package dispatchtrace
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -79,7 +80,8 @@ type record struct {
 // dispatch: diagnostics must never break work.
 func Begin(dispatchID, conversationID string) *Trace {
 	dir := outputDir()
-	if !selected(dir, conversationID) {
+	selected, multi := selection(dir, conversationID)
+	if !selected {
 		return nil
 	}
 	if dir == "" {
@@ -99,11 +101,11 @@ func Begin(dispatchID, conversationID string) *Trace {
 	}
 	// Persistent, exclusive claim bounds collection to ONE dispatch, even across
 	// worker processes or restarts. A fresh output directory explicitly rearms.
-	claim, err := os.OpenFile(filepath.Join(dir, ".claimed"), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
+	// For multi-parent lists, use per-parent claims; for legacy, use global claim.
+	// Environment mode uses a global claim file.
+	if err := claimDispatch(dir, conversationID, multi); err != nil {
 		return nil
 	}
-	_ = claim.Close()
 	path := filepath.Join(dir, fmt.Sprintf("%s-%d.jsonl", sanitizeID(dispatchID), time.Now().UnixNano()))
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
@@ -128,29 +130,65 @@ func Begin(dispatchID, conversationID string) *Trace {
 // selected supports explicit environment opt-in or a private live arming file.
 // The latter is checked per dispatch so a warm agent need not restart merely
 // to enable diagnostics. The persistent claim still limits both paths to one.
-func selected(dir, parent string) bool {
+func selection(dir, parent string) (selected, multi bool) {
 	if parent == "" || dir == "" {
-		return false
+		return false, false
 	}
 	if Enabled() {
-		return os.Getenv(ParentEnv) == parent
+		return os.Getenv(ParentEnv) == parent, false
 	}
 	info, err := os.Lstat(dir)
 	if err != nil || !info.IsDir() || info.Mode().Perm()&0o077 != 0 {
-		return false
+		return false, false
 	}
 	path := filepath.Join(dir, "armed")
 	info, err = os.Lstat(path)
-	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 || info.Size() > 256 {
-		return false
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 || info.Size() > 4096 {
+		return false, false
 	}
 	f, err := os.Open(path)
 	if err != nil {
-		return false
+		return false, false
 	}
 	defer f.Close()
-	data, err := io.ReadAll(io.LimitReader(f, 257))
-	return err == nil && len(data) <= 256 && strings.TrimSpace(string(data)) == parent
+	data, err := io.ReadAll(io.LimitReader(f, 4097))
+	if err != nil || len(data) > 4096 {
+		return false, false
+	}
+	parents := make(map[string]bool)
+	for _, line := range strings.Split(string(data), "\n") {
+		if id := strings.TrimSpace(line); id != "" {
+			parents[id] = true
+		}
+	}
+	return parents[parent], len(parents) > 1
+}
+
+// claimDispatch keeps one independent claim per parent. Single-parent callers
+// also keep the historical global claim. Any old global claim conservatively
+// blocks capture: its parent is unknown and must not be silently rearmed.
+// Read the selector once per Begin so selection and claim mode cannot disagree.
+func claimDispatch(dir, parent string, multi bool) error {
+	global := filepath.Join(dir, ".claimed")
+	if _, err := os.Lstat(global); !os.IsNotExist(err) {
+		return os.ErrExist
+	}
+	key := fmt.Sprintf(".claimed-%x", sha256.Sum256([]byte(parent)))
+	claim, err := os.OpenFile(filepath.Join(dir, key), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return err
+	}
+	if err = claim.Close(); err != nil {
+		return err
+	}
+	if !multi {
+		claim, err = os.OpenFile(global, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+		if err != nil {
+			return err
+		}
+		return claim.Close()
+	}
+	return nil
 }
 
 // sanitizeID keeps the dispatch id out of path traversal territory (sub-agent

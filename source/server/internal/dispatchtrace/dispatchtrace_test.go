@@ -215,7 +215,7 @@ func TestUnsafeArmFileIsIgnored(t *testing.T) {
 			} else {
 				body := "parent"
 				if kind == "oversize" {
-					body += strings.Repeat(" ", 257)
+					body += strings.Repeat(" ", 4097)
 				}
 				if err := os.WriteFile(path, []byte(body), 0600); err != nil {
 					t.Fatal(err)
@@ -232,4 +232,170 @@ func TestUnsafeArmFileIsIgnored(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestMultiParentArmingFile(t *testing.T) {
+	dir := setup(t)
+	t.Setenv(EnableEnv, "")
+	if err := os.Mkdir(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+
+	// Test multi-parent arming file with newline-separated IDs
+	parents := "537127edaea6c9a6\na370f5c5fe5d8472\n"
+	if err := os.WriteFile(filepath.Join(dir, "armed"), []byte(parents), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Test that both parents can be captured independently
+	tr1 := Begin("dispatch1", "537127edaea6c9a6")
+	if tr1 == nil {
+		t.Fatal("first parent not captured")
+	}
+	tr1.Close()
+
+	tr2 := Begin("dispatch2", "a370f5c5fe5d8472")
+	if tr2 == nil {
+		t.Fatal("second parent not captured")
+	}
+	tr2.Close()
+
+	// Test that each parent can only be captured once
+	if tr := Begin("dispatch3", "537127edaea6c9a6"); tr != nil {
+		tr.Close()
+		t.Fatal("first parent captured twice")
+	}
+
+	if tr := Begin("dispatch4", "a370f5c5fe5d8472"); tr != nil {
+		tr.Close()
+		t.Fatal("second parent captured twice")
+	}
+
+	// Test that unrelated parent is not captured
+	if tr := Begin("dispatch5", "unrelated"); tr != nil {
+		tr.Close()
+		t.Fatal("unrelated parent captured")
+	}
+}
+
+func TestMultiParentConcurrentCapture(t *testing.T) {
+	dir := setup(t)
+	t.Setenv(EnableEnv, "")
+	if err := os.Mkdir(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+
+	// Test multi-parent arming file with newline-separated IDs
+	parents := "537127edaea6c9a6\na370f5c5fe5d8472\n"
+	if err := os.WriteFile(filepath.Join(dir, "armed"), []byte(parents), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var count1, count2 int
+
+	// Concurrent attempts to capture both parents
+	for i := 0; i < 10; i++ {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			tr := Begin("dispatch1", "537127edaea6c9a6")
+			if tr != nil {
+				mu.Lock()
+				count1++
+				mu.Unlock()
+				tr.Close()
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			tr := Begin("dispatch2", "a370f5c5fe5d8472")
+			if tr != nil {
+				mu.Lock()
+				count2++
+				mu.Unlock()
+				tr.Close()
+			}
+		}()
+	}
+	wg.Wait()
+
+	if count1 != 1 {
+		t.Fatalf("first parent captured %d times, want exactly one", count1)
+	}
+	if count2 != 1 {
+		t.Fatalf("second parent captured %d times, want exactly one", count2)
+	}
+}
+
+func TestMultiParentWithLegacyGlobalClaim(t *testing.T) {
+	dir := setup(t)
+	t.Setenv(EnableEnv, "")
+	if err := os.Mkdir(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a legacy armed file (single parent)
+	if err := os.WriteFile(filepath.Join(dir, "armed"), []byte("legacy-parent"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a global claim file (simulating legacy usage)
+	if err := os.WriteFile(filepath.Join(dir, ".claimed"), []byte("claimed"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Test that legacy parent cannot be captured due to global claim
+	if tr := Begin("dispatch", "legacy-parent"); tr != nil {
+		tr.Close()
+		t.Fatal("legacy parent captured despite global claim")
+	}
+
+	// Test that multi-parent mode still works when armed file is updated
+	parents := "537127edaea6c9a6\na370f5c5fe5d8472\n"
+	if err := os.WriteFile(filepath.Join(dir, "armed"), []byte(parents), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// A legacy claim has no parent identity: conservatively refuse rather than
+	// silently rearming a previously captured parent when the list changes.
+	for _, parent := range []string{"537127edaea6c9a6", "a370f5c5fe5d8472"} {
+		if tr := Begin("child", parent); tr != nil {
+			tr.Close()
+			t.Fatal("legacy claim bypassed by list change")
+		}
+	}
+
+}
+
+func TestMultiParentFileBounds(t *testing.T) {
+	dir := setup(t)
+	t.Setenv(EnableEnv, "")
+	if err := os.Mkdir(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+
+	// Test exactly 4KiB boundary
+	largeBody := strings.Repeat("parent\n", 1024) // 1024 * 7 bytes = 7168 bytes, too large
+	if err := os.WriteFile(filepath.Join(dir, "armed"), []byte(largeBody), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if tr := Begin("dispatch", "parent"); tr != nil {
+		tr.Close()
+		t.Fatal("oversize multi-parent file accepted")
+	}
+
+	// Test exactly 4KiB - 1 boundary
+	smallBody := strings.Repeat("parent\n", 585) // 585 * 7 bytes = 4095 bytes
+	if err := os.WriteFile(filepath.Join(dir, "armed"), []byte(smallBody), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	tr := Begin("dispatch", "parent")
+	if tr == nil {
+		t.Fatal("valid multi-parent file rejected")
+	}
+	tr.Close()
 }

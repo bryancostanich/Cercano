@@ -4,7 +4,7 @@ Use this to investigate a capable model that repeatedly explores instead of impl
 
 ## Privacy and scope
 
-OFF by default. Captures only the **first agentic dispatch from the selected parent conversation**, with a persistent exclusive `.claimed` file preventing further captures across workers or restarts. Nested dispatches and unrelated parents do not inherit capture permission. A trace already in progress continues to its end if the arming file is removed.
+OFF by default. Captures only the **first agentic dispatch from each selected parent conversation**. The private `armed` file accepts newline-separated exact IDs (maximum 4096 bytes; blank lines and duplicates ignored). Each parent has an exclusive `.claimed-<SHA256-of-parent-ID>` file, so concurrent conversations cannot consume each other's capture. Single-ID and environment selection also create the legacy `.claimed` global claim. Any existing global claim blocks capture conservatively, even after editing the list, because old claims do not identify their parent. Nested dispatches and unrelated parents do not inherit capture permission. A trace already in progress continues to its end if the arming file is removed.
 
 Trace content includes source, prompts and tool output verbatim and **can contain secrets embedded in that content**. This is not a secret scrubber. Do not upload or commit traces. No HTTP authentication headers, client configuration objects or raw transport-error strings are captured. Images, image URLs and opaque provider reasoning blobs are omitted. Ordinary diagnostic events introduced here are metadata-only.
 
@@ -22,15 +22,15 @@ trace_dir="$HOME/.cercano/trace/dispatch"
 mkdir -p "$trace_dir"
 # If this existing directory is not private, choose/fix its permissions
 # deliberately before continuing; the collector will otherwise refuse it.
-printf '%s\n' 'PARENT_CONVERSATION_ID' > "$trace_dir/armed"
+printf '%s\n' 'FIRST_PARENT_CONVERSATION_ID' 'SECOND_PARENT_CONVERSATION_ID' > "$trace_dir/armed"
 chmod 600 "$trace_dir/armed"
 ```
 
 Then start the desired agentic dispatch from that conversation. Other conversations cannot claim it. If several dispatches from the selected parent start concurrently, the first to claim wins; avoid doing that during the reproduction.
 
-A metadata log identifies `capture opened: dispatch=...`. The trace is `<dispatch-id>-<timestamp>.jsonl`. A `.claimed` file means the one-shot capture has been consumed, even if the dispatch subsequently failed. Removing `armed` disables future file-based arming; it does not stop an ongoing capture. Never remove `.claimed` while a captured run is active.
+A metadata log identifies `capture opened: dispatch=...`. The trace is `<dispatch-id>-<timestamp>.jsonl`. A parent-specific `.claimed-<hash>` file (or legacy global `.claimed`) means the one-shot capture has been consumed, even if the dispatch subsequently failed. Removing `armed` disables future file-based arming; it does not stop an ongoing capture. Never remove claim files or change selection modes while a captured run is active.
 
-For another deliberate capture, remove `armed`, wait for the captured run to finish, preserve/delete its trace as appropriate, remove **only** `.claimed`, and then re-create `armed`. Do not clear the directory indiscriminately.
+For another deliberate capture, remove `armed`, wait for the captured run to finish, preserve/delete its trace as appropriate, remove **only** the intended parent's `.claimed-<hash>` and, if present, the global `.claimed`, and then re-create `armed`. Do not clear the directory indiscriminately.
 
 Environment opt-in is also supported for an agent launched with:
 
@@ -82,3 +82,5 @@ go test -race ./internal/dispatchtrace ./internal/hostsvc/tools ./internal/loopc
 ```
 
 Coverage includes private modes, unsafe-directory/arming rejection, concurrent one-shot claims, disabled mode, context isolation, post-close safety, payload omissions, exact scripted-provider input fidelity, same-size compaction changes, production summarizer capture and unrelated/repeated dispatch isolation.
+
+Multi-parent regression coverage verifies independent concurrent one-shot claims, exact parent matching, bounded list parsing, and legacy-claim preservation. Multi-parent support requires deploying this version once; updating the arming file afterward needs no restart.

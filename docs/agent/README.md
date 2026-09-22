@@ -1,10 +1,15 @@
 # Cercano Agent
 
-> **Hello! You've found the secret agent docs!** If you're here it's because
-> you're an intrepid beta tester, or you found them on your own (also
-> intrepid). :) These pages walk you through setting up and running Cercano as
-> a standalone AI coding agent — the thing that talks to models, calls tools,
-> and edits your code. Pour a coffee; it's a short trip.
+Cercano is a standalone AI coding agent with a terminal interface, built-in
+delegation, configurable inference routes, and persistent conversations.
+
+Start with the **[feature guide](features/README.md)** for what makes Cercano
+different and why each capability matters. This page covers setup, commands,
+and the agent architecture.
+
+Looking for the external co-processor integration? It is
+**[deprecated for now](../co-processor/README.md)**; its historical instructions
+are preserved separately.
 
 The standalone Cercano agent is a daily-driver AI coding assistant with native tool calling, a terminal UI, and a headless mode for scripts and CI. It connects to local models via Ollama and to Anthropic Claude via Meridian (Claude Max OAuth) or a direct API key.
 

@@ -1,516 +1,71 @@
 # Cercano
 
-Cercano is a local-first AI development tool that runs open-source models on your own hardware — fast, private, and at zero cost. Currently powered by [Ollama](https://ollama.com/), with pluggable backend support planned.
+**An AI coding agent designed to use context and compute deliberately.**
 
-Cercano works in two ways:
+Cercano brings frontier reasoning, built-in delegation, and open-weight models
+into one terminal workflow. Keep demanding reasoning in the main conversation,
+hand bounded work to appropriately priced subagents, and control where each kind
+of task runs—on your hardware or with a hosted provider.
 
-**1. Local, in-agent Tool** — Plug Cercano into cloud-based agents like Claude Code, Cursor, or Copilot via [MCP](https://modelcontextprotocol.io/). Instead of sending everything to the cloud, Cercano supercharges your frontier coding experience by providing a set of skills running locally, such as _research_, _summarization_, _extraction_, _classification_, and _code explanation_ that can not only massively reduce your cloud context window and usage (and costs), but actually provide better context to the cloud model.
+## What makes Cercano different
 
-**2. Standalone Agent** — Use Cercano directly as your AI coding assistant. It runs an agentic tool-calling loop with a terminal CLI, a headless one-shot mode (`cercano run "prompt"`) for scripts and CI, and integrates with VS Code and other IDEs via gRPC. Cloud routes through Anthropic (direct API or Claude Max via [Meridian](https://github.com/rynfar/meridian)); local routes through Ollama with any tool-capable model. See [docs/agent](docs/agent/README.md) for setup, the slash-command reference, and the architecture.
+| Feature | What it is | Why it matters |
+|---|---|---|
+| **[Advanced Context Management](docs/agent/features/context-management.md)** | Rolling background compaction and layered summaries | Keep long conversations manageable without pausing for a summarizer; reduce the history carried into subsequent requests. |
+| **[Built-In Delegation](docs/agent/features/built-in-delegation.md)** | Subagents with their own context and scoped tools | Keep routine exploration and mechanical work out of the main context and off expensive models when a cheaper route is sufficient. |
+| **[Advanced Metrics](docs/agent/features/advanced-metrics.md)** | Token usage broken down by provider, model, and source | See where tokens go and make informed routing and budget decisions. |
+| **[Advanced Routing Engine](docs/agent/features/advanced-routing.md)** | Independent task, quality, and destination settings | Choose the right capability and price point for each kind of work instead of using one model for everything. |
+| **[Integrated Local Runtime](docs/agent/features/integrated-local-runtime.md)** | Managed llama-server runtime for open-weight models | Use your hardware without separately assembling the inference stack. |
+| **[OpenAI-Compatible Providers](docs/agent/features/openai-providers.md)** | Connections to compatible hosted and self-hosted endpoints | Change providers and models without changing your coding workflow. |
+| **[Advanced Terminal UI](docs/agent/features/advanced-terminal-ui.md)** | Rich formatting, responsive layouts, themes, and visible agent activity | Follow complex work without deciphering raw logs. |
+| **[Automatic Session Retention](docs/agent/features/automatic-session-retention.md)** | Saved conversations, automatic titles, history, search, and resume | Return to prior work without reconstructing the conversation. |
+| **[Client/Server Architecture](docs/agent/features/client-server-architecture.md)** | An independent agent process serving multiple client sessions | Keep session state separate and use the same agent through interactive and headless clients. |
 
-## Key Features
+## Get started
 
-### Core
-- **Local-First Architecture** — Run powerful open-source models (qwen3-coder, GLM-4.7-Flash, etc.) locally via [Ollama](https://ollama.com/).
-- **Cloud Fallback** — Seamless integration with Google Gemini and Anthropic Claude for tasks that exceed local model capabilities.
-- **Smart Router** — Embedding-based classifier routes requests to local or cloud models. Ultra-fast, no LLM call needed for routing.
-- **Agentic Self-Correction** — Iterative loop that generates code, validates it (e.g., via compilation), and self-corrects automatically.
-- **Remote Inference** — Point Cercano at a remote Ollama instance (e.g., a Mac Studio on your LAN) for access to larger models. Runtime-configurable with automatic fallback if the remote goes down.
-- **Pluggable Engine Architecture** — Inference backends are abstracted behind `InferenceEngine` and `EmbeddingService` interfaces. Ollama is the built-in engine; adding new backends (ONNX, vLLM, etc.) requires only implementing the interface and registering it — no changes to the core agent, router, or MCP tools.
+Standalone release publishing is in progress. For now, follow the
+[source build instructions](docs/agent/self-dev.md#layout--build) and the
+[agent setup guide](docs/agent/README.md). The server and terminal client are
+separate Go modules; the development launcher handles building both.
 
-### Local Co-Processor Tools (via MCP)
-When used as a co-processor inside cloud agents, Cercano provides specialized tools that keep work local:
-
-| Tool | What it does | Why local? |
-|------|-------------|------------|
-| `cercano_summarize` | Condense files, logs, or text into concise summaries | Keep large content out of cloud context windows |
-| `cercano_extract` | Pull specific info (errors, signatures, config) from large text | Filter noise locally, send only what matters |
-| `cercano_classify` | Triage errors, logs, or code with category + confidence | Quick local triage without cloud round-trip |
-| `cercano_explain` | Explain what code does, its components and data flow | Understand code locally before deciding what to send to cloud |
-| `cercano_local` | General-purpose prompt execution against local models | Offload any simple task to local inference |
-| `cercano_fetch` | Fetch a URL and extract readable text (HTML stripped to plain text) | Read web pages without stuffing raw HTML into cloud context |
-| `cercano_research` | Research a question via DuckDuckGo search + local model analysis | Get distilled, sourced answers without browsing the web yourself |
-| `cercano_document` | Generate doc comments for exported Go symbols and write them to the file | Entire read-think-write cycle stays local — host never sees file contents |
-| `cercano_deep_research` | Multi-source research with ranked findings, reference chasing, and gap analysis | Dozens of page fetches and analyses stay local — host gets only the compiled report |
-
-### Project Context
-Run `cercano_init` once per project to make all Cercano tools project-aware. It scans the repo, feeds key files through a local model, and writes `.cercano/context.md` — a concise reference document that gets automatically prepended to all tool calls. The host AI can optionally provide domain knowledge it already has.
-
-If you use a Cercano tool without initializing first, it will suggest running init.
-
-### Usage Telemetry & Token Savings
-Cercano tracks how much work stays local and how many cloud tokens you save:
-
-- **`cercano_stats`** — MCP tool that returns usage summary, token savings, and breakdowns by tool, model, and day.
-- **`cercano_submit_usage`** — Opt-in tool for host agents to submit their cloud token usage data, enabling accurate local-vs-cloud comparison. (Usually handled automatically by the PostToolUse hook.)
-- **`cercano stats`** — CLI command for a quick terminal summary of cumulative usage.
-- **Cloud token capture** — A PostToolUse hook parses Claude Code's transcript to automatically record cloud token usage alongside local metrics. Run `cercano setup` to configure the hook.
-
-Data is stored locally in `~/.config/cercano/telemetry.db` (SQLite). No prompt content, file paths, or credentials are ever recorded.
-
-### Integration
-- **MCP Server** — Expose all tools to any [MCP](https://modelcontextprotocol.io/)-compatible agent (Claude Code, Cursor, Copilot, etc.).
-- **IDE Integration** — VS Code extension with gRPC-based architecture. Zed extension in progress.
-- **Model Discovery** — Query available models on any Ollama instance via `cercano_models`.
-- **Runtime Configuration** — Switch models, Ollama endpoints, and cloud providers on the fly via `cercano_config`.
-
-## Architecture
-
-Cercano can run as a standalone gRPC server (for IDE clients) or embedded inside an MCP host (for cloud agents like Claude Code). Both modes share the same core engine.
-
-```
-  Standalone Mode                    Co-Processor Mode
-  (IDE clients)                      (Cloud agents)
-
-  ┌───────────┐                      ┌──────────────┐
-  │  VS Code  │                      │  Claude Code │
-  │  Zed, etc │                      │  Cursor, etc │
-  └─────┬─────┘                      └──────┬───────┘
-        │ gRPC                              │ MCP (stdio)
-        │                                   │
-┌───────┴───────────────────┐  ┌────────────┴────────────────┐
-│    CERCANO SERVER         │  │    CERCANO (embedded)       │
-│                           │  │                             │
-│  ┌──────────────────────┐ │  │  ┌───────────────────────┐  │
-│  │       Agent          │ │  │  │  MCP Tool Handlers    │  │
-│  │  ┌───────┐ ┌───────┐ │ │  │  │  summarize, extract,  │  │
-│  │  │Router │ │ Loop  │ │ │  │  │  classify, explain    │  │
-│  │  └───────┘ └───────┘ │ │  │  └───────────┬───────────┘  │
-│  └──────────┬───────────┘ │  │              │              │
-│             │             │  │        ┌─────┴──────┐       │
-│             │             │  │        │   Agent    │       │
-└─────────────┼─────────────┘  │        └─────┬──────┘       │
-              │                └──────────────┼──────────────┘
-              │                               │
-     ┌────────┴────────┐             ┌────────┴────────┐
-     │  Engine Layer   │             │  Engine Layer   │
-     │  (Ollama, etc.) │             │  (Ollama, etc.) │
-     └─────────────────┘             └─────────────────┘
-```
-
-- **Core Agent (Go)** — Handles model routing, agentic loops, conversation history, and provides a gRPC interface.
-- **Smart Router** — Uses semantic classification (via embeddings) to route requests. Ultra-fast, no LLM call needed.
-- **Coordinator (LoopAgent)** — Google ADK-backed iterative loop that generates code, validates it, and self-corrects with cloud escalation.
-- **Engine Layer** — Pluggable inference backends behind `InferenceEngine` and `EmbeddingService` interfaces. Ollama is the default; new engines register via `EngineRegistry`.
-- **MCP Tool Handlers** — Specialized prompt templates for summarize, extract, classify, explain, fetch, and research. Each tool wraps the core agent with task-specific prompting.
-- **Conversation Store** — Server-side multi-turn history so the LLM can resolve references across requests.
-
-## Project Structure
-
-- `source/server/`: The core Go-based AI agent and gRPC server (the `cercano` binary). Exports `pkg/` (proto, agentclient, config, update) for clients.
-- `source/clients/`: Client front-ends.
-    - `cli/`: Standalone terminal client — its own Go module, builds the `cercano-cli` binary (thin gRPC client; auto-launches the singleton `cercano agent`).
-    - `vscode/`: VS Code extension (TypeScript).
-    - `zed/`: Zed extension (Rust).
-- `source/proto/`: Protocol Buffer definitions for gRPC.
-- `test/`: Integration and sandbox tests.
-- `docs/`: Product definitions, feature specs, plans, and project documentation.
-
-## Tech Stack
-
-- **Backend** - Go (Golang)
-- **Local LLM Runtime** - Ollama (qwen3-coder, nomic-embed-text)
-- **Cloud LLMs** - Google Gemini, Anthropic Claude
-- **Communication** - gRPC
-- **Frontend/Clients** - TypeScript (VS Code), Rust (Zed)
-
-## Getting Started
-
-### Install via Homebrew (macOS)
+Once the launcher is installed:
 
 ```bash
-brew tap bryancostanich/cercano
-brew install cercano
-cercano setup    # prepares Ollama plus the managed llama-server runtime
+cercano
 ```
 
-### Install from Source
+Open `/config` to configure models, routing, and permissions. Then try a bounded,
+read-only task in a repository you know:
 
-Requires [Go](https://go.dev/dl/) 1.21+.
+> Find where this project loads its configuration. Delegate the code search to
+> a read-only subagent, then explain the result with file references. Do not edit files.
 
-**macOS / Linux:**
-```bash
-git clone https://github.com/bryancostanich/Cercano.git
-cd Cercano/source/server
-make build
-bin/cercano setup    # prepares Ollama plus the managed llama-server runtime
-bin/cercano reset --setup  # confirmed developer reset; preserves history and model files
-bin/cercano          # starts the gRPC server
-```
-
-For fresh-setup testing with existing sessions left open, see [setup reset](docs/features/setup-reset.md).
-
-
-**Windows (PowerShell):**
-
-`make` isn't available by default on Windows, so build with `go build` directly:
-```powershell
-git clone https://github.com/bryancostanich/Cercano.git
-cd Cercano\source\server
-go build -o bin/cercano.exe ./cmd/cercano
-bin\cercano.exe setup    # prepares Ollama plus the managed llama-server runtime
-bin\cercano.exe          # starts the gRPC server
-```
-
-If you'd rather use `make` (e.g. for `make dev`, `make test`, `make clean`), install [Git for Windows](https://git-scm.com/download/win) and run these commands from **Git Bash** instead of PowerShell — the Makefile relies on Unix shell utilities (`rm`, `pkill`, `sleep`) that only Git Bash provides on Windows. Alternatively, install `make` itself via `choco install make` or `scoop install make`, but you'll still need Git Bash (or WSL) for targets like `dev` and `clean` to work correctly.
-
-`cercano setup` handles the local runtime prerequisites: if no AI engine backend is detected, it offers to install [Ollama](https://ollama.com/) automatically (via Homebrew on macOS or the official installer on Linux), starts it, pulls the selected chat model, and ensures the configured embedding model (`nomic-embed-text` by default) is downloaded. It also prepares the optional managed `llama-server` runtime from [llama.cpp](https://github.com/ggml-org/llama.cpp), creates `~/.cercano/models` for GGUF files, and enables the runtime in config when `llama-server` is available. Ollama remains the default local inference path for now. Use `--install-engine` to skip interactive prompts for scripted/CI use.
-
-To explicitly route local generation through the managed GGUF runtime, set `local_runtime: llama_server` in config or run `/config local-runtime llama_server` after setup.
-
-### Use with Claude Code
+For scripts and automation:
 
 ```bash
-claude mcp add --transport stdio cercano -- cercano --mcp
+cercano run "Explain this repository's top-level structure without editing files"
 ```
 
-Or add to your project's `.mcp.json`. In `--mcp` mode, Cercano starts an embedded gRPC server — no separate server needed.
-
-### Use with VS Code
-
-1. Install the VS Code extension dependencies:
-   ```bash
-   cd source/clients/vscode && npm install
-   ```
-2. Open `source/clients/vscode` in VS Code and press **F5** to launch.
-3. In the Extension Development Host, open the Chat panel and type `@cercano` followed by your question.
-
-### Developer Workflow
-
-```bash
-cd source/server
-make dev    # build + restart in one command
-```
-
-System config at `~/.config/cercano/config.yaml` persists across restarts (Ollama URL, model, port, etc.).
-
-### Cloud Provider Setup (Optional)
-
-Cercano is local-first — cloud providers are only used for escalation when local models can't handle a task.
-
-1. In the Chat panel, type `@cercano /config` to open the configuration menu.
-2. Set your API key (Google Gemini or Anthropic Claude).
-3. Select your preferred cloud provider for escalation.
-
-### Configuration
-
-For the standalone agent's Primary/Secondary/Local destinations, independent optional backups, quality/image model choices, and Cloud settings Save/Discard behavior, see [Cloud profile routing](docs/cloud-routing.md).
-
-The following settings are available under `cercano.*` in VS Code Settings:
-
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `cercano.localModel` | `qwen3-coder` | Ollama model for local inference (changeable at runtime via `@cercano /config`) |
-| `cercano.server.autoLaunch` | `true` | Automatically start the server on activation |
-| `cercano.server.binaryPath` | *(empty)* | Override path to the server binary |
-| `cercano.server.port` | `50052` | gRPC server port |
-| `cercano.ollama.url` | `http://localhost:11434` | Ollama server URL |
-| `cercano.provider` | `local` | Cloud provider for escalation (`google` or `anthropic`) |
-| `cercano.model` | *(empty)* | Override cloud model name |
-
-## MCP Server
-
-Cercano can be used as an MCP (Model Context Protocol) server, allowing cloud-based agents like Claude Code and Cursor to delegate work to local models — faster, private, and at zero cost.
-
-### Setup
-
-1. Build Cercano:
-   ```bash
-   cd source/server
-   make build
-   ```
-   On Windows, use `go build -o bin/cercano.exe ./cmd/cercano` instead (see [Install from Source](#install-from-source) above).
-
-2. Add to Claude Code (choose one):
-
-   **Via CLI:**
-   ```bash
-   claude mcp add --transport stdio cercano -- /path/to/Cercano/source/server/bin/cercano --mcp
-   ```
-
-   **Via `.mcp.json` (project scope):**
-   ```json
-   {
-     "mcpServers": {
-       "cercano": {
-         "type": "stdio",
-         "command": "/path/to/Cercano/source/server/bin/cercano",
-         "args": ["--mcp"]
-       }
-     }
-   }
-   ```
-
-   In `--mcp` mode, Cercano starts an embedded gRPC server automatically — no separate server process needed.
-
-### MCP Tools
-
-See the [tool table in Key Features](#local-co-processor-tools-via-mcp) above for the full list. Additional utility tools:
-
-| Tool | Description |
-|------|-------------|
-| `cercano_models` | List models available on the active Ollama instance. Useful for discovering models on a remote machine. |
-| `cercano_config` | Switch models, Ollama endpoints, or cloud providers at runtime without restarting. |
-
-### Usage Examples
-
-Once the MCP server is connected, your agent can call Cercano tools directly:
-
-**Chat query (offload to local model):**
-```
-cercano_local(prompt: "What is a goroutine in Go? Answer in one sentence.")
-→ "A goroutine is a lightweight thread of execution managed by the Go runtime."
-  [Model: qwen3-coder, Confidence: 1.00, Escalated: false]
-```
-
-**Switch local model at runtime:**
-```
-cercano_config(action: "set", local_model: "GLM-4.7-Flash")
-→ Configuration update success: updated: [local_model=GLM-4.7-Flash]
-```
-
-**Agentic code generation (with validation loop):**
-```
-cercano_local(
-  prompt: "Add a health check endpoint that returns JSON",
-  file_path: "internal/server/health.go",
-  work_dir: "/path/to/project/source/server"
-)
-→ Generated code with automatic build validation and self-correction.
-```
-
-**Point at a remote Ollama instance:**
-```
-cercano_config(action: "set", ollama_url: "http://mac-studio.local:11434")
-→ Configuration update success: updated: [ollama_url=http://mac-studio.local:11434]
-```
-
-**Discover available models:**
-```
-cercano_models()
-→ Available models (2):
-  - qwen3-coder:latest (4.7 GB)
-  - llama3:70b (39.1 GB)
-```
-
-**Summarize a file locally (keep large content out of cloud context):**
-```
-cercano_summarize(file_path: "internal/agent/router.go", max_length: "brief")
-→ "This Go package implements a smart routing system that selects between local
-   and cloud AI models based on semantic similarity of user requests."
-```
-
-**Extract specific info from large text:**
-```
-cercano_extract(text: "<500 lines of logs>", query: "error and warning messages")
-→ WARN  Remote endpoint health check failed (attempt 1/3)
-  ERROR Remote endpoint unreachable after 3 attempts, falling back to local
-```
-
-**Classify/triage an error locally:**
-```
-cercano_classify(
-  text: "panic: runtime error: invalid memory address or nil pointer dereference",
-  categories: "bug, config issue, infra problem"
-)
-→ Category: bug
-  Confidence: high
-  Reasoning: Nil pointer dereference is a programming bug in the code logic.
-```
-
-**Explain unfamiliar code before deciding what to send to cloud:**
-```
-cercano_explain(file_path: "internal/agent/router.go")
-→ This code implements a smart routing system for an AI agent that selects
-  between local and cloud models based on semantic similarity...
-```
-
-**Research a question (search + fetch + local model analysis):**
-```
-cercano_research(query: "How does the Ollama REST API list models?")
-→ Ollama lists models via GET /api/tags, which returns a JSON array of
-  installed models with name, size, and modification date...
-
-  Sources:
-  - https://docs.ollama.com/api/introduction
-  - https://github.com/ollama/ollama/blob/main/docs/api.md
-```
-
-**Multi-turn conversation:**
-```
-cercano_local(prompt: "Explain the SmartRouter", conversation_id: "abc123")
-cercano_local(prompt: "How does it handle escalation?", conversation_id: "abc123")
-→ Second call has full context from the first.
-```
-
-### Verified Agents
-
-| Agent | Status |
-|-------|--------|
-| Claude Code | Verified — tool discovery, chat queries, config updates, model switching |
-| Cursor | Not yet tested |
-
-### Flags
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--grpc-addr` | `localhost:50052` | Address of the Cercano gRPC server |
-
-## Agent Skills
-
-Cercano publishes its tools as [Agent Skills](https://agentskills.io) — an open standard for packaging AI capabilities so they're discoverable by any compatible agent. Over 30 agents support this standard, including Claude Code, Cursor, Copilot, Gemini CLI, Codex, and more.
-
-### Published Skills
-
-| Skill | Description |
-|-------|-------------|
-| `cercano-local` | General-purpose local inference — chat queries and agentic code generation |
-| `cercano-summarize` | Summarize text or files locally (brief, medium, or detailed) |
-| `cercano-extract` | Pull specific information from text (errors, signatures, config values) |
-| `cercano-classify` | Categorize/triage text with confidence scores and reasoning |
-| `cercano-explain` | Explain code — what it does, key interfaces, and data flow |
-| `cercano-fetch` | Fetch a URL and extract readable text (HTML stripped to plain text) |
-| `cercano-research` | Research a question via DuckDuckGo search + local model analysis |
-| `cercano-config` | View/change Cercano's runtime configuration |
-| `cercano-models` | List available models on the connected Ollama instance |
-| `cercano-init` | Initialize project context for project-aware responses |
-| `cercano-document` | Generate doc comments for exported Go symbols and write directly to the file |
-| `cercano-deep-research` | Multi-source research with ranked findings, reference chasing, and gap analysis |
-| `cercano-stats` | View usage statistics and cloud token savings |
-
-Each skill is a `SKILL.md` file that tells the agent what the tool does, its parameters, and how to invoke it via MCP.
-
-### How Agents Discover Skills
-
-Agents scan well-known directories for `SKILL.md` files at startup:
-
-| Directory | Discovered by |
-|-----------|---------------|
-| `.agents/skills/<skill-name>/SKILL.md` | Any Agent Skills-compatible agent |
-| `.claude/skills/<skill-name>/SKILL.md` | Claude Code (also appears as slash commands) |
-
-Cercano ships its skill definitions in both locations.
-
-### Installing Skills in Your Project
-
-To make Cercano's skills available to your agent, copy the skill files into your project:
-
-```bash
-# For any Agent Skills-compatible agent
-cp -r /path/to/Cercano/.agents/skills/* .agents/skills/
-
-# For Claude Code specifically (enables /cercano-* slash commands)
-cp -r /path/to/Cercano/.claude/skills/* .claude/skills/
-```
-
-The `cercano_skills` MCP tool also provides programmatic access to skill definitions:
-
-```
-cercano_skills(action: "list")           → catalog of all skills
-cercano_skills(action: "get", name: "cercano-local")  → full SKILL.md content
-```
-
-For a detailed guide on writing custom SKILL.md files, see [docs/agent-skills-guide.md](docs/agent-skills-guide.md).
-
-## Remote Inference
-
-Cercano can delegate inference to a remote Ollama instance — for example, another machine on your LAN with more GPU memory and larger models. The remote endpoint is runtime-configurable with automatic fallback to local Ollama if the remote goes down.
-
-### Setup
-
-1. Ensure Ollama is running on the remote machine and accessible over the network:
-   ```bash
-   # On the remote machine (e.g., mac-studio.local)
-   OLLAMA_HOST=0.0.0.0 ollama serve
-   ```
-
-2. Point Cercano at the remote instance:
-
-   **Via environment variable (at startup):**
-   ```bash
-   OLLAMA_URL=http://mac-studio.local:11434 bin/agent
-   ```
-
-   **Via MCP at runtime (no restart needed):**
-   ```
-   cercano_config(action: "set", ollama_url: "http://mac-studio.local:11434")
-   ```
-
-3. Discover available models on the remote machine:
-   ```
-   cercano_models()
-   → Available models (3):
-   - qwen3-coder:latest (4.7 GB, modified: 2026-03-15T10:30:00Z)
-   - llama3:70b (39.1 GB, modified: 2026-03-14T09:00:00Z)
-   - deepseek-coder-v2:latest (8.9 GB, modified: 2026-03-13T14:00:00Z)
-   ```
-
-4. Switch to a model that's only available on the remote:
-   ```
-   cercano_config(action: "set", local_model: "llama3:70b")
-   ```
-
-### Fallback Behavior
-
-When a remote endpoint is configured, Cercano monitors it with periodic health checks:
-
-- Pings the remote every 30 seconds via `GET /api/tags`
-- After 3 consecutive failures, automatically switches to local Ollama
-- When the remote recovers, automatically switches back
-- Response metadata includes `[Endpoint: url]` or `[Endpoint: url (fallback)]` so you always know which instance served the request
-
-No configuration is needed — fallback is automatic whenever a remote URL is set.
-
-## Development
-
-Cercano is in active development. For detailed information on the project's goals and technical decisions, refer to the documents in the `docs/` directory.
-
-### Building
-
-```bash
-cd source/server
-make all    # Build both agent and MCP server
-make test   # Run all tests
-```
-
-On Windows (PowerShell), `make` isn't available by default — use the underlying Go commands instead:
-```powershell
-cd source/server
-go build -o bin/cercano.exe ./cmd/cercano
-go test ./... -count=1
-```
-The standalone CLI is a separate Go module and builds the same way:
-```powershell
-cd source/clients/cli
-go build -o bin/cercano-cli.exe .
-go test ./... -count=1
-```
-
-## Feature TODOs
-
-### New Features
-
-* **[Competitive Audit — Agent Features Landscape](docs/research/competitive-audit.md)** - Feature matrix across 12+ open-source and commercial agents (Codex, Aider, Continue, Cody, OpenHands, SWE-Agent, Claude Code, Cursor, Windsurf, GitHub Copilot, JetBrains AI, Amazon Q) to inform Cercano's tool design and roadmap.
-* **[Semantic Codebase Search](docs/features/semantic-search/plan.md)** - Embedding-based code search by intent ("find auth-related code"), not just string matching. Requires indexing pipeline, storage, and nearest-neighbor retrieval.
-* **[User-Friendly Distribution](docs/features/distribution/spec.md)** - Setup/launch scripts, Docker containerization, and CI/CD pipeline with GitHub Actions for automated cross-platform releases.
-* **[AI Engine Agnosticism](docs/features/engine/agnosticism.md)** - Abstract the local inference layer to support pluggable backends (ONNX Runtime, Enso, etc.) beyond Ollama.
-* **[Web Research Tool](docs/features/web-research/spec.md)** - Fetch URLs, search the web via DuckDuckGo, and use local models to analyze and distill results. Keeps raw web content out of the cloud context window.
-* **Stand-alone CLI** - Create a stand alone Command Line Interface (CLI) for cercano that doesn't really on other CLI integrations.
-* **PDF Parsing** - Extract text from local and remote PDFs for use with summarize, extract, explain, and research tools.
-* **Documentation Site Indexing** - Crawl a documentation site once, index it persistently, and make it searchable across sessions (similar to Cursor's @Docs).
-
-### Existing Improvements
-
-* **Better VS Code Agent Window Integration** - Make Cercano available as a model dropdown in the VS Code agent window alongside Gemini, Claude, etc.
-* **LLM-Based Conversation Compaction** - Replace simple truncation-based compaction with LLM-powered summarization for better context retention in long conversations.
-* **Per-Model Configuration** - Configurable per-model settings (context window, classification thresholds, history depth, compaction limits) instead of hardcoded constants.
-* **Simplify Provider Routing** - Evaluate removing the SmartRouter's embedding-based local/cloud routing in favor of always-local with coordinator-driven cloud escalation.
-* **Zed Extension** - Build out the Rust-based Zed extension (`source/clients/zed/`) with feature parity to the VS Code extension.
-
-***
-
-This is not an officially supported Google product
-
-Canonical Repo :: [https://github.com/bryancostanich/Cercano](https://github.com/bryancostanich/Cercano)
-
-Google Mirror :: [https://github.com/GoogleDevRelExplorations/cercano](https://github.com/GoogleDevRelExplorations/cercano)
+Cloud routes require the relevant provider credentials. Local routes require
+suitable hardware and model downloads. Model quality, latency, and cost depend
+on your configuration; delegation is not a guarantee of savings. See each
+feature page for controls and limitations.
+
+## Documentation and support
+
+- [Feature guide](docs/agent/features/README.md): what each differentiator does and why it matters.
+- [Agent guide](docs/agent/README.md): setup, commands, permissions, and architecture.
+- [Routing guide](docs/cloud-routing.md): task classes, model quality, destinations, and backups.
+- [CLI track](docs/features/cli/README.md): implementation status and outstanding work.
+- [Developer guide](docs/agent/self-dev.md): building, testing, and working on Cercano.
+- [Report a problem](https://github.com/bryancostanich/Cercano/issues): include your version, platform, route/model, and reproduction steps; redact credentials and private content.
+
+## Co-processor mode: deprecated for now
+
+The external co-processor integration—using Cercano as a tool inside another
+coding agent—is **deprecated for now**. Its documentation is preserved under
+[docs/co-processor](docs/co-processor/README.md). This documentation transition
+does not remove runtime functionality or set a removal date.
+
+Native subagent delegation and the standalone agent's support for external
+Model Context Protocol (MCP) tools remain separate, current capabilities.

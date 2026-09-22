@@ -39,16 +39,19 @@ type Summarize = compaction.SummarizeFunc
 // for main turns. Not safe for concurrent use by multiple dispatches; each
 // dispatch constructs its own.
 type Compactor struct {
-	cfg       compactor.Config
-	summarize Summarize
-	tok       contextmeter.Tokenizer
-	timeout   time.Duration
+	cfg              compactor.Config
+	summarize        Summarize
+	tok              contextmeter.Tokenizer
+	timeout          time.Duration
+	contextBudgetPct float64
+	fallbackBudget   int
 	// onPass receives metadata-only telemetry for every attempt; nil disables.
 	onPass func(PassEvent)
 
 	// state carries frozen boundaries and summaries between passes. It is the
 	// in-memory analogue of the persisted conversation.Compaction row.
-	state conversation.Compaction
+	state     conversation.Compaction
+	lastUsage compaction.SummaryUsage
 }
 
 // Options configures a loop compactor. Zero values fall back to production
@@ -57,6 +60,8 @@ type Options struct {
 	Config    compactor.Config
 	Summarize Summarize
 	Tokenizer contextmeter.Tokenizer
+	// ContextBudgetPct enables sizing from the executing model in the loop scope.
+	ContextBudgetPct float64
 	// Timeout optionally tightens the shared compaction execution budget.
 	Timeout time.Duration
 	// OnPass receives metadata-only telemetry for every compaction attempt
@@ -95,17 +100,26 @@ func New(opts Options) *Compactor {
 	if timeout <= 0 || timeout > DefaultTimeout {
 		timeout = DefaultTimeout
 	}
-	return &Compactor{cfg: cfg, summarize: opts.Summarize, tok: tok, timeout: timeout, onPass: opts.OnPass}
+	return &Compactor{cfg: cfg, summarize: opts.Summarize, tok: tok, timeout: timeout, onPass: opts.OnPass, contextBudgetPct: opts.ContextBudgetPct, fallbackBudget: cfg.CompactedBudgetTokens}
 }
 
 // CompactLoopHistory implements agent.LoopCompactor.
 //
 // Returns the history unchanged whenever Advance declines (below the
 // activation floor — the common case for short dispatches), and reports the
-// tokens the summarizer billed so the dispatch budget stays honest.
+// summarizer token volume, reported where available and otherwise estimated.
 func (c *Compactor) CompactLoopHistory(ctx context.Context, history []llm.Message) ([]llm.Message, int, error) {
 	if c == nil || len(history) == 0 {
 		return history, 0, nil
+	}
+	c.lastUsage = compaction.SummaryUsage{}
+	// A dispatch's context is not the summarizer's context, nor the local chat
+	// model's. The loop refreshes this scope when its serving route changes.
+	if c.contextBudgetPct > 0 {
+		c.cfg.CompactedBudgetTokens = c.fallbackBudget
+	}
+	if scope, ok := agent.LoopCompactionScopeFrom(ctx); ok && scope.ContextWindowKnown && scope.ContextWindow > 0 && c.contextBudgetPct > 0 {
+		c.cfg.CompactedBudgetTokens = summaryBudget(scope.ContextWindow, c.contextBudgetPct)
 	}
 	// Metadata-only telemetry: counts, thresholds and outcome codes for every
 	// attempt, correlated to the dispatch via the scope the tool loop stamped.
@@ -129,7 +143,8 @@ func (c *Compactor) CompactLoopHistory(ctx context.Context, history []llm.Messag
 		ev.EstimatedTokensAfter = compaction.TotalTokens(c.tok, out)
 		ev.ToolResultCharsAfter = toolResultChars(out)
 		ev.ToolResultsAfter = toolResultCount(out)
-		ev.SpentTokensEstimated = spent
+		ev.SpentTokensEstimated = c.lastUsage.Estimated()
+		ev.SpentTokensReported = c.lastUsage.Reported()
 		ev.Duration = time.Since(started)
 		c.emitPass(ev)
 	}()
@@ -143,14 +158,20 @@ func (c *Compactor) CompactLoopHistory(ctx context.Context, history []llm.Messag
 	}
 	turns := c.toTurns(history)
 
-	// Wrap the summarizer to attribute its spend to the dispatch budget.
+	// Production records every provider call (including chunks) in this meter.
+	// Legacy/test seams without usage retain an explicitly labeled estimate.
+	ctx, meter := compaction.WithUsageMeter(ctx)
 	metered := func(ctx context.Context, msgs []llm.Message) (compaction.StructuredSummary, error) {
 		ev.SummarizerCalls++
+		before := meter.Snapshot()
 		summary, err := c.summarize(ctx, msgs)
-		// Conservative attribution: the summarizer seam reports no usage, so
-		// charge the estimated input it consumed. Undercounting spend would
-		// let compaction quietly erode the dispatch budget's guarantee.
-		spent += compaction.TotalTokens(c.tok, msgs)
+		after := meter.Snapshot()
+		if after.Observations == before.Observations {
+			compaction.RecordSummaryUsage(ctx, compaction.SummaryUsage{EstimatedInput: compaction.TotalTokens(c.tok, msgs), Calls: 1})
+			after = meter.Snapshot()
+		}
+		c.lastUsage = after
+		spent = after.Total()
 		return summary, err
 	}
 
@@ -229,3 +250,9 @@ func (c *Compactor) toTurns(msgs []llm.Message) []conversation.Turn {
 
 // Ensure the concrete type satisfies the agent-side seam.
 var _ agent.LoopCompactor = (*Compactor)(nil)
+
+// LastCompactionUsage exposes source attribution without changing the legacy
+// agent seam's total-token return. Valid only for this instance's latest pass.
+func (c *Compactor) LastCompactionUsage() (reported, estimated int) {
+	return c.lastUsage.Reported(), c.lastUsage.Estimated()
+}

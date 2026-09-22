@@ -64,9 +64,9 @@ type PassEvent struct {
 	// SummarizerCalls counts summarizer seam invocations this pass. On
 	// unchanged/below-floor passes it is 0.
 	SummarizerCalls int
-	// SpentTokensEstimated is the estimated input the summarizer consumed — an
-	// ESTIMATE, not provider usage; the seam reports no usage numbers.
+	// SpentTokensEstimated is fallback usage when provider counts are unavailable.
 	SpentTokensEstimated int
+	SpentTokensReported  int
 
 	Duration time.Duration
 }
@@ -77,12 +77,12 @@ func FormatPassEvent(ev PassEvent) string {
 	return fmt.Sprintf("[loop-compaction] pass: conv=%s iter=%d enabled=%t outcome=%s reason=%s "+
 		"activation_floor_tokens=%d segment_tokens=%d verbatim_recent=%d compacted_budget_tokens=%d "+
 		"history_messages=%d->%d est_tokens=%d->%d tool_result_chars=%d->%d tool_results=%d->%d "+
-		"summarizer_calls=%d spent_tokens_est=%d duration_ms=%d",
+		"summarizer_calls=%d spent_tokens_est=%d spent_tokens_reported=%d duration_ms=%d",
 		ev.ConversationID, ev.Iteration, ev.Enabled, ev.Outcome, ev.Reason,
 		ev.ActivationFloorTokens, ev.SegmentTokens, ev.VerbatimRecent, ev.CompactedBudgetTokens,
 		ev.HistoryMessagesBefore, ev.HistoryMessagesAfter, ev.EstimatedTokensBefore, ev.EstimatedTokensAfter,
 		ev.ToolResultCharsBefore, ev.ToolResultCharsAfter, ev.ToolResultsBefore, ev.ToolResultsAfter,
-		ev.SummarizerCalls, ev.SpentTokensEstimated, ev.Duration.Milliseconds())
+		ev.SummarizerCalls, ev.SpentTokensEstimated, ev.SpentTokensReported, ev.Duration.Milliseconds())
 }
 
 // classifyFailure maps a pass error to a stable, content-free reason code.

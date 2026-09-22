@@ -259,18 +259,27 @@ func (t *Recorder) ModelResponse(iter int, provider, model string, resp llm.Chat
 
 // Compaction records history before and after ONE inline compaction pass
 // within the dispatch, correlated by iteration. spentTokens is the budget
-// delta the pass billed (summarizer spend).
-func (t *Recorder) Compaction(iter int, before, after []llm.Message, spentTokens int) {
+// delta (reported tokens plus explicitly attributed fallback estimates).
+type CompactionAccounting struct {
+	ReportedTokens  int `json:"reported_tokens"`
+	EstimatedTokens int `json:"estimated_tokens"`
+}
+
+func (t *Recorder) Compaction(iter int, before, after []llm.Message, spentTokens int, accounting ...CompactionAccounting) {
 	if t == nil {
 		return
 	}
-	t.write(iter, "compaction", map[string]any{
+	payload := map[string]any{
 		"messages_before": len(before),
 		"messages_after":  len(after),
 		"history_before":  sanitizeMessages(before),
 		"history_after":   sanitizeMessages(after),
 		"spent_tokens":    spentTokens,
-	})
+	}
+	if len(accounting) > 0 {
+		payload["usage_accounting"] = accounting[0]
+	}
+	t.write(iter, "compaction", payload)
 }
 
 // SummarizerRequestEvent records one compaction-summarizer model call.
@@ -293,15 +302,17 @@ func (t *Recorder) SummarizerRequest(ev SummarizerRequestEvent) {
 
 // SummarizerResponseEvent records what the summarizer returned.
 type SummarizerResponseEvent struct {
-	Route          string `json:"route"`
-	RequestID      string `json:"request_id,omitempty"`
-	Model          string `json:"model,omitempty"`
-	Output         string `json:"output,omitempty"`
-	InputTokens    int    `json:"input_tokens,omitempty"`
-	OutputTokens   int    `json:"output_tokens,omitempty"`
-	Err            string `json:"error,omitempty"`
-	ConversationID string `json:"conversation_id,omitempty"`
-	Iteration      int    `json:"iteration,omitempty"`
+	Route                 string `json:"route"`
+	RequestID             string `json:"request_id,omitempty"`
+	Model                 string `json:"model,omitempty"`
+	Output                string `json:"output,omitempty"`
+	InputTokens           int    `json:"input_tokens,omitempty"`
+	OutputTokens          int    `json:"output_tokens,omitempty"`
+	Err                   string `json:"error,omitempty"`
+	ConversationID        string `json:"conversation_id,omitempty"`
+	Iteration             int    `json:"iteration,omitempty"`
+	EstimatedInputTokens  int    `json:"estimated_input_tokens,omitempty"`
+	EstimatedOutputTokens int    `json:"estimated_output_tokens,omitempty"`
 }
 
 // SummarizerResponse records the raw summarizer output (pre-parse) and the

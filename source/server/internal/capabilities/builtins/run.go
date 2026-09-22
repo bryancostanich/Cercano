@@ -3,7 +3,6 @@ package builtins
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -36,17 +35,38 @@ func (runCommandCap) Description() string {
 }
 func (runCommandCap) Schema() capabilities.Schema {
 	return capabilities.Schema(`{
-		"type": "object",
-		"required": ["cmd"],
-		"properties": {
-			"cmd":             {"type": "array", "items": {"type": "string"}, "minItems": 1,
-			                    "description": "argv array: first element is the executable (name or path; a path with spaces is used as-is, never split), the rest are its arguments. No implicit shell — no splitting, quoting, pipes, or operators. Run a program directly: [\"ls\", \"/some/path\"]. Run shell syntax explicitly: [\"bash\", \"-lc\", \"pwd && ls ..\"]. A whole command in one string or a list of separate commands is not interpreted and will fail."},
-			"cwd":             {"type": "string", "description": "Working directory for the command. Use this instead of invoking cd; defaults to the project working directory."},
-			"timeout_seconds": {"type": "integer", "minimum": -1, "default": 60,
-			                    "description": "Seconds before the command is killed. Omit or 0 for the 60s default. -1 disables the timeout entirely."},
-			"env":             {"type": "object", "additionalProperties": {"type": "string"}}
+	"type": "object",
+	"additionalProperties": false,
+	"required": [
+		"cmd"
+	],
+	"properties": {
+		"cmd": {
+			"type": "array",
+			"items": {
+				"type": "string"
+			},
+			"minItems": 1,
+			"description": "argv array: first element is the executable (name or path; a path with spaces is used as-is, never split), the rest are its arguments. No implicit shell — no splitting, quoting, pipes, or operators. Run a program directly: [\"ls\", \"/some/path\"]. Run shell syntax explicitly: [\"bash\", \"-lc\", \"pwd && ls ..\"]. A whole command in one string or a list of separate commands is not interpreted and will fail."
+		},
+		"cwd": {
+			"type": "string",
+			"description": "Working directory for the command. Use this instead of invoking cd; defaults to the project working directory."
+		},
+		"timeout_seconds": {
+			"type": "integer",
+			"minimum": -1,
+			"default": 60,
+			"description": "Seconds before the command is killed. Omit or 0 for the 60s default. -1 disables the timeout entirely."
+		},
+		"env": {
+			"type": "object",
+			"additionalProperties": {
+				"type": "string"
+			}
 		}
-	}`)
+	}
+}`)
 }
 
 type runCommandArgs struct {
@@ -58,8 +78,8 @@ type runCommandArgs struct {
 
 func (runCommandCap) Execute(ctx context.Context, call *capabilities.Call) (*capabilities.Result, error) {
 	var a runCommandArgs
-	if err := json.Unmarshal(call.Args, &a); err != nil {
-		return nil, fmt.Errorf("run_command: parse args: %w", err)
+	if err := decodeDeclaredArguments(call.Args, runCommandCap{}, &a); err != nil {
+		return nil, err
 	}
 	if len(a.Cmd) == 0 {
 		return nil, errors.New("run_command: cmd is required and must have at least one element")

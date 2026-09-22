@@ -180,6 +180,8 @@ type ToolLoopInput struct {
 	// llm.ErrTokenBudgetExhausted after the response that crosses it, without
 	// executing that response's tool calls. See agent.TokenBudget.
 	TokenBudget int
+	// DetectNonProgress enables conservative repeated-evidence notices for dispatches.
+	DetectNonProgress bool
 
 	// MaxTokensPerTurn sets the MaxTokens field on each llm.ChatRequest.
 	// 0 means use config.DefaultToolLoopMaxTokensPerTurn.
@@ -451,6 +453,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (returned ToolLoopResult
 
 	maxIters, unlimitedIters := config.EffectiveMaxIterations(in.MaxIterations)
 	tokenBudget := TokenBudget{Limit: in.TokenBudget}
+	progress := &executionProgress{detect: in.DetectNonProgress}
 	maxTokens := config.DefaultToolLoopMaxTokensPerTurn
 	if in.MaxTokensPerTurn > 0 {
 		maxTokens = in.MaxTokensPerTurn
@@ -605,13 +608,15 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (returned ToolLoopResult
 			// (no allocation) when tracing is off.
 			var beforeForTrace []llm.Message
 			spentBeforeTrace := 0
+			estimatedBeforeTrace := 0
 			if tr != nil {
 				beforeForTrace = dispatchhistory.Snapshot(hist)
 				spentBeforeTrace = tokenBudget.Spent
+				estimatedBeforeTrace = tokenBudget.Estimated
 			}
 			// Stamp dispatch correlation so the compactor's metadata telemetry
 			// names the conversation and iteration every pass belongs to.
-			compactCtx := WithLoopCompactionScope(ctx, LoopCompactionScope{ConversationID: in.ConversationID, Iteration: iter + 1})
+			compactCtx := WithLoopCompactionScope(ctx, LoopCompactionScope{ConversationID: in.ConversationID, Iteration: iter + 1, ContextWindow: in.ContextWindow, ContextWindowKnown: in.ContextWindowKnown})
 			hist = compactLoopHistory(compactCtx, in.LoopCompactor, hist, &tokenBudget)
 			if len(hist) != beforeCompact {
 				// priorHistoryCount indexes into hist for tail preservation; a
@@ -623,13 +628,16 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (returned ToolLoopResult
 				log.Printf("[tool-loop] compacted loop history: conv=%s model=%s iter=%d before_messages=%d after_messages=%d", in.ConversationID, in.Model, iter+1, beforeCompact, len(hist))
 			}
 			// Include no-op/failing passes and same-size rewrites as well.
-			tr.Compaction(iter+1, beforeForTrace, hist, tokenBudget.Spent-spentBeforeTrace)
+			tr.Compaction(iter+1, beforeForTrace, hist, tokenBudget.Spent-spentBeforeTrace, dispatchhistory.CompactionAccounting{ReportedTokens: tokenBudget.Spent - spentBeforeTrace - (tokenBudget.Estimated - estimatedBeforeTrace), EstimatedTokens: tokenBudget.Estimated - estimatedBeforeTrace})
 		}
 		preserveTail := len(hist) - priorHistoryCount
 		if preserveTail < 1 {
 			preserveTail = 1
 		}
 		beforeTrim := len(hist)
+		if tokenBudget.Exhausted() {
+			return ToolLoopResult{FinalText: progress.handoff(nil), Iterations: iter, History: hist, InputTokens: lastIn, OutputTokens: lastOut, CalledTools: calledTools}, tokenBudget.Err()
+		}
 		trimmed, budget := TrimMessagesToBudget(RequestBudgetInput{
 			System:        effectiveSystem,
 			Messages:      hist,
@@ -719,7 +727,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (returned ToolLoopResult
 			return ToolLoopResult{Iterations: iter + 1, History: hist, InputTokens: providerInput, OutputTokens: providerOutput, LastRequestBudget: budget}, err
 		}
 		lastIn, lastOut = resp.InputTokens, resp.OutputTokens
-		tokenBudget.Add(resp.InputTokens, resp.OutputTokens)
+		tokenBudget.AddUsage(resp.Usage, resp.InputTokens, resp.OutputTokens)
 		noteAssembledTurn(in.ConversationID, resp.Blocks, seenToolUse)
 
 		flattenToolResults := in.flattenToolResults()
@@ -751,7 +759,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (returned ToolLoopResult
 			log.Printf("[tool-loop] token budget exhausted: conv=%s provider=%s model=%s iter=%d spent=%d budget=%d pending_tool_calls=%d",
 				in.ConversationID, in.Provider.Name(), in.Model, iter+1, tokenBudget.Spent, tokenBudget.Limit, len(toolCalls))
 			emit(LoopEvent{Kind: LoopNotice, Summary: fmt.Sprintf("dispatch stopped: token budget exhausted (~%d of %d tokens)", tokenBudget.Spent, tokenBudget.Limit)})
-			return ToolLoopResult{Iterations: iter + 1, History: hist, InputTokens: lastIn, OutputTokens: lastOut, CalledTools: calledTools, LastRequestBudget: budget}, tokenBudget.Err()
+			return ToolLoopResult{FinalText: progress.handoff(toolCalls), Iterations: iter + 1, History: hist, InputTokens: lastIn, OutputTokens: lastOut, CalledTools: calledTools, LastRequestBudget: budget}, tokenBudget.Err()
 		}
 		if len(toolCalls) == 0 {
 			if in.WatchdogTurnEnd != nil && strings.TrimSpace(finalText) != "" {
@@ -932,7 +940,10 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (returned ToolLoopResult
 			r := <-rChan
 			rResults[r.idx] = r.blocks
 		}
-		for _, blocks := range rResults {
+		for i, blocks := range rResults {
+			if len(blocks) > 0 {
+				progress.observe(rCalls[i].block, blocks[0])
+			}
 			results = append(results, blocks...)
 		}
 
@@ -1100,6 +1111,7 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (returned ToolLoopResult
 					in.Profile = Profile{}
 				}
 			}
+			progress.observe(pc.block, out)
 		}
 
 		allErrored := true
@@ -1114,6 +1126,11 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (returned ToolLoopResult
 			appendModelTurn(llm.Message{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: flattenToolResultsForModel(toolCalls, results)}}})
 		} else {
 			appendTurn(llm.Message{Role: llm.RoleUser, Blocks: results})
+		}
+
+		if notice := progress.notice(); notice != "" {
+			emit(LoopEvent{Kind: LoopNotice, Summary: notice})
+			appendTurn(llm.Message{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: notice}}})
 		}
 
 		switch {

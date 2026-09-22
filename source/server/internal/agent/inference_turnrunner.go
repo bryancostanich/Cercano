@@ -57,8 +57,14 @@ func (a *inferenceTurnRunner) Process(ctx context.Context, req *Request) (*Respo
 		},
 	})
 	if err != nil {
+		// A failed attempt may still report usage. Preserve counts for callers
+		// doing budget accounting, without exposing partial response text.
+		if chatResp.Usage.Reported() || chatResp.InputTokens > 0 || chatResp.OutputTokens > 0 {
+			return &Response{InputTokens: chatResp.InputTokens, OutputTokens: chatResp.OutputTokens, Usage: chatResp.Usage}, err
+		}
 		return nil, err
 	}
+
 	var sb strings.Builder
 	for _, b := range chatResp.Blocks {
 		if b.Type == llm.BlockText {
@@ -76,6 +82,7 @@ func (a *inferenceTurnRunner) Process(ctx context.Context, req *Request) (*Respo
 		Output:          sb.String(),
 		InputTokens:     chatResp.InputTokens,
 		OutputTokens:    chatResp.OutputTokens,
+		Usage:           chatResp.Usage,
 		RoutingMetadata: RoutingMetadata{ModelName: served},
 	}, nil
 }

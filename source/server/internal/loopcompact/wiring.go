@@ -68,6 +68,8 @@ func BuildSummarizer(deps WiringDeps) Summarize {
 		return nil
 	}
 	return func(ctx context.Context, msgs []llm.Message) (compaction.StructuredSummary, error) {
+		// Explicitly account for routing/cancellation failures before any call.
+		compaction.RecordSummaryUsage(ctx, compaction.SummaryUsage{})
 		ctx, cancel := compaction.WithExecutionBudget(ctx)
 		defer cancel()
 		if err := ctx.Err(); err != nil {
@@ -140,16 +142,34 @@ func BuildSummarizer(deps WiringDeps) Summarize {
 			deps.logf("[compaction] summarizer request: request_id=%s destination=%s quality=%s route=%s", callID, selected.PolicyDestination, assignment.Quality, route)
 			tr.SummarizerRequest(dispatchhistory.SummarizerRequestEvent{Route: route, RequestID: callID, Model: model, Tier: string(tier), MaxTokens: maxTokens, Temperature: greedy.Temperature, Prompt: prompt, ConversationID: convID, Iteration: iteration})
 			resp, err := run.Process(ctx, &agent.Request{Input: prompt, Temperature: greedy.Temperature, Tier: string(tier), ModelOverride: model, MaxTokens: maxTokens, RequestID: callID, ConversationID: convID})
+			usage := compaction.SummaryUsage{Calls: 1}
+			if resp != nil && resp.Usage.Input.Known {
+				usage.ReportedInput = int(resp.Usage.Input.Value)
+			} else if resp != nil && resp.InputTokens > 0 {
+				usage.ReportedInput = resp.InputTokens
+			} else {
+				usage.EstimatedInput = contextmeter.Default().Count(prompt)
+			}
+			if resp != nil && resp.Usage.Output.Known {
+				usage.ReportedOutput = int(resp.Usage.Output.Value)
+			} else if resp != nil && resp.OutputTokens > 0 {
+				usage.ReportedOutput = resp.OutputTokens
+			} else if resp != nil {
+				usage.EstimatedOutput = contextmeter.Default().Count(resp.Output)
+			}
+
+			compaction.RecordSummaryUsage(ctx, usage)
+
 			if err != nil {
-				tr.SummarizerResponse(dispatchhistory.SummarizerResponseEvent{Route: route, RequestID: callID, Model: model, Err: classifyFailure(err), ConversationID: convID, Iteration: iteration})
+				tr.SummarizerResponse(dispatchhistory.SummarizerResponseEvent{Route: route, RequestID: callID, Model: model, Err: classifyFailure(err), InputTokens: usage.ReportedInput, OutputTokens: usage.ReportedOutput, EstimatedInputTokens: usage.EstimatedInput, EstimatedOutputTokens: usage.EstimatedOutput, ConversationID: convID, Iteration: iteration})
 				return compaction.StructuredSummary{}, err
 			}
 			servedModel := resp.RoutingMetadata.ModelName
 			if servedModel == "" {
 				servedModel = model
 			}
-			tr.SummarizerResponse(dispatchhistory.SummarizerResponseEvent{Route: route, RequestID: callID, Model: servedModel, Output: resp.Output, InputTokens: resp.InputTokens, OutputTokens: resp.OutputTokens, ConversationID: convID, Iteration: iteration})
-			deps.logf("[compaction] summarizer usage: request_id=%s route=%s input_tokens_reported=%d output_tokens_reported=%d", callID, route, resp.InputTokens, resp.OutputTokens)
+			tr.SummarizerResponse(dispatchhistory.SummarizerResponseEvent{Route: route, RequestID: callID, Model: servedModel, Output: resp.Output, InputTokens: usage.ReportedInput, OutputTokens: usage.ReportedOutput, EstimatedInputTokens: usage.EstimatedInput, EstimatedOutputTokens: usage.EstimatedOutput, ConversationID: convID, Iteration: iteration})
+			deps.logf("[compaction] summarizer usage: request_id=%s route=%s input_tokens_reported=%d output_tokens_reported=%d", callID, route, usage.ReportedInput, usage.ReportedOutput)
 			summary := compaction.ParseSummary(resp.Output)
 			if summary.IsEmpty() {
 				deps.logf("[compaction] summarizer output parsed EMPTY: output_chars=%d", len(resp.Output))
@@ -169,8 +189,8 @@ func BuildSummarizer(deps WiringDeps) Summarize {
 // BuildConfig derives the compactor config from the app config — the same
 // derivation the host front door performs inline (thresholds verbatim from
 // cfg.Compaction; the compacted backlog budget a fraction of the everyday chat
-// model's window, floored). Worker callers get the identical policy because
-// there is no other construction site.
+// model's window, floored). This is the main-conversation construction path;
+// dispatch factories instead receive the executing window in the loop scope.
 func BuildConfig(deps WiringDeps) compactor.Config {
 	cfg := deps.Cfg
 	budgetPct := cfg.Compaction.CompactedBudgetPct
@@ -188,17 +208,23 @@ func BuildConfig(deps WiringDeps) compactor.Config {
 	if budgetWindow <= 0 && cfg.OpenRuntime != "llama_server" {
 		budgetWindow = contextmeter.ModelMax(deps.ChatModel)
 	}
-	budgetTokens := int(float64(budgetWindow) * budgetPct)
-	if budgetTokens < CompactedBudgetFloorTokens {
-		budgetTokens = CompactedBudgetFloorTokens
+	return configWithBudget(cfg, summaryBudget(budgetWindow, budgetPct))
+}
+
+// summaryBudget preserves the shared percentage/floor policy. Known windows
+// bound the retained preamble; unknown capacity uses the conservative floor.
+func summaryBudget(window int, pct float64) int {
+	if window <= 0 {
+		return CompactedBudgetFloorTokens
 	}
-	return compactor.Config{
-		ActivationFloorTokens:   cfg.Compaction.ActivationFloorTokens,
-		SegmentTokens:           cfg.Compaction.SegmentTokens,
-		VerbatimRecent:          cfg.Compaction.VerbatimRecent,
-		CompactedBudgetTokens:   budgetTokens,
-		TieredRetentionSegments: cfg.Compaction.TieredRetentionSegments,
+	if pct <= 0 {
+		pct = CompactedBudgetDefaultPct
 	}
+	return min(window, max(CompactedBudgetFloorTokens, int(float64(window)*min(pct, 1))))
+}
+func configWithBudget(cfg config.Config, budget int) compactor.Config {
+	return compactor.Config{ActivationFloorTokens: cfg.Compaction.ActivationFloorTokens, SegmentTokens: cfg.Compaction.SegmentTokens, VerbatimRecent: cfg.Compaction.VerbatimRecent, CompactedBudgetTokens: budget, TieredRetentionSegments: cfg.Compaction.TieredRetentionSegments}
+
 }
 
 // NewFactory builds the per-dispatch compactor factory from the shared wiring.
@@ -214,16 +240,24 @@ func NewFactory(deps WiringDeps) func() agent.LoopCompactor {
 	if summarize == nil {
 		return nil
 	}
-	compCfg := BuildConfig(deps)
+	// Do not resolve/probe an unrelated local model when creating a dispatch.
+	// Known executing-model capacity arrives with each loop-compaction scope.
+	cfg := deps.Cfg.Compaction
+	compCfg := configWithBudget(deps.Cfg, summaryBudget(0, cfg.CompactedBudgetPct))
+	pct := cfg.CompactedBudgetPct
+	if pct <= 0 {
+		pct = CompactedBudgetDefaultPct
+	}
 	logPass := func(ev PassEvent) { deps.logf("%s", FormatPassEvent(ev)) }
 	deps.logf("[loop-compaction] configured: enabled=true activation_floor_tokens=%d segment_tokens=%d verbatim_recent=%d compacted_budget_tokens=%d",
 		compCfg.ActivationFloorTokens, compCfg.SegmentTokens, compCfg.VerbatimRecent, compCfg.CompactedBudgetTokens)
 	return func() agent.LoopCompactor {
 		c := New(Options{
-			Config:    compCfg,
-			Summarize: summarize,
-			Tokenizer: contextmeter.Default(),
-			OnPass:    logPass,
+			Config:           compCfg,
+			ContextBudgetPct: pct,
+			Summarize:        summarize,
+			Tokenizer:        contextmeter.Default(),
+			OnPass:           logPass,
 		})
 		if c == nil {
 			return nil

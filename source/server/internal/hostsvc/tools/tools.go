@@ -659,6 +659,7 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 		MaxIterations:      spec.MaxIterations,
 		TokenBudget:        spec.TokenBudget,
 		LoopCompactor:      loopCompactor,
+		DetectNonProgress:  true,
 		Temperature:        &greedy,
 		// Only mistral.rs needs the flattened tool-history workaround. Other
 		// providers support native history; synthetic assistant summaries can
@@ -721,15 +722,21 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 		emitDispatchProgress(spec.Emit, agenttools.ProgressEvent{SubAgentID: subConvID, SubAgentParentID: spec.ConversationID, SubAgentTitle: subTitle, Kind: "error", Text: fmt.Sprintf("sub-agent failed: conv=%s err=%v", subConvID, err), GrantedTools: granted, IgnoredTools: ignored, IsError: true})
 		var le *llm.Error
 		if errors.As(err, &le) && le.Class == llm.ErrTokenBudgetExhausted {
-			// The budget stop is a cost guard, not a provider fault: the spent
-			// tokens bought real partial work. Surface a digest (iterations,
-			// tools called, persisted sub-conversation for post-mortem) so the
-			// parent can decide how to re-scope — while still failing the
-			// dispatch so completion can never be fabricated from partials.
-			return dispatch.Result{}, fmt.Errorf(
-				"%w (dispatch stopped after %d iterations; tools called: %s; sub-conversation %s holds the partial transcript)",
-				err, res.Iterations, strings.Join(res.CalledTools, ", "), subConvID)
+			handoff := res.FinalText
+			if handoff == "" {
+				handoff = "Partial work — task not completed; review the recorded transcript."
+			}
+			subID := ""
+			location := "Persistent transcript unavailable in this environment."
+			if persisted {
+				subID = subConvID
+				location = fmt.Sprintf("Partial transcript: sub-conversation %s (%d model responses).", subID, res.Iterations)
+			}
+			text := handoff + "\n" + location
+			emitDispatchProgress(spec.Emit, agenttools.ProgressEvent{SubAgentID: subConvID, Kind: "error", Text: text, IsError: true})
+			return dispatch.Result{Text: text, SubConversationID: subID, Model: model, Provider: provider, IsCloud: sel.IsCloud, GrantedTools: granted, IgnoredTools: ignored}, fmt.Errorf("%w\n%s", err, text)
 		}
+
 		return dispatch.Result{}, err
 	}
 	log.Printf("[dispatch] subagent done: conv=%s route=%s provider=%s model=%s tier=%s iterations=%d tokens_in=%d tokens_out=%d",

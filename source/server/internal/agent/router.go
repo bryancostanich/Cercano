@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"cercano/source/server/internal/llm"
 	"context"
 	_ "embed"
 	"fmt"
@@ -100,9 +101,10 @@ type Response struct {
 	Output           string
 	FileChanges      []FileChange
 	RoutingMetadata  RoutingMetadata
-	ValidationErrors string // New field for rich feedback
-	InputTokens      int    // Prompt tokens consumed (from Ollama prompt_eval_count)
-	OutputTokens     int    // Completion tokens generated (from Ollama eval_count)
+	ValidationErrors string         // New field for rich feedback
+	InputTokens      int            // Prompt tokens consumed (from Ollama prompt_eval_count)
+	OutputTokens     int            // Completion tokens generated (from Ollama eval_count)
+	Usage            llm.TokenUsage // normalized inclusive counters, including known zero
 	// Notice carries a non-fatal informational message produced by the agent
 	// (e.g. "cloud was unavailable — answered locally"). Clients render it as
 	// a system message in the scrollback so the user always knows when routing

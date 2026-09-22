@@ -128,10 +128,13 @@ func TestToolLoopStopsAtTokenBudget(t *testing.T) {
 	if le.Used != 12192 || le.Limit != 10000 {
 		t.Fatalf("counts: %+v", le)
 	}
+	if !strings.Contains(res.FinalText, "Partial work") || !strings.Contains(res.FinalText, "2 completed") || !strings.Contains(res.FinalText, "not executed") {
+		t.Fatalf("missing partial handoff: %q", res.FinalText)
+	}
 	if len(res.History) == 0 || res.Iterations != 3 {
 		t.Fatalf("partial result lost: iters=%d history=%d", res.Iterations, len(res.History))
 	}
-	if !strings.Contains(err.Error(), "narrow the task") {
+	if !strings.Contains(err.Error(), "estimated") || strings.Contains(err.Error(), "tokens billed") {
 		t.Fatalf("unactionable message: %v", err)
 	}
 }
@@ -204,5 +207,32 @@ func TestToolLoopBudgetAllowsFinalAnswer(t *testing.T) {
 	}
 	if res.FinalText != "the findings" {
 		t.Fatalf("answer lost: %q", res.FinalText)
+	}
+}
+
+func TestBudgetSourcesAndInclusiveCacheCounts(t *testing.T) {
+	b := TokenBudget{Limit: 120}
+	b.AddUsage(llm.TokenUsage{Input: llm.ReportedTokens(100), Output: llm.ReportedTokens(10), CacheRead: llm.ReportedTokens(90)}, 10, 10)
+	b.AddEstimated(15)
+	if b.Spent != 125 || b.Estimated != 15 {
+		t.Fatalf("double counting or lost estimate: %+v", b)
+	}
+	if !strings.Contains(b.Err().Error(), "110 provider-reported") || !strings.Contains(b.Err().Error(), "15 estimated") {
+		t.Fatal(b.Err())
+	}
+	b.AddUsage(llm.TokenUsage{Input: llm.ReportedTokens(0), Output: llm.ReportedTokens(0)}, 999, 999)
+	if b.Spent != 125 {
+		t.Fatal("known zero ignored")
+	}
+}
+func TestCompactionExhaustionStopsBeforeAnotherModelRequest(t *testing.T) {
+	p := &budgetProbeProvider{}
+	executed := 0
+	result, err := RunToolLoop(t.Context(), ToolLoopInput{Provider: p, Registry: probeRegistry(t, &executed), UserInput: "task", TokenBudget: 5, LoopCompactor: LoopCompactorFunc(func(_ context.Context, h []llm.Message) ([]llm.Message, int, error) { return h, 6, nil })})
+	if err == nil || p.calls != 0 || !strings.Contains(result.FinalText, "0 completed") {
+		t.Fatalf("called model after budget exhausted: %d %v %q", p.calls, err, result.FinalText)
+	}
+	if !strings.Contains(err.Error(), "6 estimated") {
+		t.Fatal(err)
 	}
 }

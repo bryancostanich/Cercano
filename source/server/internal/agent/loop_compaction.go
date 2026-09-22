@@ -25,11 +25,11 @@ import (
 //   - Errors are advisory. The loop keeps the uncompacted history and
 //     continues: compaction is an optimization, never a reason to fail work
 //     that is already paid for.
-//   - Summarizer calls made here bill real tokens; implementations that spend
-//     must report it so the dispatch budget stays honest (see SpentTokens).
+//   - Return total accounted tokens. Implement LastCompactionUsage to separate
+//     provider reports from fallback estimates; legacy totals are estimates.
 type LoopCompactor interface {
 	// CompactLoopHistory returns the (possibly compacted) history plus the
-	// tokens the compaction itself billed, if any.
+	// enforced token volume (reported + fallback estimates), if any.
 	CompactLoopHistory(ctx context.Context, history []llm.Message) (out []llm.Message, spent int, err error)
 }
 
@@ -44,8 +44,10 @@ func (f LoopCompactorFunc) CompactLoopHistory(ctx context.Context, history []llm
 // pass should report with its telemetry: which conversation's sub-agent, at
 // which tool-loop iteration, the pass ran. Values only — no content.
 type LoopCompactionScope struct {
-	ConversationID string
-	Iteration      int
+	ConversationID     string
+	Iteration          int
+	ContextWindow      int
+	ContextWindowKnown bool
 }
 
 type loopCompactionScopeKey struct{}
@@ -72,10 +74,17 @@ func compactLoopHistory(ctx context.Context, c LoopCompactor, history []llm.Mess
 		return history
 	}
 	out, spent, err := c.CompactLoopHistory(ctx, history)
-	// Spend counts even on failure: a summarizer call that errored after
-	// billing still cost money, and hiding it would understate the budget.
+	// Account even on failure, without claiming estimates are provider bills.
 	if spent > 0 && budget != nil {
-		budget.Add(spent, 0)
+		reported, estimated := 0, spent
+		if usage, ok := c.(interface{ LastCompactionUsage() (int, int) }); ok {
+			r, e := usage.LastCompactionUsage()
+			if r >= 0 && e >= 0 && r+e == spent {
+				reported, estimated = r, e
+			}
+		}
+		budget.Add(reported, 0)
+		budget.AddEstimated(estimated)
 	}
 	if err != nil || len(out) == 0 {
 		return history

@@ -73,7 +73,7 @@ func estimateTokens(s string) int {
 
 // PackSummaryChunks splits messages so each rendered BuildSummaryPrompt(chunk)
 // plus output reserve fits the configured local context window. It first packs
-// on message boundaries; when one message is too large, it splits splittable
+// on complete tool-exchange boundaries; when a standalone message is too large, it splits splittable
 // text/tool-result blocks losslessly into same-role synthetic messages. It
 // still defers rather than silently truncating an unsplittable block.
 func PackSummaryChunks(messages []llm.Message, contextWindow, outputReserve int) ([][]llm.Message, error) {
@@ -85,8 +85,11 @@ func PackSummaryChunks(messages []llm.Message, contextWindow, outputReserve int)
 	}
 	var chunks [][]llm.Message
 	var cur []llm.Message
-	for _, msg := range messages {
-		candidate := append(append([]llm.Message(nil), cur...), msg)
+	for _, group := range toolGroups(messages) {
+		if ToolSafePrefix(group, len(group)) != len(group) {
+			return nil, &DeferralError{Reason: "incomplete tool exchange must remain in live history", Limit: contextWindow}
+		}
+		candidate := append(append([]llm.Message(nil), cur...), group...)
 		if EstimateSummaryBudget(BuildSummaryPrompt(candidate), outputReserve, contextWindow).Fits {
 			cur = candidate
 			continue
@@ -95,13 +98,23 @@ func PackSummaryChunks(messages []llm.Message, contextWindow, outputReserve int)
 			chunks = append(chunks, cur)
 			cur = nil
 		}
-		single := []llm.Message{msg}
-		budget := EstimateSummaryBudget(BuildSummaryPrompt(single), outputReserve, contextWindow)
+		budget := EstimateSummaryBudget(BuildSummaryPrompt(group), outputReserve, contextWindow)
 		if budget.Fits {
-			cur = single
+			cur = append([]llm.Message(nil), group...)
 			continue
 		}
-		split, err := splitOversizedMessageForSummary(msg, contextWindow, outputReserve)
+		hasCall := false
+		for _, m := range group {
+			for _, b := range m.Blocks {
+				if b.Type == llm.BlockToolUse {
+					hasCall = true
+				}
+			}
+		}
+		if len(group) > 1 || hasCall {
+			return nil, &DeferralError{Reason: "complete tool exchange cannot fit summarizer context without separating its evidence", Used: budget.PromptTokens + budget.OutputReserve, Limit: contextWindow}
+		}
+		split, err := splitOversizedMessageForSummary(group[0], contextWindow, outputReserve)
 		if err != nil {
 			return nil, err
 		}
@@ -109,6 +122,7 @@ func PackSummaryChunks(messages []llm.Message, contextWindow, outputReserve int)
 			chunks = append(chunks, []llm.Message{part})
 		}
 	}
+
 	if len(cur) > 0 {
 		chunks = append(chunks, cur)
 	}

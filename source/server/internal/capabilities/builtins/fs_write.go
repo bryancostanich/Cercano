@@ -29,14 +29,25 @@ func (writeFileCap) Description() string {
 }
 func (writeFileCap) Schema() capabilities.Schema {
 	return capabilities.Schema(`{
-		"type": "object",
-		"required": ["path", "content"],
-		"properties": {
-			"path":    {"type": "string"},
-			"content": {"type": "string"},
-			"mkdir":   {"type": "boolean", "default": true}
+	"type": "object",
+	"additionalProperties": false,
+	"required": [
+		"path",
+		"content"
+	],
+	"properties": {
+		"path": {
+			"type": "string"
+		},
+		"content": {
+			"type": "string"
+		},
+		"mkdir": {
+			"type": "boolean",
+			"default": true
 		}
-	}`)
+	}
+}`)
 }
 
 type writeFileArgs struct {
@@ -47,8 +58,8 @@ type writeFileArgs struct {
 
 func (writeFileCap) Execute(ctx context.Context, call *capabilities.Call) (*capabilities.Result, error) {
 	var a writeFileArgs
-	if err := json.Unmarshal(call.Args, &a); err != nil {
-		return nil, fmt.Errorf("write_file: parse args: %w", err)
+	if err := decodeDeclaredArguments(call.Args, writeFileCap{}, &a); err != nil {
+		return nil, err
 	}
 	if a.Path == "" {
 		return nil, errors.New("write_file: path is required")
@@ -122,14 +133,25 @@ func (editFileCap) Description() string {
 }
 func (editFileCap) Schema() capabilities.Schema {
 	return capabilities.Schema(`{
-		"type": "object",
-		"required": ["path", "old_string", "new_string"],
-		"properties": {
-			"path":       {"type": "string"},
-			"old_string": {"type": "string"},
-			"new_string": {"type": "string"}
+	"type": "object",
+	"additionalProperties": false,
+	"required": [
+		"path",
+		"old_string",
+		"new_string"
+	],
+	"properties": {
+		"path": {
+			"type": "string"
+		},
+		"old_string": {
+			"type": "string"
+		},
+		"new_string": {
+			"type": "string"
 		}
-	}`)
+	}
+}`)
 }
 
 type editFileArgs struct {
@@ -140,8 +162,8 @@ type editFileArgs struct {
 
 func (editFileCap) Execute(ctx context.Context, call *capabilities.Call) (*capabilities.Result, error) {
 	var a editFileArgs
-	if err := json.Unmarshal(call.Args, &a); err != nil {
-		return nil, fmt.Errorf("edit_file: parse args: %w", err)
+	if err := decodeDeclaredArguments(call.Args, editFileCap{}, &a); err != nil {
+		return nil, err
 	}
 	if a.Path == "" {
 		return nil, errors.New("edit_file: path is required")

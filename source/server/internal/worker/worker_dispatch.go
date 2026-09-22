@@ -12,6 +12,7 @@ import (
 	"cercano/source/server/internal/conversation"
 	"cercano/source/server/internal/dispatch"
 	"cercano/source/server/internal/failurelog"
+	cfgsvc "cercano/source/server/internal/hostsvc/config"
 	"cercano/source/server/internal/hostsvc/permissions"
 	toolssvc "cercano/source/server/internal/hostsvc/tools"
 	"cercano/source/server/internal/inference"
@@ -62,14 +63,14 @@ func buildWorkerToolSvc(
 	autonomy conversation.AutonomyLedger,
 	restart ...runtimeRestartFunc,
 ) runner.ToolSvc {
-	return buildWorkerToolSvcWithDiagnostic(permBroker, engine, ctxLoader, cloud, open, cfg, subPersist, enterProfile, vision, failures, nil, autonomy, restart...)
+	return buildWorkerToolSvcWithDiagnostic(permBroker, engine, ctxLoader, cloud, open, cfg, subPersist, enterProfile, vision, failures, nil, autonomy, nil, restart...)
 }
 
 func buildWorkerToolSvcWithDiagnostic(
 	permBroker permissions.Broker, engine *dispatch.Engine, ctxLoader *projectctx.Loader,
 	cloud, open inference.Provider, cfg pkgcfg.Config, subPersist *streamSubagentPersist,
 	enterProfile func(context.Context, string) error, vision capabilities.VisionService,
-	failures *failurelog.Writer, diagnostic reasoningexperiment.Service, autonomy conversation.AutonomyLedger, restart ...runtimeRestartFunc,
+	failures *failurelog.Writer, diagnostic reasoningexperiment.Service, autonomy conversation.AutonomyLedger, candidates func() inference.Tiers, restart ...runtimeRestartFunc,
 ) runner.ToolSvc {
 	var runDiagnostic func(context.Context, reasoningexperiment.Spec) (reasoningexperiment.Report, error)
 	if diagnostic != nil {
@@ -93,7 +94,7 @@ func buildWorkerToolSvcWithDiagnostic(
 	// from the shared internal/loopcompact wiring (no worker-specific policy).
 	// The worker's providers are host-streamed inference.Proxies; they adapt
 	// to the summarizer's TurnRunner seam via agent.InferenceTurnRunner.
-	if factory := loopcompact.NewFactory(workerLoopCompactDeps(cfg, cloud, open)); factory != nil {
+	if factory := loopcompact.NewFactory(workerLoopCompactDeps(cfg, cloud, open, candidates)); factory != nil {
 		svc.SetLoopCompactorFactory(factory)
 	}
 	if subPersist != nil {
@@ -122,45 +123,20 @@ func buildWorkerToolSvcWithDiagnostic(
 	return svc
 }
 
-// workerLoopCompactDeps assembles the shared loopcompact.WiringDeps from the
-// worker's snapshotted config and host-streamed providers. Every seam resolves
-// through worker-held state: the open lane is the host-proxied open runtime
-// (the summarizer's fast_light_text lane), the cloud lane is the active cloud
-// proxy for fallback, and the chat-model denominator is the host-resolved
-// everyday override snapshotted into cfg (see openTierModel).
-func workerLoopCompactDeps(cfg pkgcfg.Config, cloud, open inference.Provider) loopcompact.WiringDeps {
-	// buildDeps may pass an absent host proxy as a typed nil interface.
+// workerLoopCompactDeps uses the worker's existing destination graph, including
+// Secondary and its profile backup chain. The fallback graph is for constructors
+// with only primary/local providers (tests); it cannot invent a Secondary.
+func workerLoopCompactDeps(cfg pkgcfg.Config, cloud, open inference.Provider, candidates ...func() inference.Tiers) loopcompact.WiringDeps {
 	if proxy, ok := open.(*streamOpenProvider); ok && proxy == nil {
 		open = nil
 	}
-	deps := loopcompact.WiringDeps{
-		Cfg:           cfg,
-		ChatModel:     openTierModel(cfg, pkgcfg.TierEveryday),
-		OpenTierModel: func(t pkgcfg.Tier) string { return openTierModel(cfg, t) },
-		OpenRunner: func() agent.TurnRunner {
-			if open == nil {
-				return nil
-			}
-			return agent.InferenceTurnRunner(open, openTierModel(cfg, pkgcfg.TierEveryday))
-		},
-		CloudRunner: func() agent.TurnRunner {
-			if cloud == nil {
-				return nil
-			}
-			model := ""
-			if profile, ok := profileByName(cfg.CloudProfiles, cfg.ActiveCloudProfile); ok {
-				model = profile.Model
-			}
-			return agent.InferenceTurnRunner(cloud, model)
-		},
-		CloudModelForTier: func(t pkgcfg.Tier) string { return workerDispatchModelFor(cfg)(true, t) },
-		Log:               func(format string, args ...any) { log.Printf(format, args...) },
+	deps := loopcompact.WiringDeps{Cfg: cfg, ChatModel: openTierModel(cfg, pkgcfg.TierEveryday), Log: func(format string, args ...any) { log.Printf(format, args...) }}
+	if cloud != nil || open != nil {
+		resolver := &workerResolver{cfgSvc: cfgsvc.New("", cfg, nil), cloudProv: cloud, openProv: open}
+		deps.Candidates = resolver.Candidates
 	}
-	if open == nil {
-		deps.OpenRunner = nil
-	}
-	if cloud == nil {
-		deps.CloudRunner = nil
+	if len(candidates) > 0 && candidates[0] != nil {
+		deps.Candidates = candidates[0]
 	}
 	if runtime, ok := open.(interface {
 		RuntimeContext(context.Context, string, bool) (llm.RuntimeContext, error)

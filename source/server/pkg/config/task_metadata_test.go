@@ -9,6 +9,7 @@ import (
 func TestTaskMetadata(t *testing.T) {
 	want := []TaskDefinition{
 		{TaskChat, "Chat", TaskAssignment{DestinationPrimary, CostStandard}},
+		{TaskCompaction, "Compaction", TaskAssignment{DestinationSecondary, CostEconomy}},
 		{TaskDispatch, "Default dispatch", TaskAssignment{DestinationSecondary, CostPremium}},
 		{TaskReconnaissance, "Reconnaissance", TaskAssignment{DestinationLocal, CostEconomy}},
 		{TaskMechanicalDevelopment, "Mechanical development", TaskAssignment{DestinationLocal, CostStandard}},

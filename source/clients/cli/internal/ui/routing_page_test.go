@@ -146,3 +146,19 @@ func TestSelectingCurrentRoutingTabPreservesDraft(t *testing.T) {
 		t.Fatal("selecting current tab discarded routing page/draft")
 	}
 }
+
+func TestCompactionRoutingRowDefaultAndEdit(t *testing.T) {
+	sp := draftTestPage()
+	sp.scope = scopeRouting
+	want := config.TaskAssignment{Destination: config.DestinationSecondary, Quality: config.CostEconomy}
+	if got := sp.routingConfig().TaskAssignment(config.TaskCompaction); got != want {
+		t.Fatalf("default=%+v", got)
+	}
+	sp.onCommit("routing-task-compaction-destination", "local")
+	sp.onCommit("routing-task-compaction-quality", "premium")
+	sp.snapshotSections()
+	want = config.TaskAssignment{Destination: config.DestinationLocal, Quality: config.CostPremium}
+	if got := sp.routingConfig().TaskAssignment(config.TaskCompaction); got != want {
+		t.Fatalf("edit=%+v", got)
+	}
+}

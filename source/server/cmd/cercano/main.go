@@ -313,10 +313,9 @@ func startGRPCServer(cfg config.Config, bindAddr string, events *crashlog.Writer
 		recapGen = recap.New(persistentStore, recapComplete, 8*time.Second, 12)
 		agentOpts = append(agentOpts, agent.WithRecapScheduler(recapGen))
 	}
-	// cloudTierModel late-binds the server's live tier→cloud-model resolver
-	// (assigned after srv is constructed) so the compaction summarizer's
-	// cloud fallback rides the economy tier instead of the premium chat model.
-	var cloudTierModel func(config.Tier) string
+	// The same live task-routing graph serves main and dispatch compaction.
+	var compactionCandidates func() inference.Tiers
+
 	var compGen *compactiongen.Generator
 	// Set when compaction is enabled; installed on the server after construction.
 	var newLoopCompactor func() agent.LoopCompactor
@@ -330,20 +329,11 @@ func startGRPCServer(cfg config.Config, bindAddr string, events *crashlog.Writer
 		loopDeps := loopcompact.WiringDeps{
 			Cfg:       cfg,
 			ChatModel: openChatModel(cfg),
-			OpenTierModel: func(t config.Tier) string {
-				id, _ := openTierModelOK(cfg, t)
-				return id
-			},
-			// The host's open provider is already a TurnRunner (the interactive
-			// provider); the summarizer reuses it directly.
-			OpenRunner:  func() agent.TurnRunner { return openProvider },
-			CloudRunner: func() agent.TurnRunner { return lazyRouter.Tiers().Cloud },
-			// Late-bound on purpose: read at pass time, after srv is constructed.
-			CloudModelForTier: func(t config.Tier) string {
-				if cloudTierModel == nil {
-					return ""
+			Candidates: func() inference.Tiers {
+				if compactionCandidates == nil {
+					return inference.Tiers{}
 				}
-				return cloudTierModel(t)
+				return compactionCandidates()
 			},
 			OpenRuntimeContext: llamaEng.RuntimeContext,
 			Log: func(format string, args ...any) {
@@ -352,13 +342,6 @@ func startGRPCServer(cfg config.Config, bindAddr string, events *crashlog.Writer
 		}
 		compactSummarize := loopcompact.BuildSummarizer(loopDeps)
 		compCfg := loopcompact.BuildConfig(loopDeps)
-		// No warning when the summarizer model is empty: an unset fast_light_text.open
-		// is the recommended default, not a misconfiguration. The bakeoff
-		// (compaction-bakeoff-findings.md, "Summarizer model selection") found
-		// the interactive open model to be the best-measured summarizer on both
-		// anchor retention and latency — a larger/interactive model is not
-		// inherently slower (MoE sparsity means disk size is a poor latency
-		// predictor), so there is nothing here to warn about.
 		compGen = compactiongen.New(persistentStore, compactSummarize, compCfg, contextmeter.Default(), 10*time.Second)
 		// Runtime kill switch — Schedule noops until enabled. Wiring the
 		// scheduler unconditionally lets /config compaction-enabled true flip
@@ -412,7 +395,7 @@ func startGRPCServer(cfg config.Config, bindAddr string, events *crashlog.Writer
 	)
 	srv := server.NewServer(orchestrator, lazyRouter, coordinator, cloudFactory, registry)
 	srv.SetBuildVersion(version)
-	cloudTierModel = srv.CloudModelForTier
+	compactionCandidates = srv.DispatchCandidates
 	srv.SetRuntimeManager(runtimeManager)
 	if os.Getenv("CERCANO_AUTOLAUNCHED") == "1" && cfg.Agent.ShutdownOnLastClient {
 		srv.EnableIdleShutdown(2*time.Second, func() {

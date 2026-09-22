@@ -14,6 +14,7 @@ import (
 	projectctx "cercano/source/server/internal/context"
 	"cercano/source/server/internal/contextmeter"
 	"cercano/source/server/internal/dispatch"
+	cfgsvc "cercano/source/server/internal/hostsvc/config"
 	toolssvc "cercano/source/server/internal/hostsvc/tools"
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
@@ -66,7 +67,7 @@ func (p *scriptedSummaryProvider) StreamChat(ctx context.Context, req llm.ChatRe
 // VALUES are test-only (production defaults are untouched); the SHAPE is the
 // same config surface the host reads.
 func compactionTestConfig() pkgcfg.Config {
-	cfg := pkgcfg.Config{}
+	cfg := pkgcfg.Config{TaskAssignments: map[pkgcfg.Task]pkgcfg.TaskAssignment{pkgcfg.TaskCompaction: {Destination: pkgcfg.DestinationLocal, Quality: pkgcfg.CostEconomy}}}
 	cfg.OpenRuntime = "mistralrs"
 	cfg.MistralRS.MaxSeqLen = 32768
 	cfg.Compaction.Enabled = true
@@ -340,17 +341,41 @@ func TestWorkerCompactionOutgoingRequest(t *testing.T) {
 		t.Fatalf("recent pair broken: calls=%d results=%d", calls, results)
 	}
 }
-func TestWorkerCompactionCloudFallbackDefault(t *testing.T) {
+func TestWorkerCompactionSecondaryDefault(t *testing.T) {
 	cfg := compactionTestConfig()
-	cfg.ActiveCloudProfile = "cloud"
-	cfg.CloudProfiles = []pkgcfg.CloudProfile{{Name: "cloud", Model: "fallback-model"}}
-	cloud := &scriptedSummaryProvider{name: "cloud"}
-	open := &scriptedSummaryProvider{name: "ollama", fail: true}
-	summarize := loopcompact.BuildSummarizer(workerLoopCompactDeps(cfg, cloud, open))
+	delete(cfg.TaskAssignments, pkgcfg.TaskCompaction)
+	cfg.ActiveCloudProfile = "primary"
+	cfg.SecondaryCloudProfile = "secondary"
+	cfg.CloudProfiles = []pkgcfg.CloudProfile{
+		{Name: "primary", TierOverrides: map[pkgcfg.CostTier]string{pkgcfg.CostEconomy: "primary-economy"}},
+		{Name: "secondary", TierOverrides: map[pkgcfg.CostTier]string{pkgcfg.CostEconomy: "secondary-economy"}},
+	}
+	primary := &scriptedSummaryProvider{name: "primary"}
+	secondary := &scriptedSummaryProvider{name: "secondary"}
+	open := &scriptedSummaryProvider{name: "local"}
+	resolver := &workerResolver{cfgSvc: cfgsvc.New("", cfg, nil), cloudProv: primary, secondaryProv: secondary, openProv: open}
+	deps := workerLoopCompactDeps(cfg, primary, open, resolver.Candidates)
+	summarize := loopcompact.BuildSummarizer(deps)
 	if _, err := summarize(t.Context(), bigDispatchHistory(2, 2)); err != nil {
 		t.Fatal(err)
 	}
-	if len(cloud.reqs) != 1 || cloud.reqs[0].Model != "fallback-model" {
-		t.Fatalf("cloud fallback requests: %+v", cloud.reqs)
+	if len(secondary.reqs) != 1 || secondary.reqs[0].Model != "secondary-economy" || secondary.reqs[0].Tier != string(pkgcfg.CostEconomy.CapabilityTier()) {
+		t.Fatalf("secondary requests: %+v", secondary.reqs)
 	}
+	if primary.chats != 0 || open.chats != 0 {
+		t.Fatal("compaction used an unselected route")
+	}
+	svc := buildWorkerToolSvcWithDiagnostic(nil, nil, projectctx.NewLoader(), primary, open, cfg, nil, nil, nil, nil, nil, nil, resolver.Candidates).(*toolssvc.Service)
+	hist := bigDispatchHistory(40, 30)
+	reduced, _, err := svc.LoopCompactorFactory()().CompactLoopHistory(t.Context(), hist)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if compaction.TotalTokens(contextmeter.Default(), reduced) >= compaction.TotalTokens(contextmeter.Default(), hist) {
+		t.Fatal("worker factory did not reduce history")
+	}
+	if secondary.chats < 2 || primary.chats != 0 || open.chats != 0 {
+		t.Fatal("worker-built service lost Secondary routing")
+	}
+
 }

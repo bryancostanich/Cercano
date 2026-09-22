@@ -19,6 +19,7 @@ type Task string
 
 const (
 	TaskChat                  Task = "chat"
+	TaskCompaction            Task = "compaction"
 	TaskDispatch              Task = "dispatch"
 	TaskReconnaissance        Task = "reconnaissance"
 	TaskMechanicalDevelopment Task = "mechanical_development"
@@ -46,6 +47,7 @@ type TaskDefinition struct {
 
 var taskDefinitions = [...]TaskDefinition{
 	{TaskChat, "Chat", TaskAssignment{DestinationPrimary, CostStandard}},
+	{TaskCompaction, "Compaction", TaskAssignment{DestinationSecondary, CostEconomy}},
 	{TaskDispatch, "Default dispatch", TaskAssignment{DestinationSecondary, CostPremium}},
 	{TaskReconnaissance, "Reconnaissance", TaskAssignment{DestinationLocal, CostEconomy}},
 	{TaskMechanicalDevelopment, "Mechanical development", TaskAssignment{DestinationLocal, CostStandard}},

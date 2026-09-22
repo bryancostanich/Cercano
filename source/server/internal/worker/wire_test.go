@@ -695,3 +695,13 @@ func TestSnapshotConfigRoundTrip_ExtendedCompactionFields(t *testing.T) {
 		t.Errorf("LossyToolElision: got %v want %v", got.Compaction.LossyToolElision, orig.Compaction.LossyToolElision)
 	}
 }
+
+func TestCompactionTaskWorkerSnapshot(t *testing.T) {
+	for _, a := range []config.TaskAssignment{{}, {Destination: config.DestinationLocal, Quality: config.CostPremium}, {Destination: config.DestinationSecondary, Quality: config.CostEconomy}} {
+		cfg := config.Config{TaskAssignments: map[config.Task]config.TaskAssignment{config.TaskCompaction: a}}
+		got := ConfigFromSnapshot(SnapshotConfig(cfg, "", nil))
+		if got.TaskAssignment(config.TaskCompaction) != cfg.TaskAssignment(config.TaskCompaction) {
+			t.Fatal("compaction assignment lost in worker snapshot")
+		}
+	}
+}

@@ -10,7 +10,9 @@ import (
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/conversation"
 	"cercano/source/server/internal/dispatchhistory"
+	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
+	"cercano/source/server/pkg/config"
 )
 
 type traceSummaryRunner struct{ requests []*agent.Request }
@@ -19,6 +21,15 @@ func (*traceSummaryRunner) Name() string { return "scripted" }
 func (r *traceSummaryRunner) Process(_ context.Context, req *agent.Request) (*agent.Response, error) {
 	r.requests = append(r.requests, req)
 	return &agent.Response{Output: "<goal>implement task</goal><state>exact summary evidence</state>", InputTokens: 37, OutputTokens: 11}, nil
+}
+
+func (*traceSummaryRunner) Capabilities() inference.Capabilities { return inference.Capabilities{} }
+func (r *traceSummaryRunner) Chat(ctx context.Context, req llm.ChatRequest) (llm.ChatResponse, error) {
+	response, err := r.Process(ctx, &agent.Request{Input: req.Messages[0].Blocks[0].Text, RequestID: req.RequestID})
+	return llm.ChatResponse{Blocks: []llm.Block{{Type: llm.BlockText, Text: response.Output}}, InputTokens: response.InputTokens, OutputTokens: response.OutputTokens}, err
+}
+func (*traceSummaryRunner) StreamChat(context.Context, llm.ChatRequest) (llm.StreamReader, error) {
+	panic("unexpected stream")
 }
 
 func TestSummarizerDispatchHistoryWiring(t *testing.T) {
@@ -35,7 +46,9 @@ func TestSummarizerDispatchHistoryWiring(t *testing.T) {
 	defer tr.Close()
 
 	runner := &traceSummaryRunner{}
-	summarize := BuildSummarizer(WiringDeps{OpenRunner: func() agent.TurnRunner { return runner }})
+	summarize := BuildSummarizer(WiringDeps{Candidates: func() inference.Tiers {
+		return inference.Tiers{Destinations: map[config.Destination]inference.Candidate{config.DestinationSecondary: {Provider: runner, IsCloud: true}}}
+	}})
 	ctx := dispatchhistory.WithRecorder(t.Context(), tr)
 	ctx = agent.WithLoopCompactionScope(ctx, agent.LoopCompactionScope{ConversationID: "child", Iteration: 4})
 	_, err = summarize(ctx, []llm.Message{{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: "exact task evidence"}}}})

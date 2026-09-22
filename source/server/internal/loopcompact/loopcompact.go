@@ -28,9 +28,8 @@ import (
 	"cercano/source/server/internal/llm"
 )
 
-// Summarize is the summarizer seam, matching compaction.SummarizeFunc. In
-// production this is the same local fast_light_text summarizer the main loop
-// uses, so compacting a cloud sub-agent's history stays local work.
+// Summarize is the summarizer seam, matching compaction.SummarizeFunc. Both
+// main and dispatch compaction use the Compaction task route.
 type Summarize = compaction.SummarizeFunc
 
 // Compactor implements agent.LoopCompactor over compactor.Advance.
@@ -58,9 +57,7 @@ type Options struct {
 	Config    compactor.Config
 	Summarize Summarize
 	Tokenizer contextmeter.Tokenizer
-	// Timeout bounds one compaction pass. Unlike the background generator's
-	// multi-minute budget, an inline pass blocks the dispatch, so it must be
-	// short: a slow summarizer should cost a little latency, never a stall.
+	// Timeout optionally tightens the shared compaction execution budget.
 	Timeout time.Duration
 	// OnPass receives metadata-only telemetry for every compaction attempt
 	// (below-floor no-ops included). Nil disables telemetry.
@@ -68,7 +65,7 @@ type Options struct {
 }
 
 // DefaultTimeout bounds one inline pass.
-const DefaultTimeout = 90 * time.Second
+const DefaultTimeout = compaction.ExecutionTimeout
 
 // New builds a loop compactor. It returns nil when no summarizer is available,
 // so callers can wire unconditionally and simply get no compaction when the
@@ -95,7 +92,7 @@ func New(opts Options) *Compactor {
 		tok = contextmeter.Default()
 	}
 	timeout := opts.Timeout
-	if timeout <= 0 {
+	if timeout <= 0 || timeout > DefaultTimeout {
 		timeout = DefaultTimeout
 	}
 	return &Compactor{cfg: cfg, summarize: opts.Summarize, tok: tok, timeout: timeout, onPass: opts.OnPass}

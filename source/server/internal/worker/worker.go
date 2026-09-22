@@ -473,7 +473,7 @@ func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, cr
 		if autonomyLedger != nil {
 			autonomy = autonomyLedger
 		}
-		toolSvc = buildWorkerToolSvcWithDiagnostic(permBroker, engine, ctxLoader, provSvc.Cloud(), provSvc.Open(), cfg, subPersist, profileCtl.SetProfile, visionSvc, failureLog, diagnostic, autonomy, restart...)
+		toolSvc = buildWorkerToolSvcWithDiagnostic(permBroker, engine, ctxLoader, provSvc.Cloud(), provSvc.Open(), cfg, subPersist, profileCtl.SetProfile, visionSvc, failureLog, diagnostic, autonomy, provSvc.Candidates, restart...)
 	}
 
 	// Register a proxy per host-advertised MCP tool. Done AFTER the built-in

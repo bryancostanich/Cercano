@@ -523,3 +523,43 @@ func TestRegenerate_IncrementalKeepsExistingState(t *testing.T) {
 		t.Fatalf("incremental compaction must not clear existing state: %+v", fs.state)
 	}
 }
+
+func TestMainCompactionExecutionBudget(t *testing.T) {
+	for _, entry := range []string{"scheduled", "inline", "regenerate"} {
+		t.Run(entry, func(t *testing.T) {
+			fs := &fakeStore{turns: bigTurns(12, 1000)}
+			deadlines := make(chan time.Time, 100)
+			summary := func(ctx context.Context, _ []llm.Message) (compaction.StructuredSummary, error) {
+				d, _ := ctx.Deadline()
+				deadlines <- d
+				return compaction.StructuredSummary{Goal: "g"}, nil
+			}
+			cfg := compactor.Config{ActivationFloorTokens: 1000, SegmentTokens: 4000, VerbatimRecent: 2}
+			g := New(fs, summary, cfg, contextmeter.Default(), time.Millisecond)
+			defer g.Close(context.Background())
+			g.SetEnabled(true)
+			start := time.Now()
+			switch entry {
+			case "scheduled":
+				g.Schedule("c1")
+			case "inline":
+				if err := g.CompactNow(t.Context(), "c1"); err != nil {
+					t.Fatal(err)
+				}
+			case "regenerate":
+				if _, _, err := g.Regenerate(t.Context(), "c1", false, nil); err != nil {
+					t.Fatal(err)
+				}
+			}
+			select {
+			case d := <-deadlines:
+				remaining := d.Sub(start)
+				if remaining < compaction.ExecutionTimeout-time.Second || remaining > compaction.ExecutionTimeout+time.Second {
+					t.Fatalf("budget=%s", remaining)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("summarizer not called")
+			}
+		})
+	}
+}

@@ -26,13 +26,6 @@ type Store interface {
 	SaveCompaction(ctx context.Context, c conversation.Compaction) error
 }
 
-// runTimeout bounds one scheduled compaction pass. It must comfortably fit
-// maxSegmentsPerPass summarizer calls at local-model speed (~40s each at 8k
-// segment tokens) plus an occasional re-consolidation call — the previous
-// 2-minute budget could expire mid-pass on every attempt. Advance now keeps
-// partial progress on deadline expiry, so this is headroom, not a cliff.
-const runTimeout = 6 * time.Minute
-
 // Generator debounces compaction per conversation.
 type Generator struct {
 	rootContext context.Context
@@ -169,7 +162,7 @@ func (g *Generator) Schedule(conversationID string) {
 		g.mu.Lock()
 		delete(g.timers, conversationID)
 		g.mu.Unlock()
-		ctx, cancel := context.WithTimeout(context.Background(), runTimeout)
+		ctx, cancel := compaction.WithExecutionBudget(context.Background())
 		defer cancel()
 		_ = g.runCompaction(ctx, conversationID)
 	})
@@ -201,6 +194,8 @@ func (g *Generator) release(conversationID string) {
 }
 
 func (g *Generator) runCompaction(ctx context.Context, conversationID string) error {
+	ctx, cancel := compaction.WithExecutionBudget(ctx)
+	defer cancel()
 	ctx, release, ok := g.startWork(ctx)
 	if !ok {
 		return context.Canceled
@@ -308,6 +303,8 @@ func (g *Generator) runCompaction(ctx context.Context, conversationID string) er
 // receives one human-readable line per step. Unlike Schedule this ignores the
 // kill switch: it only ever runs as an explicit user action.
 func (g *Generator) Regenerate(ctx context.Context, conversationID string, incremental bool, progress func(string)) (preTokens, postTokens int, err error) {
+	ctx, cancel := compaction.WithExecutionBudget(ctx)
+	defer cancel()
 	ctx, release, ok := g.startWork(ctx)
 	if !ok {
 		return 0, 0, context.Canceled

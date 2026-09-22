@@ -28,7 +28,9 @@ func TestDispatchBudgetErrorRetainsPartialHandoff(t *testing.T) {
 		return agent.LoopCompactorFunc(func(_ context.Context, h []llm.Message) ([]llm.Message, int, error) { return h, 5, nil })
 	})
 	p := &historyProbeProvider{name: "cloud"}
-	result, err := svc.RunAgenticDispatch(t.Context(), dispatch.Spec{Task: "Read configuration", ConversationID: "parent", Tools: []string{"Read", "Grep"}, MaxIterations: 5, TokenBudget: 9}, inference.Selection{Provider: p, IsCloud: true}, "model")
+	// The original task is never compacted. Exhaust on the first execution-history
+	// pass, after one completed tool call and before the second model request.
+	result, err := svc.RunAgenticDispatch(t.Context(), dispatch.Spec{Task: "Read configuration", ConversationID: "parent", Tools: []string{"Read", "Grep"}, MaxIterations: 5, TokenBudget: 5}, inference.Selection{Provider: p, IsCloud: true}, "model")
 	var classified *llm.Error
 	if !errors.As(err, &classified) || classified.Class != llm.ErrTokenBudgetExhausted {
 		t.Fatalf("lost classification: %v", err)

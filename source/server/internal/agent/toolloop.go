@@ -122,8 +122,13 @@ type ToolLoopInput struct {
 	Profile     Profile
 	ConvHistory []llm.Message
 	UserInput   string
-	Images      []InlineImage
-	Model       string
+
+	// PinUserInput retains the original delegated task verbatim as the first
+	// user message. Only execution history is compactable or trimmable.
+	// Dispatch enables this; ordinary conversation turns keep their existing policy.
+	PinUserInput bool
+	Images       []InlineImage
+	Model        string
 	// Tier is the capability-tier name Model was resolved from (empty for the
 	// provider's default). Rides every ChatRequest as routing metadata so the
 	// cloud failover composite can re-resolve the tier in the backup vendor's
@@ -482,11 +487,16 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (returned ToolLoopResult
 		}
 	}
 
+	userMessage := llm.Message{Role: llm.RoleUser, Blocks: buildUserBlocks(in.UserInput, in.Images)}
 	hist := append([]llm.Message{}, in.ConvHistory...)
-	hist = append(hist, llm.Message{
-		Role:   llm.RoleUser,
-		Blocks: buildUserBlocks(in.UserInput, in.Images),
-	})
+	protectedPrefix := 0
+	if in.PinUserInput {
+		// Keep the task at user priority, separate from generated summaries.
+		hist = append([]llm.Message{userMessage}, hist...)
+		protectedPrefix = 1
+	} else {
+		hist = append(hist, userMessage)
+	}
 
 	// Vision-as-tool: replace raw image blocks with text placeholders and
 	// register each image in the per-conversation store, so the reasoning model
@@ -617,7 +627,10 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (returned ToolLoopResult
 			// Stamp dispatch correlation so the compactor's metadata telemetry
 			// names the conversation and iteration every pass belongs to.
 			compactCtx := WithLoopCompactionScope(ctx, LoopCompactionScope{ConversationID: in.ConversationID, Iteration: iter + 1, ContextWindow: in.ContextWindow, ContextWindowKnown: in.ContextWindowKnown})
-			hist = compactLoopHistory(compactCtx, in.LoopCompactor, hist, &tokenBudget)
+			working := compactLoopHistory(compactCtx, in.LoopCompactor, hist[protectedPrefix:], &tokenBudget)
+			// A capacity-limited prefix prevents append from overwriting history
+			// retained by observers. The compactor never receives the task.
+			hist = append(hist[:protectedPrefix:protectedPrefix], working...)
 			if len(hist) != beforeCompact {
 				// priorHistoryCount indexes into hist for tail preservation; a
 				// compacted view invalidates it, so clamp instead of letting a
@@ -630,20 +643,18 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (returned ToolLoopResult
 			// Include no-op/failing passes and same-size rewrites as well.
 			tr.Compaction(iter+1, beforeForTrace, hist, tokenBudget.Spent-spentBeforeTrace, dispatchhistory.CompactionAccounting{ReportedTokens: tokenBudget.Spent - spentBeforeTrace - (tokenBudget.Estimated - estimatedBeforeTrace), EstimatedTokens: tokenBudget.Estimated - estimatedBeforeTrace})
 		}
-		preserveTail := len(hist) - priorHistoryCount
-		if preserveTail < 1 {
-			preserveTail = 1
-		}
+		preserveTail := preservedLoopTail(hist, priorHistoryCount, protectedPrefix)
 		beforeTrim := len(hist)
 		if tokenBudget.Exhausted() {
 			return ToolLoopResult{FinalText: progress.handoff(nil), Iterations: iter, History: hist, InputTokens: lastIn, OutputTokens: lastOut, CalledTools: calledTools}, tokenBudget.Err()
 		}
 		trimmed, budget := TrimMessagesToBudget(RequestBudgetInput{
-			System:        effectiveSystem,
-			Messages:      hist,
-			Tools:         catalog,
-			MaxTokens:     maxTokens,
-			ContextWindow: in.ContextWindow,
+			System:          effectiveSystem,
+			Messages:        hist,
+			ProtectedPrefix: protectedPrefix,
+			Tools:           catalog,
+			MaxTokens:       maxTokens,
+			ContextWindow:   in.ContextWindow,
 		}, preserveTail)
 		if budget.TrimmedMessages > 0 {
 			hist = trimmed
@@ -1159,6 +1170,18 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (returned ToolLoopResult
 			"You've reached the %d-step tool limit for this turn. Stop calling tools and give your best answer now using what you've gathered.",
 			maxIters)}},
 	})
+	if protectedPrefix > 0 {
+		// The no-tools final pass is still a request: do not bypass the
+		// context guard or sacrifice the task to make room for its notice.
+		var budget RequestBudgetResult
+		hist, budget = TrimMessagesToBudget(RequestBudgetInput{
+			System: in.System, Messages: hist, ProtectedPrefix: protectedPrefix,
+			MaxTokens: maxTokens, ContextWindow: in.ContextWindow,
+		}, preservedLoopTail(hist, priorHistoryCount, protectedPrefix))
+		if !budget.Fits {
+			return ToolLoopResult{Iterations: maxIters, History: hist, InputTokens: lastIn, OutputTokens: lastOut, LastRequestBudget: budget, CalledTools: calledTools}, budget.OverflowError()
+		}
+	}
 	finalReq := llm.ChatRequest{Model: in.Model, Tier: in.Tier, FallbackTier: in.FallbackTier, System: in.System, Messages: hist, MaxTokens: maxTokens, Temperature: in.Temperature}
 	// Trace the iteration-cap degradation pass too: the exact no-tools request
 	// the model sees here is part of the dispatch's story.

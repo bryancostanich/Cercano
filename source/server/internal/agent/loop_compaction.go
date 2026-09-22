@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 
+	"cercano/source/server/internal/compaction"
 	"cercano/source/server/internal/llm"
 )
 
@@ -90,4 +91,15 @@ func compactLoopHistory(ctx context.Context, c LoopCompactor, history []llm.Mess
 		return history
 	}
 	return llm.RepairPairing(out)
+}
+
+// preservedLoopTail keeps the current turn for ordinary conversations. In a
+// dispatch the task has its own protected prefix, so old execution history may
+// be trimmed, but the newest message group must remain indivisible (including
+// every call/result of a parallel tool exchange when it ends the history).
+func preservedLoopTail(history []llm.Message, priorHistoryCount, protectedPrefix int) int {
+	if protectedPrefix > 0 {
+		return len(history) - compaction.ToolSafePrefix(history, len(history)-1)
+	}
+	return max(1, len(history)-priorHistoryCount)
 }

@@ -11,12 +11,16 @@ import (
 // is about to send. The estimator is deliberately cheap and conservative; real
 // provider usage remains authoritative after a successful call.
 type RequestBudgetInput struct {
-	System         string
-	Messages       []llm.Message
-	Tools          []llm.Tool
-	MaxTokens      int
-	ContextWindow  int
-	SafetyFraction float64
+	System   string
+	Messages []llm.Message
+
+	// ProtectedPrefix leading messages cannot be dropped. The boundary must
+	// not split a tool exchange; dispatch uses one plain user task message.
+	ProtectedPrefix int
+	Tools           []llm.Tool
+	MaxTokens       int
+	ContextWindow   int
+	SafetyFraction  float64
 }
 
 // RequestBudgetResult is the decomposed prompt-size estimate used for logs,
@@ -89,17 +93,18 @@ func EstimateRequestBudget(in RequestBudgetInput) RequestBudgetResult {
 	return result
 }
 
-// TrimMessagesToBudget drops the oldest messages until the estimated request
-// fits. preserveTail is the number of newest messages that must not be dropped
-// (normally the current user turn). Pairing is repaired after each candidate so
-// provider-native tool_use/tool_result constraints remain valid.
+// TrimMessagesToBudget drops the oldest unprotected messages until the complete
+// estimated request fits. preserveTail is the number of newest messages that
+// must not be dropped (normally the current user turn). Pairing is repaired after
+// each candidate so provider-native tool_use/tool_result constraints remain valid.
 func TrimMessagesToBudget(in RequestBudgetInput, preserveTail int) ([]llm.Message, RequestBudgetResult) {
 	messages := append([]llm.Message(nil), in.Messages...)
 	if preserveTail < 0 {
 		preserveTail = 0
 	}
-	if preserveTail > len(messages) {
-		preserveTail = len(messages)
+	protected := max(0, min(in.ProtectedPrefix, len(messages)))
+	if preserveTail > len(messages)-protected {
+		preserveTail = len(messages) - protected
 	}
 	result := EstimateRequestBudget(RequestBudgetInput{
 		System: in.System, Messages: messages, Tools: in.Tools, MaxTokens: in.MaxTokens,
@@ -108,11 +113,11 @@ func TrimMessagesToBudget(in RequestBudgetInput, preserveTail int) ([]llm.Messag
 	if result.Fits || in.ContextWindow <= 0 {
 		return messages, result
 	}
-	for len(messages) > preserveTail {
-		messages = append([]llm.Message(nil), messages[1:]...)
-		messages = llm.RepairPairing(messages)
-		if preserveTail > len(messages) {
-			preserveTail = len(messages)
+	for len(messages) > protected+preserveTail {
+		prefix := append([]llm.Message(nil), messages[:protected]...)
+		messages = append(prefix, llm.RepairPairing(messages[protected+1:])...)
+		if preserveTail > len(messages)-protected {
+			preserveTail = len(messages) - protected
 		}
 		result = EstimateRequestBudget(RequestBudgetInput{
 			System: in.System, Messages: messages, Tools: in.Tools, MaxTokens: in.MaxTokens,

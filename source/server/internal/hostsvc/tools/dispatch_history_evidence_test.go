@@ -113,8 +113,16 @@ func TestDispatchHistoryMatchesProviderAndRecordsEveryDispatch(t *testing.T) {
 			if err := json.Unmarshal(r.Event, &ev); err != nil {
 				t.Fatal(err)
 			}
-			if len(ev.Before) != len(ev.After) || ev.After[0].Blocks[0].Text != ev.Before[0].Blocks[0].Text+" [compacted]" || ev.Spent != 7 {
-				t.Fatalf("lost same-size compaction evidence: %+v", ev)
+			if len(ev.Before) != len(ev.After) || !reflect.DeepEqual(ev.Before[0], ev.After[0]) {
+				t.Fatalf("compaction changed the protected task: %+v", ev)
+			}
+			if r.Iteration == 1 {
+				// Only the pinned task exists: there is no execution history to compact.
+				if ev.Spent != 0 || !reflect.DeepEqual(ev.Before, ev.After) {
+					t.Fatalf("task-only history was compacted: %+v", ev)
+				}
+			} else if ev.After[1].Blocks[0].Text != ev.Before[1].Blocks[0].Text+" [compacted]" || ev.Spent != 7 {
+				t.Fatalf("lost same-size execution-history compaction evidence: %+v", ev)
 			}
 		}
 	}

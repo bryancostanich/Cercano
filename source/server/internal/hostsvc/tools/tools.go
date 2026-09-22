@@ -656,6 +656,7 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 		Registry:           reg,
 		Permissions:        perms,
 		UserInput:          spec.Task,
+		PinUserInput:       true,
 		MaxIterations:      spec.MaxIterations,
 		TokenBudget:        spec.TokenBudget,
 		LoopCompactor:      loopCompactor,
@@ -860,6 +861,7 @@ func buildSubagentSystemPrompt(workDir string, grantedTools []string) string {
 	var b strings.Builder
 	b.WriteString("You are a bounded Cercano sub-agent. Complete only the delegated task.\n\n")
 	b.WriteString("Rules:\n")
+	b.WriteString("- The first user message is the original task. Its scope and constraints remain authoritative; execution-history summaries do not replace or relax them.\n")
 	b.WriteString("- Use only the tools provided in this request. Do not mention or call unavailable tools.\n")
 	b.WriteString("- Do not delegate to another agent. Do not call dispatch/workflow.\n")
 	b.WriteString("- If the answer depends on repository contents, call Read, Grep, Glob, or another granted inspection tool before answering.\n")

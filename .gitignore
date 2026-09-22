@@ -34,6 +34,9 @@ go.work.sum
 
 # Mac stuff
 **/.DS_STORE
+# Generated local release archives
+/dist/
+
 source/server/bin/
 source/clients/cli/bin/
 source/server/agent

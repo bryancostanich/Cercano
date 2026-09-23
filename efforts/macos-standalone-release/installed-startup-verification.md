@@ -87,7 +87,21 @@ Isolation: the release check is pointed at `httptest` — no request reaches Git
 
 Parent verification: `gofmt -l` clean; `go vet ./pkg/update` clean; `go test ./pkg/update ./internal/conversation ./pkg/agentclient -count=1` all ok.
 
-## 9. Limitations and remaining Phase 2 gaps
+## 9. Required assets and installed-path gaps: none demonstrated
+
+Re-checked rather than inherited from the earlier audit. Every runtime asset is compiled into the binaries with `go:embed`: router prototypes (`internal/agent/router.go`), the conversation schema (`internal/conversation/store.go`), tier recommendations (`pkg/config/tierrecs.go`), runtime catalogs (`internal/localruntime/*/catalog.go`), the tokenizer table (`internal/contextmeter/embedded_bpe.go`), the bundled skills catalog (`internal/skills/skills.go`), and the search helper script (`internal/web/script.go`). No runtime path resolves assets relative to a source checkout, and the discovery tests in §3 ran from a working directory outside the repository without asset errors.
+
+Because no installed-path or missing-asset failure was demonstrated, the plan's "correct demonstrated gaps" task has nothing to correct. Per the plan's own objective — fix only demonstrated gaps — no production code was changed. Python virtualenv and model weights remain separately provisioned first-run concerns, not packaged assets (see §"Limitations").
+
+## 10. Restart guidance after an upgrade
+
+Under the approved ruling there is **no handshake and no version gating**: a mixed-version client and agent connect normally, and nothing in the agent can detect that it is running pre-upgrade code. Confirmed by inspection — `source/proto/agent.proto` has no version or capability-handshake RPC, and `Dial`/`connect` perform no version exchange.
+
+Consequently the only correct behavior after `brew upgrade` is what already exists: the running agent keeps serving the old binary until the user restarts it, and nothing terminates it automatically. The actionable path is the existing `/restart-agent` command (alias `/bounce`, `source/clients/cli/internal/slash/restart_agent.go`), which drains in-flight turns, stops runtime children, exits, and lets the client reconnect to a fresh agent. It is strictly user-initiated; no automatic termination was added.
+
+No production change was warranted here. What remains is telling the user about it, which the plan already assigns to Phase 5 ("Document ... explicit restart"). Flagging so it is not lost: the upgrade nudge text currently names only `brew upgrade cercano`, so the restart step must be covered in the Phase 5 installation documentation.
+
+## 11. Limitations and remaining Phase 2 gaps
 
 - Discovery is proven at the `findCercanoBinary` level only; the full auto-launch path (`ensureServerLaunched` / `autoLaunchServer` / launch lock / `waitForPort`) was **not** exercised — that needs an isolated agent subprocess with isolated HOME/config/socket/ports and is not covered here.
 - No live `brew install` against a real Homebrew prefix/keg was performed; layout is a faithful fixture, not a real bottle install (matches release-audit §"Non-blockers").

@@ -63,7 +63,19 @@ Isolation: the subprocess runs with `TMPDIR` pointed at a private directory, so 
 
 Parent verification: `go vet ./pkg/agentclient` clean; `go test ./pkg/agentclient -run TestInstalledAgentReuse -count=1 -v` PASS (both directions); `go test ./pkg/agentclient -count=1` ok (full package).
 
-## 7. Limitations and remaining Phase 2 gaps
+## 7. User data preserved across binary replacement
+
+`source/server/internal/conversation/upgrade_preservation_test.go` — `TestUpgradePreservesUserData` proves the data-safety half of the upgrade contract. It seeds a real conversation (two turns) and a `config.yaml` at the **production-resolved** location under an isolated HOME, then performs a realistic bottle upgrade: new files written to a new version keg, prefix symlinks repointed, old keg deleted. Replacement is asserted to be genuine (different inodes via `os.SameFile`, old keg gone) before checking that `DefaultPath` still resolves to the same database and that the conversation, its turn contents, its project listing, and the config bytes all survive unchanged.
+
+Non-vacuity: a temporary mutation probe that deleted the database and config after the upgrade made the test fail with `conversation lost across upgrade: sql: no rows in result set`. The probe was then removed; the passing result reflects preservation, not a missing assertion. An in-test bug was also found and fixed during development — the HOME-containment guard treated the leading dot of `.config` as an escape; it now detects `..` traversal instead.
+
+Isolation: HOME is redirected with `t.Setenv` and `CERCANO_CONVERSATIONS_DB` is explicitly cleared, so an ambient developer override cannot redirect the test onto the real database. Confirmed afterwards that the developer's real `~/.config/cercano/config.yaml` was untouched. The "binaries" are inert text fixtures, never executed; no agent was started.
+
+Note this establishes user data lives outside the install prefix and survives replacement. It does not exercise a live agent writing during an upgrade; that belongs to the Phase 6 clean-Mac rehearsal.
+
+Parent verification: `gofmt -l` clean; `go vet ./internal/conversation ./pkg/agentclient` clean; `go test ./internal/conversation -count=1` ok.
+
+## 8. Limitations and remaining Phase 2 gaps
 
 - Discovery is proven at the `findCercanoBinary` level only; the full auto-launch path (`ensureServerLaunched` / `autoLaunchServer` / launch lock / `waitForPort`) was **not** exercised — that needs an isolated agent subprocess with isolated HOME/config/socket/ports and is not covered here.
 - No live `brew install` against a real Homebrew prefix/keg was performed; layout is a faithful fixture, not a real bottle install (matches release-audit §"Non-blockers").

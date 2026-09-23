@@ -24,7 +24,7 @@ Objective: fix only demonstrated gaps in standalone installation and upgrade beh
 - [x] Add isolated integration coverage for a compatible already-running agent and incompatible connection behavior
 - [ ] Implement any missing actionable restart guidance under the established compatibility contract without automatic process termination
 - [ ] Verify Homebrew-managed installations are not overwritten by an incompatible self-update path; fix demonstrated conflicts
-- [ ] Verify configuration and conversation data are preserved across replacement and restart
+- [x] Verify configuration and conversation data are preserved across replacement and restart
 - [ ] Run affected package tests and installation/upgrade integration tests, then checkpoint the solved unit
 
 ## Phase 3 — Build strict release artifacts

@@ -19,7 +19,7 @@ Objective: resolve incomplete discovery before changing production behavior. Fil
 
 Objective: fix only demonstrated gaps in standalone installation and upgrade behavior. Files: entrypoint, agentclient, asset discovery, and update code identified in Phase 1; focused unit and integration tests beside those packages. Tests: temporary installation prefix with Homebrew-style symlinks, working directory outside the repository, already-running compatible and incompatible agents, and preserved state. Test subprocesses must use isolated configuration and sockets and must never terminate the developer's live agent.
 
-- [ ] Add installation probes for colocated binaries reached through Homebrew-style symlinks and prove any observed discovery or asset-loading failures
+- [x] Add installation probes for colocated binaries reached through Homebrew-style symlinks and prove any observed discovery or asset-loading failures
 - [ ] Correct demonstrated installed-path or required-asset gaps without introducing development-checkout dependencies
 - [ ] Add isolated integration coverage for a compatible already-running agent and incompatible connection behavior
 - [ ] Implement any missing actionable restart guidance under the established compatibility contract without automatic process termination

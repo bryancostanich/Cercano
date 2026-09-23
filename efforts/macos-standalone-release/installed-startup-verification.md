@@ -52,7 +52,18 @@ These tests cover **terminal client → agent binary discovery**. The two invoca
 
 Parent verification: `go test ./pkg/agentclient -count=1` passed after inspecting the new tests and the agent entrypoint.
 
-## 6. Limitations and remaining Phase 2 gaps
+## 6. Running-agent reuse (non-disruptive upgrade contract)
+
+`source/server/pkg/agentclient/installed_reuse_test.go` — `TestInstalledAgentReuse` exercises the production auto-launch decision (`ensureServerLaunched`) from a real copied client invoked through a Homebrew-style prefix symlink, in two directions:
+
+- `running_agent_is_reused` — a real gRPC listener on an ephemeral loopback port stands in for the running agent. Production reports `launched=false`, no spawn log, no error, and the installed agent fixture is **never executed** (marker file absent). This is the upgrade contract: a replaced client attaches to the agent already running rather than starting a competing one. No version gate is consulted; none exists and none was added.
+- `absent_agent_is_launched` — control. With nothing listening, the same fixture **is** executed (marker file appears), proving the reuse assertion above cannot pass from a dead fixture. The reported `port did not become listenable within 2s` error is expected: the fixture deliberately never binds.
+
+Isolation: the subprocess runs with `TMPDIR` pointed at a private directory, so the auto-launch flock (`cercano-agent-launch.lock`) and the spawn log are isolated from the developer's live agent; PATH and HOME are filtered and emptied. Confirmed after the run that the shared `$TMPDIR` lock was untouched (mtime unchanged, prior day) and the only spawn log written by the test was inside the isolated directory. The sole executable that can run is a throwaway shell fixture; no real agent was started, signaled, or connected to.
+
+Parent verification: `go vet ./pkg/agentclient` clean; `go test ./pkg/agentclient -run TestInstalledAgentReuse -count=1 -v` PASS (both directions); `go test ./pkg/agentclient -count=1` ok (full package).
+
+## 7. Limitations and remaining Phase 2 gaps
 
 - Discovery is proven at the `findCercanoBinary` level only; the full auto-launch path (`ensureServerLaunched` / `autoLaunchServer` / launch lock / `waitForPort`) was **not** exercised — that needs an isolated agent subprocess with isolated HOME/config/socket/ports and is not covered here.
 - No live `brew install` against a real Homebrew prefix/keg was performed; layout is a faithful fixture, not a real bottle install (matches release-audit §"Non-blockers").

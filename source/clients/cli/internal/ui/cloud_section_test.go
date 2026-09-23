@@ -254,7 +254,7 @@ func TestShouldShowClaudeSignIn(t *testing.T) {
 	}
 }
 
-func TestCloudSectionCanonicalSubscriptionOwnsSignIn(t *testing.T) {
+func TestCloudSectionEachSubscriptionOwnsSignIn(t *testing.T) {
 	sp := cloudSamplePage()
 	sp.cloudView.Providers[0].PrimaryProfile = "anthropic"
 	sp.cloudView.Providers[0].Profiles = []agentclient.CloudProfileInfo{
@@ -272,8 +272,8 @@ func TestCloudSectionCanonicalSubscriptionOwnsSignIn(t *testing.T) {
 	for _, f := range anthropic.Fields {
 		anthropicKeys[f.Key()] = true
 	}
-	if anthropicKeys["cloud-signin-claude"] {
-		t.Fatalf("legacy subscription alias must not show sign-in when canonical profile exists: %v", anthropicKeys)
+	if !anthropicKeys["cloud-signin-claude"] {
+		t.Fatalf("each subscription account must show its own sign-in: %v", anthropicKeys)
 	}
 
 	sp.selectCloudRow("profile:claude")

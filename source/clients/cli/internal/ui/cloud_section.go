@@ -3,6 +3,7 @@ package ui
 import (
 	"cercano/source/server/pkg/agentclient"
 	"context"
+	"fmt"
 	"time"
 
 	"cercano/source/clients/cli/internal/form"
@@ -144,66 +145,50 @@ func (sp *settingsPage) cloudDetailFields(r cloudRow) []form.Field {
 	}
 	out = append(out, form.NewButton("cloud-save", il("save"), true), form.NewButton("cloud-discard", il("discard"), true))
 	if !sp.cloudDraftNew {
-		out = append(out, form.NewButton("cloud-delete", il("delete"), true))
+		out = append(out, form.NewButton("cloud-add-account", il("Add another account"), true), form.NewButton("cloud-delete", il("delete"), true))
 	}
 	return out
 }
 
-const canonicalClaudeProfile = "claude"
-
-// shouldShowClaudeSignIn reports whether the selected row should expose the
-// subscription OAuth action. It is driven entirely by the row/draft's auth
-// path (route), not by hardcoded provider IDs, so the CLI stays a thin renderer
-// of the agent catalog.
-//
-// The action belongs only to the subscription auth path. Anthropic now presents
-// as two catalog entries — "anthropic (subscription)" (route=subscription) and
-// "anthropic (API key)" (empty route) — so a non-subscription draft never shows
-// sign-in. On the bare subscription template it is always offered (that is how
-// a fresh install signs in). For an already-configured subscription profile,
-// the canonical profile owns re-auth; older configs whose only subscription
-// profile is a legacy alias keep the action on the primary row so they can
-// still re-authenticate.
+// Every named subscription account owns its sign-in and refresh credentials.
 func (sp *settingsPage) shouldShowClaudeSignIn(r cloudRow, d cloudDraft) bool {
-	if r.Preset == nil || r.Preset.Flavor != "messages" {
-		return false
-	}
-	if d.Route != "subscription" {
-		// API-key path (or an unseeded draft): never offer subscription sign-in.
-		return false
-	}
-	if !r.IsProfile {
-		// Bare subscription template: this is the fresh-install sign-in entry.
-		return true
-	}
-	if r.Profile != nil && r.Profile.Name == canonicalClaudeProfile {
-		return true
-	}
-	if sp.hasCanonicalClaudeSubscriptionProfile() {
-		return false
-	}
-	return !r.SubProfile
+	return (d.Flavor == "messages" || (r.Preset != nil && r.Preset.Flavor == "messages")) && d.Route == "subscription"
 }
 
-func (sp *settingsPage) hasCanonicalClaudeSubscriptionProfile() bool {
+func (sp *settingsPage) cloudAccountNameExists(name string) bool {
 	for _, p := range sp.profiles {
-		if p.Name == canonicalClaudeProfile && p.Flavor == "messages" && p.Route == "subscription" {
+		if p.Name == name {
 			return true
 		}
 	}
-	for _, prov := range sp.cloudView.Providers {
-		for _, p := range prov.Profiles {
-			if p.Name == canonicalClaudeProfile && p.Flavor == "messages" && p.Route == "subscription" {
+	for _, provider := range sp.cloudView.Providers {
+		for _, p := range provider.Profiles {
+			if p.Name == name {
 				return true
 			}
 		}
 	}
 	for _, p := range sp.cloudView.CustomProfiles {
-		if p.Name == canonicalClaudeProfile && p.Flavor == "messages" && p.Route == "subscription" {
+		if p.Name == name {
 			return true
 		}
 	}
 	return false
+}
+
+func (sp *settingsPage) addCloudAccount() {
+	old := sp.cloudDraft
+	base := old.Name
+	name := base
+	for i := 2; sp.cloudAccountNameExists(name) || name == base; i++ {
+		name = fmt.Sprintf("%s-%d", base, i)
+	}
+	// Copy connection structure, never credentials or model overrides.
+	sp.cloudDraft = cloudDraft{Name: name, Flavor: old.Flavor, Backend: old.Backend, Route: old.Route, BaseURL: old.BaseURL, Provider: old.Provider, Region: old.Region, AWSProfile: old.AWSProfile, Choices: (&agentclient.CloudModelChoices{}).Clone()}
+	sp.cloudDraftNew = true
+	sp.cloudDirty = true
+	sp.cloudModels = nil
+	sp.cloudModelsFetched = false
 }
 
 // draftHasKey reports whether the row's profile already has a stored key (drives
@@ -212,7 +197,7 @@ func (sp *settingsPage) draftHasKey(r cloudRow) bool {
 	if sp.cloudDraft.apiKeyEdited {
 		return sp.cloudDraft.apiKey != ""
 	}
-	return r.IsProfile && r.HasKey
+	return !sp.cloudDraftNew && r.IsProfile && r.HasKey
 }
 
 // cloudModelOptions returns the model Select options for the currently

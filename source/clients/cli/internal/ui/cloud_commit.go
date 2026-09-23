@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -22,6 +23,7 @@ const (
 	cloudCommitSignIn
 	cloudCommitSignInClaude
 	cloudCommitDiscard
+	cloudCommitAddAccount
 )
 
 type cloudCommitAction struct {
@@ -44,6 +46,8 @@ func classifyCloudCommit(key, value string) cloudCommitAction {
 		return cloudCommitAction{kind: cloudCommitSelect, rowID: strings.TrimPrefix(key, "cloud-row:")}
 	}
 	switch key {
+	case "cloud-add-account":
+		return cloudCommitAction{kind: cloudCommitAddAccount}
 	case "cloud-name", "cloud-flavor", "cloud-backend", "cloud-base-url", "cloud-model":
 		return cloudCommitAction{kind: cloudCommitDraftEdit, field: key, value: value}
 	case "cloud-key":
@@ -111,7 +115,22 @@ func (sp *settingsPage) commitCloud(ca cloudCommitAction) (string, tea.Cmd, erro
 		sp.agent.State() != agentclient.ConnStateConnected {
 		return "agent reconnecting — retry in a moment", nil, nil
 	}
+	if sp.cloudDraftNew && (ca.kind == cloudCommitSave || ca.kind == cloudCommitSignIn || ca.kind == cloudCommitSignInClaude) {
+		name := strings.TrimSpace(sp.cloudDraft.Name)
+		if name == "" {
+			return "", nil, fmt.Errorf("account name is required")
+		}
+		if sp.cloudAccountNameExists(name) {
+			return "", nil, fmt.Errorf("account %q already exists; select it to sign in again", name)
+		}
+	}
 	switch ca.kind {
+	case cloudCommitAddAccount:
+		if sp.cloudDirty {
+			return "save or discard existing edits before adding an account", nil, nil
+		}
+		sp.addCloudAccount()
+		return "new account — sign in or save credentials", nil, nil
 	case cloudCommitDiscard:
 		sp.selectCloudRow(sp.cloudSelected)
 		return "discarded profile draft", nil, nil
@@ -171,13 +190,11 @@ func (sp *settingsPage) commitCloud(ca cloudCommitAction) (string, tea.Cmd, erro
 		sp.cloudSelected = ""
 		return "deleted " + name, nil, nil
 	case cloudCommitSignIn:
-		// The device-code sign-in runs in a modal owned by the root model. The
-		// profile name is owned by the server (canonical "chatgpt"), so send an
-		// empty name — this way /config and the wizard produce the same single
-		// profile instead of one named after whichever row launched it.
+		profile := strings.TrimSpace(sp.cloudDraft.Name)
 		model := strings.TrimSpace(sp.cloudDraft.Model)
+		setActive := sp.cloudView.Active == ""
 		return "starting ChatGPT sign-in…", func() tea.Msg {
-			return openChatGPTLoginModalMsg{profile: "", model: model, setActive: true}
+			return openChatGPTLoginModalMsg{profile: profile, model: model, setActive: setActive}
 		}, nil
 	case cloudCommitSignInClaude:
 		// Settings sign-in belongs to the selected provider/profile row. Passing
@@ -187,8 +204,9 @@ func (sp *settingsPage) commitCloud(ca cloudCommitAction) (string, tea.Cmd, erro
 		// canonical server-owned default.
 		profile := strings.TrimSpace(sp.cloudDraft.Name)
 		claudeModel := strings.TrimSpace(sp.cloudDraft.Model)
+		setActive := sp.cloudView.Active == ""
 		return "starting Claude sign-in…", func() tea.Msg {
-			return openClaudeLoginModalMsg{profile: profile, model: claudeModel, setActive: true}
+			return openClaudeLoginModalMsg{profile: profile, model: claudeModel, setActive: setActive}
 		}, nil
 	case cloudCommitKey:
 		sp.cloudDraft.apiKey = ca.value

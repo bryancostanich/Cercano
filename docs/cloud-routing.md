@@ -17,7 +17,7 @@ A **model tier** (called a `destination` in configuration and APIs) chooses wher
 | Git land | Local | Premium |
 | Watchdog | Local | Standard |
 
-Primary and Secondary each have their own preferred profile and optional backup. Secondary is not Primary's backup. Local uses its independently managed runtime and models. Light is the display label for the existing `economy` cost tier.
+Primary has a preferred account and an ordered list of backup accounts; Secondary keeps its own preferred profile and single optional backup. Secondary is not Primary's backup. Local uses its independently managed runtime and models. Light is the display label for the existing `economy` cost tier.
 
 Secondary can redirect to Primary or Local; Local can redirect to Primary or Secondary. Chains are followed to their final destination; self-loops, cycles and unknown destinations are rejected atomically. **No redirect** clears a redirect. Redirects change effective placement without overwriting saved profile bindings or task destination/quality. They are not failover: only the final destination's profile, model, credentials and backup chain are used.
 
@@ -43,13 +43,19 @@ Image inspection uses the profile's separate `image_model`, never its text quali
 
 Legacy profile-wide `model`/`model_pinned` choices no longer override quality selection and are not migrated into every quality slot. The legacy `UpdateConfig.cloud_model` mutation is rejected. Re-select intentional choices in the Cloud profile editor.
 
+## Multiple accounts on one provider
+
+A provider can hold several independently authenticated accounts. In **Cloud**, a configured provider row offers **Add another account**, which starts a distinct named account draft that copies only connection structure — never credentials, keys or quality choices. Each subscription account keeps its own sign-in action, so any account can be refreshed without touching another. Adding an account never replaces an existing account with the same name and never changes the current Primary selection; reauthenticating an existing account preserves its saved model and image choices.
+
+When the account serving Primary exhausts its quota, Primary advances to the next configured backup account and stays there for later requests rather than returning on a timer. Traversal visits each configured account at most once per request, wraps around to earlier accounts after the list end, and stops with `all configured cloud accounts exhausted` when every account reports quota exhaustion. Other failure classes keep their existing behavior: transient errors still get their bounded retry, and authentication problems still surface their normal recovery prompt. A quota failure after output has already been streamed does not replay that response; it only affects which account serves the next request. The active account survives unrelated provider reconfiguration and resets to the preferred account when the configured list no longer contains it.
+
 ## Editing settings
 
 The **Routing** tab has two sections:
 
 ### Model tiers
 
-Primary and Secondary each group their profile and backup controls. **No profile selected** means that tier has no cloud profile binding; **No backup** means no backup is configured. These are absent bindings, not hidden default selections.
+Primary groups its **Account** selection with an ordered backup list, each entry offering **Move up**, **Move down**, and **Remove backup**, plus a trailing **Add backup** selector. Secondary groups its profile and single backup control. Selections show provider and account name, so several accounts from one provider stay distinguishable, and an account already used in that tier is not offered again. An empty Primary account or Secondary **No backup** is an absent binding, not a hidden default selection.
 
 Secondary and Local each have **Redirect all work to**, with **No redirect** as the normal selection. A redirect always changes where work runs; a backup is tried after a failure. Local's runtime/model setup remains in **Runtime / Local Models**, rather than becoming a cloud-profile binding.
 
@@ -114,7 +120,7 @@ cloud_profiles:
       economy: openai/gpt-oss-120b
 ```
 
-To add backups, define their profiles and set `backup_cloud_profile` and/or `secondary_backup_cloud_profile` to their names. Missing references and preferred-equals-backup loops are rejected by the settings API.
+To add backups, define their profiles and set `backup_cloud_profiles` (ordered list, Primary), `backup_cloud_profile` (single legacy Primary spelling, kept in step with the list's first entry) and/or `secondary_backup_cloud_profile` to their names. Missing references, empty backup entries, and any duplicate account within one tier are rejected by the settings API, so an account never fails over to itself. An older single-backup configuration keeps working: the legacy field loads as the first backup, and clearing the list clears both spellings.
 
 ## Setup wizard and verification limits
 

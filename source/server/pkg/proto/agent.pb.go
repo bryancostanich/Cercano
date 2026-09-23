@@ -11712,6 +11712,7 @@ type UpsertCloudProfileRequest struct {
 	Region        *string                `protobuf:"bytes,9,opt,name=region,proto3,oneof" json:"region,omitempty"`
 	AwsProfile    *string                `protobuf:"bytes,10,opt,name=aws_profile,json=awsProfile,proto3,oneof" json:"aws_profile,omitempty"`
 	Structure     *CloudProfileStructure `protobuf:"bytes,11,opt,name=structure,proto3" json:"structure,omitempty"`
+	CreateOnly    bool                   `protobuf:"varint,12,opt,name=create_only,json=createOnly,proto3" json:"create_only,omitempty"` // reject an existing name rather than editing it
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -11822,6 +11823,13 @@ func (x *UpsertCloudProfileRequest) GetStructure() *CloudProfileStructure {
 		return x.Structure
 	}
 	return nil
+}
+
+func (x *UpsertCloudProfileRequest) GetCreateOnly() bool {
+	if x != nil {
+		return x.CreateOnly
+	}
+	return false
 }
 
 type UpsertCloudProfileResponse struct {
@@ -12135,6 +12143,7 @@ type StartChatGPTLoginRequest struct {
 	ProfileName   string                 `protobuf:"bytes,1,opt,name=profile_name,json=profileName,proto3" json:"profile_name,omitempty"` // profile to create/update; default "chatgpt"
 	Model         string                 `protobuf:"bytes,2,opt,name=model,proto3" json:"model,omitempty"`                                // model to set on the profile; default gpt-5.3-codex
 	SetActive     bool                   `protobuf:"varint,3,opt,name=set_active,json=setActive,proto3" json:"set_active,omitempty"`      // activate the profile on success
+	CreateOnly    bool                   `protobuf:"varint,4,opt,name=create_only,json=createOnly,proto3" json:"create_only,omitempty"`   // adding an account must not replace an existing sign-in
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -12186,6 +12195,13 @@ func (x *StartChatGPTLoginRequest) GetModel() string {
 func (x *StartChatGPTLoginRequest) GetSetActive() bool {
 	if x != nil {
 		return x.SetActive
+	}
+	return false
+}
+
+func (x *StartChatGPTLoginRequest) GetCreateOnly() bool {
+	if x != nil {
+		return x.CreateOnly
 	}
 	return false
 }
@@ -12290,6 +12306,7 @@ type StartClaudeLoginRequest struct {
 	ProfileName   string                 `protobuf:"bytes,1,opt,name=profile_name,json=profileName,proto3" json:"profile_name,omitempty"` // profile to create/update; default "claude"
 	Model         string                 `protobuf:"bytes,2,opt,name=model,proto3" json:"model,omitempty"`                                // optional explicit model pin; empty follows baked cloud defaults
 	SetActive     bool                   `protobuf:"varint,3,opt,name=set_active,json=setActive,proto3" json:"set_active,omitempty"`      // activate the profile on success
+	CreateOnly    bool                   `protobuf:"varint,4,opt,name=create_only,json=createOnly,proto3" json:"create_only,omitempty"`   // adding an account must not replace an existing sign-in
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -12341,6 +12358,13 @@ func (x *StartClaudeLoginRequest) GetModel() string {
 func (x *StartClaudeLoginRequest) GetSetActive() bool {
 	if x != nil {
 		return x.SetActive
+	}
+	return false
+}
+
+func (x *StartClaudeLoginRequest) GetCreateOnly() bool {
+	if x != nil {
+		return x.CreateOnly
 	}
 	return false
 }
@@ -19045,7 +19069,7 @@ const file_agent_proto_rawDesc = "" +
 	"\aapi_key\x18\x02 \x01(\tR\x06apiKey\"B\n" +
 	"\x1aSetCloudProfileKeyResponse\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\"\xb5\x03\n" +
+	"\x05error\x18\x02 \x01(\tR\x05error\"\xd6\x03\n" +
 	"\x19UpsertCloudProfileRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
 	"\x06flavor\x18\x02 \x01(\tR\x06flavor\x12\x18\n" +
@@ -19059,7 +19083,9 @@ const file_agent_proto_rawDesc = "" +
 	"\vaws_profile\x18\n" +
 	" \x01(\tH\x02R\n" +
 	"awsProfile\x88\x01\x01\x12:\n" +
-	"\tstructure\x18\v \x01(\v2\x1c.agent.CloudProfileStructureR\tstructureB\v\n" +
+	"\tstructure\x18\v \x01(\v2\x1c.agent.CloudProfileStructureR\tstructure\x12\x1f\n" +
+	"\vcreate_only\x18\f \x01(\bR\n" +
+	"createOnlyB\v\n" +
 	"\t_providerB\t\n" +
 	"\a_regionB\x0e\n" +
 	"\f_aws_profile\"\\\n" +
@@ -19079,12 +19105,14 @@ const file_agent_proto_rawDesc = "" +
 	"\fprofile_name\x18\x01 \x01(\tR\vprofileName\"e\n" +
 	"\x1eListCloudProfileModelsResponse\x12-\n" +
 	"\x06models\x18\x01 \x03(\v2\x15.agent.CloudModelInfoR\x06models\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\"r\n" +
+	"\x05error\x18\x02 \x01(\tR\x05error\"\x93\x01\n" +
 	"\x18StartChatGPTLoginRequest\x12!\n" +
 	"\fprofile_name\x18\x01 \x01(\tR\vprofileName\x12\x14\n" +
 	"\x05model\x18\x02 \x01(\tR\x05model\x12\x1d\n" +
 	"\n" +
-	"set_active\x18\x03 \x01(\bR\tsetActive\"\xdc\x01\n" +
+	"set_active\x18\x03 \x01(\bR\tsetActive\x12\x1f\n" +
+	"\vcreate_only\x18\x04 \x01(\bR\n" +
+	"createOnly\"\xdc\x01\n" +
 	"\x16StartChatGPTLoginEvent\x12)\n" +
 	"\x10verification_url\x18\x01 \x01(\tR\x0fverificationUrl\x12\x1b\n" +
 	"\tuser_code\x18\x02 \x01(\tR\buserCode\x12\x12\n" +
@@ -19093,12 +19121,14 @@ const file_agent_proto_rawDesc = "" +
 	"\x05error\x18\x05 \x01(\tR\x05error\x12!\n" +
 	"\fprofile_name\x18\x06 \x01(\tR\vprofileName\x12\x1d\n" +
 	"\n" +
-	"account_id\x18\a \x01(\tR\taccountId\"q\n" +
+	"account_id\x18\a \x01(\tR\taccountId\"\x92\x01\n" +
 	"\x17StartClaudeLoginRequest\x12!\n" +
 	"\fprofile_name\x18\x01 \x01(\tR\vprofileName\x12\x14\n" +
 	"\x05model\x18\x02 \x01(\tR\x05model\x12\x1d\n" +
 	"\n" +
-	"set_active\x18\x03 \x01(\bR\tsetActive\"\x99\x01\n" +
+	"set_active\x18\x03 \x01(\bR\tsetActive\x12\x1f\n" +
+	"\vcreate_only\x18\x04 \x01(\bR\n" +
+	"createOnly\"\x99\x01\n" +
 	"\x15StartClaudeLoginEvent\x12#\n" +
 	"\rauthorize_url\x18\x01 \x01(\tR\fauthorizeUrl\x12\x12\n" +
 	"\x04done\x18\x02 \x01(\bR\x04done\x12\x0e\n" +

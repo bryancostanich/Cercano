@@ -3,6 +3,7 @@ package config
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"cercano/source/server/internal/cloudfactory"
 	"cercano/source/server/internal/hostsvc/credentials"
@@ -24,15 +25,22 @@ type CloudLoginResult struct {
 	Active, Reauthenticated bool
 }
 
-func (s *svc) BeginCloudLogin(ctx context.Context, profile cfg.CloudProfile, activate, reauthenticate bool) (*CloudLogin, error) {
+func (s *svc) BeginCloudLogin(ctx context.Context, profile cfg.CloudProfile, activate, reauthenticate bool, createOnly ...bool) (*CloudLogin, error) {
 	if profile.Name == "" || !cloudfactory.IsSubscription(profile) {
 		return nil, errors.New("subscription profile required")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	before, exists := profileByName(s.current.CloudProfiles, profile.Name)
+	if exists && len(createOnly) > 0 && createOnly[0] {
+		return nil, fmt.Errorf("account %q already exists; select it to sign in again", profile.Name)
+	}
 	if reauthenticate && (!exists || before.Flavor != profile.Flavor || before.Route != profile.Route) {
 		return nil, errors.New("matching subscription profile required for reauthentication")
+	}
+	// Signing into the same auth path changes credentials, not account settings.
+	if exists && before.Flavor == profile.Flavor && before.Route == profile.Route {
+		profile = before.Clone()
 	}
 	provider := "anthropic"
 	if profile.Route == cloudfactory.RouteChatGPT {

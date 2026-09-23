@@ -39,7 +39,7 @@ func (s *Server) runClaudeLogin(req *proto.StartClaudeLoginRequest, stream proto
 	modelPinned := model != ""
 
 	np := config.CloudProfile{Name: profile, Flavor: cloudfactory.FlavorMessages, Route: cloudfactory.RouteSubscription, Model: model, ModelPinned: modelPinned}
-	login, err := s.cfgSvc.BeginCloudLogin(ctx, np, shouldActivateClaudeLogin(req.GetSetActive(), canonicalProfile), reauthenticate)
+	login, err := s.cfgSvc.BeginCloudLogin(ctx, np, shouldActivateClaudeLogin(req.GetSetActive(), canonicalProfile), reauthenticate, req.GetCreateOnly())
 	if err != nil {
 		return sendClaudeLoginResult(stream, false, profile, loginFailure(err))
 	}

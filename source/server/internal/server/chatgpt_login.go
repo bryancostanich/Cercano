@@ -43,7 +43,7 @@ func (s *Server) runChatGPTLogin(req *proto.StartChatGPTLoginRequest, stream pro
 	}
 
 	np := config.CloudProfile{Name: profile, Flavor: cloudfactory.FlavorResponses, Route: cloudfactory.RouteChatGPT, Model: model, ModelPinned: strings.TrimSpace(req.GetModel()) != ""}
-	login, err := s.cfgSvc.BeginCloudLogin(ctx, np, req.GetSetActive(), reauthenticate)
+	login, err := s.cfgSvc.BeginCloudLogin(ctx, np, req.GetSetActive(), reauthenticate, req.GetCreateOnly())
 	if err != nil {
 		return sendChatGPTLoginResult(stream, false, profile, "", loginFailure(err))
 	}

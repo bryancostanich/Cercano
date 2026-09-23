@@ -43,3 +43,21 @@ func TestAddCloudAccountSeparatesCredentialsAndPreservesRouting(t *testing.T) {
 		t.Fatalf("reauth: %+v", msg)
 	}
 }
+
+func TestAccountLoginCompletionKeepsIdentityAndPendingChoices(t *testing.T) {
+	sp := cloudSamplePage()
+	sp.cloudDraft = cloudDraft{Name: "account-2", Choices: (&agentclient.CloudModelChoices{}).Clone()}
+	sp.cloudDraftNew = true
+	sp.cloudDirty = true
+	sp.cloudAccountSignedIn("account-2", "subscription")
+	if sp.cloudDraftNew || sp.cloudDirty || sp.cloudSelected != "profile:account-2" || sp.cloudDraft.Route != "subscription" {
+		t.Fatal("login left a new-account draft")
+	}
+	sp.cloudDraftNew = true
+	sp.cloudDirty = true
+	sp.cloudDraft.Choices.TierOverrides["premium"] = "custom"
+	sp.cloudAccountSignedIn("account-2", "subscription")
+	if !sp.cloudDirty || sp.cloudDraft.Choices.TierOverrides["premium"] != "custom" {
+		t.Fatal("login discarded model edits")
+	}
+}

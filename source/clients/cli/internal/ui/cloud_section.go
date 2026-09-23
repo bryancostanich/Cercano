@@ -222,3 +222,18 @@ func (sp *settingsPage) cloudModelOptions(r cloudRow, currentID string) []form.O
 	}
 	return modelOptionsFromCatalog(models, currentID)
 }
+
+// A successful login commits account identity, not unrelated model/key edits.
+// Keep those edits pending while making the newly created account reselectable.
+func (sp *settingsPage) cloudAccountSignedIn(name, route string) {
+	sp.profilesLoaded = false
+	if sp.cloudDraft.Name != name {
+		return
+	}
+	if sp.cloudDraftNew {
+		sp.cloudDirty = sp.cloudDraft.apiKeyEdited || (sp.cloudDraft.Choices != nil && (len(sp.cloudDraft.Choices.TierOverrides) > 0 || sp.cloudDraft.Choices.ImageModel != ""))
+	}
+	sp.cloudDraftNew = false
+	sp.cloudSelected = "profile:" + name
+	sp.cloudDraft.Route = route
+}

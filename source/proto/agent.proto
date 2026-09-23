@@ -1530,6 +1530,7 @@ message UpsertCloudProfileRequest {
  optional string region = 9;
  optional string aws_profile = 10;
  CloudProfileStructure structure = 11;
+ bool create_only = 12; // reject an existing name rather than editing it
 }
 message UpsertCloudProfileResponse { bool ok = 1; string error = 2; string warning = 3; }
 message RemoveCloudProfileRequest  { string name = 1; }
@@ -1554,6 +1555,7 @@ message StartChatGPTLoginRequest {
   string profile_name = 1; // profile to create/update; default "chatgpt"
   string model = 2;        // model to set on the profile; default gpt-5.3-codex
   bool set_active = 3;     // activate the profile on success
+  bool create_only = 4;    // adding an account must not replace an existing sign-in
 }
 
 // StartChatGPTLoginEvent is one frame of the sign-in stream. The first frame
@@ -1573,6 +1575,7 @@ message StartClaudeLoginRequest {
   string profile_name = 1; // profile to create/update; default "claude"
   string model = 2;        // optional explicit model pin; empty follows baked cloud defaults
   bool set_active = 3;     // activate the profile on success
+  bool create_only = 4;    // adding an account must not replace an existing sign-in
 }
 // StartClaudeLoginEvent is one frame of the Claude sign-in stream. The first
 // frame carries the authorize URL to open in the browser; the terminal frame

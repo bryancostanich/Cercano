@@ -108,9 +108,10 @@ func (mo *chatgptLoginModal) setFailed(msg string) {
 // activates the "sign in with ChatGPT" button. Carries the profile name +
 // model to create and whether to activate it on success.
 type openChatGPTLoginModalMsg struct {
-	profile   string
-	model     string
-	setActive bool
+	createOnly bool
+	profile    string
+	model      string
+	setActive  bool
 }
 
 // chatgptLoginStartedMsg carries the opened stream (or the open error). The
@@ -132,10 +133,10 @@ type chatgptLoginFrameMsg struct {
 
 // startChatGPTLoginCmd opens the StartChatGPTLogin streaming RPC under a
 // cancellable context and returns the stream (or error) for the drain loop.
-func startChatGPTLoginCmd(ag *agentclient.Client, profile, model string, setActive bool, attempt uint64) tea.Cmd {
+func startChatGPTLoginCmd(ag *agentclient.Client, profile, model string, setActive bool, attempt uint64, createOnly ...bool) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithCancel(context.Background())
-		ch, err := ag.StartChatGPTLogin(ctx, profile, model, setActive)
+		ch, err := ag.StartChatGPTLogin(ctx, profile, model, setActive, createOnly...)
 		if err != nil {
 			cancel()
 			return chatgptLoginStartedMsg{attempt: attempt, err: err}

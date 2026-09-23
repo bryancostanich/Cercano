@@ -2253,7 +2253,7 @@ func (m Model) Update(msg tea.Msg) (nextModel tea.Model, nextCmd tea.Cmd) {
 		if m.claudeLoginModal == nil {
 			m.claudeLoginAttempt++
 			m.claudeLoginModal = newClaudeLoginModal(msg.profile, msg.model)
-			return m, startClaudeLoginCmd(m.agent, msg.profile, msg.model, msg.setActive, m.claudeLoginAttempt)
+			return m, startClaudeLoginCmd(m.agent, msg.profile, msg.model, msg.setActive, m.claudeLoginAttempt, msg.createOnly)
 		}
 		return m, nil
 
@@ -2301,6 +2301,9 @@ func (m Model) Update(msg tea.Msg) (nextModel tea.Model, nextCmd tea.Cmd) {
 					m.claudeLoginModal.profile = msg.frame.ProfileName
 				}
 				m.claudeLoginModal.setDone()
+				if sp, ok := m.content.(*settingsPage); ok {
+					sp.cloudAccountSignedIn(m.claudeLoginModal.profile, "subscription")
+				}
 			} else {
 				m.claudeLoginModal.setFailed(msg.frame.Error)
 			}
@@ -2326,7 +2329,7 @@ func (m Model) Update(msg tea.Msg) (nextModel tea.Model, nextCmd tea.Cmd) {
 		if m.chatgptLoginModal == nil {
 			m.chatgptLoginAttempt++
 			m.chatgptLoginModal = newChatGPTLoginModal(msg.profile, msg.model)
-			return m, startChatGPTLoginCmd(m.agent, msg.profile, msg.model, msg.setActive, m.chatgptLoginAttempt)
+			return m, startChatGPTLoginCmd(m.agent, msg.profile, msg.model, msg.setActive, m.chatgptLoginAttempt, msg.createOnly)
 		}
 		return m, nil
 
@@ -2374,6 +2377,9 @@ func (m Model) Update(msg tea.Msg) (nextModel tea.Model, nextCmd tea.Cmd) {
 					m.chatgptLoginModal.profile = msg.frame.ProfileName
 				}
 				m.chatgptLoginModal.setDone(msg.frame.AccountID)
+				if sp, ok := m.content.(*settingsPage); ok {
+					sp.cloudAccountSignedIn(m.chatgptLoginModal.profile, "chatgpt")
+				}
 			} else {
 				m.chatgptLoginModal.setFailed(msg.frame.Error)
 			}

@@ -906,7 +906,24 @@ func (s *Server) UpsertCloudProfile(ctx context.Context, req *proto.UpsertCloudP
 	if err := routingwire.ApplyChoices(&np, req.ModelChoices); err != nil {
 		return &proto.UpsertCloudProfileResponse{Error: err.Error()}, nil
 	}
-	s.cfgSvc.UpsertProfile(np)
+	if req.GetCreateOnly() {
+		var collision error
+		err := s.cfgSvc.Mutate(func(current *config.Config) {
+			if _, exists := current.Profile(name); exists {
+				collision = fmt.Errorf("account %q already exists", name)
+				return
+			}
+			current.CloudProfiles = append(current.CloudProfiles, np.Clone())
+		})
+		if err != nil {
+			return &proto.UpsertCloudProfileResponse{Error: err.Error()}, nil
+		}
+		if collision != nil {
+			return &proto.UpsertCloudProfileResponse{Error: collision.Error()}, nil
+		}
+	} else {
+		s.cfgSvc.UpsertProfile(np)
+	}
 	if c.ReferencesProfile(name) {
 		if err := s.rebuildCloud(); err != nil {
 			// active is set, but the provider couldn't be built — report it, keep going.

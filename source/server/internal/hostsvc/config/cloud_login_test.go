@@ -154,3 +154,49 @@ func TestLoginPreservesAndIsolatesSparseProfileChoices(t *testing.T) {
 		t.Fatal("invalidated login overwrote credentials")
 	}
 }
+
+func TestAddedAccountCreationCannotReplaceExistingCredentials(t *testing.T) {
+	store := secrets.NewMemory()
+	p := cfg.CloudProfile{Name: "work", Flavor: cloudfactory.FlavorMessages, Route: cloudfactory.RouteSubscription, TierOverrides: map[cfg.CostTier]string{cfg.CostPremium: "chosen"}}
+	c := cfg.Defaults()
+	c.CloudProfiles = []cfg.CloudProfile{p}
+	c.ActiveCloudProfile = "work"
+	service := cfgsvc.New("", c, store)
+	store.Set("work", "original")
+	if _, err := service.BeginCloudLogin(context.Background(), p, false, false, true); err == nil {
+		t.Fatal("create-only login accepted existing account")
+	}
+	if raw, _ := store.Get("work"); raw != "original" {
+		t.Fatal("collision changed credentials")
+	}
+	proposed := cfg.CloudProfile{Name: "work", Flavor: p.Flavor, Route: p.Route}
+	login, err := service.BeginCloudLogin(context.Background(), proposed, false, false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer login.Close()
+	if _, err := login.Commit("refreshed"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := service.Get().Profile("work"); !got.Equal(p) {
+		t.Fatal("settings reauthentication discarded account choices")
+	}
+	second := cfg.CloudProfile{Name: "work-2", Flavor: p.Flavor, Route: p.Route}
+	add, err := service.BeginCloudLogin(context.Background(), second, false, false, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer add.Close()
+	if _, err := add.Commit("second"); err != nil {
+		t.Fatal(err)
+	}
+	if raw, _ := store.Get("work"); raw != "refreshed" {
+		t.Fatal("new account overwrote first credentials")
+	}
+	if raw, _ := store.Get("work-2"); raw != "second" {
+		t.Fatal("second credential missing")
+	}
+	if service.Get().ActiveCloudProfile != "work" {
+		t.Fatal("adding account changed primary")
+	}
+}

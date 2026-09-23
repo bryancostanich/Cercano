@@ -20,7 +20,7 @@ type Service interface {
 	Path() string
 	Secrets() secrets.Store
 	Credentials() *credentials.Service
-	BeginCloudLogin(context.Context, cfg.CloudProfile, bool, bool) (*CloudLogin, error)
+	BeginCloudLogin(context.Context, cfg.CloudProfile, bool, bool, ...bool) (*CloudLogin, error)
 	ActiveProfile() (cfg.CloudProfile, bool)
 
 	// Full-state writes (replace entire config; no notify — caller persists

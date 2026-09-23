@@ -90,9 +90,10 @@ func (mo *claudeLoginModal) setFailed(msg string) {
 // activates the "sign in with Claude" button. Carries the profile name +
 // model to create and whether to activate it on success.
 type openClaudeLoginModalMsg struct {
-	profile   string
-	model     string
-	setActive bool
+	createOnly bool
+	profile    string
+	model      string
+	setActive  bool
 }
 
 // claudeLoginStartedMsg carries the opened stream (or the open error).
@@ -113,10 +114,10 @@ type claudeLoginFrameMsg struct {
 
 // startClaudeLoginCmd opens the StartClaudeLogin streaming RPC under a
 // cancellable context and returns the stream (or error) for the drain loop.
-func startClaudeLoginCmd(ag *agentclient.Client, profile, model string, setActive bool, attempt uint64) tea.Cmd {
+func startClaudeLoginCmd(ag *agentclient.Client, profile, model string, setActive bool, attempt uint64, createOnly ...bool) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithCancel(context.Background())
-		ch, err := ag.StartClaudeLogin(ctx, profile, model, setActive)
+		ch, err := ag.StartClaudeLogin(ctx, profile, model, setActive, createOnly...)
 		if err != nil {
 			cancel()
 			return claudeLoginStartedMsg{attempt: attempt, err: err}

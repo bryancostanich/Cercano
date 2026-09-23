@@ -120,6 +120,7 @@ func (sp *settingsPage) commitCloud(ca cloudCommitAction) (string, tea.Cmd, erro
 		if name == "" {
 			return "", nil, fmt.Errorf("account name is required")
 		}
+		sp.cloudDraft.Name = name
 		if sp.cloudAccountNameExists(name) {
 			return "", nil, fmt.Errorf("account %q already exists; select it to sign in again", name)
 		}
@@ -154,7 +155,7 @@ func (sp *settingsPage) commitCloud(ca cloudCommitAction) (string, tea.Cmd, erro
 		defer cancel()
 		d := sp.cloudDraft
 		warning, err := sp.agent.SaveCloudProfile(ctx, agentclient.CloudProfileInfo{
-			ReplaceStructure: true, Name: d.Name, Flavor: d.Flavor, Backend: d.Backend, Route: d.Route, BaseURL: d.BaseURL, Choices: d.Choices, Provider: d.Provider, Region: d.Region, AWSProfile: d.AWSProfile,
+			CreateOnly: sp.cloudDraftNew, ReplaceStructure: true, Name: d.Name, Flavor: d.Flavor, Backend: d.Backend, Route: d.Route, BaseURL: d.BaseURL, Choices: d.Choices, Provider: d.Provider, Region: d.Region, AWSProfile: d.AWSProfile,
 		})
 		if err != nil {
 			return "", nil, err
@@ -162,6 +163,8 @@ func (sp *settingsPage) commitCloud(ca cloudCommitAction) (string, tea.Cmd, erro
 		// Profile creation must succeed before its credential can be stored.
 		// Keep the pending key and dirty state on failure so Save can retry.
 		sp.profilesLoaded = false
+		sp.cloudDraftNew = false
+		sp.cloudSelected = "profile:" + d.Name
 		if d.apiKeyEdited {
 			if err := sp.agent.SetCloudProfileKey(ctx, d.Name, d.apiKey); err != nil {
 				return "", nil, err
@@ -193,8 +196,9 @@ func (sp *settingsPage) commitCloud(ca cloudCommitAction) (string, tea.Cmd, erro
 		profile := strings.TrimSpace(sp.cloudDraft.Name)
 		model := strings.TrimSpace(sp.cloudDraft.Model)
 		setActive := sp.cloudView.Active == ""
+		createOnly := sp.cloudDraftNew
 		return "starting ChatGPT sign-in…", func() tea.Msg {
-			return openChatGPTLoginModalMsg{profile: profile, model: model, setActive: setActive}
+			return openChatGPTLoginModalMsg{profile: profile, model: model, setActive: setActive, createOnly: createOnly}
 		}, nil
 	case cloudCommitSignInClaude:
 		// Settings sign-in belongs to the selected provider/profile row. Passing
@@ -205,8 +209,9 @@ func (sp *settingsPage) commitCloud(ca cloudCommitAction) (string, tea.Cmd, erro
 		profile := strings.TrimSpace(sp.cloudDraft.Name)
 		claudeModel := strings.TrimSpace(sp.cloudDraft.Model)
 		setActive := sp.cloudView.Active == ""
+		createOnly := sp.cloudDraftNew
 		return "starting Claude sign-in…", func() tea.Msg {
-			return openClaudeLoginModalMsg{profile: profile, model: claudeModel, setActive: setActive}
+			return openClaudeLoginModalMsg{profile: profile, model: claudeModel, setActive: setActive, createOnly: createOnly}
 		}, nil
 	case cloudCommitKey:
 		sp.cloudDraft.apiKey = ca.value

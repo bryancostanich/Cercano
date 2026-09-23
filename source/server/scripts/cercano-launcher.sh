@@ -61,7 +61,7 @@ build_install() {
         rm -f "$tmp"
         return 1
     fi
-    "$SERVER_DIR/scripts/codesign-if-available.sh" "$tmp"
+    "$SERVER_DIR/scripts/codesign-if-available.sh" "$tmp" "$(basename "$bin")"
     mv -f "$tmp" "$bin"
 }
 

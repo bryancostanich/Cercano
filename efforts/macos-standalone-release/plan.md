@@ -9,11 +9,11 @@ Execution approval covers local implementation and verification, not certificate
 Objective: resolve incomplete discovery before changing production behavior. Files: inspect the two module Makefiles and entry points, server scripts, CLI agentclient package, existing update and compatibility code, embedded asset declarations, and existing GitHub workflows; record evidence in efforts/macos-standalone-release/release-audit.md. Exact production files and test packages are identified by this audit, not guessed in advance. Tests: inventory existing coverage and specify small installation and upgrade probes.
 
 - [x] Establish an isolated feature worktree and preserve the approved effort documents
-- [~] Trace both installed entry points through symlink resolution, sibling executable discovery, agent startup, handshake, and restart guidance
-- [ ] Inventory required filesystem assets, embedded assets, optional integrations, runtime downloads, redistribution obligations, and minimum supported macOS version
-- [ ] Inspect current release workflows, repository release URLs, updater behavior, and tap conventions without modifying remote state
-- [-] Identify the existing compatibility contract and tests; escalate any need for a new protocol contract before implementation
-- [ ] Record exact implementation targets, supported macOS floor, test commands, and release blockers in the audit
+- [x] Trace both installed entry points through symlink resolution, sibling executable discovery, agent startup, handshake, and restart guidance
+- [x] Inventory required filesystem assets, embedded assets, optional integrations, runtime downloads, redistribution obligations, and minimum supported macOS version
+- [x] Inspect current release workflows, repository release URLs, updater behavior, and tap conventions without modifying remote state
+- [x] Identify the existing compatibility contract and tests; escalate any need for a new protocol contract before implementation
+- [x] Record exact implementation targets, supported macOS floor, test commands, and release blockers in the audit
 
 ## Phase 2 — Make installed startup and upgrades safe
 
@@ -85,3 +85,13 @@ Objective: publish only after verified readiness and explicit user authorization
 - [ ] Verify public artifact URLs and checksums before promoting the formula
 - [ ] Promote the formula to bryancostanich/homebrew-tap using narrowly scoped credentials
 - [ ] Verify installation and smoke tests from the published tap and record the shipped version
+  ---
+
+## Addendum — 2026-09-22: Compatibility clarification (user resolution)
+
+Recorded during the Phase 1 audit. The spec above is unchanged and remains authoritative; this addendum documents a user decision that governs the compatibility work.
+
+- The user explicitly rejected any new TUI/agent handshake or version gating.
+- **Mixed-version client/server connections must be preserved; a version mismatch alone is never a blocker.**
+- Audit finding: current code already satisfies this — `agentclient.Dial`/`connect` (`source/server/pkg/agentclient/client.go:88-137`) is a plain gRPC connection with no version handshake anywhere. No code or protocol changes are required or permitted for this.
+- Consequently, the Phase 1 task "identify the existing compatibility contract and tests; escalate any need for a new protocol contract before implementation" is closed on the user's resolution; no escalation is needed. Evidence and remaining release blockers are consolidated in `release-audit.md`.

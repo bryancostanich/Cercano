@@ -98,3 +98,26 @@ func TestDestinationRedirectClientRoundTrip(t *testing.T) {
 		t.Fatal("explicit clear lost")
 	}
 }
+
+func TestOrderedBackupClientIsolationAndClear(t *testing.T) {
+	a := &RoutingAssignments{Primary: "a", PrimaryBackup: "b"}
+	clone := a.Clone()
+	clone.SetPrimaryBackupAccounts([]string{"b", "c"})
+	wire := assignmentsToProto(clone)
+	clone.PrimaryBackups[1] = "changed"
+	if wire.PrimaryBackups[1] != "c" {
+		t.Fatal("wire aliases draft")
+	}
+	got := assignmentsFromProto(wire)
+	if len(got.PrimaryBackupAccounts()) != 2 || got.PrimaryBackup != "b" {
+		t.Fatal("list lost")
+	}
+	got.SetPrimaryBackupAccounts(nil)
+	wire = assignmentsToProto(got)
+	if len(wire.PrimaryBackups) != 0 || wire.PrimaryBackup != "" {
+		t.Fatal("clear resurrected legacy backup")
+	}
+	if len(a.PrimaryBackupAccounts()) != 1 {
+		t.Fatal("clone changed saved assignments")
+	}
+}

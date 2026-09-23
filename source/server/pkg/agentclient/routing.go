@@ -35,13 +35,32 @@ func (a *RoutingAssignments) Clone() *RoutingAssignments {
 		return &RoutingAssignments{Tasks: map[string]TaskAssignment{}}
 	}
 	c := *a
-	c.PrimaryBackups = append([]string(nil), a.PrimaryBackups...)
+	c.SetPrimaryBackupAccounts(a.PrimaryBackupAccounts())
 	c.Tasks = map[string]TaskAssignment{}
 	for k, v := range a.Tasks {
 		c.Tasks[k] = v
 	}
 	return &c
 }
+
+// PrimaryBackupAccounts accepts snapshots from older single-backup servers.
+func (a *RoutingAssignments) PrimaryBackupAccounts() []string {
+	if a.PrimaryBackups != nil {
+		return append([]string{}, a.PrimaryBackups...)
+	}
+	if a.PrimaryBackup != "" {
+		return []string{a.PrimaryBackup}
+	}
+	return nil
+}
+func (a *RoutingAssignments) SetPrimaryBackupAccounts(names []string) {
+	a.PrimaryBackups = append([]string(nil), names...)
+	a.PrimaryBackup = ""
+	if len(names) > 0 {
+		a.PrimaryBackup = names[0]
+	}
+}
+
 func copyStringMap(src map[string]string) map[string]string {
 	if src == nil {
 		return nil
@@ -68,6 +87,7 @@ func assignmentsToProto(a *RoutingAssignments) *proto.RoutingAssignments {
 	if a == nil {
 		return nil
 	}
+	a = a.Clone()
 	out := &proto.RoutingAssignments{Primary: a.Primary, PrimaryBackup: a.PrimaryBackup, PrimaryBackups: append([]string(nil), a.PrimaryBackups...), Secondary: a.Secondary, SecondaryBackup: a.SecondaryBackup, SecondaryRedirect: a.SecondaryRedirect, LocalRedirect: a.LocalRedirect, Tasks: map[string]*proto.TaskModelAssignment{}}
 	for k, v := range a.Tasks {
 		out.Tasks[k] = &proto.TaskModelAssignment{Destination: v.Destination, Quality: v.Quality}

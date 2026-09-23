@@ -12,7 +12,7 @@ Objective: resolve incomplete discovery before changing production behavior. Fil
 - [~] Trace both installed entry points through symlink resolution, sibling executable discovery, agent startup, handshake, and restart guidance
 - [ ] Inventory required filesystem assets, embedded assets, optional integrations, runtime downloads, redistribution obligations, and minimum supported macOS version
 - [ ] Inspect current release workflows, repository release URLs, updater behavior, and tap conventions without modifying remote state
-- [ ] Identify the existing compatibility contract and tests; escalate any need for a new protocol contract before implementation
+- [-] Identify the existing compatibility contract and tests; escalate any need for a new protocol contract before implementation
 - [ ] Record exact implementation targets, supported macOS floor, test commands, and release blockers in the audit
 
 ## Phase 2 — Make installed startup and upgrades safe

@@ -75,7 +75,19 @@ Note this establishes user data lives outside the install prefix and survives re
 
 Parent verification: `gofmt -l` clean; `go vet ./internal/conversation ./pkg/agentclient` clean; `go test ./internal/conversation -count=1` ok.
 
-## 8. Limitations and remaining Phase 2 gaps
+## 8. Self-update must not overwrite a Homebrew-managed install
+
+Inspection first: `source/server/pkg/update` contains **no replacement path at all**. `CheckForUpdate` / `CheckCached` query GitHub and cache the result; `UpgradeCommand` returns advice (`brew upgrade cercano` for Homebrew, a download URL otherwise); `DetectInstallMethod` shells out to `brew list cercano`. The only write in the package is `writeCache` to `update_check.json`. Both call sites (`main.go` setup and MCP startup) only print the advice. There is therefore **no conflict to fix** — the risk is a future regression.
+
+`source/server/pkg/update/no_self_replacement_test.go` — `TestUpdateNeverReplacesInstalledBinaries` pins this as a guard. It builds a Homebrew-style keg plus prefix symlinks, drives the version check against a local stub release server reporting a much newer version with `InstallMethod` forced to `homebrew` (the exact conditions a self-updater would act on), then asserts the installed files keep the same inodes and bytes, the prefix symlinks still point at the original keg files, and the only file written into the config directory is `update_check.json`.
+
+Non-vacuity: a temporary probe rewriting the installed `cercano` after the check made the test fail with `installed cercano was rewritten by the update path`. Probe removed afterwards.
+
+Isolation: the release check is pointed at `httptest` — no request reaches GitHub; the fake installation lives in a temp directory and is never on PATH.
+
+Parent verification: `gofmt -l` clean; `go vet ./pkg/update` clean; `go test ./pkg/update ./internal/conversation ./pkg/agentclient -count=1` all ok.
+
+## 9. Limitations and remaining Phase 2 gaps
 
 - Discovery is proven at the `findCercanoBinary` level only; the full auto-launch path (`ensureServerLaunched` / `autoLaunchServer` / launch lock / `waitForPort`) was **not** exercised — that needs an isolated agent subprocess with isolated HOME/config/socket/ports and is not covered here.
 - No live `brew install` against a real Homebrew prefix/keg was performed; layout is a faithful fixture, not a real bottle install (matches release-audit §"Non-blockers").

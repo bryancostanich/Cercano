@@ -124,6 +124,8 @@ brew install cercano
 cercano setup    # prepares Ollama plus the managed llama-server runtime
 ```
 
+**Local release rehearsal:** `scripts/build-macos-unsigned.sh` targets macOS 12.0 on Apple Silicon. Actual macOS 12 runtime support remains unverified; this is not yet a supported release. See [local signing and notarization](docs/local-macos-signing.md).
+
 ### Install from Source
 
 Requires [Go](https://go.dev/dl/) 1.21+.

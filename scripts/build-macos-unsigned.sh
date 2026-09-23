@@ -50,6 +50,11 @@ trap 'rm -rf "$TEMP_DIR"' EXIT
 STAGE_ROOT="$TEMP_DIR/cercano-${VERSION}-darwin-arm64-unsigned"
 mkdir -p "$STAGE_ROOT/bin"
 
+# Explicit CGO flags key the Go cache; deployment-target env alone does not.
+export MACOSX_DEPLOYMENT_TARGET=12.0
+export CGO_CFLAGS='-O2 -g -mmacosx-version-min=12.0'
+export CGO_LDFLAGS='-O2 -g -mmacosx-version-min=12.0'
+
 # Build Go modules
 cd "$REPO_ROOT/source/server"
 
@@ -66,6 +71,17 @@ GOOS=darwin GOARCH=arm64 CGO_ENABLED=1 go build -trimpath -buildvcs=false \
     -o "$STAGE_ROOT/bin/cercano-cli" \
     .
 
+# Verify exact target metadata; a higher minos would silently raise the floor.
+for binary in "$STAGE_ROOT/bin/cercano" "$STAGE_ROOT/bin/cercano-cli"; do
+    arch="$(lipo -archs "$binary")"
+    minos="$(otool -l "$binary" | awk '/cmd LC_BUILD_VERSION/ { build=1; next } build && $1 == "minos" { print $2; build=0 }')"
+    if [[ "$arch" != arm64 || "$minos" != 12.0 ]]; then
+        echo "Error: $binary: expected arm64/minos 12.0, got $arch/$minos" >&2
+        exit 1
+    fi
+    echo "Verified arm64, macOS 12.0 build target: $binary"
+done
+
 # Copy LICENSE
 cp "$REPO_ROOT/LICENSE" "$STAGE_ROOT/"
 
@@ -75,6 +91,9 @@ THIS IS AN UNSIGNED LOCAL REHEARSAL BUILD - NOT FOR PUBLISHING
 
 This is a local build of Cercano for macOS arm64. It is intended for
 local testing and development purposes only.
+
+Build target: macOS 12.0. This is verified Mach-O metadata, NOT proof of
+runtime support on macOS 12.0; that still requires an actual OS test.
 
 Entrypoints:
 - cercano-cli: Command line interface

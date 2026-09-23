@@ -90,3 +90,48 @@ The tests execute the script with isolated PATH shims for `uname`, `lipo`,
 spaces, preflight errors, signing and verification failures, and missing signature
 metadata. They never use real keys or Apple's services. Passing mocks is not proof
 of an accepted Apple signature or notarization.
+
+## Controlled build target and local notarization
+
+The rehearsal builder now pins macOS 12.0 in both `MACOSX_DEPLOYMENT_TARGET`
+and explicit CGO compiler/linker flags. Go does not key its C-object cache on
+that environment variable alone. The builder rejects anything other than
+arm64-only binaries with exact Mach-O `minos 12.0`. This is still a build target,
+not proven macOS 12 runtime support.
+
+Notarization requires credentials separate from the Developer ID signing key.
+If you do not already have a named notarytool profile, run this interactively in
+your own terminal (do not paste passwords or private keys into chat):
+
+```bash
+xcrun notarytool store-credentials cercano-local
+```
+
+Follow Apple's prompts for your chosen authentication method. For Apple ID
+credentials use an app-specific password, not your normal account password.
+The command validates with Apple and stores credentials in Keychain. The pipeline
+does not create profiles or change Keychain permissions itself.
+
+After signing the staged binaries as above:
+
+```bash
+python3 scripts/notarize-macos-local.py "$stage/bin"   "$rehearsal/notarization" --keychain-profile cercano-local
+```
+
+This uploads both signed binaries to Apple. The output directory must not exist,
+and its parent must exist. Optional `--keychain PATH` selects a nondefault
+Keychain. No raw-password argument is accepted. The command preserves a submission
+ZIP, SHA-256, submission ID when returned, tool stdout/stderr, and notarization log.
+It reports success only after a successful Accepted response and a matching
+Accepted log. It has a bounded wait (default 1800 seconds per request) and never
+automatically resubmits. On failure inspect the printed history/info/log commands;
+a timeout can mean Apple is still processing the original submission. JSON output
+may omit the ID until completion, in which case recover it using history.
+
+The submission ZIP is not a final release archive. Neither raw command-line
+executables nor tar.gz archives support stapled notarization tickets. First-launch
+Gatekeeper verification can therefore require network access to Apple. A clean-Mac
+test is still required; successful notarization alone does not test credential
+access or prove prompt-free upgrades.
+
+Credential-free tests: `python3 scripts/test-macos-notarize.py`.

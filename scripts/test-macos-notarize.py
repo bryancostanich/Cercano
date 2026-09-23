@@ -1,0 +1,145 @@
+#!/usr/bin/env python3
+"""Subprocess tests with an isolated PATH: no real Apple tools can run."""
+import hashlib
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import unittest
+import zipfile
+
+SCRIPT = Path(__file__).with_name('notarize-macos-local.py').resolve()
+SID = '12345678-1234-1234-1234-123456789abc'
+DETAILS = 'Authority=Developer ID Application: Test\nCodeDirectory flags=0x10000(runtime)\nTimestamp=Today\n'
+SHIM = '''
+import json, os, sys, time
+from pathlib import Path
+name = Path(sys.argv[0]).name
+args = sys.argv[1:]
+with open(os.environ['CALLS'], 'a') as f: f.write(json.dumps([name] + args) + '\\n')
+if name == 'uname': print('arm64' if args else 'Darwin')
+elif name == 'lipo': print('arm64')
+elif name == 'codesign':
+    if '-d' in args: print(os.environ['DETAILS'], file=sys.stderr)
+    sys.exit(int(os.environ.get('VERIFY_EXIT', '0')))
+elif name == 'xcrun':
+    action = args[1].upper()
+    print(os.environ[action], flush=True)
+    time.sleep(float(os.environ.get(action + '_SLEEP', '0')))
+    sys.exit(int(os.environ.get(action + '_EXIT', '0')))
+else: sys.exit(99)
+'''
+
+class NotaryTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix='notary tests ')
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.stage = self.root / 'stage bin'
+        self.stage.mkdir()
+        for name in ('cercano', 'cercano-cli'):
+            p = self.stage / name
+            p.write_bytes(b'mock executable')
+            p.chmod(0o755)
+        tools = self.root / 'tools'
+        tools.mkdir()
+        for name in ('uname', 'lipo', 'codesign', 'xcrun'):
+            p = tools / name
+            p.write_text('#!' + sys.executable + '\n' + SHIM)
+            p.chmod(0o755)
+        self.out = self.root / 'new output'
+        self.calls = self.root / 'calls'
+        self.env = dict(os.environ, PATH=str(tools), CALLS=str(self.calls), DETAILS=DETAILS,
+                        SUBMIT=json.dumps({'id': SID, 'status': 'Accepted'}),
+                        LOG=json.dumps({'jobId': SID, 'status': 'Accepted'}))
+
+    def execute(self, success=True, timeout='3'):
+        result = subprocess.run([sys.executable, str(SCRIPT), str(self.stage), str(self.out),
+                                 '--keychain-profile', 'test profile', '--keychain', '/tmp/keys with spaces',
+                                 '--timeout', timeout], env=self.env, capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode == 0, success, result.stdout + result.stderr)
+        self.assertEqual((self.out / 'accepted.json').exists(), success)
+        return result
+
+    def uploads(self):
+        return [json.loads(line) for line in self.calls.read_text().splitlines()
+                if json.loads(line)[:3] == ['xcrun', 'notarytool', 'submit']]
+
+    def test_success(self):
+        self.execute()
+        archive = self.out / 'cercano-notarization-submission.zip'
+        with zipfile.ZipFile(archive) as z:
+            self.assertEqual(z.namelist(), ['bin/cercano', 'bin/cercano-cli'])
+            self.assertEqual(z.read('bin/cercano'), b'mock executable')
+        digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+        self.assertTrue(Path(str(archive) + '.sha256').read_text().startswith(digest))
+        call, = self.uploads()
+        self.assertEqual(call[call.index('--keychain-profile') + 1], 'test profile')
+        self.assertEqual(call[call.index('--keychain') + 1], '/tmp/keys with spaces')
+        self.assertEqual((self.out / 'submission-id.txt').read_text().strip(), SID)
+
+    def test_rejected(self):
+        self.env['SUBMIT'] = json.dumps({'id': SID, 'status': 'Invalid'})
+        self.env['LOG'] = json.dumps({'jobId': SID, 'status': 'Invalid'})
+        self.execute(False)
+        self.assertEqual(json.loads((self.out / 'log-stdout.txt').read_text())['status'], 'Invalid')
+
+    def test_nonzero_accepted(self):
+        self.env['SUBMIT_EXIT'] = '1'
+        self.execute(False)
+
+    def test_malformed(self):
+        self.env['SUBMIT'] = 'bad json'
+        self.execute(False)
+
+    def test_timeout(self):
+        self.env['SUBMIT_SLEEP'] = '2'
+        result = self.execute(False, '.3')
+        self.assertIn('history', result.stderr)
+        self.assertEqual((self.out / 'submission-id.txt').read_text().strip(), SID)
+        self.assertEqual(len(self.uploads()), 1)
+        self.assertTrue(json.loads((self.out / 'submit-result.json').read_text())['timed_out'])
+
+    def test_preflight(self):
+        self.env['VERIFY_EXIT'] = '1'
+        self.execute(False)
+        self.assertEqual(self.uploads(), [])
+
+    def test_metadata(self):
+        for i, removed in enumerate(DETAILS.splitlines()):
+            with self.subTest(removed=removed):
+                self.out = self.root / f'output{i}'
+                self.env['DETAILS'] = DETAILS.replace(removed, '')
+                self.execute(False)
+                self.assertEqual(self.uploads(), [])
+
+    def test_existing_output(self):
+        self.out.mkdir()
+        marker = self.out / 'marker'
+        marker.write_text('unchanged')
+        self.execute(False)
+        self.assertEqual(list(self.out.iterdir()), [marker])
+        self.assertEqual(marker.read_text(), 'unchanged')
+
+    def test_bad_logs(self):
+        for i, log in enumerate(('bad json', '{}', json.dumps({'jobId': SID, 'status': 'Invalid'}),
+                                 json.dumps({'jobId': 'wrong', 'status': 'Accepted'}))):
+            with self.subTest(log=log):
+                self.out = self.root / f'output{i}'
+                self.env['LOG'] = log
+                self.execute(False)
+
+    def test_missing_and_symlink(self):
+        binary = self.stage / 'cercano-cli'
+        binary.unlink()
+        self.execute(False)
+        self.assertEqual(self.uploads(), [])
+        self.out = self.root / 'symlink output'
+        binary.symlink_to(self.stage / 'cercano')
+        self.execute(False)
+        self.assertEqual(self.uploads(), [])
+
+if __name__ == '__main__':
+    unittest.main()

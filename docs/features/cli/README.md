@@ -14,6 +14,10 @@ Cercano today is consumed via MCP (Claude Code, Cursor) and IDE extensions (VS C
 
 **What does NOT change:** existing MCP server mode (`cercano --mcp`), VS Code / Zed extensions, existing SmartRouter / Coordinator / engine layer / Ollama (enriched, not replaced).
 
+## Multiple cloud accounts
+
+**Cloud → provider → Add another account** creates a separately named account using the existing authentication flow. Credentials are isolated by profile; adding an account does not replace an existing sign-in or change Primary. **Routing → Primary** offers an ordered backup list with add, remove, and move controls, including multiple accounts from the same provider. Quota exhaustion advances through the list and stays on the next account without cooldown-based return. Configuration and execution details are in [Cloud routing](../../cloud-routing.md).
+
 ## Design / Approach
 
 ### Design principles (load-bearing)

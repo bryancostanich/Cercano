@@ -1,0 +1,92 @@
+# Local macOS signing
+
+`scripts/sign-macos-release.sh` signs disposable staging copies of `cercano`
+and `cercano-cli` using Developer ID Application, hardened runtime, and secure
+timestamps. This is the first local step of the release pipeline, not a complete
+release build. Notarization, final archives/checksums, and clean-Mac verification
+remain separate gates. Do not publish these staging files.
+
+## Local rehearsal
+
+Requires an Apple Silicon Mac, Xcode command-line tools (`lipo`, `codesign`), Go
+for the build, and a valid Developer ID Application certificate with its private
+key in your Keychain. Secure timestamping requires access to Apple's service.
+
+From the release worktree root:
+
+```bash
+# Lists public identity metadata; does not export private keys.
+security find-identity -v -p codesigning
+
+# Copy the exact Developer ID Application name or its full 40-hex SHA-1 fingerprint.
+export CERCANO_CODESIGN_ID='Developer ID Application: Your Name (YOURTEAMID)'
+# Optional: otherwise macOS uses its configured keychain search list.
+# export CERCANO_CODESIGN_KEYCHAIN="$HOME/Library/Keychains/login.keychain-db"
+
+version=0.0.0-local
+rehearsal=$(mktemp -d)
+bash scripts/build-macos-unsigned.sh "$version" "$rehearsal"
+tar -xzf "$rehearsal/cercano-$version-darwin-arm64-unsigned.tar.gz" -C "$rehearsal"
+stage="$rehearsal/cercano-$version-darwin-arm64-unsigned"
+bash scripts/sign-macos-release.sh "$stage/bin"
+
+# These invoke only version output, not the running agent.
+"$stage/bin/cercano" --version
+"$stage/bin/cercano-cli" --version
+```
+
+The original unsigned archive and its checksum remain unsigned and unchanged.
+The extracted directory's README still labels the rehearsal unsigned; it is not
+release packaging. The signer modifies only its two staged binaries. It does not
+install, restart the agent, notarize, publish, change Keychain permissions, or
+export keys. `codesign` does use the selected private key through Keychain and
+may request authorization. Never pass a directory containing live installed
+binaries or hard links to them.
+
+Both binaries are checked before signing starts: regular, executable, non-symlink,
+arm64-only files. Identity selection must match exactly one valid Developer ID
+Application name or fingerprint, never a partial name or an ad-hoc identity.
+Each signature is strictly verified and checked for Developer ID authority,
+hardened runtime and a nonempty secure timestamp. Any error stops the script.
+Signing is not transactional: discard the staging directory on failure and
+extract fresh copies before retrying.
+
+## Password prompts: two separate issues
+
+- **When signing:** macOS may ask to unlock the Keychain or authorize `codesign`
+  to use the certificate's private key. This pipeline does not bypass that
+  authorization or change private-key access controls.
+- **When running Cercano:** the agent reads provider credentials from Keychain.
+  Stable signing identity and designated requirements can let macOS recognize
+  rebuilt versions as the same application. Ad-hoc or unsigned rebuilds can
+  break that recognition. Existing item access controls and Keychain lock state
+  still matter, so signing alone does not guarantee prompt-free operation.
+
+The existing permissive development helper is unchanged. The strict signer
+retains normal basename-based signing identifiers rather than introducing new
+identifiers. Signing disposable staging binaries does not fix the currently
+running agent or the launcher you normally use. Verify the actual running build
+and compare designated requirements across rebuilds before diagnosing recurring
+runtime prompts:
+
+```bash
+codesign -d --verbose=4 /path/to/cercano
+codesign -d -r- /path/to/cercano
+```
+
+Do not grant all applications access to credentials to suppress prompts. A real
+signed-rebuild test using isolated test credentials is still needed; this script's
+unit tests cannot establish Keychain trust continuity.
+
+## Credential-free verification
+
+```bash
+bash -n scripts/sign-macos-release.sh
+python3 scripts/test-macos-signing.py
+```
+
+The tests execute the script with isolated PATH shims for `uname`, `lipo`,
+`security`, and `codesign`. They cover identity selection, keychain paths with
+spaces, preflight errors, signing and verification failures, and missing signature
+metadata. They never use real keys or Apple's services. Passing mocks is not proof
+of an accepted Apple signature or notarization.

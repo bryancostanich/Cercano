@@ -12,6 +12,9 @@ import (
 type Builder func(config.CloudProfile) (inference.Provider, error)
 
 func Build(c config.Config, d config.Destination, build Builder, events ...func(resilience.Event)) (inference.Provider, error) {
+	if d == config.DestinationPrimary {
+		return BuildPrimary(c, build, nil, events...)
+	}
 	preferred, backup := c.DestinationProfiles(d)
 	p, ok := c.Profile(preferred)
 	if !ok {

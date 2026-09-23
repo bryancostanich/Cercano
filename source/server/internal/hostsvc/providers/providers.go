@@ -368,7 +368,11 @@ func (p *service) rebuildCloud() error {
 	defer p.rebuildMu.Unlock()
 	c := p.cfgSvc.Get()
 	secondary, _ := profilechain.Build(c, cfg.DestinationSecondary, p.buildProfile, p.chainEvents(c, cfg.DestinationSecondary))
-	provider, err := profilechain.Build(c, cfg.DestinationPrimary, p.buildProfile, p.chainEvents(c, cfg.DestinationPrimary))
+	var cycleState *profilechain.CycleState
+	if old := p.cloudState.Load(); old != nil {
+		cycleState = profilechain.StateOf(old.primary)
+	}
+	provider, err := profilechain.BuildPrimary(c, p.buildProfile, cycleState, p.chainEvents(c, cfg.DestinationPrimary))
 	p.cloudState.Store(&cloudRoutingState{primary: provider, secondary: secondary, config: c})
 	if err != nil {
 		p.installAbsentCloud(err.Error())
@@ -552,7 +556,7 @@ func (p *service) chainEvents(c cfg.Config, d cfg.Destination) func(resilience.E
 	return func(ev resilience.Event) {
 		log.Printf("[cloud] %s resilience %s (%s, %s): %s: %v", d, ev.Action, ev.Stage, ev.Class, ev.Notice(), ev.Err)
 		if p.routingLog != nil {
-			p.routingLog.Log("cloud.resilience", routinglog.Event{"destination": string(d), "primary_profile": preferred, "backup_profile": backup, "action": string(ev.Action), "stage": ev.Stage, "error_class": string(ev.Class), "from_provider": ev.From, "to_provider": ev.To, "wait_ms": ev.Wait.Milliseconds(), "notice": ev.Notice(), "error": errorString(ev.Err)})
+			p.routingLog.Log("cloud.resilience", routinglog.Event{"destination": string(d), "primary_profile": preferred, "backup_profile": backup, "action": string(ev.Action), "stage": ev.Stage, "error_class": string(ev.Class), "from_provider": ev.From, "to_provider": ev.To, "from_account": ev.From, "to_account": ev.To, "wait_ms": ev.Wait.Milliseconds(), "notice": ev.Notice(), "error": errorString(ev.Err)})
 		}
 	}
 }

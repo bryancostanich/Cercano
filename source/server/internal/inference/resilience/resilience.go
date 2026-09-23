@@ -95,6 +95,9 @@ func (e Event) Notice() string {
 // Options configures the engine. Zero values give: no backup, silent events,
 // 500ms default retry wait, 2s cap, 1h quota cooldown.
 type Options struct {
+	// OnQuota delegates quota selection to an account cycle. When set, cooldowns are disabled.
+	OnQuota            func(context.Context)
+	PrimaryLabel       string
 	PrimaryBlocked     bool // credential/configuration failures must reach their gate, not automatic fallback
 	PrimaryUnavailable bool // construction failure, excluding actionable credential failures
 	// PrimaryModelFor maps a capability-tier name to the primary vendor's model
@@ -135,6 +138,8 @@ const (
 // Provider is the engine. It impersonates the primary everywhere except the
 // moment of a decision, which is narrated via EventNotice / OnEvent.
 type Provider struct {
+	onQuota            func(context.Context)
+	primaryLabel       string
 	primaryBlocked     bool
 	primaryUnavailable bool
 	primary            inference.Provider
@@ -158,6 +163,7 @@ type Provider struct {
 // New builds the engine around primary.
 func New(primary inference.Provider, opts Options) *Provider {
 	p := &Provider{
+		onQuota: opts.OnQuota, primaryLabel: opts.PrimaryLabel,
 		primaryUnavailable: opts.PrimaryUnavailable,
 		primaryBlocked:     opts.PrimaryBlocked,
 		primary:            primary,
@@ -222,6 +228,13 @@ func eventFrom(fallback string, err error) string {
 	return fallback
 }
 
+func (p *Provider) eventFrom(err error) string {
+	if p.primaryLabel != "" {
+		return p.primaryLabel
+	}
+	return eventFrom(p.primary.Name(), err)
+}
+
 // waitFor computes the busy-retry wait: the server's suggestion capped, or
 // the default when it gave none.
 func (p *Provider) waitFor(err error) time.Duration {
@@ -244,6 +257,9 @@ func (p *Provider) quotaCooldownFor(err error) time.Duration {
 }
 
 func (p *Provider) markQuotaCooldown(err error) {
+	if p.onQuota != nil {
+		return
+	}
 	until := p.now().Add(p.quotaCooldownFor(err))
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -318,7 +334,7 @@ func (p *Provider) Chat(ctx context.Context, req inference.Call) (inference.Resu
 	}
 	if llm.Retryable(llm.ClassOf(err)) {
 		ev := Event{Action: ActionRetry, Stage: "chat", Class: llm.ClassOf(err),
-			From: eventFrom(p.primary.Name(), err), To: p.primary.Name(), Wait: p.waitFor(err), Err: err}
+			From: p.eventFrom(err), To: p.primary.Name(), Wait: p.waitFor(err), Err: err}
 		p.emit(ev)
 		if !p.sleep(ctx, ev.Wait) {
 			return resp, err
@@ -332,16 +348,19 @@ func (p *Provider) Chat(ctx context.Context, req inference.Call) (inference.Resu
 		}
 	}
 	class := llm.ClassOf(err)
+	if class == llm.ErrQuota && p.onQuota != nil {
+		p.onQuota(ctx)
+	}
 	if p.backup == nil || !llm.Failoverable(class, err) {
 		p.emit(Event{Action: ActionSurface, Stage: "chat", Class: class,
-			From: eventFrom(p.primary.Name(), err), Err: err})
+			From: p.eventFrom(err), Err: err})
 		return inference.Result{}, err
 	}
 	if class == llm.ErrQuota {
 		p.markQuotaCooldown(err)
 	}
 	p.emit(Event{Action: ActionFailover, Stage: "chat", Class: class,
-		From: eventFrom(p.primary.Name(), err), To: p.backup.Name(), Err: err})
+		From: p.eventFrom(err), To: p.backup.Name(), Err: err})
 	r, e, _ := p.chatAuth(ctx, p.backup, p.backupRequest(req), false, attempts)
 	return r, e
 }
@@ -384,12 +403,13 @@ type reader struct {
 	queue   []llm.StreamEvent                // injected notices to deliver first
 	attempt func() (llm.StreamReader, error) // deferred action set by decide()
 
-	emitted      bool // a real event was delivered; recovery is off the table
-	retried      bool // the one busy retry has been used
-	failedOver   bool // already on the backup; never cascade
-	authAttempts map[string]bool
-	terminalErr  error
-	authFallback bool
+	emitted       bool // a real event was delivered; recovery is off the table
+	retried       bool // the one busy retry has been used
+	failedOver    bool // already on the backup; never cascade
+	authAttempts  map[string]bool
+	terminalErr   error
+	authFallback  bool
+	quotaObserved bool
 }
 
 func (r *reader) Next() (llm.StreamEvent, bool, error) {
@@ -427,6 +447,9 @@ func (r *reader) Next() (llm.StreamEvent, bool, error) {
 			return llm.StreamEvent{}, false, r.failure(authErr)
 		}
 		if r.emitted || r.failedOver {
+			if !r.failedOver {
+				r.observeQuota(authErr)
+			}
 			if r.authFallback {
 				if err != nil {
 					return llm.StreamEvent{}, false, r.failure(err)
@@ -464,6 +487,13 @@ func (r *reader) Next() (llm.StreamEvent, bool, error) {
 	}
 }
 
+func (r *reader) observeQuota(err error) {
+	if r.ctx.Err() == nil && !r.failedOver && !r.quotaObserved && r.p.onQuota != nil && llm.ClassOf(err) == llm.ErrQuota {
+		r.quotaObserved = true
+		r.p.onQuota(r.ctx)
+	}
+}
+
 // decide runs the per-class policy for a pre-content failure. It returns true
 // when it scheduled a recovery (notice queued + attempt set) and false when
 // the error must surface.
@@ -476,6 +506,7 @@ func (r *reader) decide(stage string, err error) bool {
 		r.inner = nil
 	}
 	class := llm.ClassOf(err)
+	r.observeQuota(err)
 	p := r.p
 	if class == llm.ErrLoginRequired {
 		fallback := ""
@@ -515,7 +546,7 @@ func (r *reader) decide(stage string, err error) bool {
 	if llm.Retryable(class) && !r.retried {
 		r.retried = true
 		ev := Event{Action: ActionRetry, Stage: stage, Class: class,
-			From: eventFrom(p.primary.Name(), err), To: p.primary.Name(), Wait: p.waitFor(err), Err: err}
+			From: p.eventFrom(err), To: p.primary.Name(), Wait: p.waitFor(err), Err: err}
 		p.emit(ev)
 		r.queue = append(r.queue, llm.StreamEvent{Type: llm.EventNotice, Notice: ev.Notice()})
 		r.attempt = func() (llm.StreamReader, error) {
@@ -532,7 +563,7 @@ func (r *reader) decide(stage string, err error) bool {
 			p.markQuotaCooldown(err)
 		}
 		ev := Event{Action: ActionFailover, Stage: stage, Class: class,
-			From: eventFrom(p.primary.Name(), err), To: p.backup.Name(), Err: err}
+			From: p.eventFrom(err), To: p.backup.Name(), Err: err}
 		p.emit(ev)
 		r.queue = append(r.queue, llm.StreamEvent{Type: llm.EventNotice, Notice: ev.Notice()})
 		r.attempt = func() (llm.StreamReader, error) {
@@ -541,7 +572,7 @@ func (r *reader) decide(stage string, err error) bool {
 		return true
 	}
 	p.emit(Event{Action: ActionSurface, Stage: stage, Class: class,
-		From: eventFrom(p.primary.Name(), err), Err: err})
+		From: p.eventFrom(err), Err: err})
 	return false
 }
 

@@ -40,8 +40,14 @@ Verification:
 
 ## Blockers and limitations
 
-No real notarization submission occurred: user must supply the profile name or
-set up credentials interactively. No Keychain credential contents were inspected.
+Real local notarization succeeded on 2026-09-22 using the user-created
+`cercano-local` Keychain profile. Both signed binaries passed script preflight;
+Apple returned Accepted and the script verified the matching Accepted log.
+Submission ID: `4eb0131d-ecc4-473e-b378-84326d8d8b62`.
+Diagnostics, submission ZIP, checksum, and acceptance record are retained at
+`/tmp/cercano-local-notarization-20260922` (temporary local storage).
+Nothing was published or stapled; the ZIP is not final release packaging.
+No Keychain credential contents were inspected.
 No macOS 12 machine was used; target metadata does not establish runtime support.
 Prompt-free Keychain access across signed rebuilds, final packaging, redistribution
 notices, clean-machine Gatekeeper checks and CI integration remain pending.

@@ -3,6 +3,7 @@
 package routingwire
 
 import (
+	"cercano/source/server/pkg/accountidentity"
 	"cercano/source/server/pkg/config"
 	"cercano/source/server/pkg/proto"
 )
@@ -30,7 +31,8 @@ func ApplyChoices(p *config.CloudProfile, choices *proto.ProfileModelChoices) er
 	return nil
 }
 func Profile(p config.CloudProfile, models config.ModelProfiles) *proto.CloudProfileInfo {
-	out := &proto.CloudProfileInfo{Name: p.Name, Flavor: p.Flavor, Backend: p.Backend, BaseUrl: p.BaseURL, Route: p.Route, Provider: p.Provider, Region: p.Region, AwsProfile: p.AWSProfile, ModelChoices: Choices(p), EffectiveQualityModels: map[string]string{}}
+	identity := p.AccountIdentity.Normalized()
+	out := &proto.CloudProfileInfo{AccountEmail: identity.Email, AccountDisplayName: identity.Name, Name: p.Name, Flavor: p.Flavor, Backend: p.Backend, BaseUrl: p.BaseURL, Route: p.Route, Provider: p.Provider, Region: p.Region, AwsProfile: p.AWSProfile, ModelChoices: Choices(p), EffectiveQualityModels: map[string]string{}}
 	recommended := p.Clone()
 	recommended.TierOverrides = nil
 	out.RecommendedQualityModels = map[string]string{}
@@ -41,7 +43,7 @@ func Profile(p config.CloudProfile, models config.ModelProfiles) *proto.CloudPro
 	return out
 }
 func DecodeProfile(p *proto.CloudProfileInfo) (config.CloudProfile, error) {
-	out := config.CloudProfile{Name: p.GetName(), Flavor: p.GetFlavor(), Backend: p.GetBackend(), BaseURL: p.GetBaseUrl(), Route: p.GetRoute(), Provider: p.GetProvider(), Region: p.GetRegion(), AWSProfile: p.GetAwsProfile()}
+	out := config.CloudProfile{AccountIdentity: (accountidentity.Identity{Email: p.GetAccountEmail(), Name: p.GetAccountDisplayName()}).Normalized(), Name: p.GetName(), Flavor: p.GetFlavor(), Backend: p.GetBackend(), BaseURL: p.GetBaseUrl(), Route: p.GetRoute(), Provider: p.GetProvider(), Region: p.GetRegion(), AWSProfile: p.GetAwsProfile()}
 	err := ApplyChoices(&out, p.GetModelChoices())
 	return out, err
 }

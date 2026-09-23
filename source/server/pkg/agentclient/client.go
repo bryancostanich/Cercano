@@ -2474,19 +2474,20 @@ func (c *Client) ListCloudProfileModels(ctx context.Context, profileName string)
 
 // CloudProfileInfo is a point-in-time view of one cloud profile.
 type CloudProfileInfo struct {
-	CreateOnly                   bool // New-account saves reject existing names.
-	ReplaceStructure             bool // Send a complete structural draft, including explicit clears.
-	Choices                      *CloudModelChoices
-	EffectiveQualityModels       map[string]string
-	RecommendedQualityModels     map[string]string
-	Provider, Region, AWSProfile string
-	Name                         string
-	Flavor                       string
-	BaseURL                      string
-	Model                        string
-	HasKey                       bool // a key exists in the keychain for this profile
-	Backend                      string
-	Route                        string // "direct" (default), "meridian", "ccr" (future) — selects adapter-specific auth
+	AccountEmail, AccountDisplayName string // Optional sign-in display metadata.
+	CreateOnly                       bool   // New-account saves reject existing names.
+	ReplaceStructure                 bool   // Send a complete structural draft, including explicit clears.
+	Choices                          *CloudModelChoices
+	EffectiveQualityModels           map[string]string
+	RecommendedQualityModels         map[string]string
+	Provider, Region, AWSProfile     string
+	Name                             string
+	Flavor                           string
+	BaseURL                          string
+	Model                            string
+	HasKey                           bool // a key exists in the keychain for this profile
+	Backend                          string
+	Route                            string // "direct" (default), "meridian", "ccr" (future) — selects adapter-specific auth
 }
 
 // GetCloudProfiles returns all configured cloud profiles and the name of the

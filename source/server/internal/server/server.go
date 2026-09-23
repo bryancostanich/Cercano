@@ -864,6 +864,7 @@ func (s *Server) UpsertCloudProfile(ctx context.Context, req *proto.UpsertCloudP
 	c := s.cfgSvc.Get()
 	np, _ := c.Profile(name)
 	np.Name = name
+	previous := np.Clone()
 	if structure := req.GetStructure(); structure != nil {
 		np.Flavor = structure.Flavor
 		np.Backend = structure.Backend
@@ -894,6 +895,11 @@ func (s *Server) UpsertCloudProfile(ctx context.Context, req *proto.UpsertCloudP
 		if req.AwsProfile != nil {
 			np.AWSProfile = req.GetAwsProfile()
 		}
+	}
+	// A different connection/auth path must not inherit the old sign-in label.
+	if np.Flavor != previous.Flavor || np.Route != previous.Route || np.BaseURL != previous.BaseURL || np.Backend != previous.Backend || np.Provider != previous.Provider {
+		np.AccountIdentity.Email = ""
+		np.AccountIdentity.Name = ""
 	}
 	if !knownFlavor(np.Flavor) {
 		return &proto.UpsertCloudProfileResponse{Error: fmt.Sprintf("unknown flavor %q", np.Flavor)}, nil

@@ -12,6 +12,7 @@ package chatgptauth
 
 import (
 	"bytes"
+	"cercano/source/server/pkg/accountidentity"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -39,10 +40,11 @@ const pollSafetyMargin = 3 * time.Second
 // JSON-encoded into the secrets store under the profile name — same place
 // API keys live, never in any client-side file.
 type TokenSet struct {
-	Access    string    `json:"access"`
-	Refresh   string    `json:"refresh"`
-	ExpiresAt time.Time `json:"expires_at"`
-	AccountID string    `json:"account_id,omitempty"`
+	Identity  accountidentity.Identity `json:"identity,omitempty"`
+	Access    string                   `json:"access"`
+	Refresh   string                   `json:"refresh"`
+	ExpiresAt time.Time                `json:"expires_at"`
+	AccountID string                   `json:"account_id,omitempty"`
 }
 
 // Expired reports whether the access token needs a refresh. A small skew
@@ -273,6 +275,14 @@ func (f Flow) tokenRequest(ctx context.Context, form url.Values) (*TokenSet, err
 		Refresh:   tr.RefreshToken,
 		ExpiresAt: time.Now().Add(time.Duration(expires) * time.Second),
 	}
+	ts.Identity = identityFromJWT(tr.IDToken)
+	accessIdentity := identityFromJWT(tr.AccessToken)
+	if ts.Identity.Email == "" {
+		ts.Identity.Email = accessIdentity.Email
+	}
+	if ts.Identity.Name == "" {
+		ts.Identity.Name = accessIdentity.Name
+	}
 	ts.AccountID = firstNonEmptyStr(accountIDFromJWT(tr.IDToken), accountIDFromJWT(tr.AccessToken))
 	return ts, nil
 }
@@ -323,4 +333,28 @@ func firstNonEmptyStr(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+// Identity claims are display hints only, not an authorization decision.
+func identityFromJWT(token string) accountidentity.Identity {
+	parts := bytes.Split([]byte(token), []byte("."))
+	if len(parts) != 3 {
+		return accountidentity.Identity{}
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(string(parts[1]))
+	if err != nil {
+		return accountidentity.Identity{}
+	}
+	identity := accountidentity.Decode(raw)
+	var claims map[string]json.RawMessage
+	if json.Unmarshal(raw, &claims) == nil {
+		profile := accountidentity.Decode(claims["https://api.openai.com/profile"])
+		if identity.Email == "" {
+			identity.Email = profile.Email
+		}
+		if identity.Name == "" {
+			identity.Name = profile.Name
+		}
+	}
+	return identity
 }

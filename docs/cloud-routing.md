@@ -49,6 +49,14 @@ A provider can hold several independently authenticated accounts. In **Cloud**, 
 
 When the account serving Primary exhausts its quota, Primary advances to the next configured backup account and stays there for later requests rather than returning on a timer. Traversal visits each configured account at most once per request, wraps around to earlier accounts after the list end, and stops with `all configured cloud accounts exhausted` when every account reports quota exhaustion. Other failure classes keep their existing behavior: transient errors still get their bounded retry, and authentication problems still surface their normal recovery prompt. A quota failure after output has already been streamed does not replay that response; it only affects which account serves the next request. The active account survives unrelated provider reconfiguration and resets to the preferred account when the configured list no longer contains it.
 
+### Signed-in identity labels
+
+Cloud settings and routing selectors show the signed-in email when supplied by the provider, falling back to its display name and then the configured account name. The configured name remains visible, for example `ChatGPT — person@example.com (chatgpt-work)`, so accounts sharing an email remain distinguishable. Emails never replace profile IDs or credential-storage keys.
+
+ChatGPT identity comes from the token claims received at sign-in. Claude identity comes from the token response, with a best-effort OAuth profile lookup if email is missing. That lookup has a two-second deadline, rejects redirects, and cannot invalidate an otherwise successful login. Malformed or absent optional identity is ignored. Refresh responses that omit identity preserve the stored metadata.
+
+Display metadata is saved under the profile's `account_identity` in the local configuration so opening settings does not need to unlock credentials or contact a provider. Treat configuration exports as containing personal information. Existing accounts without this metadata show their configured names until they sign in again. Reauthentication updates the label without renaming the account; if identity is unavailable for the new sign-in, an old email is not displayed as though it belonged to that sign-in.
+
 ## Editing settings
 
 The **Routing** tab has two sections:

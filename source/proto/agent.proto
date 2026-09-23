@@ -1474,6 +1474,8 @@ message CloudProfileInfo {
  string region = 11;
  string aws_profile = 12;
  map<string,string> recommended_quality_models = 13;
+ string account_email = 14; // display metadata only; never a credential key
+ string account_display_name = 15;
 }
 message GetCloudProfilesRequest {}
 message GetCloudProfilesResponse {

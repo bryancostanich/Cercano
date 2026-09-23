@@ -72,11 +72,12 @@ func (s *Server) runChatGPTLogin(req *proto.StartChatGPTLoginRequest, stream pro
 	if err != nil {
 		return sendChatGPTLoginResult(stream, false, profile, "", loginFailure(err))
 	}
-	result, err := login.Commit(encoded)
+	result, err := login.Commit(encoded, ts.Identity)
 	if err != nil {
 		return sendChatGPTLoginResult(stream, false, profile, "", loginFailure(err))
 	}
 	if result.Reauthenticated {
+		s.persistConfig()
 		return sendChatGPTLoginResult(stream, true, profile, ts.AccountID, "")
 	}
 	isActive := result.Active

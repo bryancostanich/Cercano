@@ -71,11 +71,12 @@ func (s *Server) runClaudeLogin(req *proto.StartClaudeLoginRequest, stream proto
 	if err != nil {
 		return sendClaudeLoginResult(stream, false, profile, loginFailure(err))
 	}
-	result, err := login.Commit(encoded)
+	result, err := login.Commit(encoded, ts.Identity)
 	if err != nil {
 		return sendClaudeLoginResult(stream, false, profile, loginFailure(err))
 	}
 	if result.Reauthenticated {
+		s.persistConfig()
 		return sendClaudeLoginResult(stream, true, profile, "")
 	}
 	isActive := result.Active

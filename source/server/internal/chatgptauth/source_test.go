@@ -1,6 +1,7 @@
 package chatgptauth
 
 import (
+	"cercano/source/server/pkg/accountidentity"
 	"context"
 	"testing"
 	"time"
@@ -31,7 +32,7 @@ func TestSourceRefreshesExpiredToken(t *testing.T) {
 	store := secrets.NewMemory()
 	// Expired token with the refresh token the fake issuer accepts, plus an
 	// account id the refresh response won't carry (must be preserved).
-	ts := TokenSet{Access: "old", Refresh: "refresh-old", AccountID: "acct-keep", ExpiresAt: time.Now().Add(-time.Hour)}
+	ts := TokenSet{Identity: accountidentity.Identity{Email: "keep@example.com"}, Access: "old", Refresh: "refresh-old", AccountID: "acct-keep", ExpiresAt: time.Now().Add(-time.Hour)}
 	if err := Save(store, "p", ts); err != nil {
 		t.Fatal(err)
 	}
@@ -51,6 +52,9 @@ func TestSourceRefreshesExpiredToken(t *testing.T) {
 	got, err := DecodeTokenSet(raw)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if got.Identity.Email != "keep@example.com" {
+		t.Fatal("refresh lost identity")
 	}
 	if got.Access != "access-refresh_token" || got.Refresh != "refresh-old" || got.Expired(time.Now()) {
 		t.Errorf("persisted set wrong: %+v", got)

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"cercano/source/server/pkg/accountidentity"
 	"fmt"
 	"log"
 	"os"
@@ -63,10 +64,12 @@ type AgentConfig struct {
 }
 
 type CloudProfile struct {
-	Name    string `yaml:"name"`
-	Flavor  string `yaml:"flavor"`            // messages | chat_completions | responses | bedrock
-	Backend string `yaml:"backend,omitempty"` // chat_completions only: selects per-backend quirks (openai|gemini|groq|…); empty → defensive default
-	Route   string `yaml:"route,omitempty"`   // direct (default) | subscription | ccr (future) | …
+	// AccountIdentity is optional sign-in display metadata, not a credential key.
+	AccountIdentity accountidentity.Identity `yaml:"account_identity,omitempty"`
+	Name            string                   `yaml:"name"`
+	Flavor          string                   `yaml:"flavor"`            // messages | chat_completions | responses | bedrock
+	Backend         string                   `yaml:"backend,omitempty"` // chat_completions only: selects per-backend quirks (openai|gemini|groq|…); empty → defensive default
+	Route           string                   `yaml:"route,omitempty"`   // direct (default) | subscription | ccr (future) | …
 	// Provider names the vendor whose cost-tier table this profile draws its
 	// per-request models from (anthropic|openai|google|…). It bridges "how I
 	// connect" (route/flavor/auth on this profile) to "which vendor's model

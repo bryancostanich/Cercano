@@ -289,17 +289,17 @@ func (sp *settingsPage) routingAccountLabel(name string) string {
 	for _, provider := range sp.cloudView.Providers {
 		for _, p := range provider.Profiles {
 			if p.Name == name {
-				return provider.Label + " — " + name
+				return p.AccountLabel(provider.Label)
 			}
 		}
 	}
 	for _, p := range sp.profiles {
 		if p.Name == name {
 			if p.Provider != "" {
-				return p.Provider + " — " + name
+				return p.AccountLabel(p.Provider)
 			}
 			if p.Flavor != "" {
-				return p.Flavor + " — " + name
+				return p.AccountLabel(p.Flavor)
 			}
 		}
 	}

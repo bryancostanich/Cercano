@@ -19,6 +19,7 @@ func TestOrderedAccountsRoutingRPC(t *testing.T) {
 	s, _ := newTestServer()
 	c := config.Defaults()
 	c.CloudProfiles = []config.CloudProfile{{Name: "a", Flavor: "messages"}, {Name: "b", Flavor: "messages"}, {Name: "c", Flavor: "messages"}}
+	c.CloudProfiles[0].AccountIdentity.Email = "account@example.com"
 	s.cfgSvc.Set(c)
 	listener := bufconn.Listen(1024 * 1024)
 	server := grpc.NewServer()
@@ -40,6 +41,17 @@ func TestOrderedAccountsRoutingRPC(t *testing.T) {
 	view, err := client.GetCloudProviders(ctx, &proto.GetCloudProvidersRequest{})
 	if err != nil {
 		t.Fatal(err)
+	}
+	foundIdentity := false
+	for _, provider := range view.Providers {
+		for _, p := range provider.Profiles {
+			if p.Name == "a" {
+				foundIdentity = p.AccountEmail == "account@example.com"
+			}
+		}
+	}
+	if !foundIdentity {
+		t.Fatal("RPC lost account display metadata")
 	}
 	if !reflect.DeepEqual(view.GetAssignments().GetPrimaryBackups(), []string{"b", "c"}) {
 		t.Fatal("RPC lost ordered accounts", view.GetAssignments())

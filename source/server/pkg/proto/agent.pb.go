@@ -10854,6 +10854,8 @@ type CloudProfileInfo struct {
 	Region                   string               `protobuf:"bytes,11,opt,name=region,proto3" json:"region,omitempty"`
 	AwsProfile               string               `protobuf:"bytes,12,opt,name=aws_profile,json=awsProfile,proto3" json:"aws_profile,omitempty"`
 	RecommendedQualityModels map[string]string    `protobuf:"bytes,13,rep,name=recommended_quality_models,json=recommendedQualityModels,proto3" json:"recommended_quality_models,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	AccountEmail             string               `protobuf:"bytes,14,opt,name=account_email,json=accountEmail,proto3" json:"account_email,omitempty"` // display metadata only; never a credential key
+	AccountDisplayName       string               `protobuf:"bytes,15,opt,name=account_display_name,json=accountDisplayName,proto3" json:"account_display_name,omitempty"`
 	unknownFields            protoimpl.UnknownFields
 	sizeCache                protoimpl.SizeCache
 }
@@ -10978,6 +10980,20 @@ func (x *CloudProfileInfo) GetRecommendedQualityModels() map[string]string {
 		return x.RecommendedQualityModels
 	}
 	return nil
+}
+
+func (x *CloudProfileInfo) GetAccountEmail() string {
+	if x != nil {
+		return x.AccountEmail
+	}
+	return ""
+}
+
+func (x *CloudProfileInfo) GetAccountDisplayName() string {
+	if x != nil {
+		return x.AccountDisplayName
+	}
+	return ""
 }
 
 type GetCloudProfilesRequest struct {
@@ -19004,7 +19020,7 @@ const file_agent_proto_rawDesc = "" +
 	"\x05value\x18\x02 \x01(\v2\x1a.agent.TaskModelAssignmentR\x05value:\x028\x01\"\x83\x01\n" +
 	"\x0fRoutingSnapshot\x12;\n" +
 	"\vassignments\x18\x01 \x01(\v2\x19.agent.RoutingAssignmentsR\vassignments\x123\n" +
-	"\bprofiles\x18\x02 \x03(\v2\x17.agent.CloudProfileInfoR\bprofiles\"\xce\x05\n" +
+	"\bprofiles\x18\x02 \x03(\v2\x17.agent.CloudProfileInfoR\bprofiles\"\xa5\x06\n" +
 	"\x10CloudProfileInfo\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
 	"\x06flavor\x18\x02 \x01(\tR\x06flavor\x12\x19\n" +
@@ -19020,7 +19036,9 @@ const file_agent_proto_rawDesc = "" +
 	"\x06region\x18\v \x01(\tR\x06region\x12\x1f\n" +
 	"\vaws_profile\x18\f \x01(\tR\n" +
 	"awsProfile\x12s\n" +
-	"\x1arecommended_quality_models\x18\r \x03(\v25.agent.CloudProfileInfo.RecommendedQualityModelsEntryR\x18recommendedQualityModels\x1aI\n" +
+	"\x1arecommended_quality_models\x18\r \x03(\v25.agent.CloudProfileInfo.RecommendedQualityModelsEntryR\x18recommendedQualityModels\x12#\n" +
+	"\raccount_email\x18\x0e \x01(\tR\faccountEmail\x120\n" +
+	"\x14account_display_name\x18\x0f \x01(\tR\x12accountDisplayName\x1aI\n" +
 	"\x1bEffectiveQualityModelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1aK\n" +

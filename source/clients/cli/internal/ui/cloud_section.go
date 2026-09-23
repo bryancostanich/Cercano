@@ -226,6 +226,12 @@ func (sp *settingsPage) cloudModelOptions(r cloudRow, currentID string) []form.O
 // A successful login commits account identity, not unrelated model/key edits.
 // Keep those edits pending while making the newly created account reselectable.
 func (sp *settingsPage) cloudAccountSignedIn(name, route string) {
+	// Refresh visible account labels immediately after a successful sign-in.
+	defer func() {
+		if sp.form != nil {
+			sp.form.Reload()
+		}
+	}()
 	sp.profilesLoaded = false
 	if sp.cloudDraft.Name != name {
 		return

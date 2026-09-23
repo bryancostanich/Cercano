@@ -1,6 +1,7 @@
 package config
 
 import (
+	"cercano/source/server/pkg/accountidentity"
 	"context"
 	"errors"
 	"fmt"
@@ -54,7 +55,7 @@ func (s *svc) BeginCloudLogin(ctx context.Context, profile cfg.CloudProfile, act
 }
 func (l *CloudLogin) Context() context.Context { return l.attempt.Context() }
 func (l *CloudLogin) Close()                   { l.attempt.Close() }
-func (l *CloudLogin) Commit(encoded string) (CloudLoginResult, error) {
+func (l *CloudLogin) Commit(encoded string, identity ...accountidentity.Identity) (CloudLoginResult, error) {
 	s := l.owner
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -65,8 +66,8 @@ func (l *CloudLogin) Commit(encoded string) (CloudLoginResult, error) {
 	if err := l.attempt.Commit(encoded); err != nil {
 		return CloudLoginResult{}, err
 	}
-	if l.reauthenticate {
-		return CloudLoginResult{Profile: current.Clone(), Active: s.current.ActiveCloudProfile == current.Name, Reauthenticated: true}, nil
+	if len(identity) > 0 {
+		l.proposed.AccountIdentity = identity[0].Normalized()
 	}
 	replaced := false
 	for i, p := range s.current.CloudProfiles {
@@ -79,10 +80,10 @@ func (l *CloudLogin) Commit(encoded string) (CloudLoginResult, error) {
 	if !replaced {
 		s.current.CloudProfiles = append(s.current.CloudProfiles, l.proposed.Clone())
 	}
-	if l.activate {
+	if l.activate && !l.reauthenticate {
 		s.setActiveProfileLocked(l.proposed.Name)
 	}
-	return CloudLoginResult{Profile: l.proposed.Clone(), Active: s.current.ActiveCloudProfile == l.proposed.Name}, nil
+	return CloudLoginResult{Reauthenticated: l.reauthenticate, Profile: l.proposed.Clone(), Active: s.current.ActiveCloudProfile == l.proposed.Name}, nil
 }
 
 // Called under the config lock. Profile identity/configuration changes cancel

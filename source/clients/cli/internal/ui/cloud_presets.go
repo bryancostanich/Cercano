@@ -95,7 +95,7 @@ func buildCloudRowsFromProviders(view agentclient.CloudProvidersView) []cloudRow
 		// view's backing array, so &profs[j] stays valid for the row's lifetime.
 		profs := view.Providers[i].Profiles
 		rows = append(rows, cloudRow{
-			ID: "profile:" + profs[0].Name, Label: prov.Label, Tier: tier,
+			ID: "profile:" + profs[0].Name, Label: profs[0].AccountLabel(prov.Label), Tier: tier,
 			IsProfile: true, HasKey: profs[0].HasKey, Active: profs[0].Name == view.Active,
 			Backup: profs[0].Name == view.Backup,
 			Preset: preset, Profile: &profs[0],
@@ -104,7 +104,7 @@ func buildCloudRowsFromProviders(view agentclient.CloudProvidersView) []cloudRow
 		// accounts for one provider stay distinguishable.
 		for j := 1; j < len(profs); j++ {
 			rows = append(rows, cloudRow{
-				ID: "profile:" + profs[j].Name, Label: profileSubIndent + profs[j].Name, Tier: tierCustom,
+				ID: "profile:" + profs[j].Name, Label: profileSubIndent + profs[j].AccountLabel(""), Tier: tierCustom,
 				IsProfile: true, HasKey: profs[j].HasKey, Active: profs[j].Name == view.Active,
 				Backup:     profs[j].Name == view.Backup,
 				SubProfile: true, Preset: preset, Profile: &profs[j],
@@ -115,7 +115,7 @@ func buildCloudRowsFromProviders(view agentclient.CloudProvidersView) []cloudRow
 	for i := range view.CustomProfiles {
 		p := view.CustomProfiles[i]
 		rows = append(rows, cloudRow{
-			ID: "profile:" + p.Name, Label: p.Name, Tier: tierCustom,
+			ID: "profile:" + p.Name, Label: p.AccountLabel(""), Tier: tierCustom,
 			IsProfile: true, HasKey: p.HasKey, Active: p.Name == view.Active,
 			Backup:  p.Name == view.Backup,
 			Profile: &view.CustomProfiles[i],

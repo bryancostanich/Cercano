@@ -55,12 +55,12 @@ func TestCloudSectionListsProfilesAndTemplates(t *testing.T) {
 		labels[f.Label()] = true
 	}
 	// The configured profile is merged into its provider row (keyed by the
-	// primary profile name), labeled by the friendly provider label.
+	// primary profile name), labeled by the provider and the configured account name.
 	if !keys["cloud-row:profile:work-openai"] {
 		t.Errorf("merged openai provider row (primary work-openai) missing: %v", keys)
 	}
-	if !labels["openai"] {
-		t.Errorf("merged provider row should be labeled by provider: %v", labels)
+	if !labels["openai — work-openai"] {
+		t.Errorf("merged provider row should identify provider and account: %v", labels)
 	}
 	// Providers without profiles render as template rows; the trailing custom
 	// row is always present.

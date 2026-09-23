@@ -159,7 +159,11 @@ func (c Config) ResolveTask(task Task, difficulty string) TaskAssignment {
 func (c Config) DestinationProfiles(d Destination) (preferred, backup string) {
 	switch d {
 	case DestinationPrimary:
-		return c.ActiveCloudProfile, c.BackupCloudProfile
+		backups := c.PrimaryBackups()
+		if len(backups) != 0 {
+			return c.ActiveCloudProfile, backups[0]
+		}
+		return c.ActiveCloudProfile, ""
 	case DestinationSecondary:
 		return c.SecondaryCloudProfile, c.SecondaryBackupCloudProfile
 	}
@@ -177,18 +181,56 @@ func (c Config) Profile(name string) (CloudProfile, bool) {
 	return CloudProfile{}, false
 }
 
-func (c Config) ReferencesProfile(name string) bool {
-	return name != "" && (name == c.ActiveCloudProfile || name == c.BackupCloudProfile || name == c.SecondaryCloudProfile || name == c.SecondaryBackupCloudProfile)
+// PrimaryBackups returns an independent ordered list, accepting legacy configs.
+func (c Config) PrimaryBackups() []string {
+	if c.BackupCloudProfiles != nil {
+		return append([]string{}, c.BackupCloudProfiles...)
+	}
+	if c.BackupCloudProfile != "" {
+		return []string{c.BackupCloudProfile}
+	}
+	return nil
 }
 
-// ReferencedProfiles deduplicates by identity and does not substitute missing
-// profiles. Credentials remain outside this graph and are fetched by name.
+// SetPrimaryBackups synchronizes the legacy first-entry field, including clears.
+// Callers editing user routing must validate the candidate before publishing it.
+func (c *Config) SetPrimaryBackups(names []string) {
+	c.BackupCloudProfiles = append([]string{}, names...)
+	c.BackupCloudProfile = ""
+	if len(names) > 0 {
+		c.BackupCloudProfile = names[0]
+	}
+}
+
+// DestinationProfileNames retains configuration order; it does not hide duplicates.
+func (c Config) DestinationProfileNames(d Destination) []string {
+	if d == DestinationPrimary {
+		return append([]string{c.ActiveCloudProfile}, c.PrimaryBackups()...)
+	}
+	preferred, backup := c.DestinationProfiles(d)
+	return []string{preferred, backup}
+}
+
+func (c Config) ReferencesProfile(name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, d := range []Destination{DestinationPrimary, DestinationSecondary} {
+		for _, n := range c.DestinationProfileNames(d) {
+			if n == name {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// ReferencedProfiles deduplicates by identity; credentials stay outside the graph.
 func (c Config) ReferencedProfiles() []CloudProfile {
 	var profiles []CloudProfile
 	seen := map[string]bool{}
 	for _, d := range []Destination{DestinationPrimary, DestinationSecondary} {
-		preferred, backup := c.DestinationProfiles(d)
-		for _, name := range []string{preferred, backup} {
+		for _, name := range c.DestinationProfileNames(d) {
 			if p, ok := c.Profile(name); ok && !seen[name] {
 				profiles = append(profiles, p)
 				seen[name] = true
@@ -243,15 +285,20 @@ func (c Config) ValidateRouting() error {
 		return err
 	}
 	for _, d := range []Destination{DestinationPrimary, DestinationSecondary} {
-		preferred, backup := c.DestinationProfiles(d)
-		if preferred != "" && preferred == backup {
-			return fmt.Errorf("%s preferred and backup must differ", d)
-		}
-		for _, name := range []string{preferred, backup} {
-			if name != "" {
-				if _, ok := c.Profile(name); !ok {
-					return fmt.Errorf("%s references missing profile %q", d, name)
+		seen := map[string]bool{}
+		for i, name := range c.DestinationProfileNames(d) {
+			if name == "" {
+				if d == DestinationPrimary && i > 0 {
+					return fmt.Errorf("primary backup must not be empty")
 				}
+				continue
+			}
+			if seen[name] {
+				return fmt.Errorf("%s preferred and backups must differ: duplicate profile %q", d, name)
+			}
+			seen[name] = true
+			if _, ok := c.Profile(name); !ok {
+				return fmt.Errorf("%s references missing profile %q", d, name)
 			}
 		}
 	}
@@ -308,7 +355,12 @@ func (c *Config) SetDestinationProfiles(d Destination, preferred, backup string)
 	next := c.Clone()
 	switch d {
 	case DestinationPrimary:
-		next.ActiveCloudProfile, next.BackupCloudProfile = preferred, backup
+		next.ActiveCloudProfile = preferred
+		if backup == "" {
+			next.SetPrimaryBackups(nil)
+		} else {
+			next.SetPrimaryBackups([]string{backup})
+		}
 	case DestinationSecondary:
 		next.SecondaryCloudProfile, next.SecondaryBackupCloudProfile = preferred, backup
 	default:

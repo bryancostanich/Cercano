@@ -46,7 +46,7 @@ func DecodeProfile(p *proto.CloudProfileInfo) (config.CloudProfile, error) {
 	return out, err
 }
 func Assignments(c config.Config) *proto.RoutingAssignments {
-	out := &proto.RoutingAssignments{Primary: c.ActiveCloudProfile, PrimaryBackup: c.BackupCloudProfile, Secondary: c.SecondaryCloudProfile, SecondaryBackup: c.SecondaryBackupCloudProfile, SecondaryRedirect: string(c.SecondaryRedirect), LocalRedirect: string(c.LocalRedirect), Tasks: map[string]*proto.TaskModelAssignment{}}
+	out := &proto.RoutingAssignments{Primary: c.ActiveCloudProfile, PrimaryBackup: c.BackupCloudProfile, PrimaryBackups: c.PrimaryBackups(), Secondary: c.SecondaryCloudProfile, SecondaryBackup: c.SecondaryBackupCloudProfile, SecondaryRedirect: string(c.SecondaryRedirect), LocalRedirect: string(c.LocalRedirect), Tasks: map[string]*proto.TaskModelAssignment{}}
 	for task, a := range c.TaskAssignments {
 		out.Tasks[string(task)] = &proto.TaskModelAssignment{Destination: string(a.Destination), Quality: string(a.Quality)}
 	}
@@ -56,7 +56,12 @@ func ApplyAssignments(c *config.Config, p *proto.RoutingAssignments) {
 	if p == nil {
 		return
 	}
-	c.ActiveCloudProfile, c.BackupCloudProfile = p.Primary, p.PrimaryBackup
+	c.ActiveCloudProfile = p.Primary
+	backups := p.PrimaryBackups
+	if len(backups) == 0 && p.PrimaryBackup != "" {
+		backups = []string{p.PrimaryBackup}
+	}
+	c.SetPrimaryBackups(backups)
 	c.SecondaryCloudProfile, c.SecondaryBackupCloudProfile = p.Secondary, p.SecondaryBackup
 	c.SecondaryRedirect, c.LocalRedirect = config.Destination(p.SecondaryRedirect), config.Destination(p.LocalRedirect)
 	c.TaskAssignments = map[config.Task]config.TaskAssignment{}

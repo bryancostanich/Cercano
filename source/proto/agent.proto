@@ -1452,6 +1452,8 @@ message RoutingAssignments {
  // Empty means own configuration; a present draft replaces both fields.
  string secondary_redirect = 6;
  string local_redirect = 7;
+ // Ordered Primary backups; primary_backup mirrors the first entry for older clients.
+ repeated string primary_backups = 8;
 }
 message RoutingSnapshot {
  RoutingAssignments assignments = 1;

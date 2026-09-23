@@ -353,7 +353,10 @@ type Config struct {
 	// BackupCloudProfile names the profile that serves a request when the
 	// active profile's provider fails (see internal/llm/fallback for what
 	// counts as a failure worth failing over). Empty = no fallback.
-	BackupCloudProfile          string                  `yaml:"backup_cloud_profile,omitempty"`
+	BackupCloudProfile string `yaml:"backup_cloud_profile,omitempty"`
+	// BackupCloudProfiles is the ordered Primary account list. The scalar above
+	// remains the first-entry compatibility field for older configurations.
+	BackupCloudProfiles         []string                `yaml:"backup_cloud_profiles,omitempty"`
 	SecondaryCloudProfile       string                  `yaml:"secondary_cloud_profile,omitempty"`
 	SecondaryBackupCloudProfile string                  `yaml:"secondary_backup_cloud_profile,omitempty"`
 	TaskAssignments             map[Task]TaskAssignment `yaml:"task_assignments,omitempty"`
@@ -847,8 +850,27 @@ func collapseLegacySubscriptionAliases(cfg *Config) {
 	if removed[cfg.ActiveCloudProfile] {
 		cfg.ActiveCloudProfile = canonical
 	}
-	if removed[cfg.BackupCloudProfile] {
-		cfg.BackupCloudProfile = canonical
+	backups := cfg.PrimaryBackups()
+	keptBackups := make([]string, 0, len(backups))
+	seen := map[string]bool{}
+	for _, name := range backups {
+		if removed[name] {
+			name = canonical
+		}
+		if !seen[name] {
+			keptBackups = append(keptBackups, name)
+			seen[name] = true
+		}
+	}
+	cfg.SetPrimaryBackups(keptBackups)
+	if removed[cfg.SecondaryCloudProfile] {
+		cfg.SecondaryCloudProfile = canonical
+	}
+	if removed[cfg.SecondaryBackupCloudProfile] {
+		cfg.SecondaryBackupCloudProfile = canonical
+	}
+	if cfg.SecondaryBackupCloudProfile == cfg.SecondaryCloudProfile {
+		cfg.SecondaryBackupCloudProfile = ""
 	}
 }
 
@@ -1184,6 +1206,9 @@ func applyEnvOverrides(cfg *Config) {
 // array.
 func (c Config) Clone() Config {
 	out := c
+	if c.BackupCloudProfiles != nil {
+		out.BackupCloudProfiles = append([]string{}, c.BackupCloudProfiles...)
+	}
 	// A routing graph must not observe later edits to per-runtime model slots.
 	if c.Models.Open.Overrides != nil {
 		out.Models.Open.Overrides = make(map[string]map[string]string, len(c.Models.Open.Overrides))

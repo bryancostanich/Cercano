@@ -76,3 +76,21 @@ func TestActivationPreservesIndependentBackup(t *testing.T) {
 		}
 	}
 }
+
+func TestRemoveOrderedBackup(t *testing.T) {
+	c := cfg.Config{ActiveCloudProfile: "p", CloudProfiles: []cfg.CloudProfile{{Name: "p"}, {Name: "b"}, {Name: "c"}}}
+	c.SetPrimaryBackups([]string{"b", "c"})
+	svc := New("", c, nil)
+	if svc.SetActiveProfile("c") {
+		t.Fatal("allowed backup as primary")
+	}
+	svc.RemoveProfile("b")
+	got := svc.Get()
+	if got.BackupCloudProfile != "c" || len(got.PrimaryBackups()) != 1 {
+		t.Fatalf("lost remaining backup: %v", got.PrimaryBackups())
+	}
+	svc.RemoveProfile("c")
+	if got := svc.Get(); len(got.PrimaryBackups()) != 0 || got.BackupCloudProfile != "" {
+		t.Fatal("backup resurrected")
+	}
+}

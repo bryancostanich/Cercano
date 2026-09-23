@@ -24,6 +24,7 @@ func (c *CloudModelChoices) Clone() *CloudModelChoices {
 
 type TaskAssignment struct{ Destination, Quality string }
 type RoutingAssignments struct {
+	PrimaryBackups                                     []string
 	SecondaryRedirect, LocalRedirect                   string
 	Primary, PrimaryBackup, Secondary, SecondaryBackup string
 	Tasks                                              map[string]TaskAssignment
@@ -34,6 +35,7 @@ func (a *RoutingAssignments) Clone() *RoutingAssignments {
 		return &RoutingAssignments{Tasks: map[string]TaskAssignment{}}
 	}
 	c := *a
+	c.PrimaryBackups = append([]string(nil), a.PrimaryBackups...)
 	c.Tasks = map[string]TaskAssignment{}
 	for k, v := range a.Tasks {
 		c.Tasks[k] = v
@@ -66,7 +68,7 @@ func assignmentsToProto(a *RoutingAssignments) *proto.RoutingAssignments {
 	if a == nil {
 		return nil
 	}
-	out := &proto.RoutingAssignments{Primary: a.Primary, PrimaryBackup: a.PrimaryBackup, Secondary: a.Secondary, SecondaryBackup: a.SecondaryBackup, SecondaryRedirect: a.SecondaryRedirect, LocalRedirect: a.LocalRedirect, Tasks: map[string]*proto.TaskModelAssignment{}}
+	out := &proto.RoutingAssignments{Primary: a.Primary, PrimaryBackup: a.PrimaryBackup, PrimaryBackups: append([]string(nil), a.PrimaryBackups...), Secondary: a.Secondary, SecondaryBackup: a.SecondaryBackup, SecondaryRedirect: a.SecondaryRedirect, LocalRedirect: a.LocalRedirect, Tasks: map[string]*proto.TaskModelAssignment{}}
 	for k, v := range a.Tasks {
 		out.Tasks[k] = &proto.TaskModelAssignment{Destination: v.Destination, Quality: v.Quality}
 	}
@@ -76,7 +78,7 @@ func assignmentsFromProto(a *proto.RoutingAssignments) *RoutingAssignments {
 	if a == nil {
 		return nil
 	}
-	out := &RoutingAssignments{Primary: a.Primary, PrimaryBackup: a.PrimaryBackup, Secondary: a.Secondary, SecondaryBackup: a.SecondaryBackup, SecondaryRedirect: a.SecondaryRedirect, LocalRedirect: a.LocalRedirect, Tasks: map[string]TaskAssignment{}}
+	out := &RoutingAssignments{Primary: a.Primary, PrimaryBackup: a.PrimaryBackup, PrimaryBackups: append([]string(nil), a.PrimaryBackups...), Secondary: a.Secondary, SecondaryBackup: a.SecondaryBackup, SecondaryRedirect: a.SecondaryRedirect, LocalRedirect: a.LocalRedirect, Tasks: map[string]TaskAssignment{}}
 	for k, v := range a.Tasks {
 		out.Tasks[k] = TaskAssignment{Destination: v.GetDestination(), Quality: v.GetQuality()}
 	}

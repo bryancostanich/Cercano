@@ -146,8 +146,10 @@ func (s *svc) setActiveProfileLocked(name string) bool {
 	if _, ok := profileByName(s.current.CloudProfiles, name); !ok {
 		return false
 	}
-	if s.current.BackupCloudProfile == name {
-		return false
+	for _, backup := range s.current.PrimaryBackups() {
+		if backup == name {
+			return false
+		}
 	}
 	s.current.ActiveCloudProfile = name
 	return true
@@ -191,9 +193,14 @@ func (s *svc) RemoveProfile(name string) (existed, wasActive bool) {
 	if wasActive {
 		s.current.ActiveCloudProfile = ""
 	}
-	if s.current.BackupCloudProfile == name {
-		s.current.BackupCloudProfile = ""
+	backups := s.current.PrimaryBackups()
+	keptBackups := backups[:0]
+	for _, backup := range backups {
+		if backup != name {
+			keptBackups = append(keptBackups, backup)
+		}
 	}
+	s.current.SetPrimaryBackups(keptBackups)
 	if s.current.SecondaryCloudProfile == name {
 		s.current.SecondaryCloudProfile = ""
 	}
@@ -211,7 +218,11 @@ func (s *svc) SetBackupProfile(name string) bool {
 			return false
 		}
 	}
-	s.current.BackupCloudProfile = name
+	if name == "" {
+		s.current.SetPrimaryBackups(nil)
+	} else {
+		s.current.SetPrimaryBackups([]string{name})
+	}
 	return true
 }
 

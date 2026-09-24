@@ -1,6 +1,26 @@
-# Release formula and upgrade restart
+# Release formula and upgrade
 
 `cercano.rb.in` is the Apple Silicon release formula template. It is **not ready to publish**: replace `@RELEASE_URL@`, `@VERSION@`, and `@SHA256@` with the final signed/notarized release archive's values. The archive must contain `bin/cercano` and `bin/cercano-cli`; its agent binary must implement `restart-after-upgrade`. Do not attach this hook to the legacy 0.8.1 single-binary formula.
+
+## Rendering the formula
+
+`render_formula.py` fills the template's three placeholders from a verified local archive:
+
+```bash
+python3 release/homebrew/render_formula.py \
+    --version 1.2.3 \
+    --archive dist/cercano-1.2.3-darwin-arm64.tar.gz \
+    --sha256 <expected-64-hex-digest> \
+    --output dist/cercano.rb
+```
+
+It hashes the archive bytes before parsing the tar, requires that digest to equal the one you supply, then checks layout without extracting or executing anything: exactly `bin/cercano` and `bin/cercano-cli` as regular executable files under a single `cercano-<version>-darwin-arm64` directory, with only `LICENSE` and `README.txt` permitted beside them. Symlinks, hardlinks, devices, FIFOs, absolute or traversing paths, duplicate members, extra executables and stray files are rejected. The URL is built only from the validated version and archive name. The output is created exclusively and never overwritten, and any validation failure writes no formula at all.
+
+**Trust boundary.** This renderer checks archive layout and byte digest only. It does **not** verify code signatures, notarization, Mach-O architecture, the macOS deployment target, or the version the binaries actually report, and it never downloads, installs, executes archive contents or publishes. A rendered formula is not evidence that signing or notarization passed.
+
+The unsigned rehearsal build (`scripts/build-macos-unsigned.sh`) emits a `-unsigned` archive and top-level directory, so it is deliberately rejected; only a final release archive renders.
+
+## Homebrew Integration
 
 Homebrew runs `post_install` after placing/linking the new keg. The hook invokes the **new keg's absolute executable**, not a PATH lookup. Installation itself only places files. The coordinator does nothing when no owned agent listens at the configured endpoint. It does not register a background service or compare client/agent versions.
 
@@ -20,10 +40,15 @@ The default endpoint is `127.0.0.1` with the port from Cercano configuration. If
 
 Automatic discovery of agents on other ports is not implemented. A nil ownership result describes the selected endpoint, not all agents on the machine. Nonstandard launch arguments are refused instead of replayed unsafely.
 
-Run the local formula-method checks with:
+## Testing
 
-```
+```bash
+cd release/homebrew && python3 -m unittest test_render_formula
 ruby release/homebrew/test_formula.rb
 ```
 
-These tests use a small Ruby DSL stub; they do not prove Homebrew's actual lifecycle, sandbox behavior, detached-process survival, or release-archive installation. Those still require the clean-Mac installation/upgrade rehearsal and final formula rendering. Nothing in this directory publishes to the tap.
+The Python tests build tiny inert tar fixtures and cover valid rendering, digest/name/version mismatches, incomplete archives, hostile members (symlink, hardlink, FIFO, traversal, absolute path, smuggled executable, stray file, second tree), duplicate members, refusal to overwrite an existing formula, and templates with missing, duplicated or unknown placeholders.
+
+The Ruby tests exercise our formula methods against a small DSL stub. Neither suite proves Homebrew's actual lifecycle, sandbox behavior, detached-process survival, or installation of a real release archive; those need the clean-Mac rehearsal.
+
+Nothing in this directory publishes to the tap.

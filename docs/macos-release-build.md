@@ -82,17 +82,66 @@ passed with `--notarization-evidence <dir>`. That is corroborating provenance
 — it records that *a* submission was accepted — not proof that these exact
 bytes are notarized. Only the Gatekeeper assessment establishes that.
 
+## Release workflow (GitHub Actions)
+
+`.github/workflows/release-macos.yml` runs the whole pipeline on an Apple
+Silicon runner: test gate, signing-identity import, build and sign, notarize,
+verify the finished archive, render the formula, and upload artifacts for
+review.
+
+**It is manually triggered only.** There is no push, tag or pull_request
+trigger, so untrusted code can never reach the signing credentials. An operator
+starts each run from the Actions tab with a version, and publication is a
+separate checkbox that defaults to off — a rehearsal stops at reviewable
+artifacts.
+
+> The previous tag-triggered `release.yml` was removed. It published unsigned,
+> cross-compiled binaries automatically on any `v*` tag, which would have raced
+> this pipeline and attached unsigned macOS artifacts to the same release.
+> Nothing publishes without an explicit operator-initiated run. If Linux or
+> Docker artifacts are wanted again, they need their own workflow under the
+> same no-automatic-publish rule.
+
+### Required configuration
+
+Create a **protected `release` environment** in the repository settings with
+required reviewers, so a run cannot reach Apple credentials without human
+approval. Add these secrets to that environment:
+
+| Secret | Contents |
+|---|---|
+| `MACOS_CERTIFICATE_P12` | Base64-encoded Developer ID Application certificate (`.p12`) |
+| `MACOS_CERTIFICATE_PASSWORD` | Password for that `.p12` |
+| `APPLE_NOTARY_ISSUER_ID` | App Store Connect API issuer ID |
+| `APPLE_NOTARY_KEY_ID` | Notarization key ID |
+| `APPLE_NOTARY_PRIVATE_KEY` | Base64-encoded `.p8` private key |
+
+The workflow creates a temporary keychain, resolves the signing identity from
+it (failing if absent or ambiguous rather than trusting a configured string),
+and **destroys the keychain and all decoded key material on every path**,
+including failure and cancellation. Default permissions are read-only; write
+access is scoped to the publish job alone. Publication refuses to replace an
+asset already attached to the tag and re-checks the artifact digest before
+uploading.
+
 ## Tests
 
 ```bash
 python3 scripts/test-macos-release-build.py
 python3 scripts/test-macos-release-verify.py
+python3 scripts/test-release-workflow.py
 ```
 
-Both suites drive the scripts with stub `go`, `lipo`, `otool`, `codesign`,
-`spctl` and signing executables on `PATH`. They prove refusal behavior, archive
-layout and permissions, agreement with the formula renderer, and that every
-verification check actually fails when its property is violated. They cannot
-prove that a real toolchain, a real Developer ID signature, or real
-notarization succeeds; those need the real build, a networked Gatekeeper
-assessment, and the clean-Mac rehearsal.
+The build and verify suites drive the scripts with stub `go`, `lipo`, `otool`,
+`codesign`, `spctl` and signing executables on `PATH`. They prove refusal
+behavior, archive layout and permissions, agreement with the formula renderer,
+and that every verification check actually fails when its property is violated.
+
+`test-release-workflow.py` checks the workflow's structure: manual-only
+trigger, least-privilege permissions, protected environment, step ordering,
+keychain cleanup on every path, verification before publication, and that no
+workflow publishes on push or tag.
+
+None of these prove that a real toolchain, a real Developer ID signature, real
+notarization, or an actual Actions run succeeds; those need the real build, a
+networked Gatekeeper assessment, and the clean-Mac rehearsal.

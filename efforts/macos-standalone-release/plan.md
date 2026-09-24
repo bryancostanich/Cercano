@@ -43,14 +43,14 @@ Objective: produce version-matched arm64 binaries and complete archives with a s
 
 Objective: connect tested tooling to a protected, least-privilege release workflow. Files: .github/workflows release workflow, supporting release scripts, and operator documentation. Tests: workflow validation, shell checks, and controlled failure/rehearsal paths. Actual Apple service calls require operator-provisioned credentials and explicit authorization where applicable.
 
-- [ ] Add a macOS arm64 release build and relevant test gate with explicit toolchain versions and narrowly scoped workflow permissions
-- [ ] Restrict signing credentials to the protected release environment and prevent untrusted pull-request access
-- [ ] Import the operator-provisioned signing identity into a temporary keychain and clean up credentials and temporary files on success or failure
-- [ ] Gate artifact promotion on signatures, accepted notarization, archive validation, and checksum generation
-- [ ] Support a non-public rehearsal that produces reviewable artifacts without public release or tap promotion
-- [ ] Gate publication on explicit operator authorization and prevent silent replacement of existing versioned artifacts
-- [ ] Document required environment configuration, certificate and notarization provisioning, rotation, and failure recovery without placing secrets in source or logs
-- [ ] Validate the workflow and checkpoint the automation
+- [x] Add a macOS arm64 release build and relevant test gate with explicit toolchain versions and narrowly scoped workflow permissions
+- [x] Restrict signing credentials to the protected release environment and prevent untrusted pull-request access
+- [x] Import the operator-provisioned signing identity into a temporary keychain and clean up credentials and temporary files on success or failure
+- [x] Gate artifact promotion on signatures, accepted notarization, archive validation, and checksum generation
+- [x] Support a non-public rehearsal that produces reviewable artifacts without public release or tap promotion
+- [x] Gate publication on explicit operator authorization and prevent silent replacement of existing versioned artifacts
+- [x] Document required environment configuration, certificate and notarization provisioning, rotation, and failure recovery without placing secrets in source or logs
+- [x] Validate the workflow and checkpoint the automation
 
 ## Phase 5 — Prepare the Homebrew formula and operator documentation
 

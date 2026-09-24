@@ -24,6 +24,21 @@ The kernel executable path is deliberately not resolved through a Homebrew prefi
 
 No live Cercano process was connected to, signaled or restarted. No Homebrew operation was invoked.
 
+## Implemented: launch-state capture and per-process listener verification
+
+`CaptureLaunchState` reads kernel `KERN_PROCARGS2` and `PROC_PIDVNODEPATHINFO` records for a known same-user process. It preserves argument boundaries (including empty arguments), environment entries, and the working directory. Identity is revalidated before and after capture. Malformed kernel records and changed identities fail closed. LaunchState formatting reports counts only, not arguments, environment values or working-directory contents; captured state is not persisted.
+
+`HoldsListener` uses `PROC_PIDLISTFDS` and `proc_pidfdinfo(PROC_PIDFDSOCKETINFO)` to verify an exact loopback TCP listener on a known process. It checks TCP LISTEN state and address/port and binds inspection to the expected process identity. Wildcard/remote endpoints, unstable descriptor snapshots and changed identities are rejected. It does not enumerate the machine's processes or prove unique socket ownership.
+
+A real isolated child test opens an ephemeral listener, exposes its endpoint, and waits for an explicit test command to close it. The parent verifies capture of its supplied argv/environment/cwd, listener presence and subsequent absence, stale-identity rejection, and rejection after process exit. Only the test child is inspected and terminated. Parser tests cover padding, empty arguments, environment values containing equals signs, malformed records and secret-redacting formatting.
+
+Additional verification passed:
+
+- `go test ./internal/brewrestart -count=10`
+- `go test -race ./internal/brewrestart -count=1`
+- `go vet ./internal/brewrestart`
+- `CGO_ENABLED=0 go test ./internal/brewrestart -count=1`
+
 ## Not implemented yet
 
-This is a safety component, not an operational restart command. Remaining work includes socket-to-process attribution, preserving launch settings, coordinating with client launches, shutdown/drain and actual-process-exit handling, replacement startup/readiness checks, command and formula hook wiring, and isolated end-to-end tests. There is no claim that direct brew upgrades now restart the agent. No tap/release artifacts were published.
+These are safety components, not an operational restart command. Remaining work includes candidate-process discovery and unique socket ownership, coordinating with client launches, shutdown/drain and actual-process-exit handling, replacement startup/readiness checks, command and formula hook wiring, and isolated end-to-end tests. Capturing launch state alone does not prove a restarted agent preserves its settings. There is no claim that direct brew upgrades now restart the agent. No tap/release artifacts were published.

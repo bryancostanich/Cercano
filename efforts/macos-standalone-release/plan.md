@@ -22,7 +22,7 @@ Objective: fix only demonstrated gaps in standalone installation and upgrade beh
 - [x] Add installation probes for colocated binaries reached through Homebrew-style symlinks and prove any observed discovery or asset-loading failures
 - [x] Correct demonstrated installed-path or required-asset gaps without introducing development-checkout dependencies
 - [x] Add isolated integration coverage for a compatible already-running agent and incompatible connection behavior
-- [x] Implement any missing actionable restart guidance under the established compatibility contract without automatic process termination
+- [~] Implement any missing actionable restart guidance under the established compatibility contract without automatic process termination
 - [x] Verify Homebrew-managed installations are not overwritten by an incompatible self-update path; fix demonstrated conflicts
 - [x] Verify configuration and conversation data are preserved across replacement and restart
 - [x] Run affected package tests and installation/upgrade integration tests, then checkpoint the solved unit

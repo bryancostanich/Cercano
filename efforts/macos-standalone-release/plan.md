@@ -34,9 +34,9 @@ Objective: produce version-matched arm64 binaries and complete archives with a s
 - [x] Implement clean release builds for both binaries using one explicit tag-derived version and the audited macOS build requirements
 - [x] Package required base assets and license notices with the binaries; exclude developer launchers, credentials, caches, and model weights
 - [x] Implement fail-closed Developer ID signing with hardened runtime, secure timestamps, and signature verification of final executable bytes
-- [ ] Implement notarization submission and acceptance verification using a supported submission container, followed by final archive checksums
-- [ ] Add failure coverage for absent identity, signing failure, notarization rejection, and incomplete archive contents
-- [ ] Verify archive architecture, matching version output, required assets, and executable permissions without asserting notarization success from mocked tests
+- [x] Implement notarization submission and acceptance verification using a supported submission container, followed by final archive checksums
+- [x] Add failure coverage for absent identity, signing failure, notarization rejection, and incomplete archive contents
+- [x] Verify archive architecture, matching version output, required assets, and executable permissions without asserting notarization success from mocked tests
 - [ ] Checkpoint the artifact tooling and tests
 
 ## Phase 4 — Wire protected GitHub release automation

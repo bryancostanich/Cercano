@@ -40,9 +40,10 @@ func writeLines(t *testing.T, dir, name string, n int, line string) string {
 	return path
 }
 
-// A file barely over the cap loses a sliver of content but is told to "refine",
-// which is the instruction that drove repeated re-reads.
-func TestSlightOverflowTruncatesAndInvitesReread(t *testing.T) {
+// A file barely over the cap is still truncated. The reproduction file was one
+// unbroken 32,826-byte line in this shape, which cannot be continued by line
+// number; it must say so rather than advise a start that repeats the read.
+func TestSlightOverflowTruncates(t *testing.T) {
 	dir := t.TempDir()
 	body := strings.Repeat("x", reproFileBytes)
 	if err := os.WriteFile(filepath.Join(dir, "big.rs"), []byte(body), 0o600); err != nil {
@@ -59,12 +60,11 @@ func TestSlightOverflowTruncatesAndInvitesReread(t *testing.T) {
 	if !res.Truncated {
 		t.Fatal("expected truncation at 58 bytes over the cap")
 	}
-	if !strings.Contains(res.Note, "refine to get more") {
-		t.Fatalf("note = %q, want the refine instruction", res.Note)
+	if strings.Contains(res.Note, "refine to get more") {
+		t.Fatalf("note still asks the caller to guess: %q", res.Note)
 	}
-	// The note names no concrete next call: no byte offset, no line number.
-	if strings.ContainsAny(res.Note, "0123456789") && !strings.Contains(res.Note, "32") {
-		t.Logf("note contains a number other than the cap: %q", res.Note)
+	if !strings.Contains(res.Note, "exceeds") {
+		t.Fatalf("note = %q, want the oversized-line explanation", res.Note)
 	}
 }
 

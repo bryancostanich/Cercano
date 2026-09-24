@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"cercano/source/server/internal/agenttools"
 	"cercano/source/server/internal/capabilities"
 )
 
@@ -84,11 +85,15 @@ func (readFileCap) Execute(ctx context.Context, call *capabilities.Call) (*capab
 		return nil, fmt.Errorf("read_file: %s appears to be binary; refusing to read", a.Path)
 	}
 	text := string(data)
+	first := a.Start
+	if first < 1 {
+		first = 1
+	}
 	if a.Start > 0 || a.End > 0 {
 		text = selectLines(text, a.Start, a.End)
 	}
-	res := capabilities.NewTextResult(text)
-	res.Detail = countLabel(lineCount(text), "line", "lines")
+	res := truncateFileText(text, first, totalLines(string(data)))
+	res.Detail = countLabel(lineCount(res.Text), "line", "lines")
 	return res, nil
 }
 
@@ -322,4 +327,50 @@ func (globCap) Execute(ctx context.Context, call *capabilities.Call) (*capabilit
 	res := capabilities.NewTextResult(strings.Join(matches, "\n") + "\n")
 	res.Detail = countLabel(len(matches), "match", "matches")
 	return res, nil
+}
+
+// truncateFileText caps a file read at the shared byte ceiling and, when it
+// cuts, names the exact next call instead of asking the caller to "refine".
+//
+// The old note ("showed first 32 KiB; refine to get more") named no offset, and
+// because the cap applies after line slicing a narrowed range could hit the
+// same wall and return the identical message. A caller could only guess how far
+// to narrow. Reported line numbers are absolute in the file, so following the
+// note advances rather than restarting.
+func truncateFileText(text string, firstLine, fileLines int) *capabilities.Result {
+	if len(text) <= agenttools.MaxResultBytes {
+		return capabilities.NewTextResult(text)
+	}
+	shown := agenttools.TruncateUTF8(text, agenttools.MaxResultBytes)
+	lastLine := firstLine + strings.Count(shown, "\n")
+	// A single line longer than the ceiling cannot be continued by line number:
+	// advising start=firstLine would repeat the same truncated read forever.
+	if lastLine <= firstLine {
+		return &capabilities.Result{
+			Type:      capabilities.ResultText,
+			Text:      shown + "\n… (truncated)",
+			Truncated: true,
+			Note: fmt.Sprintf("line %d exceeds the %d KiB result ceiling; showed its first %d bytes",
+				firstLine, agenttools.MaxResultBytes/1024, len(shown)),
+		}
+	}
+	// The cut usually lands mid-line, so the last shown line is partial: point
+	// the continuation at it rather than past it, or that line is lost.
+	return &capabilities.Result{
+		Type:      capabilities.ResultText,
+		Text:      shown + "\n… (truncated)",
+		Truncated: true,
+		Note: fmt.Sprintf("showed lines %d-%d of %d; request start=%d for the remainder",
+			firstLine, lastLine, fileLines, lastLine),
+	}
+}
+
+// totalLines counts lines the way selectLines splits them, so the reported
+// total matches the numbering used for start/end. A trailing newline does not
+// start a further line.
+func totalLines(text string) int {
+	if text == "" {
+		return 0
+	}
+	return strings.Count(strings.TrimSuffix(text, "\n"), "\n") + 1
 }

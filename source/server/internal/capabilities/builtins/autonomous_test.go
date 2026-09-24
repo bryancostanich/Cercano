@@ -50,8 +50,8 @@ func TestSuggestAutonomous_PersistsRunBriefWhenStoreWired(t *testing.T) {
 		t.Fatalf("EnsureConversation: %v", err)
 	}
 	svc := capabilities.Services{
-		Autonomy: store,
-		EnterProfile:  func(convID, name string) error { return nil },
+		Autonomy:     store,
+		EnterProfile: func(convID, name string) error { return nil },
 	}
 	_, err = SuggestAutonomous().Execute(ctx, &capabilities.Call{
 		ConversationID: "conv-brief",

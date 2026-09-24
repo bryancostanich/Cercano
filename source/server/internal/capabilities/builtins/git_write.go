@@ -17,9 +17,11 @@ type gitAddCap struct{}
 // GitAdd constructs the git_add capability. W-tier.
 func GitAdd() capabilities.Capability { return gitAddCap{} }
 
-func (gitAddCap) Name() string                  { return "git_add" }
-func (gitAddCap) Tier() capabilities.Tier        { return capabilities.TierW }
-func (gitAddCap) Surfaces() capabilities.Surface { return capabilities.SurfaceAgent | capabilities.SurfaceMCP }
+func (gitAddCap) Name() string            { return "git_add" }
+func (gitAddCap) Tier() capabilities.Tier { return capabilities.TierW }
+func (gitAddCap) Surfaces() capabilities.Surface {
+	return capabilities.SurfaceAgent | capabilities.SurfaceMCP
+}
 func (gitAddCap) Description() string {
 	return "Stage files for the next commit. Args: {paths: [string], cwd?: string}."
 }
@@ -73,9 +75,11 @@ type gitCommitCap struct{}
 // GitCommit constructs the git_commit capability. W-tier.
 func GitCommit() capabilities.Capability { return gitCommitCap{} }
 
-func (gitCommitCap) Name() string                  { return "git_commit" }
-func (gitCommitCap) Tier() capabilities.Tier        { return capabilities.TierW }
-func (gitCommitCap) Surfaces() capabilities.Surface { return capabilities.SurfaceAgent | capabilities.SurfaceMCP }
+func (gitCommitCap) Name() string            { return "git_commit" }
+func (gitCommitCap) Tier() capabilities.Tier { return capabilities.TierW }
+func (gitCommitCap) Surfaces() capabilities.Surface {
+	return capabilities.SurfaceAgent | capabilities.SurfaceMCP
+}
 func (gitCommitCap) Description() string {
 	return "Create a commit with the given message from currently staged changes. Args: {message: string, cwd?: string}."
 }
@@ -126,9 +130,11 @@ type gitPushCap struct{}
 // GitPush constructs the git_push capability. X-tier.
 func GitPush() capabilities.Capability { return gitPushCap{} }
 
-func (gitPushCap) Name() string                  { return "git_push" }
-func (gitPushCap) Tier() capabilities.Tier        { return capabilities.TierX }
-func (gitPushCap) Surfaces() capabilities.Surface { return capabilities.SurfaceAgent | capabilities.SurfaceMCP }
+func (gitPushCap) Name() string            { return "git_push" }
+func (gitPushCap) Tier() capabilities.Tier { return capabilities.TierX }
+func (gitPushCap) Surfaces() capabilities.Surface {
+	return capabilities.SurfaceAgent | capabilities.SurfaceMCP
+}
 func (gitPushCap) Description() string {
 	return "Push to a remote. Defaults: remote=origin, current branch. Args: {remote?: string, branch?: string, force?: bool (default false), cwd?: string}."
 }
@@ -192,9 +198,11 @@ type gitResetHardCap struct{}
 // GitResetHard constructs the git_reset_hard capability. X-tier.
 func GitResetHard() capabilities.Capability { return gitResetHardCap{} }
 
-func (gitResetHardCap) Name() string                  { return "git_reset_hard" }
-func (gitResetHardCap) Tier() capabilities.Tier        { return capabilities.TierX }
-func (gitResetHardCap) Surfaces() capabilities.Surface { return capabilities.SurfaceAgent | capabilities.SurfaceMCP }
+func (gitResetHardCap) Name() string            { return "git_reset_hard" }
+func (gitResetHardCap) Tier() capabilities.Tier { return capabilities.TierX }
+func (gitResetHardCap) Surfaces() capabilities.Surface {
+	return capabilities.SurfaceAgent | capabilities.SurfaceMCP
+}
 func (gitResetHardCap) Description() string {
 	return "Reset the working tree to the given revision, discarding uncommitted changes. Args: {revision: string (e.g. 'HEAD', 'HEAD~3', a SHA), cwd?: string}."
 }

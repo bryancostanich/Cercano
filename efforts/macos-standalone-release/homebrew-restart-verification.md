@@ -62,6 +62,35 @@ Verification passed after these changes:
 - `go vet ./internal/brewrestart`
 - `CGO_ENABLED=0 go test ./internal/brewrestart -count=1`
 
-## Not implemented yet
+## Implemented: restart lifecycle, command and release hook template
 
-These are safety components, not an operational restart command. Remaining work includes coordinating with client launches, shutdown/drain and actual-process-exit handling, replacement startup/readiness checks, command and formula hook wiring, and isolated end-to-end tests. Capturing launch state and finding an owner alone do not prove a restarted agent preserves its settings. There is no claim that direct brew upgrades now restart the agent. No tap/release artifacts were published.
+`RestartInstalled` now coordinates discovery, launch-state capture, local preflight, shared CLI launch locking, ownership revalidation, the existing `ShutdownAgent` RPC, actual process exit, detached replacement launch and readiness. The launch lock uses the old agent's captured TMPDIR rather than Homebrew's environment and stays held through replacement readiness. The agent's existing shutdown handler determines drain/cleanup semantics; the coordinator adds no kill fallback and no version check. Shutdown rejection, unknown exit and readiness failure return actionable errors rather than starting competing processes.
+
+`agentclient.AcquireAutoLaunchLock` exposes the existing lock with bounded context cancellation. The original auto-launch helper uses the same underlying implementation and filename. Local preflight rejects unavailable executables/cwd, unsupported entrypoint arguments, relative temporary directories and unsafe log files before requesting shutdown. Only bare agent and explicit `agent` entrypoints are replayed. Launch environment, working directory and argument boundaries are retained; the executable is replaced with the canonical new-keg binary.
+
+The early `cercano restart-after-upgrade` entrypoint avoids normal server startup and accepts a bounded timeout and optional explicit loopback address. Its default address uses the configured port. An absent matching agent is a no-op. An environment-only port override not inherited by Homebrew requires an explicit retry address; automatic discovery of other ports is not implemented.
+
+`release/homebrew/cercano.rb.in` installs both binaries and invokes the new keg's absolute command only from `post_install`. It is a template with unresolved URL/version/checksum placeholders, not a published formula. The old `source/server/Formula/cercano.rb` still targets an older single-binary release without this command and was deliberately left unchanged. See `release/homebrew/README.md` for activation requirements and failure handling.
+
+## Lifecycle verification
+
+- A native integration test runs two copied Go test executables in isolated old/new kegs, using a real gRPC shutdown service and native process/socket inspection, captured state, shared launch lock, detached startup and readiness. Only candidate enumeration is restricted to the known fixture PID.
+- The old fixture closes its listener then remains alive for 300ms of cleanup. The replacement detects an overlap if it starts before the old PID exits. The passing test confirms no overlap, the new executable path, and preserved environment/cwd, without an attached client.
+- A competing client lock acquisition remains blocked until replacement readiness.
+- Deterministic lifecycle tests cover absence, preflight/capture/lock failure, identity changes while waiting for the lock, shutdown refusal, exit timeout, spawn failure and readiness failure, checking exact ordering and lock release.
+- Command tests exercise help, invalid input, bounded deadlines, configuration/executable failures, explicit address, absence, success and failure messages without scanning the live host.
+- The Ruby formula-method harness checks two-binary installation, no restart from install or failed install, absolute-keg post-install invocation, surfaced restart failures and platform constraints. It does not emulate Homebrew itself.
+
+Final verification passed:
+
+- `go test ./internal/brewrestart -count=3`
+- `go test ./pkg/agentclient ./cmd/cercano -count=1`
+- `go test ./internal/server -run '^TestDrainThenStop' -count=1`
+- `go test -race ./internal/brewrestart ./pkg/agentclient -run 'TestNativeCoordinator|TestCoordinateRestart|TestUpgradeLaunchLock|TestRestartPreflight' -count=1`
+- `go vet ./internal/brewrestart ./pkg/agentclient ./cmd/cercano`
+- `CGO_ENABLED=0 go test ./internal/brewrestart -count=1`
+- `ruby release/homebrew/test_formula.rb`: 5 tests, 12 assertions, no failures.
+
+## Remaining release boundaries
+
+The command and lifecycle are implemented; the final signed archive/formula rendering, Homebrew lifecycle/sandbox and detached-process survival rehearsal, real client reconnection rehearsal, and publication to the approved tap remain incomplete. Tests use a small agent-protocol fixture, not the full agent with model runtimes and user conversations. The installed tap has not changed, so direct brew upgrades of the currently published version do not gain this behavior yet. No live developer agent was connected to or signaled; no real Homebrew install/upgrade or publication occurred.

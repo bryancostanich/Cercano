@@ -1,0 +1,207 @@
+//go:build darwin && cgo
+
+package brewrestart
+
+import (
+	"context"
+	"fmt"
+	"net"
+	"net/netip"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"cercano/source/server/pkg/agentclient"
+	"cercano/source/server/pkg/proto"
+	"google.golang.org/grpc"
+)
+
+type restartFixture struct {
+	proto.UnimplementedAgentServer
+	stop chan struct{}
+	once sync.Once
+}
+
+func (s *restartFixture) ShutdownAgent(context.Context, *proto.ShutdownAgentRequest) (*proto.ShutdownAgentResponse, error) {
+	s.once.Do(func() { close(s.stop) })
+	return &proto.ShutdownAgentResponse{Accepted: true}, nil
+}
+
+func TestMain(m *testing.M) {
+	if os.Getenv("CERCANO_COORD_FIXTURE") == "1" && len(os.Args) == 2 && os.Args[1] == "agent" {
+		os.Exit(runRestartFixture())
+	}
+	os.Exit(m.Run())
+}
+
+func runRestartFixture() int {
+	root := os.Getenv("CERCANO_COORD_ROOT")
+	exe, _ := os.Executable()
+	version := filepath.Base(filepath.Dir(filepath.Dir(exe)))
+	if version == "2" {
+		data, _ := os.ReadFile(filepath.Join(root, "old-pid"))
+		pid, _ := strconv.Atoi(string(data))
+		if _, err := Inspect(pid); err == nil {
+			_ = os.WriteFile(filepath.Join(root, "overlap"), []byte("old process still alive"), 0600)
+		}
+	}
+	listener, err := net.Listen("tcp", os.Getenv("CERCANO_COORD_ENDPOINT"))
+	if err != nil {
+		return 2
+	}
+	service := &restartFixture{stop: make(chan struct{})}
+	gs := grpc.NewServer()
+	proto.RegisterAgentServer(gs, service)
+	go func() { _ = gs.Serve(listener) }()
+	cwd, _ := os.Getwd()
+	_ = os.WriteFile(filepath.Join(root, version+"-ready"), []byte(fmt.Sprintf("%d\n%s\n%s", os.Getpid(), cwd, os.Getenv("FIXTURE_SETTING"))), 0600)
+	select {
+	case <-service.stop:
+	case <-time.After(20 * time.Second):
+		return 3
+	}
+	time.Sleep(50 * time.Millisecond) // allow accepting RPC response to flush
+	gs.GracefulStop()
+	_ = os.WriteFile(filepath.Join(root, version+"-port-closed"), []byte("closed"), 0600)
+	time.Sleep(300 * time.Millisecond) // model cleanup after the listener closes
+	return 0
+}
+
+func waitFixtureFile(t *testing.T, path string) []byte {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if b, err := os.ReadFile(path); err == nil {
+			return b
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("fixture did not become ready")
+	return nil
+}
+
+func TestNativeCoordinatorRestartsWithoutClients(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	contents, err := os.ReadFile(exe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldExe := filepath.Join(root, "Cellar", "cercano", "1", "bin", "cercano")
+	newExe := filepath.Join(root, "Cellar", "cercano", "2", "bin", "cercano")
+	for _, path := range []string{oldExe, newExe} {
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, contents, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reserve, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoint := netip.MustParseAddrPort(reserve.Addr().String())
+	_ = reserve.Close()
+	old := exec.Command(oldExe, "agent")
+	old.Dir = root
+	old.Env = []string{"HOME=" + root, "TMPDIR=" + root, "CERCANO_COORD_FIXTURE=1", "CERCANO_COORD_ROOT=" + root, "CERCANO_COORD_ENDPOINT=" + endpoint.String(), "FIXTURE_SETTING=preserved value"}
+	if err := old.Start(); err != nil {
+		t.Fatal(err)
+	}
+	oldDone := make(chan struct{})
+	go func() { _ = old.Wait(); close(oldDone) }()
+	t.Cleanup(func() { _ = old.Process.Kill(); <-oldDone })
+	_ = os.WriteFile(filepath.Join(root, "old-pid"), []byte(strconv.Itoa(old.Process.Pid)), 0600)
+	waitFixtureFile(t, filepath.Join(root, "1-ready"))
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ops := nativeRestartOps()
+	ops.source = fixtureProcesses{pid: old.Process.Pid} // never enumerate/inspect the developer's processes
+	// A reconnecting client's launcher must remain blocked until readiness.
+	var readyConfirmed atomic.Bool
+	contender := make(chan bool, 1)
+	realShutdown := ops.shutdown
+	ops.shutdown = func(ctx context.Context, id Identity, endpoint netip.AddrPort) error {
+		err := realShutdown(ctx, id, endpoint)
+		if err == nil {
+			go func() {
+				release, err := agentclient.AcquireAutoLaunchLock(ctx, root)
+				if err != nil {
+					contender <- false
+					return
+				}
+				observed := readyConfirmed.Load()
+				release()
+				contender <- observed
+			}()
+		}
+		return err
+	}
+	realReady := ops.ready
+	ops.ready = func(ctx context.Context, id Identity, endpoint netip.AddrPort) error {
+		err := realReady(ctx, id, endpoint)
+		if err == nil {
+			readyConfirmed.Store(true)
+		}
+		return err
+	}
+	realStart := ops.start
+	var replacement Identity
+	ops.start = func(path string, state LaunchState) (Identity, error) {
+		id, err := realStart(path, state)
+		replacement = id
+		return id, err
+	}
+	t.Cleanup(func() {
+		if replacement.PID > 0 {
+			if current, err := Inspect(replacement.PID); err == nil && current.SameProcess(replacement) {
+				p, _ := os.FindProcess(replacement.PID)
+				_ = p.Kill()
+			}
+		}
+	})
+	started := time.Now()
+	restarted, err := coordinateRestart(ctx, ops, newExe, uint32(os.Getuid()), endpoint)
+	if err != nil || !restarted {
+		t.Fatalf("restarted=%v err=%v", restarted, err)
+	}
+	select {
+	case ready := <-contender:
+		if !ready {
+			t.Fatal("reconnecting client acquired lock before readiness")
+		}
+	case <-ctx.Done():
+		t.Fatal("reconnecting client remained blocked")
+	}
+	if time.Since(started) < 300*time.Millisecond {
+		t.Fatal("replacement did not wait for old cleanup")
+	}
+	if _, err := os.Stat(filepath.Join(root, "overlap")); !os.IsNotExist(err) {
+		t.Fatal("new process started before old exited")
+	}
+	ready := string(waitFixtureFile(t, filepath.Join(root, "2-ready")))
+	want := fmt.Sprintf("%d\n%s\npreserved value", replacement.PID, root)
+	if ready != want {
+		t.Fatal("replacement launch settings were not preserved")
+	}
+	if replacement.Executable != newExe {
+		t.Fatal("wrong executable started")
+	}
+	select {
+	case <-oldDone:
+	case <-time.After(time.Second):
+		t.Fatal("old child not reaped")
+	}
+}

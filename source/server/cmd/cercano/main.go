@@ -1013,6 +1013,10 @@ func main() {
 	// Handle subcommands before flag parsing.
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
+		case "restart-after-upgrade":
+			// Homebrew post-install entrypoint. No normal startup, model probing,
+			// or automatic agent launch occurs before ownership verification.
+			os.Exit(runUpgradeRestart(os.Args[2:]))
 		case "reset":
 			// Dispatch before normal startup, config migration, keychain access
 			// and runtime probing. Confirmation is the developer's trigger.

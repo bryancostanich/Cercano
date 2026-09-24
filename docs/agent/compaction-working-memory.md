@@ -56,6 +56,24 @@ Rejection trades tokens for fidelity: a rejected pass still bills its model call
 and leaves the history uncompacted, which can bring the loop closer to its
 context limit. The two-attempt bound and preserved raw history are the mitigation.
 
+## Both compaction paths
+
+The change covers the two places compaction runs, because the failure was
+observed in a sub-agent dispatch but the same summarizer serves main turns:
+
+- **Sub-agent / in-loop** (`loopcompact.Compactor`, per dispatch, synchronous):
+  `agent.RunToolLoop` stamps the pinned task via `WithTaskReference`, and each
+  `Compactor` is built with its own `SummaryGuard`. One dispatch exhausting its
+  two-attempt budget cannot suppress compaction for another dispatch.
+- **Main thread** (`compactiongen.Generator`, store-backed, background):
+  `runCompaction` and `Regenerate` both derive the reference from the latest real
+  user turn. Background guards are per conversation *and* task digest;
+  explicit regeneration always gets a fresh budget.
+
+Rejection degrades safely rather than failing a turn: the compactor returns the
+quality error, and `agent.compactLoopHistory` converts that into unchanged
+history so the loop continues uncompacted.
+
 ## Verification
 
 `internal/compaction/recorded_failures_test.go` replays the ten real recorded
@@ -67,11 +85,16 @@ same-file distinct observations, bounded rejection, task-change reset, separate
 regeneration budget, and that rejection leaves raw turns and stored compaction
 state untouched.
 
+`internal/loopcompact/guard_scope_test.go` covers the sub-agent path
+specifically: the per-dispatch guard bound (two summarizer calls, then no more),
+budget independence across dispatches from the same factory, and that the
+in-loop summarizer receives the task reference and reduces history when the
+summary is substantive.
+
 Verified with `go test ./internal/compaction ./internal/compactiongen
 ./internal/loopcompact ./internal/agent ./internal/hostsvc/tools
-./internal/compactor` and a full `go test ./...` run. Two unrelated timing
-tests (`TestDownloadModel_ConcurrentSameModelDownloadsOnce`,
-`TestWorkerAccountingDrainReportsUnstoppedProducer`) failed in the full run and
-passed repeatedly in isolation.
+./internal/compactor`, then a full `go test ./...`: 103 packages pass, no
+failures. Changed files are gofmt-clean; unrelated pre-existing gofmt dirt
+elsewhere in the repository is untouched.
 
 No live model comparison was run for this change.

@@ -1,0 +1,128 @@
+package loopcompact
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"sync"
+	"testing"
+
+	"cercano/source/server/internal/agent"
+	"cercano/source/server/internal/compaction"
+	"cercano/source/server/internal/compactor"
+	"cercano/source/server/internal/llm"
+)
+
+// codeHistory exceeds the activation floor and carries substantive inspected
+// code, so the working-memory gate applies to the resulting summary.
+func codeHistory() []llm.Message {
+	out := []llm.Message{{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: "Implement grading-only aperture reuse"}}}}
+	for i := 0; i < 12; i++ {
+		out = append(out,
+			llm.Message{Role: llm.RoleAssistant, Blocks: []llm.Block{{Type: llm.BlockToolUse, ToolUseID: "r", ToolName: "Read", ToolInput: []byte(`{"path":"job.rs"}`)}}},
+			llm.Message{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockToolResult, ToolUseRef: "r", Content: strings.Repeat("pub struct SiteMeshJobKey { grading: GradingSnapshot, terrain_epoch: TerrainEpoch }\npub fn build_site_mesh_for_key_with_stats_cancellable() {}\n", 40)}}},
+		)
+	}
+	return out
+}
+
+func receiptSummarizer(calls *int64, mu *sync.Mutex) compaction.SummarizeFunc {
+	return func(context.Context, []llm.Message) (compaction.StructuredSummary, error) {
+		mu.Lock()
+		*calls++
+		mu.Unlock()
+		// The exact shape recorded in dispatch a4bfafd8578002fc6b9ab73c.
+		return compaction.ParseSummary("GOAL: Summarize the conversation span for later reference\nFILES:\n- job.rs: [verified] source sha256:8fb51aa3\nSTATE: Summary prepared."), nil
+	}
+}
+
+// testFactory mirrors NewFactory's per-dispatch construction (Options is the
+// same seam the factory uses) while injecting a scripted summarizer.
+func testFactory(summarize compaction.SummarizeFunc) func() agent.LoopCompactor {
+	cfg := compactor.DefaultConfig()
+	cfg.ActivationFloorTokens = 100
+	cfg.SegmentTokens = 4000
+	cfg.VerbatimRecent = 2
+	return func() agent.LoopCompactor {
+		return New(Options{Config: cfg, Summarize: summarize})
+	}
+}
+
+// Each dispatch must get its own rejection budget: one sub-agent exhausting its
+// budget must not suppress compaction for a concurrent or later sub-agent.
+func TestDispatchGuardBudgetIsPerDispatchNotShared(t *testing.T) {
+	var calls int64
+	var mu sync.Mutex
+	factory := testFactory(receiptSummarizer(&calls, &mu))
+	if factory == nil {
+		t.Fatal("factory not configured")
+	}
+	hist := codeHistory()
+
+	first := factory()
+	for i := 0; i < 4; i++ {
+		// The compactor reports the rejection; agent.compactLoopHistory converts
+		// that into "history unchanged" so the turn continues uncompacted.
+		out, _, err := first.CompactLoopHistory(context.Background(), hist)
+		if !errors.Is(err, compaction.ErrUnhelpfulSummary) {
+			t.Fatalf("attempt %d: err=%v, want a quality rejection", i, err)
+		}
+		if len(out) != 0 && len(out) != len(hist) {
+			t.Fatalf("rejected summary was partially applied: %d vs %d", len(out), len(hist))
+		}
+	}
+	mu.Lock()
+	afterFirst := calls
+	mu.Unlock()
+	if afterFirst != 2 {
+		t.Fatalf("first dispatch summarizer calls=%d, want 2 (bounded)", afterFirst)
+	}
+
+	second := factory()
+	if _, _, err := second.CompactLoopHistory(context.Background(), hist); !errors.Is(err, compaction.ErrUnhelpfulSummary) {
+		t.Fatalf("second dispatch err=%v", err)
+	}
+	mu.Lock()
+	afterSecond := calls
+	mu.Unlock()
+	if afterSecond != 3 {
+		t.Fatalf("second dispatch calls=%d, want 3: budget leaked across dispatches", afterSecond)
+	}
+}
+
+// The in-loop (sub-agent) path must pass the task reference through to its
+// summarizer, exactly like the store-backed main-thread generator. Compaction
+// runs before the model request, so this drives the compactor directly with the
+// same context the tool loop stamps.
+func TestDispatchCompactionSuppliesTaskReference(t *testing.T) {
+	task := "Implement grading-only aperture reuse; preserve cancellation"
+	seen := make(chan string, 4)
+	factory := testFactory(func(ctx context.Context, msgs []llm.Message) (compaction.StructuredSummary, error) {
+		seen <- compaction.TaskReferenceFrom(ctx)
+		return compaction.StructuredSummary{Goal: "Implement aperture reuse", Findings: []string{"job.rs: SiteMeshJobKey carries grading and terrain_epoch; non-grading fields must invalidate reuse."}, State: "Implementation pending"}, nil
+	})
+	hist := codeHistory()
+	ctx := compaction.WithTaskReference(t.Context(), task)
+	out, _, err := factory().CompactLoopHistory(ctx, hist)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) >= len(hist) {
+		t.Fatalf("accepted summary did not reduce history: %d vs %d", len(out), len(hist))
+	}
+	select {
+	case got := <-seen:
+		if got != task {
+			t.Fatalf("sub-agent summarizer task reference = %q, want %q", got, task)
+		}
+	default:
+		t.Fatal("summarizer never ran; cannot claim the sub-agent path was covered")
+	}
+}
+
+func TestSuspensionSurfacesAsUnhelpfulSummary(t *testing.T) {
+	if !errors.Is(errors.Join(compaction.ErrUnhelpfulSummary, compaction.ErrSummarySuspended), compaction.ErrUnhelpfulSummary) {
+		t.Fatal("suspension must remain classifiable as a quality rejection")
+	}
+	_ = compactor.DefaultConfig()
+}

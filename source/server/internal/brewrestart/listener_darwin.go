@@ -36,6 +36,15 @@ static int cercano_listener(int pid, const char *address, int port, int *found) 
   if(s.psi.soi_family==AF_INET) converted=inet_ntop(AF_INET,&in->insi_laddr.ina_46.i46a_addr4,text,sizeof(text));
   if(s.psi.soi_family==AF_INET6) converted=inet_ntop(AF_INET6,&in->insi_laddr.ina_6,text,sizeof(text));
   if(converted && !strcmp(address,text)) *found=1;
+  // The agent binds :port. A wildcard socket owns the requested loopback
+  // endpoint only when the kernel advertises that endpoint's IP family.
+  struct in_addr target4;
+  struct in6_addr target6;
+  int wants4=inet_pton(AF_INET,address,&target4)==1;
+  int wants6=inet_pton(AF_INET6,address,&target6)==1;
+  if(s.psi.soi_family==AF_INET && in->insi_laddr.ina_46.i46a_addr4.s_addr==INADDR_ANY && wants4 && (in->insi_vflag & INI_IPV4)) *found=1;
+  if(s.psi.soi_family==AF_INET6 && IN6_IS_ADDR_UNSPECIFIED(&in->insi_laddr.ina_6) &&
+     ((wants4 && (in->insi_vflag & INI_IPV4)) || (wants6 && (in->insi_vflag & INI_IPV6)))) *found=1;
  }
  free(fds);return 0;
 }
@@ -50,9 +59,9 @@ import (
 	"unsafe"
 )
 
-// HoldsListener verifies a known same-user process owns an exact loopback TCP
-// listener. Wildcard listeners are deliberately not accepted. This is a
-// per-candidate check, not discovery or a proof of unique socket ownership.
+// HoldsListener verifies a known same-user process owns a loopback TCP endpoint.
+// Wildcard bindings are accepted only for IP families supported by the socket.
+// This is a per-candidate check, not a proof of unique socket ownership.
 func HoldsListener(expected Identity, endpoint netip.AddrPort) (bool, error) {
 	if !endpoint.IsValid() || !endpoint.Addr().IsLoopback() || endpoint.Port() == 0 || endpoint.Addr().Zone() != "" {
 		return false, fmt.Errorf("restart requires an explicit loopback TCP endpoint")

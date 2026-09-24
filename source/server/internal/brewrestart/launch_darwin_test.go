@@ -111,7 +111,12 @@ func TestLaunchChild(t *testing.T) {
 	if os.Getenv("CERCANO_LAUNCH_CHILD") != "1" {
 		t.Skip("subprocess only")
 	}
-	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	network, bind := "tcp4", "127.0.0.1:0"
+	switch kind := os.Getenv("CERCANO_LAUNCH_WILDCARD"); kind {
+	case "tcp", "tcp4", "tcp6":
+		network, bind = kind, ":0"
+	}
+	listener, err := net.Listen(network, bind)
 	if err != nil {
 		t.Fatal(err)
 	}

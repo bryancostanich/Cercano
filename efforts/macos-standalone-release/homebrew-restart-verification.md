@@ -39,6 +39,29 @@ Additional verification passed:
 - `go vet ./internal/brewrestart`
 - `CGO_ENABLED=0 go test ./internal/brewrestart -count=1`
 
+## Implemented: bounded candidate discovery
+
+`ListCandidates` uses `proc_listpids(PROC_UID_ONLY, currentUID, ...)`, with sorted/deduplicated positive PIDs. A completely full buffer is treated as potentially truncated and retried with a larger allocation, up to a fixed limit. Kernel errors, malformed lengths and persistent truncation fail closed. Tests exercise the production buffer collector through injected kernel reads; they do not enumerate the live host.
+
+`Discover` selects at most one same-user listener from the same formula installation. It excludes foreign users/development installations before socket inspection, tolerates ESRCH for exited candidates, rejects ambiguous matching owners, and fails closed on other inspection errors. It returns no candidate without starting or connecting to anything. A nil result does not establish that the port is free, and this same-user snapshot is not authentication against malicious processes or a guarantee against later socket changes.
+
+Tests include a real copied executable under a temporary Cellar with an ephemeral listener. Candidate enumeration is restricted to that one fixture while production kernel identity/socket checks run. Table tests cover absent, duplicate, foreign, ambiguous, inaccessible, vanished and stale/mismatched cases.
+
+Review rejected the delegated enumeration draft: it used UID 0, accepted potentially truncated buffers and tested duplicated logic rather than production logic. A targeted test also reproduced its compile failure. Debug artifacts were removed and the draft replaced before checkpointing.
+
+## Corrected: wildcard listener attribution
+
+Production `runServerMode` passes `":" + cfg.Port` to `startGRPCServer`, which uses `net.Listen("tcp", bindAddr)`. The prior exact-bind-only socket check therefore could not find the actual agent. An isolated wildcard listener reproduced the failure for both reachable IPv4 and IPv6 loopback endpoints before the fix.
+
+Wildcard bindings are now accepted for loopback endpoints only when the kernel socket flags support the requested IP family. Regression tests compare real loopback reachability against attribution for dual-stack, IPv4-only and IPv6-only listeners, including rejection of the unsupported family. This supersedes the earlier note saying wildcard listeners are rejected.
+
+Verification passed after these changes:
+
+- `go test ./internal/brewrestart -count=5`
+- `go test -race ./internal/brewrestart -count=1`
+- `go vet ./internal/brewrestart`
+- `CGO_ENABLED=0 go test ./internal/brewrestart -count=1`
+
 ## Not implemented yet
 
-These are safety components, not an operational restart command. Remaining work includes candidate-process discovery and unique socket ownership, coordinating with client launches, shutdown/drain and actual-process-exit handling, replacement startup/readiness checks, command and formula hook wiring, and isolated end-to-end tests. Capturing launch state alone does not prove a restarted agent preserves its settings. There is no claim that direct brew upgrades now restart the agent. No tap/release artifacts were published.
+These are safety components, not an operational restart command. Remaining work includes coordinating with client launches, shutdown/drain and actual-process-exit handling, replacement startup/readiness checks, command and formula hook wiring, and isolated end-to-end tests. Capturing launch state and finding an owner alone do not prove a restarted agent preserves its settings. There is no claim that direct brew upgrades now restart the agent. No tap/release artifacts were published.

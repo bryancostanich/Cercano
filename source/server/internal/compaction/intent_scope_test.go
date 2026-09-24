@@ -44,23 +44,6 @@ func TestAssignedTaskStillReachesPrompt(t *testing.T) {
 	}
 }
 
-// The gate's narrow exemptions may still consult the latest user message, since
-// that never reaches the model. A user winding down must not force a rejection.
-func TestIntentHintStillInformsGateExemptions(t *testing.T) {
-	// Substantive findings, but a wind-down state: only the exemption differs.
-	idle := StructuredSummary{
-		Goal:     "Investigate cancellation",
-		Findings: []string{"job.rs: SiteMeshJobKey carries grading identity; non-grading inputs must invalidate reuse."},
-		State:    "Awaiting further instructions",
-	}
-	if err := ValidateWorkingMemory(codeSpan(), idle, GateIntentFrom(WithUserIntentHint(context.Background(), "thanks, stop here"))); err != nil {
-		t.Fatalf("user-closed exemption lost: %v", err)
-	}
-	if err := ValidateWorkingMemory(codeSpan(), idle, GateIntentFrom(WithUserIntentHint(context.Background(), "push"))); err == nil {
-		t.Fatal("idle claim accepted mid-investigation")
-	}
-}
-
 func codeSpan() []llm.Message {
 	return []llm.Message{
 		{Role: llm.RoleAssistant, Blocks: []llm.Block{{Type: llm.BlockToolUse, ToolUseID: "r", ToolName: "Read", ToolInput: []byte(`{"path":"job.rs"}`)}}},

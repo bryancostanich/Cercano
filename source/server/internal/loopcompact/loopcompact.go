@@ -39,7 +39,6 @@ type Summarize = compaction.SummarizeFunc
 // for main turns. Not safe for concurrent use by multiple dispatches; each
 // dispatch constructs its own.
 type Compactor struct {
-	guard            *compaction.SummaryGuard
 	cfg              compactor.Config
 	summarize        Summarize
 	tok              contextmeter.Tokenizer
@@ -101,7 +100,7 @@ func New(opts Options) *Compactor {
 	if timeout <= 0 || timeout > DefaultTimeout {
 		timeout = DefaultTimeout
 	}
-	return &Compactor{guard: compaction.NewSummaryGuard(2), cfg: cfg, summarize: opts.Summarize, tok: tok, timeout: timeout, onPass: opts.OnPass, contextBudgetPct: opts.ContextBudgetPct, fallbackBudget: cfg.CompactedBudgetTokens}
+	return &Compactor{cfg: cfg, summarize: opts.Summarize, tok: tok, timeout: timeout, onPass: opts.OnPass, contextBudgetPct: opts.ContextBudgetPct, fallbackBudget: cfg.CompactedBudgetTokens}
 }
 
 // CompactLoopHistory implements agent.LoopCompactor.
@@ -165,7 +164,7 @@ func (c *Compactor) CompactLoopHistory(ctx context.Context, history []llm.Messag
 	metered := func(ctx context.Context, msgs []llm.Message) (compaction.StructuredSummary, error) {
 		ev.SummarizerCalls++
 		before := meter.Snapshot()
-		summary, err := c.guard.Summarize(ctx, msgs, c.summarize)
+		summary, err := c.summarize(ctx, msgs)
 		after := meter.Snapshot()
 		if after.Observations == before.Observations {
 			compaction.RecordSummaryUsage(ctx, compaction.SummaryUsage{EstimatedInput: compaction.TotalTokens(c.tok, msgs), Calls: 1})

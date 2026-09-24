@@ -6,7 +6,6 @@ package compactiongen
 import (
 	"cercano/source/server/internal/usage"
 	"context"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
@@ -18,7 +17,6 @@ import (
 	"cercano/source/server/internal/compactor"
 	"cercano/source/server/internal/contextmeter"
 	"cercano/source/server/internal/conversation"
-	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/requestassembly"
 )
 
@@ -50,11 +48,6 @@ type Generator struct {
 	timers   map[string]*time.Timer
 	inflight map[string]bool
 
-	// At most one rejection budget per conversation's current task. Bounded LRU
-	// state is process-local and does not retain task contents in map keys.
-	guards    map[string]taskGuard
-	guardKeys []string
-
 	// toolElisionOnly (guarded by mu) switches a pass from LLM summarization
 	// to elideFn: the compaction triggers/debounce stay as-is, but the pass
 	// only advances the conversation's elision floor — no model call ever.
@@ -78,11 +71,9 @@ func New(store Store, summarize compaction.SummarizeFunc, cfg compactor.Config, 
 	return &Generator{
 		rootContext: root, cancelRoot: cancel, workersDone: make(chan struct{}),
 		store: store, summarize: summarize, cfg: cfg, tok: tok, debounce: debounce,
-		logf:      func(f string, a ...any) { fmt.Fprintf(os.Stderr, f, a...) },
-		timers:    make(map[string]*time.Timer),
-		inflight:  make(map[string]bool),
-		guards:    make(map[string]taskGuard),
-		guardKeys: make([]string, 0),
+		logf:     func(f string, a ...any) { fmt.Fprintf(os.Stderr, f, a...) },
+		timers:   make(map[string]*time.Timer),
+		inflight: make(map[string]bool),
 	}
 }
 
@@ -122,34 +113,6 @@ func (g *Generator) SetContextUsageFn(fn func(ctx context.Context, conversationI
 	g.mu.Lock()
 	g.usageFn = fn
 	g.mu.Unlock()
-}
-
-type taskGuard struct {
-	digest [32]byte
-	guard  *compaction.SummaryGuard
-}
-
-func (g *Generator) getGuard(conversationID, task string) *compaction.SummaryGuard {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	digest := sha256.Sum256([]byte(task))
-	entry, ok := g.guards[conversationID]
-	if !ok || entry.digest != digest {
-		entry = taskGuard{digest, compaction.NewSummaryGuard(2)}
-		g.guards[conversationID] = entry
-	}
-	for i, k := range g.guardKeys {
-		if k == conversationID {
-			g.guardKeys = append(g.guardKeys[:i], g.guardKeys[i+1:]...)
-			break
-		}
-	}
-	g.guardKeys = append(g.guardKeys, conversationID)
-	if len(g.guardKeys) > 128 {
-		delete(g.guards, g.guardKeys[0])
-		g.guardKeys = g.guardKeys[1:]
-	}
-	return entry.guard
 }
 
 // recordUsage persists the post-pass context-usage snapshot, if a writer is
@@ -303,15 +266,7 @@ func (g *Generator) runCompaction(ctx context.Context, conversationID string) er
 	taskRef := compaction.LatestUserMessage(agent.BuildLLMHistory(turns))
 	taskCtx := compaction.WithUserIntentHint(ctx, taskRef)
 
-	// Get guard for this conversation and task
-	guard := g.getGuard(conversationID, taskRef)
-
-	// Wrap the summarizer with the guard
-	summarizeWithGuard := func(ctx context.Context, msgs []llm.Message) (compaction.StructuredSummary, error) {
-		return guard.Summarize(ctx, msgs, g.summarize)
-	}
-
-	newState, changed, more, err := compactor.Advance(taskCtx, turns, state, summarizeWithGuard, g.cfg, g.tok)
+	newState, changed, more, err := compactor.Advance(taskCtx, turns, state, g.summarize, g.cfg, g.tok)
 	if err != nil {
 		var deferral *compaction.DeferralError
 		if errors.As(err, &deferral) {
@@ -403,15 +358,11 @@ func (g *Generator) Regenerate(ctx context.Context, conversationID string, incre
 
 	// Same reasoning as runCompaction: hint only, never an invented task.
 	taskCtx := compaction.WithUserIntentHint(ctx, compaction.LatestUserMessage(agent.BuildLLMHistory(turns)))
-	regenGuard := compaction.NewSummaryGuard(2)
-	summarizeWithGuard := func(ctx context.Context, msgs []llm.Message) (compaction.StructuredSummary, error) {
-		return regenGuard.Summarize(ctx, msgs, g.summarize)
-	}
 	pass := 0
 	for {
 		pass++
 		start := time.Now()
-		next, changed, more, err := compactor.Advance(taskCtx, turns, state, summarizeWithGuard, g.cfg, g.tok)
+		next, changed, more, err := compactor.Advance(taskCtx, turns, state, g.summarize, g.cfg, g.tok)
 		if err != nil {
 			return preTokens, 0, fmt.Errorf("pass %d: %w", pass, err)
 		}

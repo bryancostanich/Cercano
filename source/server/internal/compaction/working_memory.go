@@ -2,11 +2,7 @@ package compaction
 
 import (
 	"context"
-	"errors"
-	"regexp"
 	"strings"
-	"sync"
-	"unicode/utf8"
 
 	"cercano/source/server/internal/llm"
 )
@@ -24,22 +20,14 @@ func TaskReferenceFrom(ctx context.Context) string {
 	return task
 }
 
-// WithUserIntentHint carries the latest user message for the rejection gate's
-// narrow exemptions ONLY. A main thread has no assigned task: its trailing
-// message is usually conversational ("push", "continue", "land on main"), so
-// presenting it to the summarizer as the worker's objective would misdirect
-// fact selection. This value is deliberately never placed in the prompt.
+// WithUserIntentHint carries the latest user message for callers that need to
+// know what the user most recently said. A main thread has no assigned task:
+// its trailing message is usually conversational ("push", "continue", "land on
+// main"), so presenting it to the summarizer as the worker's objective would
+// misdirect fact selection. This value is deliberately never placed in the
+// prompt; only an assigned task (WithTaskReference) reaches the summarizer.
 func WithUserIntentHint(ctx context.Context, msg string) context.Context {
 	return context.WithValue(ctx, userIntentKey{}, msg)
-}
-
-// GateIntentFrom returns the intent hint, or the assigned task when one exists.
-// Used only for gate exemptions, never for prompt construction.
-func GateIntentFrom(ctx context.Context) string {
-	if hint, _ := ctx.Value(userIntentKey{}).(string); hint != "" {
-		return hint
-	}
-	return TaskReferenceFrom(ctx)
 }
 
 // LatestUserMessage returns the most recent genuine user text, ignoring
@@ -60,224 +48,4 @@ func LatestUserMessage(messages []llm.Message) string {
 		}
 	}
 	return ""
-}
-
-// RejectionCause identifies which gate rule fired. Without this the telemetry
-// label is the catch-all "summarizer_error", which cannot distinguish a gate
-// rejection from a provider failure.
-type RejectionCause string
-
-const (
-	RejectMetaObjective  RejectionCause = "meta_objective"
-	RejectIdleState      RejectionCause = "idle_state"
-	RejectIdleOpenThread RejectionCause = "idle_open_thread"
-	RejectNoFindings     RejectionCause = "no_findings"
-)
-
-func (c RejectionCause) String() string { return string(c) }
-
-// maxRejectionEvidence bounds retained summary text: enough to judge whether a
-// rejection was correct, small enough to keep bulk model output out of logs.
-const maxRejectionEvidence = 600
-
-// RejectionError reports which rule refused a summary and preserves the summary
-// itself so the gate can be audited. It wraps ErrUnhelpfulSummary so existing
-// errors.Is checks keep working.
-type RejectionError struct {
-	Cause    RejectionCause
-	Evidence string
-}
-
-func (e *RejectionError) Error() string {
-	return "compaction summary rejected (" + string(e.Cause) + "): does not preserve useful working context"
-}
-
-func (e *RejectionError) Unwrap() error { return ErrUnhelpfulSummary }
-
-func reject(cause RejectionCause, s StructuredSummary) error {
-	return &RejectionError{Cause: cause, Evidence: summaryEvidence(s)}
-}
-
-// summaryEvidence renders the rejected summary compactly, truncating on a rune
-// boundary so the retained text stays valid UTF-8.
-func summaryEvidence(s StructuredSummary) string {
-	var b strings.Builder
-	b.WriteString("GOAL: " + s.Goal)
-	for _, f := range s.Findings {
-		b.WriteString("\nFINDING: " + f)
-	}
-	for path, state := range s.Files {
-		b.WriteString("\nFILE: " + path + ": " + state)
-	}
-	for _, o := range s.OpenThreads {
-		b.WriteString("\nOPEN: " + o)
-	}
-	b.WriteString("\nSTATE: " + s.State)
-	out := strings.TrimSpace(b.String())
-	if len(out) <= maxRejectionEvidence {
-		return out
-	}
-	trimmed := out[:maxRejectionEvidence]
-	for len(trimmed) > 0 && !utf8.ValidString(trimmed) {
-		trimmed = trimmed[:len(trimmed)-1]
-	}
-	return trimmed
-}
-
-var ErrUnhelpfulSummary = errors.New("compaction summary does not preserve useful working context")
-var ErrSummarySuspended = errors.New("compaction suspended after repeated summary quality rejection")
-
-var sourceCitation = regexp.MustCompile(`(?i)\(?source\s+sha256:[a-f0-9]+\)?`)
-var statusTag = regexp.MustCompile(`\[[^\]]+\]`)
-var readReceipt = regexp.MustCompile(`(?i)^(?:read|inspected|viewed|opened|searched|located|found|view|search results|grep matches)\b`)
-var substantiveCode = regexp.MustCompile(`\b(?:fn|func|function|class|struct|interface|enum|def)\s+[A-Za-z_]`)
-
-func normalizedClaim(s string) string {
-	s = sourceCitation.ReplaceAllString(s, "")
-	s = statusTag.ReplaceAllString(s, "")
-	return strings.ToLower(strings.Trim(strings.Join(strings.Fields(s), " "), " .;:-()"))
-}
-func metaObjective(s string) bool {
-	s = normalizedClaim(s)
-	// Any "summarize <the supplied material>" objective describes this
-	// compaction operation rather than the worker's task. A genuine user
-	// summarization task is exempted by the caller via the task reference.
-	for _, p := range []string{"summarize", "summarise", "summary of", "summarizing", "summarising"} {
-		if strings.HasPrefix(s, p) {
-			return true
-		}
-	}
-	return s == "summary prepared" || s == "summary generated" || s == "summary complete"
-}
-func idleClaim(s string) bool {
-	s = normalizedClaim(s)
-	for _, v := range []string{"awaiting further instruction", "awaiting instructions", "waiting for further instruction", "no unresolved questions", "no pending actions", "no pending work"} {
-		if strings.HasPrefix(s, v) {
-			return true
-		}
-	}
-	return metaObjective(s)
-}
-func usefulObservation(s string) bool {
-	s = normalizedClaim(s)
-	if head, tail, ok := strings.Cut(s, ":"); ok && !strings.Contains(head, " ") {
-		s = strings.TrimSpace(tail)
-	}
-	for _, v := range []string{"implementation pending", "work remains", "no code changes", "no modifications", "not modified", "summary prepared"} {
-		if s == v {
-			return false
-		}
-	}
-	if s == "" || s == "none" || s == "(none)" || s == "n/a" || metaObjective(s) || idleClaim(s) {
-		return false
-	}
-	if readReceipt.MatchString(s) {
-		// Reading a range/location/hash alone is a receipt. A clause describing the
-		// actual finding can still be useful, e.g. "read ...; JobKey includes epoch".
-		if !strings.ContainsAny(s, ";\n") && !strings.Contains(s, " because ") && !strings.Contains(s, " shows ") && !strings.Contains(s, " contains ") && !strings.Contains(s, " includes ") {
-			return false
-		}
-	}
-	return true
-}
-
-// ValidateWorkingMemory is a conservative rejection gate for demonstrated bad
-// patterns, not a semantic proof of factual correctness. It only applies when the
-// span contained substantive inspected code/search evidence, so ordinary prose
-// conversations and terse error-only exchanges keep their existing behavior.
-func ValidateWorkingMemory(messages []llm.Message, s StructuredSummary, task string) error {
-	calls := map[string]bool{}
-	for _, m := range messages {
-		for _, b := range m.Blocks {
-			if b.Type == llm.BlockToolUse {
-				switch strings.ToLower(b.ToolName) {
-				case "read", "read_file", "grep", "glob", "ls", "list_directory":
-					calls[b.ToolUseID] = true
-				}
-			}
-		}
-	}
-	needsFindings := false
-	for _, m := range messages {
-		for _, b := range m.Blocks {
-			if b.Type == llm.BlockToolResult && !b.IsError && calls[b.ToolUseRef] && len(b.Content) >= 256 && substantiveCode.MatchString(b.Content) {
-				needsFindings = true
-			}
-		}
-	}
-	if !needsFindings {
-		return nil
-	}
-	// Scope: spans that actually carried substantive inspected evidence. Prose
-	// conversations and terse exchanges stay compatible with existing behavior.
-	if metaObjective(s.Goal) && !metaObjective(task) {
-		return reject(RejectMetaObjective, s)
-	}
-	userClosed := false
-	reference := strings.ToLower(strings.TrimSpace(task))
-	for _, phrase := range []string{"thanks, stop here", "wait for further instructions", "pause here", "no further work"} {
-		if strings.Contains(reference, phrase) {
-			userClosed = true
-		}
-	}
-	if !userClosed {
-		if idleClaim(s.State) {
-			return reject(RejectIdleState, s)
-		}
-		for _, open := range s.OpenThreads {
-			if idleClaim(open) {
-				return reject(RejectIdleOpenThread, s)
-			}
-		}
-	}
-	// Findings are preferred. Substantive legacy file entries remain acceptable.
-	// Decisions or a pending-work placeholder do not replace inspected code facts.
-	for _, list := range [][]string{s.Findings} {
-		for _, v := range list {
-			if usefulObservation(v) {
-				return nil
-			}
-		}
-	}
-	for _, v := range s.Files {
-		if usefulObservation(v) {
-			return nil
-		}
-	}
-	return reject(RejectNoFindings, s)
-}
-
-// SummaryGuard bounds rejected model attempts over its owner's lifetime. Use one
-// per dispatch, or per main-conversation task. Manual regeneration gets a fresh
-// budget. Successful calls do not erase earlier quality failures. The lock also
-// prevents concurrent callers from exceeding the bound.
-type SummaryGuard struct {
-	mu              sync.Mutex
-	limit, rejected int
-}
-
-func NewSummaryGuard(limit int) *SummaryGuard {
-	if limit <= 0 {
-		limit = 2
-	}
-	return &SummaryGuard{limit: limit}
-}
-func (g *SummaryGuard) Reset() { g.mu.Lock(); g.rejected = 0; g.mu.Unlock() }
-func (g *SummaryGuard) Summarize(ctx context.Context, msgs []llm.Message, call SummarizeFunc) (StructuredSummary, error) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	if g.rejected >= g.limit {
-		return StructuredSummary{}, errors.Join(ErrUnhelpfulSummary, ErrSummarySuspended)
-	}
-	s, err := call(ctx, msgs)
-	if err == nil {
-		err = ValidateWorkingMemory(msgs, s, GateIntentFrom(ctx))
-	}
-	if errors.Is(err, ErrUnhelpfulSummary) {
-		g.rejected++
-	}
-	if err != nil {
-		return StructuredSummary{}, err
-	}
-	return s, nil
 }

@@ -3,7 +3,6 @@ package loopcompact
 import (
 	"bytes"
 	"context"
-	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -52,48 +51,6 @@ func testFactory(summarize compaction.SummarizeFunc) func() agent.LoopCompactor 
 	}
 }
 
-// Each dispatch must get its own rejection budget: one sub-agent exhausting its
-// budget must not suppress compaction for a concurrent or later sub-agent.
-func TestDispatchGuardBudgetIsPerDispatchNotShared(t *testing.T) {
-	var calls int64
-	var mu sync.Mutex
-	factory := testFactory(receiptSummarizer(&calls, &mu))
-	if factory == nil {
-		t.Fatal("factory not configured")
-	}
-	hist := codeHistory()
-
-	first := factory()
-	for i := 0; i < 4; i++ {
-		// The compactor reports the rejection; agent.compactLoopHistory converts
-		// that into "history unchanged" so the turn continues uncompacted.
-		out, _, err := first.CompactLoopHistory(context.Background(), hist)
-		if !errors.Is(err, compaction.ErrUnhelpfulSummary) {
-			t.Fatalf("attempt %d: err=%v, want a quality rejection", i, err)
-		}
-		if len(out) != 0 && len(out) != len(hist) {
-			t.Fatalf("rejected summary was partially applied: %d vs %d", len(out), len(hist))
-		}
-	}
-	mu.Lock()
-	afterFirst := calls
-	mu.Unlock()
-	if afterFirst != 2 {
-		t.Fatalf("first dispatch summarizer calls=%d, want 2 (bounded)", afterFirst)
-	}
-
-	second := factory()
-	if _, _, err := second.CompactLoopHistory(context.Background(), hist); !errors.Is(err, compaction.ErrUnhelpfulSummary) {
-		t.Fatalf("second dispatch err=%v", err)
-	}
-	mu.Lock()
-	afterSecond := calls
-	mu.Unlock()
-	if afterSecond != 3 {
-		t.Fatalf("second dispatch calls=%d, want 3: budget leaked across dispatches", afterSecond)
-	}
-}
-
 // The in-loop (sub-agent) path must pass the task reference through to its
 // summarizer, exactly like the store-backed main-thread generator. Compaction
 // runs before the model request, so this drives the compactor directly with the
@@ -122,13 +79,6 @@ func TestDispatchCompactionSuppliesTaskReference(t *testing.T) {
 	default:
 		t.Fatal("summarizer never ran; cannot claim the sub-agent path was covered")
 	}
-}
-
-func TestSuspensionSurfacesAsUnhelpfulSummary(t *testing.T) {
-	if !errors.Is(errors.Join(compaction.ErrUnhelpfulSummary, compaction.ErrSummarySuspended), compaction.ErrUnhelpfulSummary) {
-		t.Fatal("suspension must remain classifiable as a quality rejection")
-	}
-	_ = compactor.DefaultConfig()
 }
 
 // The in-loop compactor belongs to dispatches. Main chat compaction is

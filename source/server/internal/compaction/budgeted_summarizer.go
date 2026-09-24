@@ -45,9 +45,6 @@ func SummarizeBudgetedLocal(ctx context.Context, messages []llm.Message, context
 		if err != nil {
 			return StructuredSummary{}, stats, err
 		}
-		if err := ValidateWorkingMemory(chunk, summary, GateIntentFrom(ctx)); err != nil {
-			return StructuredSummary{}, stats, err
-		}
 		summaries = append(summaries, summary)
 	}
 	if len(summaries) == 1 {

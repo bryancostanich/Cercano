@@ -11,6 +11,7 @@ import (
 )
 
 type taskReferenceKey struct{}
+type userIntentKey struct{}
 
 // WithTaskReference supplies relevance context, not additional material to freeze
 // or authority for new approvals. It does not modify the protected task/history.
@@ -22,9 +23,27 @@ func TaskReferenceFrom(ctx context.Context) string {
 	return task
 }
 
-// LatestTaskReference ignores tool-result user wrappers and generated preambles.
-// A main conversation may contain several tasks; do not pin its first task forever.
-func LatestTaskReference(messages []llm.Message) string {
+// WithUserIntentHint carries the latest user message for the rejection gate's
+// narrow exemptions ONLY. A main thread has no assigned task: its trailing
+// message is usually conversational ("push", "continue", "land on main"), so
+// presenting it to the summarizer as the worker's objective would misdirect
+// fact selection. This value is deliberately never placed in the prompt.
+func WithUserIntentHint(ctx context.Context, msg string) context.Context {
+	return context.WithValue(ctx, userIntentKey{}, msg)
+}
+
+// GateIntentFrom returns the intent hint, or the assigned task when one exists.
+// Used only for gate exemptions, never for prompt construction.
+func GateIntentFrom(ctx context.Context) string {
+	if hint, _ := ctx.Value(userIntentKey{}).(string); hint != "" {
+		return hint
+	}
+	return TaskReferenceFrom(ctx)
+}
+
+// LatestUserMessage returns the most recent genuine user text, ignoring
+// tool-result wrappers and generated summary preambles.
+func LatestUserMessage(messages []llm.Message) string {
 	for i := len(messages) - 1; i >= 0; i-- {
 		if messages[i].Role != llm.RoleUser {
 			continue
@@ -189,7 +208,7 @@ func (g *SummaryGuard) Summarize(ctx context.Context, msgs []llm.Message, call S
 	}
 	s, err := call(ctx, msgs)
 	if err == nil {
-		err = ValidateWorkingMemory(msgs, s, TaskReferenceFrom(ctx))
+		err = ValidateWorkingMemory(msgs, s, GateIntentFrom(ctx))
 	}
 	if errors.Is(err, ErrUnhelpfulSummary) {
 		g.rejected++

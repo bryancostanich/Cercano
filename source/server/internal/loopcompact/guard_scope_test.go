@@ -126,3 +126,31 @@ func TestSuspensionSurfacesAsUnhelpfulSummary(t *testing.T) {
 	}
 	_ = compactor.DefaultConfig()
 }
+
+// A main turn reaching the in-loop compactor must not present its conversational
+// input as an assigned task. Pinned dispatch input still must.
+func TestOnlyPinnedDispatchInputBecomesATask(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		pinned bool
+		input  string
+		want   string
+	}{
+		{"main turn", false, "push", ""},
+		{"main turn", false, "continue", ""},
+		{"dispatch", true, "Implement grading-only aperture reuse", "Implement grading-only aperture reuse"},
+	} {
+		ctx := context.Background()
+		if tc.pinned {
+			ctx = compaction.WithTaskReference(ctx, tc.input)
+		} else {
+			ctx = compaction.WithUserIntentHint(ctx, tc.input)
+		}
+		if got := compaction.TaskReferenceFrom(ctx); got != tc.want {
+			t.Fatalf("%s %q: task reference = %q, want %q", tc.name, tc.input, got, tc.want)
+		}
+		if compaction.GateIntentFrom(ctx) != tc.input {
+			t.Fatalf("%s %q: gate lost the intent", tc.name, tc.input)
+		}
+	}
+}

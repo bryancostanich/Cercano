@@ -295,8 +295,13 @@ func (g *Generator) runCompaction(ctx context.Context, conversationID string) er
 	pre := compaction.TotalTokens(g.tok, preView)
 	g.logf("[compaction] pass start %s: %d tokens\n", conversationID, pre)
 
-	taskRef := compaction.LatestTaskReference(agent.BuildLLMHistory(turns))
-	taskCtx := compaction.WithTaskReference(ctx, taskRef)
+	// A main conversation has no assigned task. Its latest user message is
+	// usually conversational ("push", "continue"), so it informs only the
+	// rejection gate's exemptions and is never shown to the summarizer as an
+	// objective. Sub-agent dispatches, which do have a task, use
+	// WithTaskReference in the tool loop instead.
+	taskRef := compaction.LatestUserMessage(agent.BuildLLMHistory(turns))
+	taskCtx := compaction.WithUserIntentHint(ctx, taskRef)
 
 	// Get guard for this conversation and task
 	guard := g.getGuard(conversationID, taskRef)
@@ -396,7 +401,8 @@ func (g *Generator) Regenerate(ctx context.Context, conversationID string, incre
 		// the currently persisted derived state.
 	}
 
-	taskCtx := compaction.WithTaskReference(ctx, compaction.LatestTaskReference(agent.BuildLLMHistory(turns)))
+	// Same reasoning as runCompaction: hint only, never an invented task.
+	taskCtx := compaction.WithUserIntentHint(ctx, compaction.LatestUserMessage(agent.BuildLLMHistory(turns)))
 	regenGuard := compaction.NewSummaryGuard(2)
 	summarizeWithGuard := func(ctx context.Context, msgs []llm.Message) (compaction.StructuredSummary, error) {
 		return regenGuard.Summarize(ctx, msgs, g.summarize)

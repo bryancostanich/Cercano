@@ -17,12 +17,22 @@ against a 1,024-token allowance, so truncation alone does not explain it.
 
 ## Changes
 
-1. **Read-only task reference.** `compaction.WithTaskReference` supplies the
-   active task to the summarizer as reference data for selecting relevant facts.
-   The protected task itself is still never compaction input and is not rewritten.
-   The reference is JSON-encoded, explicitly marked as data, and explicitly not
-   evidence of approval, execution, or completion. It counts toward the summary
-   request budget and defers rather than silently overflowing.
+1. **Read-only task reference — dispatches only.** `compaction.WithTaskReference`
+   supplies an *assigned* task to the summarizer as reference data for selecting
+   relevant facts. The protected task itself is still never compaction input and
+   is not rewritten. The reference is JSON-encoded, explicitly marked as data,
+   and explicitly not evidence of approval, execution, or completion. It counts
+   toward the summary request budget and defers rather than silently overflowing.
+
+   A main conversation has **no assigned task**, and one is never inferred.
+   Its trailing user message is typically conversational — real examples from
+   this database include `"push"`, `"continue"`, `"land on main"`, and
+   `"middle button drag left/right is backwards"`. Presenting any of those as
+   the worker's objective would misdirect fact selection and could discard a
+   whole session's findings as irrelevant. Main threads instead pass
+   `WithUserIntentHint`, which reaches the rejection gate's narrow exemptions
+   and is never placed in the prompt. Only `PinUserInput` (set solely by the
+   sub-agent dispatch path) promotes input to an assigned task.
 2. **A FINDINGS section.** `StructuredSummary.Findings` carries historical
    observations: behavior, constraints, call paths, and verified results with
    exact identifiers. `FILES` returns to actual modification/build state. The
@@ -66,9 +76,14 @@ observed in a sub-agent dispatch but the same summarizer serves main turns:
   `Compactor` is built with its own `SummaryGuard`. One dispatch exhausting its
   two-attempt budget cannot suppress compaction for another dispatch.
 - **Main thread** (`compactiongen.Generator`, store-backed, background):
-  `runCompaction` and `Regenerate` both derive the reference from the latest real
-  user turn. Background guards are per conversation *and* task digest;
-  explicit regeneration always gets a fresh budget.
+  `runCompaction` and `Regenerate` derive an *intent hint* from the latest real
+  user turn — gate-only, never prompted as an objective. Background guards are
+  per conversation *and* intent digest; explicit regeneration always gets a
+  fresh budget.
+
+The main *turn* loop (`runner/core.go`) sets no `LoopCompactor` at all, so the
+in-loop compactor is reached only by dispatches; the tool loop still branches on
+`PinUserInput` so that stays true if a future caller wires one up.
 
 Rejection degrades safely rather than failing a turn: the compactor returns the
 quality error, and `agent.compactLoopHistory` converts that into unchanged
@@ -84,6 +99,11 @@ cover the reference contract, budget deferral, findings parse/merge/render,
 same-file distinct observations, bounded rejection, task-change reset, separate
 regeneration budget, and that rejection leaves raw turns and stored compaction
 state untouched.
+
+`internal/compaction/intent_scope_test.go` pins the task/intent split using real
+trailing main-thread messages: none of them may become an assigned task or reach
+the prompt, an assigned dispatch task still must, and the gate's exemptions still
+see the user's wording. `guard_scope_test.go` pins the `PinUserInput` branch.
 
 `internal/loopcompact/guard_scope_test.go` covers the sub-agent path
 specifically: the per-dispatch guard bound (two summarizer calls, then no more),

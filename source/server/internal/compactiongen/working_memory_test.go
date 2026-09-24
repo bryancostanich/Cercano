@@ -26,11 +26,11 @@ func memoryTurns() []conversation.Turn {
 	ts[0].Content = "Implement reuse; preserve cancellation"
 	return ts
 }
-func TestTaskReferenceIgnoresToolWrappersAndPreambles(t *testing.T) {
+func TestUserIntentHintIgnoresToolWrappersAndPreambles(t *testing.T) {
 	ts := memoryTurns()
 	b, _ := json.Marshal([]llm.Block{{Type: llm.BlockToolResult, ToolUseRef: "read", Content: "not a new task"}})
 	ts = append(ts, conversation.Turn{Role: "user", BlocksJSON: string(b), CreatedAt: time.Unix(200, 0)}, conversation.Turn{Role: "user", Content: "[conversation summary]\nGoal: old", CreatedAt: time.Unix(201, 0)})
-	if got := compaction.LatestTaskReference(agent.BuildLLMHistory(ts)); got != ts[0].Content {
+	if got := compaction.LatestUserMessage(agent.BuildLLMHistory(ts)); got != ts[0].Content {
 		t.Fatal(got)
 	}
 }
@@ -40,7 +40,7 @@ func TestBackgroundRejectionBudgetAndTaskChange(t *testing.T) {
 	calls := 0
 	summarizer := func(ctx context.Context, _ []llm.Message) (compaction.StructuredSummary, error) {
 		calls++
-		if got := compaction.TaskReferenceFrom(ctx); got != store.turns[0].Content {
+		if got := compaction.GateIntentFrom(ctx); got != store.turns[0].Content {
 			t.Fatalf("task=%q", got)
 		}
 		return compaction.StructuredSummary{}, compaction.ErrUnhelpfulSummary
@@ -79,7 +79,7 @@ func TestBackgroundReferenceUsesSameSnapshotAndGuardIsBounded(t *testing.T) {
 	calls := 0
 	g := New(store, func(ctx context.Context, _ []llm.Message) (compaction.StructuredSummary, error) {
 		calls++
-		if compaction.TaskReferenceFrom(ctx) != store.turns[0].Content {
+		if compaction.GateIntentFrom(ctx) != store.turns[0].Content {
 			t.Fatal("task missing")
 		}
 		return compaction.StructuredSummary{Goal: "Implement reuse", Findings: []string{"JobKey contains epoch and grading identity."}}, nil

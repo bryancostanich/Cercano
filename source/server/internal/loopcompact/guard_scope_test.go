@@ -1,8 +1,12 @@
 package loopcompact
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -127,30 +131,38 @@ func TestSuspensionSurfacesAsUnhelpfulSummary(t *testing.T) {
 	_ = compactor.DefaultConfig()
 }
 
-// A main turn reaching the in-loop compactor must not present its conversational
-// input as an assigned task. Pinned dispatch input still must.
-func TestOnlyPinnedDispatchInputBecomesATask(t *testing.T) {
-	for _, tc := range []struct {
-		name   string
-		pinned bool
-		input  string
-		want   string
-	}{
-		{"main turn", false, "push", ""},
-		{"main turn", false, "continue", ""},
-		{"dispatch", true, "Implement grading-only aperture reuse", "Implement grading-only aperture reuse"},
-	} {
-		ctx := context.Background()
-		if tc.pinned {
-			ctx = compaction.WithTaskReference(ctx, tc.input)
-		} else {
-			ctx = compaction.WithUserIntentHint(ctx, tc.input)
+// The in-loop compactor belongs to dispatches. Main chat compaction is
+// background-only (compactiongen), so the main turn path must not wire one up:
+// that is what keeps conversational input ("push", "continue") from ever being
+// presented to a summarizer as an assigned task.
+func TestOnlyDispatchWiresTheInLoopCompactor(t *testing.T) {
+	root := "../.."
+	mainTurn, err := os.ReadFile(filepath.Join(root, "internal/runner/core.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(mainTurn, []byte("LoopCompactor:")) {
+		t.Fatal("main turn path now wires an in-loop compactor; its UserInput is conversational, not an assigned task")
+	}
+
+	var setters []string
+	err = filepath.WalkDir(filepath.Join(root, "internal"), func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return err
 		}
-		if got := compaction.TaskReferenceFrom(ctx); got != tc.want {
-			t.Fatalf("%s %q: task reference = %q, want %q", tc.name, tc.input, got, tc.want)
+		src, err := os.ReadFile(path)
+		if err != nil {
+			return err
 		}
-		if compaction.GateIntentFrom(ctx) != tc.input {
-			t.Fatalf("%s %q: gate lost the intent", tc.name, tc.input)
+		if bytes.Contains(src, []byte("LoopCompactor:")) {
+			setters = append(setters, filepath.ToSlash(path))
 		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(setters) != 1 || !strings.HasSuffix(setters[0], "internal/hostsvc/tools/tools.go") {
+		t.Fatalf("in-loop compactor wired outside the dispatch path: %v", setters)
 	}
 }

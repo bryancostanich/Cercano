@@ -628,15 +628,10 @@ func RunToolLoop(ctx context.Context, in ToolLoopInput) (returned ToolLoopResult
 			// Stamp dispatch correlation so the compactor's metadata telemetry
 			// names the conversation and iteration every pass belongs to.
 			compactCtx := WithLoopCompactionScope(ctx, LoopCompactionScope{ConversationID: in.ConversationID, Iteration: iter + 1, ContextWindow: in.ContextWindow, ContextWindowKnown: in.ContextWindowKnown})
-			// Only a dispatch pins an assigned task here (PinUserInput). A main
-			// turn's input is conversational ("push", "continue") and must never be
-			// presented to the summarizer as an objective; it informs only the
-			// rejection gate's exemptions.
-			if in.PinUserInput {
-				compactCtx = compaction.WithTaskReference(compactCtx, in.UserInput)
-			} else {
-				compactCtx = compaction.WithUserIntentHint(compactCtx, in.UserInput)
-			}
+			// Reaching here means a dispatch: LoopCompactor is set only by the
+			// dispatch path, where UserInput is spec.Task. Main chat compaction is
+			// background-only (compactiongen) and never enters this loop.
+			compactCtx = compaction.WithTaskReference(compactCtx, in.UserInput)
 			working := compactLoopHistory(compactCtx, in.LoopCompactor, hist[protectedPrefix:], &tokenBudget)
 			// A capacity-limited prefix prevents append from overwriting history
 			// retained by observers. The task is reference context, never input to freeze.

@@ -29,10 +29,9 @@ against a 1,024-token allowance, so truncation alone does not explain it.
    this database include `"push"`, `"continue"`, `"land on main"`, and
    `"middle button drag left/right is backwards"`. Presenting any of those as
    the worker's objective would misdirect fact selection and could discard a
-   whole session's findings as irrelevant. Main threads instead pass
-   `WithUserIntentHint`, which reaches the rejection gate's narrow exemptions
-   and is never placed in the prompt. Only `PinUserInput` (set solely by the
-   sub-agent dispatch path) promotes input to an assigned task.
+   whole session's findings as irrelevant. Background main-chat compaction
+   instead passes `WithUserIntentHint`, which reaches the rejection gate's
+   narrow exemptions and is never placed in the prompt.
 2. **A FINDINGS section.** `StructuredSummary.Findings` carries historical
    observations: behavior, constraints, call paths, and verified results with
    exact identifiers. `FILES` returns to actual modification/build state. The
@@ -72,18 +71,22 @@ The change covers the two places compaction runs, because the failure was
 observed in a sub-agent dispatch but the same summarizer serves main turns:
 
 - **Sub-agent / in-loop** (`loopcompact.Compactor`, per dispatch, synchronous):
-  `agent.RunToolLoop` stamps the pinned task via `WithTaskReference`, and each
+  `agent.RunToolLoop` stamps `spec.Task` via `WithTaskReference`, and each
   `Compactor` is built with its own `SummaryGuard`. One dispatch exhausting its
-  two-attempt budget cannot suppress compaction for another dispatch.
+  two-attempt budget cannot suppress compaction for another dispatch. This is
+  the only path that sets `LoopCompactor`, so the stamp is unambiguously an
+  assigned task.
 - **Main thread** (`compactiongen.Generator`, store-backed, background):
   `runCompaction` and `Regenerate` derive an *intent hint* from the latest real
   user turn — gate-only, never prompted as an objective. Background guards are
   per conversation *and* intent digest; explicit regeneration always gets a
   fresh budget.
 
-The main *turn* loop (`runner/core.go`) sets no `LoopCompactor` at all, so the
-in-loop compactor is reached only by dispatches; the tool loop still branches on
-`PinUserInput` so that stays true if a future caller wires one up.
+These are the two compaction paths by design: main chat compacts in the
+background, dispatches compact in-loop. `runner/core.go` therefore sets no
+`LoopCompactor`, and a test asserts that `internal/hostsvc/tools/tools.go`
+remains its only non-test caller — if that ever changes, the in-loop task stamp
+would need revisiting, so the test fails rather than letting it pass silently.
 
 Rejection degrades safely rather than failing a turn: the compactor returns the
 quality error, and `agent.compactLoopHistory` converts that into unchanged
@@ -103,7 +106,7 @@ state untouched.
 `internal/compaction/intent_scope_test.go` pins the task/intent split using real
 trailing main-thread messages: none of them may become an assigned task or reach
 the prompt, an assigned dispatch task still must, and the gate's exemptions still
-see the user's wording. `guard_scope_test.go` pins the `PinUserInput` branch.
+see the user's wording.
 
 `internal/loopcompact/guard_scope_test.go` covers the sub-agent path
 specifically: the per-dispatch guard bound (two summarizer calls, then no more),

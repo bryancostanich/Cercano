@@ -72,7 +72,22 @@ class FormulaHookTest < Minitest::Test
   end
 
   def test_platform_constraints
-    assert_includes Cercano.requirements, :macos
+    # Monterey is macOS 12, matching the binaries' deployment target, so
+    # Homebrew refuses older systems instead of installing binaries that
+    # cannot run. Intel Macs are excluded for this release.
+    assert_includes Cercano.requirements, {macos: :monterey}
     assert_includes Cercano.requirements, {arch: :arm64}
+  end
+
+  def test_smoke_test_does_not_restart_a_running_agent
+    # `brew test` must never act on the user's live agent. Verified against
+    # real builds: restart-after-upgrade without --help attempts a restart.
+    source = File.read(File.join(__dir__, "cercano.rb.in"))
+    smoke = source[/^  test do$.*?^  end$/m]
+    refute_nil smoke, "formula must define a test block"
+    smoke.scan(/restart-after-upgrade[^"]*/) do |invocation|
+      assert_includes invocation, "--help",
+                      "brew test may only invoke restart-after-upgrade with --help"
+    end
   end
 end

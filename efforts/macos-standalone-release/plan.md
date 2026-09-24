@@ -56,13 +56,13 @@ Objective: connect tested tooling to a protected, least-privilege release workfl
 
 Objective: prepare a binary formula matching the tap's conventions and complete user-facing installation instructions without pushing. Files: a reviewable formula/template and promotion tooling in the release tooling location, plus installation/release documentation; the external tap is modified only in an authorized checkout. Tests: formula syntax/style, archive/checksum mapping, unsupported-platform rejection, and credential-free smoke tests.
 
-- [ ] Prepare the macOS arm64 formula installing both binaries together from immutable GitHub Release URLs with SHA-256 verification
-- [ ] Enforce the audited minimum macOS version and reject unsupported operating systems and architectures clearly
-- [ ] Add a smoke test that needs neither model downloads nor credentials and verify version commands do not require network availability
-- [ ] Prepare narrowly scoped tap-update automation that runs only after the referenced release artifacts are available and verified
-- [ ] Ensure formula install and upgrade hooks neither stop agents nor register a background service
-- [ ] Document tap installation, first-run model setup, explicit restart, PATH conflicts with the development launcher, troubleshooting, and uninstall data retention
-- [ ] Run available formula checks, record externally blocked installation checks, and checkpoint formula tooling and documentation
+- [x] Prepare the macOS arm64 formula installing both binaries together from immutable GitHub Release URLs with SHA-256 verification
+- [x] Enforce the audited minimum macOS version and reject unsupported operating systems and architectures clearly
+- [x] Add a smoke test that needs neither model downloads nor credentials and verify version commands do not require network availability
+- [x] Prepare narrowly scoped tap-update automation that runs only after the referenced release artifacts are available and verified
+- [x] Ensure formula install and upgrade hooks neither stop agents nor register a background service
+- [x] Document tap installation, first-run model setup, explicit restart, PATH conflicts with the development launcher, troubleshooting, and uninstall data retention
+- [x] Run available formula checks, record externally blocked installation checks, and checkpoint formula tooling and documentation
 
 ## Phase 6 — Rehearse and validate on a clean Mac
 

@@ -40,12 +40,39 @@ The default endpoint is `127.0.0.1` with the port from Cercano configuration. If
 
 Automatic discovery of agents on other ports is not implemented. A nil ownership result describes the selected endpoint, not all agents on the machine. Nonstandard launch arguments are refused instead of replayed unsafely.
 
+## Promoting to the tap
+
+`promote_to_tap.py` stages a rendered formula into a local checkout of
+`bryancostanich/homebrew-tap`:
+
+```bash
+python3 release/homebrew/promote_to_tap.py dist/cercano.rb ~/git/homebrew-tap --version 1.2.3
+```
+
+Promotion is what makes a release reachable by users, so it refuses to run
+until the referenced artifact is **actually downloadable and matches the
+checksum the formula claims**. A formula pointing at a missing or altered asset
+would break `brew install` for everyone. It also rejects unrendered
+placeholders, a version or URL that disagrees with the expected version, a tap
+path that is not a git checkout, invalid Ruby, and a formula identical to what
+the tap already has.
+
+`--skip-download` skips the artifact check for offline work; the run then
+reports the artifact as `UNVERIFIED` rather than implying it was checked.
+
+**The tool never commits, pushes, or opens a pull request.** It writes one file
+into a local checkout. Review the diff and publish deliberately.
+
 ## Testing
 
 ```bash
-cd release/homebrew && python3 -m unittest test_render_formula
+cd release/homebrew && python3 -m unittest test_render_formula test_promote_to_tap
 ruby release/homebrew/test_formula.rb
 ```
+
+The promotion tests serve the artifact from a loopback HTTP server, so the real
+download and digest-comparison path runs; no live release or tap is involved.
+Every refusal is asserted to leave the tap checkout unmodified.
 
 The Python tests build tiny inert tar fixtures and cover valid rendering, digest/name/version mismatches, incomplete archives, hostile members (symlink, hardlink, FIFO, traversal, absolute path, smuggled executable, stray file, second tree), duplicate members, refusal to overwrite an existing formula, and templates with missing, duplicated or unknown placeholders.
 

@@ -27,6 +27,7 @@ func MergeSummaries(sums []StructuredSummary) StructuredSummary {
 		if s.State != "" {
 			out.State = s.State
 		}
+		out.Findings = appendUnique(out.Findings, s.Findings)
 	}
 	return out
 }
@@ -95,6 +96,12 @@ func (s StructuredSummary) RenderBlock() llm.Block {
 	}
 	if s.State != "" {
 		fmt.Fprintf(&b, "Current state: %s\n", s.State)
+	}
+	if len(s.Findings) > 0 {
+		b.WriteString("Findings (historical observations; later evidence may supersede):\n")
+		for _, f := range s.Findings {
+			fmt.Fprintf(&b, "  - %s\n", f)
+		}
 	}
 	return llm.Block{Type: llm.BlockText, Text: strings.TrimRight(b.String(), "\n")}
 }

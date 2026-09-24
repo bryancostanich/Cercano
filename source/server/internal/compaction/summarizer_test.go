@@ -134,6 +134,234 @@ STATE: awaiting user approval on tier names`
 	}
 }
 
+func TestParseSummary_Findings(t *testing.T) {
+	// FINDINGS section should be parsed and stored as historical observations
+	in := `GOAL: investigate performance issue
+DECISIONS:
+- use structured summaries
+FINDINGS:
+- observed 50% latency increase under load
+- database connection pool exhausted
+- cache miss rate 85%
+STATE: investigation ongoing`
+	s := ParseSummary(in)
+	if len(s.Findings) != 3 {
+		t.Fatalf("Findings count = %d, want 3: %v", len(s.Findings), s.Findings)
+	}
+	if s.Findings[0] != "observed 50% latency increase under load" {
+		t.Errorf("Finding[0] = %q, want exact preservation", s.Findings[0])
+	}
+	if s.Findings[1] != "database connection pool exhausted" {
+		t.Errorf("Finding[1] = %q, want exact preservation", s.Findings[1])
+	}
+	if s.Findings[2] != "cache miss rate 85%" {
+		t.Errorf("Finding[2] = %q, want exact preservation", s.Findings[2])
+	}
+}
+
+func TestParseSummary_JSONLegacyCompatibility(t *testing.T) {
+	// JSON serialization should work with legacy summaries that lack Findings
+	// (zero value for Findings should serialize as null or omit field)
+	_ = StructuredSummary{
+		Goal:        "test goal",
+		Decisions:   []string{"decision 1"},
+		Proposals:   []string{"proposal 1"},
+		Files:       map[string]string{"file1": "state1"},
+		OpenThreads: []string{"thread 1"},
+		State:       "test state",
+		Findings:    nil, // legacy compatibility
+	}
+
+	_ = StructuredSummary{
+		Goal:        "test goal",
+		Decisions:   []string{"decision 1"},
+		Proposals:   []string{"proposal 1"},
+		Files:       map[string]string{"file1": "state1"},
+		OpenThreads: []string{"thread 1"},
+		State:       "test state",
+		Findings:    []string{"finding 1"}, // new field present
+	}
+
+	// Both should parse correctly from text format
+	text1 := `GOAL: test goal
+DECISIONS:
+- decision 1
+PROPOSALS:
+- proposal 1
+FILES:
+- file1: state1
+OPEN:
+- thread 1
+STATE: test state`
+
+	text2 := `GOAL: test goal
+DECISIONS:
+- decision 1
+PROPOSALS:
+- proposal 1
+FILES:
+- file1: state1
+OPEN:
+- thread 1
+STATE: test state
+FINDINGS:
+- finding 1`
+
+	parsed1 := ParseSummary(text1)
+	parsed2 := ParseSummary(text2)
+
+	if len(parsed1.Findings) != 0 {
+		t.Errorf("Legacy summary should have empty Findings, got %v", parsed1.Findings)
+	}
+	if len(parsed2.Findings) != 1 || parsed2.Findings[0] != "finding 1" {
+		t.Errorf("New summary should preserve Findings, got %v", parsed2.Findings)
+	}
+}
+
+func TestMergeSummaries_FindingsDeduplication(t *testing.T) {
+	// MergeSummaries should deduplicate findings while preserving order
+	// and keeping distinct observations from the same file
+	s1 := StructuredSummary{
+		Findings: []string{
+			"file.go: syntax error on line 10",
+			"config.yaml: missing required field",
+			"file.go: type mismatch in function signature",
+		},
+	}
+
+	s2 := StructuredSummary{
+		Findings: []string{
+			"config.yaml: missing required field", // duplicate
+			"database: connection timeout",
+			"file.go: syntax error on line 10", // duplicate
+		},
+	}
+
+	merged := MergeSummaries([]StructuredSummary{s1, s2})
+
+	if len(merged.Findings) != 4 {
+		t.Fatalf("Merged Findings count = %d, want 4: %v", len(merged.Findings), merged.Findings)
+	}
+
+	expected := []string{
+		"file.go: syntax error on line 10",
+		"config.yaml: missing required field",
+		"file.go: type mismatch in function signature",
+		"database: connection timeout",
+	}
+
+	for i, want := range expected {
+		if merged.Findings[i] != want {
+			t.Errorf("Findings[%d] = %q, want %q", i, merged.Findings[i], want)
+		}
+	}
+}
+
+func TestMergeSummaries_SameFileDistinctObservations(t *testing.T) {
+	// Different observations about the same file should be preserved
+	s1 := StructuredSummary{
+		Findings: []string{
+			"main.go: imports missing",
+			"main.go: function signature incorrect",
+		},
+	}
+
+	s2 := StructuredSummary{
+		Findings: []string{
+			"main.go: variable naming issue",
+			"test.go: assertion failure",
+		},
+	}
+
+	merged := MergeSummaries([]StructuredSummary{s1, s2})
+
+	if len(merged.Findings) != 4 {
+		t.Fatalf("Merged Findings count = %d, want 4: %v", len(merged.Findings), merged.Findings)
+	}
+
+	// Check that all distinct observations are preserved
+	mergedSet := make(map[string]bool)
+	for _, f := range merged.Findings {
+		mergedSet[f] = true
+	}
+
+	expected := []string{
+		"main.go: imports missing",
+		"main.go: function signature incorrect",
+		"main.go: variable naming issue",
+		"test.go: assertion failure",
+	}
+
+	for _, exp := range expected {
+		if !mergedSet[exp] {
+			t.Errorf("Expected finding %q not found in merged result", exp)
+		}
+	}
+}
+
+func TestParseSummary_FindingsOnly(t *testing.T) {
+	// Summary with only FINDINGS section should be parseable
+	in := `FINDINGS:
+- observed intermittent failures
+- performance degradation under load
+- memory leak suspected`
+	s := ParseSummary(in)
+	if len(s.Findings) != 3 {
+		t.Fatalf("Findings count = %d, want 3: %v", len(s.Findings), s.Findings)
+	}
+	if s.Findings[0] != "observed intermittent failures" {
+		t.Errorf("Finding[0] = %q, want exact preservation", s.Findings[0])
+	}
+}
+
+func TestStructuredSummary_FindingsOnlyIsNotEmpty(t *testing.T) {
+	// Summary with only Findings should not be empty
+	s := StructuredSummary{
+		Findings: []string{"some observation"},
+	}
+	if s.IsEmpty() {
+		t.Error("Summary with Findings should not be empty")
+	}
+}
+
+func TestStructuredSummary_FindingsDedupKeyPreservesOriginal(t *testing.T) {
+	// Test that findings with different casing/punctuation are deduplicated
+	// but the original first occurrence is preserved
+	s1 := StructuredSummary{
+		Findings: []string{
+			"error: file not found",
+			"Error: File Not Found", // should be deduplicated (same content)
+			"warning: low memory",
+		},
+	}
+
+	s2 := StructuredSummary{
+		Findings: []string{
+			"warning: low memory",   // duplicate, should be ignored
+			"info: process started", // different content, should be preserved
+		},
+	}
+
+	merged := MergeSummaries([]StructuredSummary{s1, s2})
+
+	if len(merged.Findings) != 3 {
+		t.Fatalf("Merged Findings count = %d, want 3: %v", len(merged.Findings), merged.Findings)
+	}
+
+	// Check that original casing is preserved and duplicates removed
+	expected := []string{
+		"error: file not found", // first occurrence preserved
+		"warning: low memory",   // first occurrence preserved
+		"info: process started",
+	}
+
+	for i, want := range expected {
+		if merged.Findings[i] != want {
+			t.Errorf("Findings[%d] = %q, want original preserved %q", i, merged.Findings[i], want)
+		}
+	}
+}
+
 func TestBuildSummaryPrompt_ContractInvariants(t *testing.T) {
 	// The prompt has to teach the model three things or the summarizer
 	// silently drops load-bearing content. Test each requirement so the

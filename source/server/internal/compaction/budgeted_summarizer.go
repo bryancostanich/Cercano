@@ -25,7 +25,7 @@ func SummarizeBudgetedLocal(ctx context.Context, messages []llm.Message, context
 	}
 	messages, deduped := ElideSupersededToolResults(messages)
 	messages, lossyElided := KeepLastNToolResults(messages, DefaultLossyElisionKeepLast)
-	chunks, err := PackSummaryChunks(messages, contextWindow, outputReserve)
+	chunks, err := PackSummaryChunks(messages, contextWindow, outputReserve, TaskReferenceFrom(ctx))
 	if err != nil {
 		return StructuredSummary{}, BudgetedSummaryStats{ToolResultsElided: deduped + lossyElided}, err
 	}
@@ -35,11 +35,17 @@ func SummarizeBudgetedLocal(ctx context.Context, messages []llm.Message, context
 	}
 	summaries := make([]StructuredSummary, 0, len(chunks))
 	for _, chunk := range chunks {
-		prompt := BuildSummaryPrompt(chunk)
+		prompt := BuildSummaryPromptWithTask(chunk, TaskReferenceFrom(ctx))
 		budget := EstimateSummaryBudget(prompt, outputReserve, contextWindow)
+		if !budget.Fits {
+			return StructuredSummary{}, stats, &DeferralError{Reason: "task reference and history exceed summary context", Used: budget.PromptTokens + budget.OutputReserve, Limit: contextWindow}
+		}
 		stats.PromptTokens = append(stats.PromptTokens, budget.PromptTokens)
 		summary, err := call(ctx, prompt, outputReserve)
 		if err != nil {
+			return StructuredSummary{}, stats, err
+		}
+		if err := ValidateWorkingMemory(chunk, summary, TaskReferenceFrom(ctx)); err != nil {
 			return StructuredSummary{}, stats, err
 		}
 		summaries = append(summaries, summary)

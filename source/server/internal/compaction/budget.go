@@ -76,7 +76,7 @@ func estimateTokens(s string) int {
 // on complete tool-exchange boundaries; when a standalone message is too large, it splits splittable
 // text/tool-result blocks losslessly into same-role synthetic messages. It
 // still defers rather than silently truncating an unsplittable block.
-func PackSummaryChunks(messages []llm.Message, contextWindow, outputReserve int) ([][]llm.Message, error) {
+func PackSummaryChunks(messages []llm.Message, contextWindow, outputReserve int, task ...string) ([][]llm.Message, error) {
 	if len(messages) == 0 {
 		return nil, nil
 	}
@@ -90,7 +90,7 @@ func PackSummaryChunks(messages []llm.Message, contextWindow, outputReserve int)
 			return nil, &DeferralError{Reason: "incomplete tool exchange must remain in live history", Limit: contextWindow}
 		}
 		candidate := append(append([]llm.Message(nil), cur...), group...)
-		if EstimateSummaryBudget(BuildSummaryPrompt(candidate), outputReserve, contextWindow).Fits {
+		if EstimateSummaryBudget(BuildSummaryPromptWithTask(candidate, firstTask(task)), outputReserve, contextWindow).Fits {
 			cur = candidate
 			continue
 		}
@@ -98,7 +98,7 @@ func PackSummaryChunks(messages []llm.Message, contextWindow, outputReserve int)
 			chunks = append(chunks, cur)
 			cur = nil
 		}
-		budget := EstimateSummaryBudget(BuildSummaryPrompt(group), outputReserve, contextWindow)
+		budget := EstimateSummaryBudget(BuildSummaryPromptWithTask(group, firstTask(task)), outputReserve, contextWindow)
 		if budget.Fits {
 			cur = append([]llm.Message(nil), group...)
 			continue
@@ -114,7 +114,7 @@ func PackSummaryChunks(messages []llm.Message, contextWindow, outputReserve int)
 		if len(group) > 1 || hasCall {
 			return nil, &DeferralError{Reason: "complete tool exchange cannot fit summarizer context without separating its evidence", Used: budget.PromptTokens + budget.OutputReserve, Limit: contextWindow}
 		}
-		split, err := splitOversizedMessageForSummary(group[0], contextWindow, outputReserve)
+		split, err := splitOversizedMessageForSummary(group[0], contextWindow, outputReserve, task...)
 		if err != nil {
 			return nil, err
 		}
@@ -129,7 +129,7 @@ func PackSummaryChunks(messages []llm.Message, contextWindow, outputReserve int)
 	return chunks, nil
 }
 
-func splitOversizedMessageForSummary(msg llm.Message, contextWindow, outputReserve int) ([]llm.Message, error) {
+func splitOversizedMessageForSummary(msg llm.Message, contextWindow, outputReserve int, task ...string) ([]llm.Message, error) {
 	var out []llm.Message
 	cur := llm.Message{Role: msg.Role}
 	flush := func() {
@@ -141,18 +141,18 @@ func splitOversizedMessageForSummary(msg llm.Message, contextWindow, outputReser
 	for _, blk := range msg.Blocks {
 		candidate := cur
 		candidate.Blocks = append(append([]llm.Block(nil), cur.Blocks...), blk)
-		if len(candidate.Blocks) > 0 && EstimateSummaryBudget(BuildSummaryPrompt([]llm.Message{candidate}), outputReserve, contextWindow).Fits {
+		if len(candidate.Blocks) > 0 && EstimateSummaryBudget(BuildSummaryPromptWithTask([]llm.Message{candidate}, firstTask(task)), outputReserve, contextWindow).Fits {
 			cur = candidate
 			continue
 		}
 		flush()
 		alone := llm.Message{Role: msg.Role, Blocks: []llm.Block{blk}}
-		budget := EstimateSummaryBudget(BuildSummaryPrompt([]llm.Message{alone}), outputReserve, contextWindow)
+		budget := EstimateSummaryBudget(BuildSummaryPromptWithTask([]llm.Message{alone}, firstTask(task)), outputReserve, contextWindow)
 		if budget.Fits {
 			cur = alone
 			continue
 		}
-		parts, err := splitOversizedBlockForSummary(msg.Role, blk, contextWindow, outputReserve)
+		parts, err := splitOversizedBlockForSummary(msg.Role, blk, contextWindow, outputReserve, task...)
 		if err != nil {
 			return nil, err
 		}
@@ -162,23 +162,23 @@ func splitOversizedMessageForSummary(msg llm.Message, contextWindow, outputReser
 	return out, nil
 }
 
-func splitOversizedBlockForSummary(role llm.Role, blk llm.Block, contextWindow, outputReserve int) ([]llm.Message, error) {
+func splitOversizedBlockForSummary(role llm.Role, blk llm.Block, contextWindow, outputReserve int, task ...string) ([]llm.Message, error) {
 	get, set, ok := splittableSummaryText(blk)
 	if !ok {
-		budget := EstimateSummaryBudget(BuildSummaryPrompt([]llm.Message{{Role: role, Blocks: []llm.Block{blk}}}), outputReserve, contextWindow)
+		budget := EstimateSummaryBudget(BuildSummaryPromptWithTask([]llm.Message{{Role: role, Blocks: []llm.Block{blk}}}, firstTask(task)), outputReserve, contextWindow)
 		return nil, &DeferralError{Reason: "single unsplittable message block plus summary instructions cannot fit local context", Used: budget.PromptTokens + budget.OutputReserve, Limit: contextWindow}
 	}
 	text := get(blk)
 	if text == "" {
-		budget := EstimateSummaryBudget(BuildSummaryPrompt([]llm.Message{{Role: role, Blocks: []llm.Block{blk}}}), outputReserve, contextWindow)
+		budget := EstimateSummaryBudget(BuildSummaryPromptWithTask([]llm.Message{{Role: role, Blocks: []llm.Block{blk}}}, firstTask(task)), outputReserve, contextWindow)
 		return nil, &DeferralError{Reason: "empty message block plus summary instructions cannot fit local context", Used: budget.PromptTokens + budget.OutputReserve, Limit: contextWindow}
 	}
 	var out []llm.Message
 	remaining := []rune(text)
 	for len(remaining) > 0 {
-		maxRunes := maxFittingRunes(role, blk, set, remaining, contextWindow, outputReserve)
+		maxRunes := maxFittingRunes(role, blk, set, remaining, contextWindow, outputReserve, task...)
 		if maxRunes <= 0 {
-			budget := EstimateSummaryBudget(BuildSummaryPrompt([]llm.Message{{Role: role, Blocks: []llm.Block{blk}}}), outputReserve, contextWindow)
+			budget := EstimateSummaryBudget(BuildSummaryPromptWithTask([]llm.Message{{Role: role, Blocks: []llm.Block{blk}}}, firstTask(task)), outputReserve, contextWindow)
 			return nil, &DeferralError{Reason: "single message plus summary instructions cannot fit local context", Used: budget.PromptTokens + budget.OutputReserve, Limit: contextWindow}
 		}
 		part := blk
@@ -200,7 +200,7 @@ func splittableSummaryText(blk llm.Block) (func(llm.Block) string, func(*llm.Blo
 	}
 }
 
-func maxFittingRunes(role llm.Role, blk llm.Block, set func(*llm.Block, string), text []rune, contextWindow, outputReserve int) int {
+func maxFittingRunes(role llm.Role, blk llm.Block, set func(*llm.Block, string), text []rune, contextWindow, outputReserve int, task ...string) int {
 	lo, hi := 1, len(text)
 	best := 0
 	for lo <= hi {
@@ -208,7 +208,7 @@ func maxFittingRunes(role llm.Role, blk llm.Block, set func(*llm.Block, string),
 		part := blk
 		set(&part, string(text[:mid]))
 		msg := llm.Message{Role: role, Blocks: []llm.Block{part}}
-		if EstimateSummaryBudget(BuildSummaryPrompt([]llm.Message{msg}), outputReserve, contextWindow).Fits {
+		if EstimateSummaryBudget(BuildSummaryPromptWithTask([]llm.Message{msg}, firstTask(task)), outputReserve, contextWindow).Fits {
 			best = mid
 			lo = mid + 1
 		} else {
@@ -216,4 +216,11 @@ func maxFittingRunes(role llm.Role, blk llm.Block, set func(*llm.Block, string),
 		}
 	}
 	return best
+}
+
+func firstTask(task []string) string {
+	if len(task) > 0 {
+		return task[0]
+	}
+	return ""
 }

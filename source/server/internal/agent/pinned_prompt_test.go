@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"cercano/source/server/internal/compaction"
 	"cercano/source/server/internal/llm"
 )
 
@@ -61,14 +62,17 @@ func TestPinnedPromptCompactionOutcomesAndFinalPass(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			p := &pinnedPromptProvider{}
 			executed, passes := 0, 0
-			c := LoopCompactorFunc(func(_ context.Context, h []llm.Message) ([]llm.Message, int, error) {
+			c := LoopCompactorFunc(func(ctx context.Context, h []llm.Message) ([]llm.Message, int, error) {
 				passes++
 				for _, m := range h {
 					for _, b := range m.Blocks {
 						if b.Text == task {
-							t.Fatal("compactor received task")
+							t.Fatal("task must stay protected history, not compactable input")
 						}
 					}
+				}
+				if compaction.TaskReferenceFrom(ctx) != task {
+					t.Fatal("summarizer lost read-only task reference")
 				}
 				switch mode {
 				case "rewrite":

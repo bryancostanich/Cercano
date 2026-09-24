@@ -22,7 +22,7 @@ Objective: fix only demonstrated gaps in standalone installation and upgrade beh
 - [x] Add installation probes for colocated binaries reached through Homebrew-style symlinks and prove any observed discovery or asset-loading failures
 - [x] Correct demonstrated installed-path or required-asset gaps without introducing development-checkout dependencies
 - [x] Add isolated integration coverage for a compatible already-running agent and incompatible connection behavior
-- [~] Implement any missing actionable restart guidance under the established compatibility contract without automatic process termination
+- [x] Implement any missing actionable restart guidance under the established compatibility contract without automatic process termination
 - [x] Verify Homebrew-managed installations are not overwritten by an incompatible self-update path; fix demonstrated conflicts
 - [x] Verify configuration and conversation data are preserved across replacement and restart
 - [x] Run affected package tests and installation/upgrade integration tests, then checkpoint the solved unit
@@ -31,8 +31,8 @@ Objective: fix only demonstrated gaps in standalone installation and upgrade beh
 
 Objective: produce version-matched arm64 binaries and complete archives with a strict release-only signing path. Files: release scripts under source/server/scripts or the existing release-script location established by the audit, related build targets, and script tests. Leave permissive local development signing intact. Tests: build-version checks, archive-content checks, architecture checks, and controlled signing/notarization failure cases without credentials.
 
-- [ ] Implement clean release builds for both binaries using one explicit tag-derived version and the audited macOS build requirements
-- [ ] Package required base assets and license notices with the binaries; exclude developer launchers, credentials, caches, and model weights
+- [x] Implement clean release builds for both binaries using one explicit tag-derived version and the audited macOS build requirements
+- [x] Package required base assets and license notices with the binaries; exclude developer launchers, credentials, caches, and model weights
 - [x] Implement fail-closed Developer ID signing with hardened runtime, secure timestamps, and signature verification of final executable bytes
 - [ ] Implement notarization submission and acceptance verification using a supported submission container, followed by final archive checksums
 - [ ] Add failure coverage for absent identity, signing failure, notarization rejection, and incomplete archive contents
@@ -95,3 +95,14 @@ Recorded during the Phase 1 audit. The spec above is unchanged and remains autho
 - **Mixed-version client/server connections must be preserved; a version mismatch alone is never a blocker.**
 - Audit finding: current code already satisfies this — `agentclient.Dial`/`connect` (`source/server/pkg/agentclient/client.go:88-137`) is a plain gRPC connection with no version handshake anywhere. No code or protocol changes are required or permitted for this.
 - Consequently, the Phase 1 task "identify the existing compatibility contract and tests; escalate any need for a new protocol contract before implementation" is closed on the user's resolution; no escalation is needed. Evidence and remaining release blockers are consolidated in `release-audit.md`.
+
+## Addendum — 2026-09-23: Automatic restart after upgrade (user resolution)
+
+The user superseded the spec's "no automatic termination of a running agent" requirement. The governing contract is now:
+
+- A **successful** upgrade — including a direct `brew upgrade cercano`, not only an update applied through Cercano — must restart an already-running agent so the new binaries take effect.
+- A failed download or installation must leave the running agent alone.
+- If no agent is running, upgrading must not start one.
+- Still no version handshake or compatibility gating; a mixed-version connection is never a blocker.
+
+The Phase 2 task "Implement any missing actionable restart guidance ... without automatic process termination" retains its original title for traceability, but was completed under this revised contract: the agent is now stopped and replaced automatically after a successful install, in addition to the user-initiated `/restart-agent` path. Implementation and its verified boundaries are recorded in `homebrew-restart-verification.md`; the Homebrew hook is activated by `release/homebrew/cercano.rb.in`, which is not yet published.

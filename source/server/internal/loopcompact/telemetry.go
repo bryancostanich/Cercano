@@ -105,6 +105,22 @@ func classifyFailure(err error) string {
 	if errors.As(err, &startup) {
 		return "local_runtime_unavailable"
 	}
+	// Exhaustion is checked before the individual causes: it means compaction has
+	// stopped calling the summarizer entirely, which needs a different response
+	// than a single rejected summary.
+	if errors.Is(err, compaction.ErrSummarySuspended) {
+		return "summary_rejection_budget_exhausted"
+	}
+	// Gate rejections carry their rule. Only the cause code is logged; the
+	// rejected summary text stays on the error for callers that can store it
+	// privately, never in this shared content-free line.
+	var rejection *compaction.RejectionError
+	if errors.As(err, &rejection) {
+		return "summary_rejected_" + rejection.Cause.String()
+	}
+	if errors.Is(err, compaction.ErrUnhelpfulSummary) {
+		return "summary_rejected"
+	}
 	return "summarizer_error"
 }
 

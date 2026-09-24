@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"cercano/source/server/internal/llm"
 )
@@ -59,6 +60,68 @@ func LatestUserMessage(messages []llm.Message) string {
 		}
 	}
 	return ""
+}
+
+// RejectionCause identifies which gate rule fired. Without this the telemetry
+// label is the catch-all "summarizer_error", which cannot distinguish a gate
+// rejection from a provider failure.
+type RejectionCause string
+
+const (
+	RejectMetaObjective  RejectionCause = "meta_objective"
+	RejectIdleState      RejectionCause = "idle_state"
+	RejectIdleOpenThread RejectionCause = "idle_open_thread"
+	RejectNoFindings     RejectionCause = "no_findings"
+)
+
+func (c RejectionCause) String() string { return string(c) }
+
+// maxRejectionEvidence bounds retained summary text: enough to judge whether a
+// rejection was correct, small enough to keep bulk model output out of logs.
+const maxRejectionEvidence = 600
+
+// RejectionError reports which rule refused a summary and preserves the summary
+// itself so the gate can be audited. It wraps ErrUnhelpfulSummary so existing
+// errors.Is checks keep working.
+type RejectionError struct {
+	Cause    RejectionCause
+	Evidence string
+}
+
+func (e *RejectionError) Error() string {
+	return "compaction summary rejected (" + string(e.Cause) + "): does not preserve useful working context"
+}
+
+func (e *RejectionError) Unwrap() error { return ErrUnhelpfulSummary }
+
+func reject(cause RejectionCause, s StructuredSummary) error {
+	return &RejectionError{Cause: cause, Evidence: summaryEvidence(s)}
+}
+
+// summaryEvidence renders the rejected summary compactly, truncating on a rune
+// boundary so the retained text stays valid UTF-8.
+func summaryEvidence(s StructuredSummary) string {
+	var b strings.Builder
+	b.WriteString("GOAL: " + s.Goal)
+	for _, f := range s.Findings {
+		b.WriteString("\nFINDING: " + f)
+	}
+	for path, state := range s.Files {
+		b.WriteString("\nFILE: " + path + ": " + state)
+	}
+	for _, o := range s.OpenThreads {
+		b.WriteString("\nOPEN: " + o)
+	}
+	b.WriteString("\nSTATE: " + s.State)
+	out := strings.TrimSpace(b.String())
+	if len(out) <= maxRejectionEvidence {
+		return out
+	}
+	trimmed := out[:maxRejectionEvidence]
+	for len(trimmed) > 0 && !utf8.ValidString(trimmed) {
+		trimmed = trimmed[:len(trimmed)-1]
+	}
+	return trimmed
 }
 
 var ErrUnhelpfulSummary = errors.New("compaction summary does not preserve useful working context")
@@ -148,7 +211,7 @@ func ValidateWorkingMemory(messages []llm.Message, s StructuredSummary, task str
 	// Scope: spans that actually carried substantive inspected evidence. Prose
 	// conversations and terse exchanges stay compatible with existing behavior.
 	if metaObjective(s.Goal) && !metaObjective(task) {
-		return ErrUnhelpfulSummary
+		return reject(RejectMetaObjective, s)
 	}
 	userClosed := false
 	reference := strings.ToLower(strings.TrimSpace(task))
@@ -159,11 +222,11 @@ func ValidateWorkingMemory(messages []llm.Message, s StructuredSummary, task str
 	}
 	if !userClosed {
 		if idleClaim(s.State) {
-			return ErrUnhelpfulSummary
+			return reject(RejectIdleState, s)
 		}
 		for _, open := range s.OpenThreads {
 			if idleClaim(open) {
-				return ErrUnhelpfulSummary
+				return reject(RejectIdleOpenThread, s)
 			}
 		}
 	}
@@ -181,7 +244,7 @@ func ValidateWorkingMemory(messages []llm.Message, s StructuredSummary, task str
 			return nil
 		}
 	}
-	return ErrUnhelpfulSummary
+	return reject(RejectNoFindings, s)
 }
 
 // SummaryGuard bounds rejected model attempts over its owner's lifetime. Use one

@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"cercano/source/server/internal/compaction"
 	"cercano/source/server/internal/conversation"
 	"cercano/source/server/internal/llm"
 )
@@ -416,6 +417,19 @@ func ErrorCode(err error) string {
 		return "unexpected_eof"
 	case errors.Is(err, io.EOF):
 		return "eof"
+	case errors.Is(err, compaction.ErrSummarySuspended):
+		return "summary_rejection_budget_exhausted"
+	}
+	// Compaction gate rejections carry the rule that fired. Only the stable code
+	// is recorded here; the rejected summary text is written separately by the
+	// summarizer-response event, which already stores model output.
+	var rejection *compaction.RejectionError
+	if errors.As(err, &rejection) {
+		return "summary_rejected_" + rejection.Cause.String()
+	}
+	switch {
+	case errors.Is(err, compaction.ErrUnhelpfulSummary):
+		return "summary_rejected"
 	default:
 		return "error"
 	}

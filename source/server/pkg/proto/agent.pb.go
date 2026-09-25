@@ -14297,8 +14297,14 @@ type ConfigSnapshot struct {
 	ModelMetadata  []*ModelMetadataEntry `protobuf:"bytes,47,rep,name=model_metadata,json=modelMetadata,proto3" json:"model_metadata,omitempty"`
 	Routing        *RoutingSnapshot      `protobuf:"bytes,48,opt,name=routing,proto3" json:"routing,omitempty"`
 	TierVisionOpen string                `protobuf:"bytes,49,opt,name=tier_vision_open,json=tierVisionOpen,proto3" json:"tier_vision_open,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Sanitized DeepInfra cloud-profile NAMES (eligible for deepinfra_infer
+	// credential selection: deepinfra provider, exact host api.deepinfra.com,
+	// complete base URL). Metadata only — never a credential, key, or raw
+	// config file contents. Lets the crash-isolated worker offer profile
+	// selection even when no DeepInfra profile is the active/backup one.
+	DeepinfraProfiles []string `protobuf:"bytes,53,rep,name=deepinfra_profiles,json=deepinfraProfiles,proto3" json:"deepinfra_profiles,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *ConfigSnapshot) Reset() {
@@ -14651,6 +14657,13 @@ func (x *ConfigSnapshot) GetTierVisionOpen() string {
 		return x.TierVisionOpen
 	}
 	return ""
+}
+
+func (x *ConfigSnapshot) GetDeepinfraProfiles() []string {
+	if x != nil {
+		return x.DeepinfraProfiles
+	}
+	return nil
 }
 
 type ModelMetadataEntry struct {
@@ -19567,7 +19580,7 @@ const file_agent_proto_rawDesc = "" +
 	"\x05route\x18\a \x01(\v2\x17.agent.ServingRouteInfoR\x05route\"%\n" +
 	"\tTurnError\x12\x18\n" +
 	"\amessage\x18\x01 \x01(\tR\amessage\"\b\n" +
-	"\x06Cancel\"\xac\x12\n" +
+	"\x06Cancel\"\xdb\x12\n" +
 	"\x0eConfigSnapshot\x12\x1d\n" +
 	"\n" +
 	"locus_mode\x18\x01 \x01(\tR\tlocusMode\x120\n" +
@@ -19619,7 +19632,8 @@ const file_agent_proto_rawDesc = "" +
 	"\x13model_profiles_json\x18. \x01(\tR\x11modelProfilesJson\x12@\n" +
 	"\x0emodel_metadata\x18/ \x03(\v2\x19.agent.ModelMetadataEntryR\rmodelMetadata\x120\n" +
 	"\arouting\x180 \x01(\v2\x16.agent.RoutingSnapshotR\arouting\x12(\n" +
-	"\x10tier_vision_open\x181 \x01(\tR\x0etierVisionOpenJ\x04\b\x0f\x10\x10J\x04\b\x11\x10\x12J\x04\b\x13\x10\x14J\x04\b\x15\x10\x16J\x04\b\x17\x10\x18J\x04\b\x18\x10\x19R\x17tier_most_capable_cloudR\x13tier_everyday_cloudR\x15tier_fast_light_cloudR\x1atier_fast_light_text_cloudR\x14tier_embedding_cloudR\x10default_provider\"\x8f\x02\n" +
+	"\x10tier_vision_open\x181 \x01(\tR\x0etierVisionOpen\x12-\n" +
+	"\x12deepinfra_profiles\x185 \x03(\tR\x11deepinfraProfilesJ\x04\b\x0f\x10\x10J\x04\b\x11\x10\x12J\x04\b\x13\x10\x14J\x04\b\x15\x10\x16J\x04\b\x17\x10\x18J\x04\b\x18\x10\x19R\x17tier_most_capable_cloudR\x13tier_everyday_cloudR\x15tier_fast_light_cloudR\x1atier_fast_light_text_cloudR\x14tier_embedding_cloudR\x10default_provider\"\x8f\x02\n" +
 	"\x12ModelMetadataEntry\x12\x1a\n" +
 	"\bprovider\x18\x01 \x01(\tR\bprovider\x12\x19\n" +
 	"\bbase_url\x18\x02 \x01(\tR\abaseUrl\x12\x14\n" +

@@ -20,6 +20,7 @@ import (
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/loopcompact"
 	"cercano/source/server/internal/runner"
+	"cercano/source/server/internal/secrets"
 	"cercano/source/server/internal/toolstack"
 	pkgcfg "cercano/source/server/pkg/config"
 )
@@ -64,13 +65,14 @@ func buildWorkerToolSvc(
 	autonomy conversation.AutonomyLedger,
 	restart ...runtimeRestartFunc,
 ) runner.ToolSvc {
-	return buildWorkerToolSvcWithDiagnostic(permBroker, engine, ctxLoader, cloud, open, cfg, subPersist, enterProfile, vision, failures, nil, autonomy, nil, nil, restart...)
+	return buildWorkerToolSvcWithDiagnostic(permBroker, engine, ctxLoader, cloud, open, cfg, subPersist, enterProfile, vision, nil, failures, nil, autonomy, nil, nil, restart...)
 }
 
 func buildWorkerToolSvcWithDiagnostic(
 	permBroker permissions.Broker, engine *dispatch.Engine, ctxLoader *projectctx.Loader,
 	cloud, open inference.Provider, cfg pkgcfg.Config, subPersist *streamSubagentPersist,
 	enterProfile func(context.Context, string) error, vision capabilities.VisionService,
+	attachments capabilities.AttachmentLookup,
 	failures *failurelog.Writer, diagnostic reasoningexperiment.Service, autonomy conversation.AutonomyLedger, candidates func() inference.Tiers, sessionModel chatroute.Control, restart ...runtimeRestartFunc,
 ) runner.ToolSvc {
 	var runDiagnostic func(context.Context, reasoningexperiment.Spec) (reasoningexperiment.Report, error)
@@ -112,6 +114,11 @@ func buildWorkerToolSvcWithDiagnostic(
 		Config:              &cfg,
 		CtxLoader:           ctxLoader,
 		Autonomy:            autonomy,
+		// deepinfra_infer reads configured DeepInfra credentials from the OS
+		// keychain. The worker is a same-machine child process, so it opens its
+		// own keychain handle (nil on headless systems — the capability errors
+		// clearly rather than sending an anonymous request).
+		Secrets: openWorkerSecrets(),
 		EnterProfile: func(convID, name string) error {
 			if enterProfile == nil {
 				return fmt.Errorf("session profile control not configured")
@@ -122,8 +129,25 @@ func buildWorkerToolSvcWithDiagnostic(
 			return enterProfile(context.Background(), name)
 		},
 		Vision: vision,
+		// deepinfra_infer binds same-turn image attachments (attachment_id)
+		// from the SAME store inspect_image reads. The worker's store is
+		// per-turn, so cross-turn IDs from the host store are misses — the
+		// capability reports that clearly (reattach) instead of guessing.
+		// Keychain failure stays fail-closed: nil Secrets errors clearly.
+		Attachments: attachments,
 	})
 	return svc
+}
+
+// openWorkerSecrets opens the OS keychain for capability credential reads
+// (deepinfra_infer). Nil on failure (headless systems): the capability reports
+// credentials unavailable rather than guessing.
+func openWorkerSecrets() capabilities.SecretStore {
+	st, err := secrets.OpenKeychain()
+	if err != nil {
+		return nil
+	}
+	return st
 }
 
 // workerLoopCompactDeps uses the worker's existing destination graph, including

@@ -307,6 +307,20 @@ func (s *Server) InstallCapabilities() {
 		// the vision model a focused question. nil when vision is unconfigured, in
 		// which case inspect_image reports vision unavailable.
 		Vision: s.visionService,
+		// deepinfra_infer binds conversation image attachments (attachment_id)
+		// from the SAME store inspect_image reads, so binary content goes
+		// straight into the request body without passing through context.
+		// Typed-nil guard: an unwired store stays a nil seam (never a
+		// non-nil interface holding a nil store that would panic on lookup).
+		Attachments: func() capabilities.AttachmentLookup {
+			if s.visionStore == nil {
+				return nil
+			}
+			return s.visionStore
+		}(),
+		// deepinfra_infer resolves configured DeepInfra credentials from the OS
+		// keychain through the live config service. Nil-safe downstream.
+		Secrets: s.cfgSvc.Secrets(),
 	})
 }
 

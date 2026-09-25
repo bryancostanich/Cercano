@@ -107,6 +107,17 @@ type CapDeps struct {
 	// this identically (a caching + locus-aware inspector over one shared
 	// attachment store) so the two turn-execution environments never diverge.
 	Vision capabilities.VisionService
+	// Attachments resolves per-conversation attachment bytes by stable ID (the
+	// SAME store the runner registers image placeholders into and inspect_image
+	// reads). Backs deepinfra_infer's attachment_id binding; bytes go straight
+	// into the request body, never through model context. Optional; nil means
+	// that binding errors clearly in this execution environment.
+	Attachments capabilities.AttachmentLookup
+	// Secrets reads cloud-profile API keys from the OS keychain, keyed by
+	// profile name. Optional; nil means capabilities that need credentials
+	// (deepinfra_infer) error clearly. The host wires cfgSvc.Secrets(); the
+	// worker opens its own keychain handle (same OS keychain, same machine).
+	Secrets capabilities.SecretStore
 }
 
 // InstallCapabilities builds the capability registry with a fully-populated
@@ -158,6 +169,8 @@ func InstallCapabilities(svc tools.Catalog, d CapDeps) {
 		RestartRuntime:      d.RestartRuntime,
 		ReasoningDiagnostic: d.ReasoningDiagnostic,
 		Vision:              d.Vision,
+		Attachments:         d.Attachments,
+		Secrets:             d.Secrets,
 	})
 	builtins.Register(capReg)
 	svc.SetCapRegistry(capReg)

@@ -1941,6 +1941,13 @@ message ConfigSnapshot {
   repeated ModelMetadataEntry model_metadata = 47;
  RoutingSnapshot routing = 48;
  string tier_vision_open = 49;
+
+ // Sanitized DeepInfra cloud-profile NAMES (eligible for deepinfra_infer
+ // credential selection: deepinfra provider, exact host api.deepinfra.com,
+ // complete base URL). Metadata only — never a credential, key, or raw
+ // config file contents. Lets the crash-isolated worker offer profile
+ // selection even when no DeepInfra profile is the active/backup one.
+ repeated string deepinfra_profiles = 53;
 }
 
 message ModelMetadataEntry {

@@ -2,7 +2,9 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"reflect"
+	"sort"
 	"strings"
 )
 
@@ -194,6 +196,56 @@ func (c Config) Profile(name string) (CloudProfile, bool) {
 		}
 	}
 	return CloudProfile{}, false
+}
+
+// DeepinfraNativeBaseURL is DeepInfra's NATIVE inference base — NOT the
+// OpenAI-compatible chat-completions surface at /v1/openai. Verified against
+// DeepInfra's public API docs (https://deepinfra.com/documentation, "API
+// reference" section: POST https://api.deepinfra.com/v1/inference/{model_id});
+// see docs/features/deepinfra-infer.md for the recorded sources.
+const DeepinfraNativeBaseURL = "https://api.deepinfra.com"
+
+// DeepinfraHost returns the lowercased base-URL host of a cloud profile, or ""
+// when unset or unparseable. Credential eligibility for deepinfra_infer
+// compares this EXACTLY against "api.deepinfra.com": the provider label alone
+// is not authority — a profile labelled deepinfra that points at another host
+// must never receive DeepInfra credentials.
+func DeepinfraHost(p CloudProfile) string {
+	raw := strings.TrimSpace(p.BaseURL)
+	if raw == "" {
+		return ""
+	}
+	if !strings.Contains(raw, "://") {
+		raw = "https://" + raw
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	return strings.ToLower(u.Host)
+}
+
+// SanitizedDeepinfraProfiles returns the NAMES of configured cloud profiles
+// eligible for the deepinfra_infer capability's credential selection
+// (deepinfra provider, api.deepinfra.com base-URL host, complete base URL),
+// sorted for stable snapshots. Metadata only — no credentials or keys — so
+// the host can hand the crash-isolated worker profile-choice metadata
+// without the worker loading the user's config file.
+func (c Config) SanitizedDeepinfraProfiles() []string {
+	names := make([]string, 0, len(c.CloudProfiles))
+	seen := map[string]bool{}
+	for _, p := range c.CloudProfiles {
+		if DeepinfraHost(p) != "api.deepinfra.com" {
+			continue
+		}
+		if p.Name == "" || seen[p.Name] {
+			continue
+		}
+		seen[p.Name] = true
+		names = append(names, p.Name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // PrimaryBackups returns an independent ordered list, accepting legacy configs.

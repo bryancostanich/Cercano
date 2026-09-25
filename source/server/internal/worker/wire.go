@@ -330,6 +330,12 @@ func SnapshotConfig(cfg config.Config, cred string, openTiers map[string]string)
 
 		ToolLoopMaxIterations: int32(cfg.ToolLoop.MaxIterations),
 		ModelProfilesJson:     modelProfilesJSON,
+
+		// Sanitized DeepInfra cloud-profile NAMES (no credentials) so the
+		// worker's deepinfra_infer can offer profile selection even when
+		// none of them is the active/backup profile. The worker still reads
+		// keys from the keychain via the Secrets seam — never the wire.
+		DeepinfraProfiles: cfg.SanitizedDeepinfraProfiles(),
 	}
 }
 
@@ -383,6 +389,29 @@ func ConfigFromSnapshot(p *proto.ConfigSnapshot) config.Config {
 			Region:     p.BackupRegion,
 			AWSProfile: p.BackupAwsProfile,
 		})
+	}
+
+	// Rebuild sanitized DeepInfra profile names as stub profile entries (Name +
+	// eligible base URL/host only; no credentials on the wire — keys come from
+	// the keychain via the Secrets seam). deepinfra_infer needs the profile
+	// NAMES and exact api.deepinfra.com eligibility, not the full provider
+	// fields; skipping duplicates and names already rebuilt above.
+	if len(p.DeepinfraProfiles) != 0 {
+		seen := map[string]bool{}
+		for _, existing := range profiles {
+			seen[existing.Name] = true
+		}
+		for _, name := range p.DeepinfraProfiles {
+			if name == "" || seen[name] {
+				continue
+			}
+			seen[name] = true
+			profiles = append(profiles, config.CloudProfile{
+				Name:     name,
+				Provider: "deepinfra",
+				BaseURL:  config.DeepinfraNativeBaseURL,
+			})
+		}
 	}
 
 	// Rebuild ModelProfiles from its JSON blob (defensive: zero on error).
@@ -444,6 +473,28 @@ func ConfigFromSnapshot(p *proto.ConfigSnapshot) config.Config {
 		cfg.BackupCloudProfile = ""
 		cfg.SecondaryCloudProfile = ""
 		cfg.SecondaryBackupCloudProfile = ""
+	} else if len(p.DeepinfraProfiles) != 0 {
+		// ApplySnapshot rebuilds CloudProfiles from the routing graph, which
+		// only carries REFERENCED (active/backup/secondary) profiles. Re-append
+		// the sanitized DeepInfra stubs AFTER it, so non-active DeepInfra
+		// profiles survive the round trip and stay selectable by
+		// deepinfra_infer (deduped against whatever ApplySnapshot restored;
+		// no-ops when the legacy rebuild above already carried them).
+		seen := map[string]bool{}
+		for _, existing := range cfg.CloudProfiles {
+			seen[existing.Name] = true
+		}
+		for _, name := range p.DeepinfraProfiles {
+			if name == "" || seen[name] {
+				continue
+			}
+			seen[name] = true
+			cfg.CloudProfiles = append(cfg.CloudProfiles, config.CloudProfile{
+				Name:     name,
+				Provider: "deepinfra",
+				BaseURL:  config.DeepinfraNativeBaseURL,
+			})
+		}
 	}
 	return cfg
 }

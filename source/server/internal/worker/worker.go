@@ -4,6 +4,7 @@ import (
 	"cercano/source/server/internal/chatroute"
 	"cercano/source/server/internal/reasoningexperiment"
 	"cercano/source/server/internal/visioninspect"
+	"cercano/source/server/internal/capabilities"
 	"context"
 	"errors"
 	"fmt"
@@ -484,7 +485,14 @@ func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, cr
 		if autonomyLedger != nil {
 			autonomy = autonomyLedger
 		}
-		toolSvc = buildWorkerToolSvcWithDiagnostic(permBroker, engine, ctxLoader, provSvc.Cloud(), provSvc.Open(), cfg, subPersist, profileCtl.SetProfile, visionSvc, failureLog, diagnostic, autonomy, provSvc.Candidates, sessionModel, restart...)
+		// deepinfra_infer attachment lookup: same per-turn store as inspect_image
+		// (buildWorkerToolSvc takes the interface; a typed-nil store would be a
+		// non-nil interface that panics, so guard the nil case).
+		var workerAttachments capabilities.AttachmentLookup
+		if visionStore != nil {
+			workerAttachments = visionStore
+		}
+		toolSvc = buildWorkerToolSvcWithDiagnostic(permBroker, engine, ctxLoader, provSvc.Cloud(), provSvc.Open(), cfg, subPersist, profileCtl.SetProfile, visionSvc, workerAttachments, failureLog, diagnostic, autonomy, provSvc.Candidates, sessionModel, restart...)
 	}
 
 	// Register a proxy per host-advertised MCP tool. Done AFTER the built-in

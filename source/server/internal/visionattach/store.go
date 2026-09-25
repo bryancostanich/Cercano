@@ -180,6 +180,19 @@ func (s *Store) LookupAny(id string) (att *Attachment, convID string, ok bool, a
 	return att, convID, true, false
 }
 
+// LookupAttachment adapts Lookup to the capabilities.AttachmentLookup seam
+// (deepinfra_infer binds image attachment bytes into a request body). A miss —
+// unknown ID, stale ID from an earlier process, or an externally removed
+// temporary file — is reported as ok=false so the capability can tell the
+// user to reattach instead of guessing.
+func (s *Store) LookupAttachment(convID, id string) ([]byte, string, bool) {
+	att, ok := s.Lookup(convID, id)
+	if !ok || att == nil {
+		return nil, "", false
+	}
+	return att.Data, att.MediaType, true
+}
+
 // Clear removes a conversation's files and metadata. Failed deletions remain
 // inside the owned directory and are retried by Close.
 func (s *Store) Clear(convID string) {

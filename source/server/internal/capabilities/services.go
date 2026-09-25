@@ -15,6 +15,31 @@ import (
 	"cercano/source/server/pkg/config"
 )
 
+// SecretStore is the narrow credential seam a capability may read through:
+// the OS keychain store keyed by cloud-profile name. A small local interface
+// (rather than the secrets.Store type) keeps this package free of an
+// internal/secrets import. Nil means credentials are unavailable in this
+// execution environment and credential-reading capabilities error clearly.
+type SecretStore interface {
+	Get(profile string) (string, error)
+}
+
+// AttachmentLookup is the narrow seam a capability uses to resolve a
+// previously-registered conversation attachment's bytes by stable ID without
+// owning (or importing) the attachment store. Implemented over the same
+// per-conversation visionattach store inspect_image reads. Nil means
+// attachment lookup is unavailable in this execution environment (or the ID
+// is from an earlier process) and the capability errors clearly rather than
+// guessing. Payload bytes must never flow into model context through the
+// caller — this hook exists so binary content can go straight into a request
+// body instead.
+type AttachmentLookup interface {
+	// LookupAttachment returns the caller-owned bytes and media type for the
+	// attachment registered under attachmentID in convID. ok=false is a miss
+	// (unknown, stale, or not held in this process).
+	LookupAttachment(convID, attachmentID string) (data []byte, mediaType string, ok bool)
+}
+
 // Services holds the static collaborators a capability may need. Injected once
 // when the registry is built. There is no ProviderSet type — the agent holds
 // cloud + local providers as two discrete fields, so Services mirrors that.
@@ -23,6 +48,11 @@ type Services struct {
 	OpenProvider  inference.Provider
 	Engine        engine.InferenceEngine
 	Config        *config.Config
+	// Secrets reads cloud-profile API keys from the OS keychain, keyed by
+	// profile name. The host and the crash-isolated worker each wire it (see
+	// toolstack.CapDeps.Secrets). Nil means the keychain is unavailable;
+	// deepinfra_infer errors clearly instead of guessing credentials.
+	Secrets SecretStore
 	// Autonomy is the narrow durable-ledger seam the autonomous-mode builtins
 	// (suggest_autonomous, request_autonomous_execution, capture_decision,
 	// auto_exit, request_autonomous_exit) read and write. The host wires its
@@ -65,6 +95,13 @@ type Services struct {
 	SessionModel        chatroute.Control
 	RestartRuntime      func(context.Context, string) (json.RawMessage, error)
 	ReasoningDiagnostic func(context.Context, reasoningexperiment.Spec) (reasoningexperiment.Report, error)
+
+	// Attachments resolves conversation attachment bytes by stable ID (the same
+	// per-conversation store the runner registers image placeholders into and
+	// inspect_image reads). Backs deepinfra_infer's attachment_id binding. Nil
+	// means attachment lookup is unavailable in this execution environment and
+	// that capability errors clearly rather than guessing.
+	Attachments AttachmentLookup
 
 	// Vision resolves an image attachment by conversation-scoped ID and asks the
 	// configured vision model a focused question about it. It backs the

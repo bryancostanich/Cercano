@@ -365,7 +365,7 @@ func TestWorkerCompactionSecondaryDefault(t *testing.T) {
 	if primary.chats != 0 || open.chats != 0 {
 		t.Fatal("compaction used an unselected route")
 	}
-	svc := buildWorkerToolSvcWithDiagnostic(nil, nil, projectctx.NewLoader(), primary, open, cfg, nil, nil, nil, nil, nil, nil, resolver.Candidates, nil).(*toolssvc.Service)
+	svc := buildWorkerToolSvcWithDiagnostic(nil, nil, projectctx.NewLoader(), primary, open, cfg, nil, nil, nil, nil, nil, nil, nil, resolver.Candidates, nil).(*toolssvc.Service)
 	hist := bigDispatchHistory(40, 30)
 	reduced, _, err := svc.LoopCompactorFactory()().CompactLoopHistory(t.Context(), hist)
 	if err != nil {

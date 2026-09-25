@@ -69,18 +69,26 @@ hardened runtime and a secure timestamp, executable permissions, the required
 `LICENSE` and `README.txt`, and that each binary reports the expected version.
 Any failure exits non-zero and says not to publish.
 
-**How notarization is checked.** A bare Mach-O executable cannot carry a
-stapled ticket — `xcrun stapler` handles bundles, disk images and installer
-packages, not loose binaries. So notarization is confirmed the way Gatekeeper
-does it, by assessing each binary with `spctl --assess`, which consults Apple's
-online records and must see `source=Notarized Developer ID`. **This requires
-network access.** Offline, pass `--skip-gatekeeper`; the run then reports
-notarization as `UNVERIFIED` rather than implying success.
+**How notarization is checked.** Notarization evidence from
+`scripts/notarize-macos-local.py` is **required**, passed with
+`--notarization-evidence <dir>`. Each binary's code directory hash (cdhash) is
+compared against the cdhashes in Apple's Accepted notarization ticket. A match
+proves those exact bytes were notarized. Offline, pass `--skip-gatekeeper`; the
+run then reports notarization as `UNVERIFIED` rather than implying success.
 
-Accepted-submission evidence from `scripts/notarize-macos-local.py` can be
-passed with `--notarization-evidence <dir>`. That is corroborating provenance
-— it records that *a* submission was accepted — not proof that these exact
-bytes are notarized. Only the Gatekeeper assessment establishes that.
+Two other approaches were tried against a real notarized build and rejected:
+
+- **`spctl --assess`** only evaluates app bundles. It rejects a correctly signed
+  and notarized command-line binary with *"does not seem to be an app"*.
+- **`codesign --test-requirement==notarized`** is unreliable for loose Mach-O
+  files. Two freshly notarized probe binaries both failed it even though Apple
+  returned Accepted and their cdhashes appeared in the ticket, and the failure
+  persisted after waiting. A bare binary carries no stapled ticket — `xcrun
+  stapler` handles only bundles, disk images and packages — so that lookup
+  cannot be depended on.
+
+The cdhash comparison is deterministic and needs no network call at
+verification time, since Apple's ticket contents are captured at submission.
 
 ## Release workflow (GitHub Actions)
 

@@ -7,13 +7,15 @@ Developer ID signature with hardened runtime and secure timestamp, executable
 permissions, and the version each binary reports.
 
 Notarization honesty: a bare Mach-O executable cannot carry a stapled ticket
-(`xcrun stapler` supports bundles, disk images and installer packages). So
-notarization is confirmed the way Gatekeeper does it, by assessing the binary
-against Apple's online records with `spctl`. That requires network access. Use
---skip-gatekeeper offline, which reports notarization as UNVERIFIED rather than
-claiming success. Accepted-submission evidence from notarize-macos-local.py can
-be supplied with --notarization-evidence; it is corroborating provenance, not
-proof that these bytes are notarized.
+(`xcrun stapler` supports bundles, disk images and installer packages), and
+`spctl --assess` only evaluates app bundles. Notarization is therefore checked
+with `codesign --test-requirement==notarized`, which consults Apple's records
+for loose executables and fails for a binary that was signed but never
+notarized. That requires network access. Use --skip-gatekeeper offline, which
+reports notarization as UNVERIFIED rather than claiming success.
+Accepted-submission evidence from notarize-macos-local.py can be supplied with
+--notarization-evidence; it is corroborating provenance, not proof that these
+bytes are notarized.
 
 Nothing here signs, notarizes, uploads, publishes or mutates the archive.
 """
@@ -118,13 +120,39 @@ def verify_signature(binary):
           f"{binary.name}: missing secure timestamp")
 
 
-def verify_notarization(binary):
-    """Gatekeeper assessment; consults Apple's online notarization records."""
-    result = run(["spctl", "--assess", "--type", "exec", "--verbose=4", str(binary)], timeout=120)
+def code_directory_hash(binary):
+    """Read the binary's code directory hash (cdhash), its identity to Apple."""
+    result = run(["codesign", "-d", "--verbose=4", str(binary)])
     details = result.stdout + "\n" + result.stderr
-    check(result.returncode == 0, f"{binary.name}: Gatekeeper rejected the binary\n{details.strip()}")
-    check("source=Notarized Developer ID" in details,
-          f"{binary.name}: accepted but not as a notarized Developer ID binary\n{details.strip()}")
+    check(result.returncode == 0, f"cannot read signature details: {binary.name}")
+    match = re.search(r"^CDHash=([0-9a-f]+)$", details, re.M)
+    check(bool(match), f"{binary.name}: no code directory hash in the signature")
+    return match[1]
+
+
+def verify_notarization(binary, notarized_hashes):
+    """Confirm these exact bytes appear in Apple's Accepted notarization ticket.
+
+    Two approaches were tried against a real notarized build and rejected:
+
+    `spctl --assess` only evaluates app bundles. It rejects a correctly signed
+    and notarized command-line executable with "does not seem to be an app".
+
+    `codesign --test-requirement==notarized` is unreliable for loose Mach-O
+    files. Two freshly notarized probe binaries both failed it despite Apple
+    returning Accepted and their cdhashes appearing in the ticket, and the
+    failure persisted after waiting. A bare binary carries no stapled ticket
+    (`xcrun stapler` handles only bundles, disk images and packages), so this
+    lookup cannot be depended on.
+
+    Comparing the cdhash instead is authoritative and deterministic: Apple's
+    log records the cdhash of every binary it accepted, so a match proves these
+    bytes were notarized. Verified against a real submission.
+    """
+    actual = code_directory_hash(binary)
+    check(actual in notarized_hashes,
+          f"{binary.name}: code directory hash {actual} is not in Apple's Accepted "
+          f"notarization ticket; these bytes were not notarized")
 
 
 def verify_version(binary, version):
@@ -136,19 +164,35 @@ def verify_version(binary, version):
 
 
 def load_evidence(path, version):
-    accepted = Path(path) / "accepted.json"
+    """Read the submission id and Apple's accepted cdhashes from evidence."""
+    directory = Path(path)
+    accepted = directory / "accepted.json"
     check(accepted.is_file(), f"no accepted.json in notarization evidence: {path}")
     payload = json.loads(accepted.read_text())
     check(payload.get("status") == "Accepted", "notarization evidence does not record an Accepted status")
     check(bool(payload.get("id")), "notarization evidence has no submission id")
-    return payload["id"]
+
+    log = directory / "log-stdout.txt"
+    check(log.is_file(), f"no Apple notarization log in evidence: {log}")
+    entry = json.loads(log.read_text())
+    check(entry.get("status") == "Accepted", "Apple's notarization log does not record an Accepted status")
+    check(entry.get("jobId") == payload["id"],
+          "Apple's notarization log is for a different submission than accepted.json")
+    hashes = {item.get("cdhash") for item in entry.get("ticketContents") or []}
+    hashes.discard(None)
+    check(bool(hashes), "Apple's notarization log lists no notarized binaries")
+    return payload["id"], hashes
 
 
 def verify(archive, version, expected_sha256=None, skip_gatekeeper=False, evidence=None):
     check(archive.is_file(), f"archive is not a regular file: {archive}")
     notes = []
     digest = verify_checksum(archive, expected_sha256)
-    submission = load_evidence(evidence, version) if evidence else None
+    submission, notarized_hashes = load_evidence(evidence, version) if evidence else (None, set())
+    # Notarization can only be confirmed from Apple's own ticket contents.
+    check(skip_gatekeeper or evidence is not None,
+          "notarization cannot be verified without --notarization-evidence; "
+          "pass it, or use --skip-gatekeeper to report notarization as UNVERIFIED")
 
     with tempfile.TemporaryDirectory(prefix="cercano-verify-") as tmp:
         root = extract(archive, version, Path(tmp))
@@ -160,9 +204,9 @@ def verify(archive, version, expected_sha256=None, skip_gatekeeper=False, eviden
             verify_deployment_target(binary)
             verify_signature(binary)
             if skip_gatekeeper:
-                notes.append(f"{binary.name}: notarization UNVERIFIED (Gatekeeper check skipped)")
+                notes.append(f"{binary.name}: notarization UNVERIFIED (check skipped)")
             else:
-                verify_notarization(binary)
+                verify_notarization(binary, notarized_hashes)
             verify_version(binary, version)
         for name in ("LICENSE", "README.txt"):
             check((root / name).is_file(), f"missing required file: {name}")

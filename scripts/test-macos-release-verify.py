@@ -3,12 +3,13 @@
 
 Every check is proven to fail when its property is violated, so a passing
 verification cannot come from a check that never runs. Stub `lipo`, `otool`,
-`codesign` and `spctl` executables stand in for the real toolchain; no real
+`codesign` executables stand in for the real toolchain; no real
 signature, Apple service or network is involved. These tests therefore prove
 the gate's logic, not that a real signed archive passes.
 """
 
 import io
+import json
 import os
 import subprocess
 import sys
@@ -42,18 +43,21 @@ class VerifyReleaseTest(unittest.TestCase):
     def _write_stubs(self):
         self.stub("lipo", 'echo "${FAKE_ARCH:-arm64}"')
         self.stub("otool", 'echo "      cmd LC_BUILD_VERSION"; echo "     minos ${FAKE_MINOS:-12.0}"')
+        # cdhash identifies the exact bytes Apple notarized.
         self.stub("codesign", """
 [[ "${FAKE_CODESIGN_EXIT:-0}" == 0 ]] || exit "${FAKE_CODESIGN_EXIT}"
 if [[ "$1" == "-d" ]]; then
   echo "Authority=${FAKE_AUTHORITY:-Developer ID Application: Example (TEAMID)}"
   echo "CodeDirectory v=20500 flags=0x${FAKE_FLAGS:-10000}(${FAKE_FLAG_TEXT:-runtime})"
   echo "Timestamp=${FAKE_TIMESTAMP:-1 Jan 2026 at 00:00:00}"
+  if [[ "${FAKE_OMIT_CDHASH:-0}" != 1 ]]; then
+    case "${@: -1}" in
+      *cercano-cli) echo "CDHash=${FAKE_CDHASH_CLI:-bbbb}" ;;
+      *) echo "CDHash=${FAKE_CDHASH:-aaaa}" ;;
+    esac
+  fi
 fi
 exit 0
-""")
-        self.stub("spctl", """
-[[ "${FAKE_SPCTL_EXIT:-0}" == 0 ]] || { echo "rejected" >&2; exit "${FAKE_SPCTL_EXIT}"; }
-echo "source=${FAKE_SPCTL_SOURCE:-Notarized Developer ID}"
 """)
 
     def build_archive(self, name=None, version=VERSION, members=None, binary_body=None):
@@ -83,6 +87,11 @@ echo "source=${FAKE_SPCTL_SOURCE:-Notarized Developer ID}"
         environ = dict(os.environ)
         environ["PATH"] = f"{self.stubs}:{os.environ['PATH']}"
         environ.update(env or {})
+        # Notarization evidence is mandatory unless the caller opts out, so
+        # supply default evidence for tests targeting other checks.
+        if not any(a.startswith("--notarization-evidence") or a == "--skip-gatekeeper"
+                   for a in args):
+            args = (*args, "--notarization-evidence", str(self.evidence_dir("auto-evidence")))
         return subprocess.run(
             [sys.executable, str(SCRIPT), str(archive), "--version", VERSION, *args],
             capture_output=True, text=True, env=environ)
@@ -134,17 +143,75 @@ echo "source=${FAKE_SPCTL_SOURCE:-Notarized Developer ID}"
         self.assert_failed(self.run_verify(self.build_archive(), env={"FAKE_TIMESTAMP": "none"}),
                            "missing secure timestamp")
 
-    def test_rejects_gatekeeper_failure(self):
-        self.assert_failed(self.run_verify(self.build_archive(), env={"FAKE_SPCTL_EXIT": "3"}),
-                           "Gatekeeper rejected")
+    def evidence_dir(self, name="evidence", status="Accepted", job="1234-abcd",
+                     hashes=("aaaa", "bbbb"), log_status="Accepted", log_job=None,
+                     omit_log=False):
+        directory = self.dir / name
+        directory.mkdir()
+        (directory / "accepted.json").write_text(
+            json.dumps({"status": status, "id": job}))
+        if not omit_log:
+            (directory / "log-stdout.txt").write_text(json.dumps({
+                "jobId": log_job or job, "status": log_status,
+                "ticketContents": [{"path": f"x/{i}", "cdhash": h}
+                                   for i, h in enumerate(hashes)],
+            }))
+        return directory
 
-    def test_rejects_signed_but_not_notarized(self):
-        self.assert_failed(self.run_verify(self.build_archive(), env={"FAKE_SPCTL_SOURCE": "Developer ID"}),
-                           "not as a notarized Developer ID binary")
+    def test_accepts_binaries_present_in_apples_ticket(self):
+        result = self.run_verify(self.build_archive(), "--notarization-evidence",
+                                 str(self.evidence_dir()))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("1234-abcd", result.stdout)
+        self.assertNotIn("WARNING", result.stdout)
 
-    def test_skip_gatekeeper_warns_instead_of_claiming_success(self):
-        result = self.run_verify(self.build_archive(), "--skip-gatekeeper",
-                                 env={"FAKE_SPCTL_EXIT": "3"})
+    def test_rejects_binary_absent_from_apples_ticket(self):
+        # Signed identically, but these bytes were never notarized.
+        self.assert_failed(
+            self.run_verify(self.build_archive(), "--notarization-evidence",
+                            str(self.evidence_dir(hashes=("aaaa",)))),
+            "is not in Apple's Accepted notarization ticket")
+
+    def test_requires_evidence_to_claim_notarization(self):
+        environ = dict(os.environ)
+        environ["PATH"] = f"{self.stubs}:{os.environ['PATH']}"
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), str(self.build_archive()), "--version", VERSION],
+            capture_output=True, text=True, env=environ)
+        self.assert_failed(result, "cannot be verified without --notarization-evidence")
+
+    def test_rejects_log_for_a_different_submission(self):
+        self.assert_failed(
+            self.run_verify(self.build_archive(), "--notarization-evidence",
+                            str(self.evidence_dir(log_job="other-job"))),
+            "different submission")
+
+    def test_rejects_unaccepted_apple_log(self):
+        self.assert_failed(
+            self.run_verify(self.build_archive(), "--notarization-evidence",
+                            str(self.evidence_dir(log_status="Invalid"))),
+            "log does not record an Accepted status")
+
+    def test_rejects_missing_apple_log(self):
+        self.assert_failed(
+            self.run_verify(self.build_archive(), "--notarization-evidence",
+                            str(self.evidence_dir(omit_log=True))),
+            "no Apple notarization log")
+
+    def test_rejects_ticket_without_binaries(self):
+        self.assert_failed(
+            self.run_verify(self.build_archive(), "--notarization-evidence",
+                            str(self.evidence_dir(hashes=()))),
+            "lists no notarized binaries")
+
+    def test_rejects_missing_cdhash_in_signature(self):
+        self.assert_failed(
+            self.run_verify(self.build_archive(), "--notarization-evidence",
+                            str(self.evidence_dir()), env={"FAKE_OMIT_CDHASH": "1"}),
+            "no code directory hash")
+
+    def test_skip_warns_instead_of_claiming_notarization(self):
+        result = self.run_verify(self.build_archive(), "--skip-gatekeeper")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("notarization UNVERIFIED", result.stdout)
         self.assertIn("NOT verified", result.stdout)
@@ -173,21 +240,11 @@ echo "source=${FAKE_SPCTL_SOURCE:-Notarized Developer ID}"
     def test_rejects_missing_archive(self):
         self.assert_failed(self.run_verify(self.dir / "absent.tar.gz"), "not a regular file")
 
-    def test_notarization_evidence_must_record_acceptance(self):
-        evidence = self.dir / "evidence"
-        evidence.mkdir()
-        (evidence / "accepted.json").write_text('{"status": "Invalid", "id": "abc"}')
+    def test_rejects_unaccepted_submission_record(self):
         self.assert_failed(
-            self.run_verify(self.build_archive(), "--notarization-evidence", str(evidence)),
+            self.run_verify(self.build_archive(), "--notarization-evidence",
+                            str(self.evidence_dir(status="Invalid"))),
             "does not record an Accepted status")
-
-    def test_notarization_evidence_is_reported_when_present(self):
-        evidence = self.dir / "good-evidence"
-        evidence.mkdir()
-        (evidence / "accepted.json").write_text('{"status": "Accepted", "id": "1234-abcd"}')
-        result = self.run_verify(self.build_archive(), "--notarization-evidence", str(evidence))
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("1234-abcd", result.stdout)
 
 
 if __name__ == "__main__":

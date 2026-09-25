@@ -143,8 +143,8 @@ jobs:
           VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          # Online Gatekeeper assessment: notarization is confirmed against
-          # Apple's records, not assumed from a successful submission.
+          # Notarization is confirmed by matching each binary's code directory
+          # hash against Apple's Accepted ticket, not assumed from submission.
           python3 scripts/verify-macos-release.py "${{ steps.build.outputs.archive }}" \
             --version "$VERSION" \
             --sha256 "${{ steps.build.outputs.sha256 }}" \

@@ -343,6 +343,12 @@ func vendorByHost(baseURL string) string {
 // strips them so disk reflects the profile-only world. New code should
 // always read through the active profile (see Server.activeCloudModel).
 type Config struct {
+	// CaptureDispatchReasoning records plaintext model reasoning in dispatch
+	// history. Debugging aid, off by default: reasoning restates conversation
+	// and tool content, so it is normally redacted to a byte count. Enable it
+	// only while diagnosing why a dispatch behaved the way it did.
+	CaptureDispatchReasoning bool `yaml:"capture_dispatch_reasoning,omitempty"`
+
 	OllamaURL          string         `yaml:"ollama_url"`
 	OpenRuntime        string         `yaml:"open_runtime"`
 	OpenModel          string         `yaml:"open_model,omitempty"`

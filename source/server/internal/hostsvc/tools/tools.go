@@ -55,6 +55,9 @@ type Catalog interface {
 	SetContextWindowResolver(fn func(model string, isCloud bool) int)
 	// SetFailureLog installs the sanitized failure/degradation diagnostic sink.
 	SetFailureLog(w *failurelog.Writer)
+	// SetCaptureReasoning opts dispatch history into recording plaintext model
+	// reasoning. Debugging aid, off by default.
+	SetCaptureReasoning(on bool)
 	// SetLoopCompactorFactory installs the per-dispatch synchronous history
 	// compactor factory for sub-agent tool loops. Unset = no compaction.
 	SetLoopCompactorFactory(fn func() agent.LoopCompactor)
@@ -99,6 +102,10 @@ type Service struct {
 	store             func() conversation.Store
 	persistTurn       func(ctx context.Context, convID string, m llm.Message)
 	dispatchEventSink func(context.Context, conversation.DispatchEvent) error
+	// captureReasoning records plaintext model reasoning in dispatch history.
+	// Debugging aid, off by default: reasoning restates conversation and tool
+	// content, so it is normally redacted to a byte count.
+	captureReasoning bool
 
 	// ensureSubagent creates the sub-agent conversation row. In-process this is
 	// unset and RunAgenticDispatch falls back to the store directly; the worker
@@ -612,6 +619,7 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 		}
 	}
 	tr := dispatchhistory.Begin(ctx, subConvID, sink)
+	tr.CaptureReasoning(x.captureReasoning)
 
 	ctx = dispatchhistory.WithRecorder(ctx, tr)
 	tr.DispatchStart(dispatchhistory.DispatchStartEvent{
@@ -973,6 +981,14 @@ func (x *Service) InvokeCapability(ctx context.Context, name string, argsJSON js
 		return nil, true, "marshal result: " + err.Error()
 	}
 	return b, false, ""
+}
+
+// SetCaptureReasoning opts dispatch history into recording plaintext model
+// reasoning. Reasoning explains why a model chose a tool call, which cannot be
+// recovered from the tool calls themselves; it is off by default because it
+// restates conversation and tool content on disk.
+func (x *Service) SetCaptureReasoning(on bool) {
+	x.captureReasoning = on
 }
 
 // SetDispatchEventSink injects the acknowledged host proxy for worker dispatches.

@@ -1114,6 +1114,9 @@ func NewServer(a *agent.Agent, router RouterCloudUpdater, coordinator *loop.ADKC
 		s.persistSvc.PersistTurn,
 	)
 	s.toolSvc.SetFailureLog(failureLog)
+	// Read at wiring time: dispatch reasoning capture is a debugging opt-in, not
+	// a hot-reloaded setting, so a config edit takes effect on the next start.
+	s.toolSvc.SetCaptureReasoning(s.cfgSvc.Get().CaptureDispatchReasoning)
 	// Wire the dispatch pre-flight context-window resolver. Local sub-agents run
 	// on the managed llama-server; a cloud sub-agent's window we don't track, so
 	// return 0 to disable the guard (the provider's own overflow error remains

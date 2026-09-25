@@ -12,6 +12,7 @@ import (
 	"log"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"cercano/source/server/internal/conversation"
 	"cercano/source/server/internal/llm"
@@ -27,6 +28,10 @@ type Recorder struct {
 	seq      int64
 	closed   bool
 	failures int
+	// captureReasoning opts this dispatch into recording plaintext model
+	// reasoning. Off by default: reasoning restates conversation and tool
+	// content, so it is redacted to a byte count during normal operation.
+	captureReasoning bool
 }
 
 // Begin is automatic whenever dispatch conversation persistence is available.
@@ -248,7 +253,7 @@ func (t *Recorder) ModelResponse(iter int, provider, model string, resp llm.Chat
 		Usage:        resp.Usage,
 		InputTokens:  resp.InputTokens,
 		OutputTokens: resp.OutputTokens,
-		Blocks:       sanitizeBlocks(resp.Blocks),
+		Blocks:       sanitizeBlocksWithReasoning(resp.Blocks, t.reasoningCaptured()),
 		Route:        routeViewOf(resp.Route),
 	}
 	if err != nil {
@@ -358,6 +363,49 @@ func imageOmissionMarker(b llm.Block) string {
 	return fmt.Sprintf("[dispatchhistory: image omitted (media_type=%q, %d base64 bytes not recorded)]", b.MediaType, len(b.ImageData))
 }
 
+// maxCapturedReasoning bounds stored reasoning per block. A single block in the
+// aperture-reuse reproduction ran to 15,268 characters; storing them unbounded
+// would grow the conversation database quickly.
+const maxCapturedReasoning = 32 * 1024
+
+// CaptureReasoning enables plaintext reasoning capture for this dispatch. It is
+// a debugging aid: reasoning explains why a model chose a tool call, which
+// cannot be recovered from the tool calls themselves.
+//
+// Only plaintext reasoning is captured. Opaque Responses-API state (identified
+// by ReasoningID) stays redacted: it is encrypted round-trip data, not readable
+// thought, so storing it costs space and yields nothing.
+func (t *Recorder) CaptureReasoning(on bool) {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.captureReasoning = on
+}
+
+func (t *Recorder) reasoningCaptured() bool {
+	if t == nil {
+		return false
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.captureReasoning
+}
+
+// boundedReasoning truncates on a rune boundary and discloses that it did, so a
+// reader never mistakes a cut-off trace for the model's complete thought.
+func boundedReasoning(s string) string {
+	if len(s) <= maxCapturedReasoning {
+		return s
+	}
+	cut := s[:maxCapturedReasoning]
+	for len(cut) > 0 && !utf8.ValidString(cut) {
+		cut = cut[:len(cut)-1]
+	}
+	return cut + fmt.Sprintf("\n[dispatchhistory: truncated, %d of %d bytes recorded]", len(cut), len(s))
+}
+
 func reasoningOmissionMarker(b llm.Block) string {
 	return fmt.Sprintf("[dispatchhistory: reasoning blob omitted (%d bytes not recorded; id=%q)]", len(b.ReasoningData), b.ReasoningID)
 }
@@ -367,6 +415,13 @@ func reasoningOmissionMarker(b llm.Block) string {
 // tool args, tool results, error flags — is recorded verbatim: it is exactly
 // what the model received, which is the point of the trace.
 func sanitizeBlocks(blocks []llm.Block) []llm.Block {
+	return sanitizeBlocksWithReasoning(blocks, false)
+}
+
+// sanitizeBlocksWithReasoning redacts images always, and reasoning unless this
+// dispatch opted into capture. Callers pass a copy-on-write slice: the caller's
+// blocks are returned to the provider on the continuation and must not change.
+func sanitizeBlocksWithReasoning(blocks []llm.Block, keepReasoning bool) []llm.Block {
 	if blocks == nil {
 		return nil
 	}
@@ -383,6 +438,12 @@ func sanitizeBlocks(blocks []llm.Block) []llm.Block {
 			b.ImageData = ""
 			b.ImageURL = ""
 		case llm.BlockReasoning:
+			// Opaque Responses-API state carries an ID and is encrypted; it is
+			// never readable, so capture does not apply to it.
+			if keepReasoning && b.ReasoningID == "" && b.ReasoningData != "" {
+				b.ReasoningData = boundedReasoning(b.ReasoningData)
+				break
+			}
 			b.Text = reasoningOmissionMarker(*b)
 			b.ReasoningData = ""
 		}

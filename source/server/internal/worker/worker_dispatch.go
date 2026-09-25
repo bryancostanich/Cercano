@@ -97,6 +97,7 @@ func buildWorkerToolSvcWithDiagnostic(
 	if factory := loopcompact.NewFactory(workerLoopCompactDeps(cfg, cloud, open, candidates)); factory != nil {
 		svc.SetLoopCompactorFactory(factory)
 	}
+	svc.SetCaptureReasoning(cfg.CaptureDispatchReasoning)
 	if subPersist != nil {
 		svc.SetDispatchEventSink(subagentDispatchEventSink(subPersist))
 		svc.SetEnsureSubagent(subPersist.ensure) // worker creates sub-agent conversation rows on the host

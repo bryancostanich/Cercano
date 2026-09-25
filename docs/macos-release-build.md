@@ -102,6 +102,14 @@ artifacts.
 > Docker artifacts are wanted again, they need their own workflow under the
 > same no-automatic-publish rule.
 
+### Selecting the rehearsal source
+
+Dispatch the workflow from a ref resolving to the exact commit tagged
+`v<version>`. Both workflow validation and the release builder reject a tag
+that exists on a different commit; an old release tag must never label a build
+of the current branch. Start with `publish` unchecked. Creating/pushing the
+ref and configuring the protected environment are separate operator steps.
+
 ### Required configuration
 
 Create a **protected `release` environment** in the repository settings with

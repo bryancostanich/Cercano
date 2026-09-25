@@ -12,6 +12,7 @@ Apple, or prove that a real signed release succeeds.
 """
 
 import json
+import tempfile
 import subprocess
 import sys
 import unittest
@@ -150,6 +151,27 @@ class ReleaseWorkflowTest(unittest.TestCase):
         run = self.step("build", "validate inputs")["run"]
         self.assertIn("refs/tags/v$VERSION", run)
         self.assertIn("[1-9][0-9]*", run)
+
+    def test_validation_rejects_a_tag_on_another_commit(self):
+        script = self.step("build", "validate inputs")["run"]
+        with tempfile.TemporaryDirectory() as directory:
+            def git(*args):
+                return subprocess.run(["git", *args], cwd=directory, check=True,
+                                      capture_output=True, text=True)
+            git("init")
+            git("config", "user.name", "Release Test")
+            git("config", "user.email", "test@example.invalid")
+            git("commit", "--allow-empty", "-m", "tagged source")
+            git("tag", "-a", "v1.2.3", "-m", "release fixture")
+            def validate():
+                return subprocess.run(["bash", "-c", 'VERSION=1.2.3\n' + script],
+                                      cwd=directory, capture_output=True, text=True)
+            self.assertEqual(validate().returncode, 0)
+            git("commit", "--allow-empty", "-m", "different source")
+            result = validate()
+            self.assertNotEqual(result.returncode, 0,
+                                "a tag on another commit must not label this checkout")
+            self.assertIn("does not match", result.stdout + result.stderr)
 
     def test_concurrency_prevents_overlapping_runs_for_a_version(self):
         concurrency = self.workflow["concurrency"]

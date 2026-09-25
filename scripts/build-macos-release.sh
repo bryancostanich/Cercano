@@ -35,8 +35,10 @@ SIGN_SCRIPT="$SCRIPT_DIR/sign-macos-release.sh"
 # The version must come from a real tag so the archive URL, the formula and the
 # source revision agree. CERCANO_ALLOW_UNTAGGED=1 is for local dry runs only.
 if [[ "${CERCANO_ALLOW_UNTAGGED:-}" != 1 ]]; then
-    git -C "$REPO_ROOT" rev-parse "refs/tags/v$VERSION" >/dev/null 2>&1 \
+    TAG_COMMIT="$(git -C "$REPO_ROOT" rev-parse --verify "refs/tags/v$VERSION^{commit}")" \
         || fail "No tag v$VERSION in this repository. Tag the release, or set CERCANO_ALLOW_UNTAGGED=1 for a local dry run."
+    [[ "$TAG_COMMIT" == "$(git -C "$REPO_ROOT" rev-parse --verify 'HEAD^{commit}')" ]] \
+        || fail "HEAD does not match v$VERSION; refusing to label different source as this release."
 fi
 
 mkdir -p "$OUTPUT_DIR"

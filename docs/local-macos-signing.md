@@ -112,6 +112,10 @@ credentials use an app-specific password, not your normal account password.
 The command validates with Apple and stores credentials in Keychain. The pipeline
 does not create profiles or change Keychain permissions itself.
 
+**Important:** Use an app-specific password that is distinct from your Apple ID
+account password and your Developer ID certificate export password. App-specific
+passwords are generated in your Apple ID account security settings.
+
 After signing the staged binaries as above:
 
 ```bash

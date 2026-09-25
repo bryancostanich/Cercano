@@ -102,7 +102,7 @@ class ReleaseWorkflowTest(unittest.TestCase):
         self.assertIn("rm -f", cleanup["run"])
 
     def test_secrets_are_never_echoed(self):
-        for secret in ("MACOS_CERTIFICATE_P12", "APPLE_NOTARY_PRIVATE_KEY",
+        for secret in ("MACOS_CERTIFICATE_P12", "APPLE_APP_SPECIFIC_PASSWORD",
                        "MACOS_CERTIFICATE_PASSWORD"):
             self.assertNotIn(f"echo $" + secret, self.text)
             self.assertNotIn(f'echo "${secret}"', self.text)
@@ -139,6 +139,24 @@ class ReleaseWorkflowTest(unittest.TestCase):
         for suite in ("test-macos-release-build.py", "test-macos-release-verify.py",
                       "test_render_formula"):
             self.assertIn(suite, run)
+
+    def test_notarization_uses_apple_id_credentials(self):
+        run = self.step("build", "notarize")["run"]
+        # Check that new Apple ID credentials are used
+        self.assertIn("APPLE_ID", run)
+        self.assertIn("APPLE_TEAM_ID", run)
+        self.assertIn("APPLE_APP_SPECIFIC_PASSWORD", run)
+        # Check that old API key credentials are not used
+        self.assertNotIn("NOTARY_ISSUER_ID", run)
+        self.assertNotIn("NOTARY_KEY_ID", run)
+        self.assertNotIn("NOTARY_PRIVATE_KEY", run)
+        # Check that notarytool uses the new authentication method
+        self.assertIn("--apple-id", run)
+        self.assertIn("--team-id", run)
+        self.assertIn("--password", run)
+        # Check that p8 handling is removed
+        self.assertNotIn("notary-key.p8", run)
+        self.assertNotIn("base64 --decode", run)
 
     def test_publish_refuses_to_replace_existing_artifacts(self):
         run = self.step("publish", "refuse to replace")["run"]

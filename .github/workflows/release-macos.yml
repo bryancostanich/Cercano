@@ -117,22 +117,18 @@ jobs:
 
       - name: Notarize
         env:
-          NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
-          NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
-          NOTARY_PRIVATE_KEY: ${{ secrets.APPLE_NOTARY_PRIVATE_KEY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          [[ -n "$NOTARY_ISSUER_ID" && -n "$NOTARY_KEY_ID" && -n "$NOTARY_PRIVATE_KEY" ]] \
+          [[ -n "$APPLE_ID" && -n "$APPLE_TEAM_ID" && -n "$APPLE_APP_SPECIFIC_PASSWORD" ]] \
             || { echo "::error::Notarization secrets are not configured in the release environment."; exit 1; }
-          KEY_PATH="$RUNNER_TEMP/notary-key.p8"
-          umask 077
-          printf '%s' "$NOTARY_PRIVATE_KEY" | base64 --decode > "$KEY_PATH"
           # Store credentials in the same temporary keychain so cleanup removes them.
           xcrun notarytool store-credentials cercano-notary \
-            --key "$KEY_PATH" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" \
+            --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_SPECIFIC_PASSWORD" \
             --keychain "$KEYCHAIN_PATH" >/dev/null
-          rm -f "$KEY_PATH"
           # Stage the exact signed binaries that were archived.
           STAGE="$RUNNER_TEMP/notarize-stage"
           mkdir -p "$STAGE"
@@ -172,7 +168,7 @@ jobs:
           set -uo pipefail
           # Runs even on failure or cancellation so credentials never persist.
           security delete-keychain "$RUNNER_TEMP/cercano-signing.keychain-db" 2>/dev/null || true
-          rm -f "$RUNNER_TEMP/certificate.p12" "$RUNNER_TEMP/notary-key.p8"
+          rm -f "$RUNNER_TEMP/certificate.p12"
 
       - name: Upload artifacts for review
         uses: actions/upload-artifact@v4

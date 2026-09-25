@@ -120,9 +120,9 @@ approval. Add these secrets to that environment:
 |---|---|
 | `MACOS_CERTIFICATE_P12` | Base64-encoded Developer ID Application certificate (`.p12`) |
 | `MACOS_CERTIFICATE_PASSWORD` | Password for that `.p12` |
-| `APPLE_NOTARY_ISSUER_ID` | App Store Connect API issuer ID |
-| `APPLE_NOTARY_KEY_ID` | Notarization key ID |
-| `APPLE_NOTARY_PRIVATE_KEY` | Base64-encoded `.p8` private key |
+| `APPLE_ID` | Apple ID for app-specific password authentication |
+| `APPLE_TEAM_ID` | Apple Developer Team ID |
+| `APPLE_APP_SPECIFIC_PASSWORD` | App-specific password for Apple ID authentication |
 
 The workflow creates a temporary keychain, resolves the signing identity from
 it (failing if absent or ambiguous rather than trusting a configured string),

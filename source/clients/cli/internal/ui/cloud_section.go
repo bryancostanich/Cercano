@@ -91,9 +91,20 @@ func (sp *settingsPage) cloudDetailFields(r cloudRow) []form.Field {
 	il := func(s string) string { return cloudDetailIndent + s }
 	var out []form.Field
 	if sp.cloudDraftNew {
-		out = append(out, form.NewText("cloud-name", il("name"), d.Name, "profile name"))
+		out = append(out, form.NewText("cloud-name", il("Profile ID"), d.Name, "internal account identifier"))
 	} else {
-		out = append(out, form.NewReadOnly("cloud-name", il("name"), d.Name, ""))
+		account := agentclient.CloudProfileInfo{Name: d.Name, Flavor: d.Flavor, Route: d.Route}
+		for _, p := range sp.profiles {
+			if p.Name == d.Name {
+				account = p
+				break
+			}
+		}
+		hint := "Signed-in identity; credentials and routing use the Profile ID below"
+		if account.AccountEmail == "" && account.AccountDisplayName == "" && (account.Route == "subscription" || account.Route == "chatgpt") {
+			hint = "Sign in again to identify this account; existing credentials are unchanged"
+		}
+		out = append(out, form.NewReadOnly("cloud-account", il("Account"), account.AccountDisplayNameLabel(), hint), form.NewReadOnly("cloud-name", il("Profile ID"), d.Name, "Internal identifier; not your username or email"))
 	}
 	// flavor/backend: editable only for the custom "other" row; read-only otherwise.
 	if r.ID == "other" {

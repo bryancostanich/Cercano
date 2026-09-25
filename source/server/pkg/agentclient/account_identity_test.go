@@ -8,16 +8,17 @@ import (
 
 func TestAccountIdentityWireAndLabels(t *testing.T) {
 	p := cloudProfileInfoFromProto(&proto.CloudProfileInfo{Name: "chatgpt-work", AccountEmail: "person@example.com", AccountDisplayName: "Person"})
-	if got := p.AccountLabel("ChatGPT"); got != "ChatGPT — person@example.com (chatgpt-work)" {
+	if got := p.AccountLabel("ChatGPT"); got != "ChatGPT — person@example.com" {
 		t.Fatal(got)
 	}
 	other := p
 	other.Name = "chatgpt-personal"
-	if p.AccountLabel("ChatGPT") == other.AccountLabel("ChatGPT") {
+	peers := []CloudProfileInfo{p, other}
+	if p.DistinctAccountLabel("ChatGPT", peers) == other.DistinctAccountLabel("ChatGPT", peers) {
 		t.Fatal("same-email accounts indistinguishable")
 	}
 	p.AccountEmail = ""
-	if got := p.AccountLabel("ChatGPT"); got != "ChatGPT — Person (chatgpt-work)" {
+	if got := p.AccountLabel("ChatGPT"); got != "ChatGPT — Person" {
 		t.Fatal(got)
 	}
 	p.AccountDisplayName = ""

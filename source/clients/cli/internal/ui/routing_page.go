@@ -114,7 +114,7 @@ func (sp *settingsPage) buildRoutingSections() []form.Section {
 	tiers := form.Section{Title: "Model tiers", Groups: []form.Group{
 		{Title: "Primary", Fields: primaryFields},
 		{Title: "Secondary", Fields: []form.Field{
-			form.NewSelect("routing-secondary", "Profile", profileOptions("No profile selected"), a.Secondary),
+			form.NewSelect("routing-secondary", "Account", profileOptions("No profile selected"), a.Secondary),
 			form.NewSelect("routing-secondary-backup", "Backup", profileOptions("No backup"), a.SecondaryBackup),
 			form.NewSelect("routing-secondary-redirect", "Redirect all work to", []form.Option{{Label: "No redirect", Value: ""}, {Label: "Primary", Value: "primary"}, {Label: "Local", Value: "local"}}, a.SecondaryRedirect),
 		}},
@@ -289,18 +289,24 @@ func (sp *settingsPage) routingAccountLabel(name string) string {
 	for _, provider := range sp.cloudView.Providers {
 		for _, p := range provider.Profiles {
 			if p.Name == name {
-				return p.AccountLabel(provider.Label)
+				return p.DistinctAccountLabel(provider.Label, provider.Profiles)
 			}
+		}
+	}
+	for _, p := range sp.cloudView.CustomProfiles {
+		if p.Name == name {
+			return p.DistinctAccountLabel(p.Provider, sp.cloudView.CustomProfiles)
 		}
 	}
 	for _, p := range sp.profiles {
 		if p.Name == name {
 			if p.Provider != "" {
-				return p.AccountLabel(p.Provider)
+				return p.DistinctAccountLabel(p.Provider, sp.profiles)
 			}
 			if p.Flavor != "" {
-				return p.AccountLabel(p.Flavor)
+				return p.DistinctAccountLabel(p.Flavor, sp.profiles)
 			}
+			return p.DistinctAccountLabel("", sp.profiles)
 		}
 	}
 	return name

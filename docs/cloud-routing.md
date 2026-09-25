@@ -51,7 +51,7 @@ When the account serving Primary exhausts its quota, Primary advances to the nex
 
 ### Signed-in identity labels
 
-Cloud settings and routing selectors show the signed-in email when supplied by the provider, falling back to its display name and then the configured account name. The configured name remains visible, for example `ChatGPT — person@example.com (chatgpt-work)`, so accounts sharing an email remain distinguishable. Emails never replace profile IDs or credential-storage keys.
+Cloud settings and routing selectors show the signed-in email when supplied by the provider, falling back to its display name and then the configured account name. The email is primary, for example `ChatGPT — person@example.com`. The internal profile ID is appended only when needed to distinguish accounts with identical labels. Cloud details show **Account** separately from **Profile ID**; the latter is not a username. Subscription accounts without identity are explicitly labelled `unidentified account (chatgpt-work)`. Emails never replace profile IDs or credential-storage keys.
 
 ChatGPT identity comes from the token claims received at sign-in. Claude identity comes from the token response, with a best-effort OAuth profile lookup if email is missing. That lookup has a two-second deadline, rejects redirects, and cannot invalidate an otherwise successful login. Malformed or absent optional identity is ignored. Refresh responses that omit identity preserve the stored metadata.
 

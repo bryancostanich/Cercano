@@ -44,7 +44,7 @@ func TestBuildCloudRowsFromProvidersMergesAndDedupes(t *testing.T) {
 	// Merged anthropic provider row: provider plus account name, primary = the
 	// active meridian profile, and NO duplicate template row.
 	m, ok := byID["profile:work-anthropic"]
-	if !ok || m.Label != "Claude — work-anthropic" || !m.IsProfile || !m.Active {
+	if !ok || m.Label != "Claude — unidentified account (work-anthropic)" || !m.IsProfile || !m.Active {
 		t.Fatalf("merged anthropic row wrong: %+v (present=%v)", m, ok)
 	}
 	if _, dup := byID["template:anthropic"]; dup {
@@ -53,7 +53,7 @@ func TestBuildCloudRowsFromProvidersMergesAndDedupes(t *testing.T) {
 
 	// Extra anthropic account: an indented sub-row, not active.
 	sub, ok := byID["profile:personal-anthropic"]
-	if !ok || !sub.SubProfile || sub.Active || sub.Label != profileSubIndent+"personal-anthropic" {
+	if !ok || !sub.SubProfile || sub.Active || sub.Label != profileSubIndent+"anthropic — personal-anthropic" {
 		t.Errorf("extra profile sub-row wrong: %+v (present=%v)", sub, ok)
 	}
 
@@ -78,7 +78,7 @@ func TestBuildCloudRowsFromProvidersMergesAndDedupes(t *testing.T) {
 	// Exactly one merged provider/account row — the dedup guarantee.
 	n := 0
 	for _, l := range labels {
-		if l == "Claude — work-anthropic" {
+		if l == "Claude — unidentified account (work-anthropic)" {
 			n++
 		}
 	}

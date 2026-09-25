@@ -34,12 +34,24 @@ Fixed by a cumulative billed-token budget on delegated tool loops:
 - `dispatch.Spec.TokenBudget`: explicit budgets pass through;
   `config.UnlimitedDispatchTokenBudget` opts out; 0 resolves the class default
   from the routing assignment's cost tier — Economy 300K, Standard 1M,
-  Premium 3M (`CostTier.DispatchTokenBudget`). Main turns stay uncapped;
+  Premium 10M (`CostTier.DispatchTokenBudget`). Main turns stay uncapped;
   every agentic dispatch (host and worker share `RunAgenticDispatch`) is
   budgeted unless explicitly opted out, including taskless legacy dispatches.
 - The class is non-retryable and non-failoverable (rerunning exhausted work
   doubles the spend), and the dispatch failure message carries iterations,
   called tools, and the persisted sub-conversation ID for post-mortem.
+
+Premium raised 3M → 10M (2026-09-25). The cumulative sum is dominated by
+resent history rather than work produced: a measured implementation dispatch
+billed 2,780,649 input against 82,942 output (97% input, ~34x the cap per
+unique generated token). Because every turn resends the conversation, the cap
+behaves as a turn ceiling independent of productivity — at ~37K mean input the
+3M ceiling bound that dispatch at 74 turns and stopped it mid-implementation
+with its plan still in context. 10M leaves room to finish and verify a
+substantial refactor while still tripping well before an unbounded loop runs
+unattended. Economy and Standard are unchanged. Note that the budget counts
+`input + output` including cache reads where the provider reports them; the
+measured run reported no cache fields, so the discounted share is unknown.
 
 In-loop compaction now complements the budget (2026-09-17). Sub-agent
 dispatches never had compaction at all: main turns compact asynchronously via

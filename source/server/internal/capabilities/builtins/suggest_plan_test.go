@@ -99,7 +99,7 @@ func TestSuggestPlanDescriptionRequiresSignificantWork(t *testing.T) {
 // planning 15 times and the user denied 12. The denials shared four shapes --
 // the approach was already agreed in chat and only implementation remained; the
 // user had issued a bare execute command ("build it", "do it", "fix it"); the
-// user asked for "a plan"/"the shape" meaning prose, not planning mode; or a
+// user asked for an explanation without planning intent; or a
 // bug fix had failed repeatedly and planning was floated instead of debugging.
 // Cross-subsystem sequencing was the stated justification for most of them, so
 // it must no longer stand alone as a reason.
@@ -111,9 +111,9 @@ func TestSuggestPlanDescriptionExcludesObservedFalsePositives(t *testing.T) {
 		"however many subsystems it spans",
 		// Bare imperatives are execution instructions.
 		"instruction to build, fix, do, or try",
-		// "give me a plan" means prose in the reply.
-		"asks for prose in your reply",
-		"spec or plan file",
+		// Explanation alone does not request planning.
+		"without explicit planning intent",
+		"prose-only responses",
 		// Keep debugging instead of proposing a design.
 		"keep debugging and fixing",
 	} {
@@ -125,5 +125,14 @@ func TestSuggestPlanDescriptionExcludesObservedFalsePositives(t *testing.T) {
 	// as a standalone planning criterion.
 	if strings.Contains(desc, "complex cross-subsystem sequencing") {
 		t.Error("cross-subsystem sequencing must not stand alone as a planning criterion")
+	}
+}
+
+func TestSuggestPlanExplicitRequestOverride(t *testing.T) {
+	desc := SuggestPlan().Description()
+	for _, want := range []string{"put a plan together", "let's plan this out", "make a plan", "regardless of task simplicity or agreed approach", "unless already in planning mode", "No request for a spec or plan file is required", "do not enter planning mode without approval", "Absent an explicit planning request"} {
+		if !strings.Contains(desc, want) {
+			t.Errorf("missing explicit planning override: %q", want)
+		}
 	}
 }

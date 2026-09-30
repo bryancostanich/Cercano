@@ -255,7 +255,7 @@ func TestPlanningModeTriggerExcludesObservedFalsePositives(t *testing.T) {
 		"agreed in conversation",
 		"however many subsystems it spans",
 		"instruction to build, fix, do, or try",
-		"asks for prose in your reply",
+		"provide prose-only responses",
 		"keep debugging and fixing",
 		"design itself is still open",
 	} {

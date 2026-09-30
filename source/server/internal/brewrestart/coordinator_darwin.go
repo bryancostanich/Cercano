@@ -183,22 +183,40 @@ func startReplacement(executable string, s LaunchState) (Identity, error) {
 }
 
 func waitReplacementReady(ctx context.Context, id Identity, endpoint netip.AddrPort) error {
-	for {
-		owns, err := HoldsListener(id, endpoint)
-		if err != nil {
-			return err
-		}
-		if owns {
-			dialCtx, cancel := context.WithTimeout(ctx, time.Second)
-			conn, err := grpc.DialContext(dialCtx, endpoint.String(), grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithBlock())
-			cancel()
+	return pollReplacementReady(ctx,
+		func() (bool, error) { return HoldsListener(id, endpoint) },
+		func(ctx context.Context) error {
+			conn, err := grpc.DialContext(ctx, endpoint.String(), grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithBlock())
 			if err == nil {
 				_ = conn.Close()
-				owns, err = HoldsListener(id, endpoint)
-				if err != nil {
+			}
+			return err
+		})
+}
+
+// Socket descriptors may close between proc_pidinfo and proc_pidfdinfo.
+// Retry the entire ownership snapshot rather than trusting partial results.
+// Every probe still binds the listener to the original process identity.
+func pollReplacementReady(ctx context.Context, holds func() (bool, error), dial func(context.Context) error) error {
+	transient := func(err error) bool { return errors.Is(err, syscall.EBADF) || errors.Is(err, syscall.EAGAIN) }
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		owns, err := holds()
+		if err != nil && !transient(err) {
+			return err
+		}
+		if err == nil && owns {
+			dialCtx, cancel := context.WithTimeout(ctx, time.Second)
+			err := dial(dialCtx)
+			cancel()
+			if err == nil {
+				owns, err = holds()
+				if err != nil && !transient(err) {
 					return err
 				}
-				if owns {
+				if err == nil && owns {
 					return nil
 				}
 			}

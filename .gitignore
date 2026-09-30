@@ -63,3 +63,7 @@ source/server/cercano
 
 # Stray build output at the repo root
 /bin/
+
+# Python release-tool test caches
+__pycache__/
+*.pyc

@@ -3939,6 +3939,7 @@ func (m Model) applyProgressiveResumeEvent(msg resumeViewportStreamMsg) (Model, 
 	}
 	switch msg.event.Kind {
 	case agentclient.ResumeViewportEventTail:
+		m.restoreDevMode(msg.event.DevWorkDir)
 		m.resumeTurns = append([]agentclient.PersistedTurn(nil), msg.event.Turns...)
 		m.mainChat().BeginProgressiveLoad(resumeEntries(msg.event.Turns, 0), msg.event.StartIndex > 0)
 		m.mainChat().PrependBanner(m.splash.Meta, m.splash.Started())
@@ -4020,6 +4021,7 @@ func (m Model) applyResume(conversationID string) (Model, tea.Cmd) {
 	// silently failing (e.g. local runtime misconfigured). Don't push into
 	// scrollback — that showed the recap twice on resume.
 	if info, err := m.agent.GetConversation(ctx, conversationID); err == nil {
+		m.restoreDevMode(info.DevWorkDir)
 		m.recap = recapDisplay(info)
 	}
 	// Reopen the conversation's sub-agent tabs from their persisted

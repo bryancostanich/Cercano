@@ -2999,6 +2999,9 @@ func formatRuntimeTime(t time.Time) string {
 
 // ProcessRequest implements proto.AgentServer (Unary).
 func (s *Server) ProcessRequest(ctx context.Context, req *proto.ProcessRequestRequest) (*proto.ProcessRequestResponse, error) {
+	if err := s.persistDevMode(ctx, req); err != nil {
+		return nil, err
+	}
 	ctx = s.accountingContext(ctx, "local_tool", req.GetConversationId())
 	fmt.Printf("Received request (Unary): %s\n", req.Input)
 
@@ -3019,6 +3022,9 @@ func (s *Server) StreamProcessRequest(req *proto.ProcessRequestRequest, stream p
 
 	if (s.providerSvc.Cloud() != nil || s.providerSvc.Open() != nil) && s.toolSvc.Registry() != nil {
 		return s.streamProcessRequestWithToolLoop(req, stream)
+	}
+	if err := s.persistDevMode(stream.Context(), req); err != nil {
+		return err
 	}
 
 	agentReq := s.mapRequest(req)
@@ -3253,6 +3259,9 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 	// a superseded turn's late writes never interleave into the live history.
 	ctx, turnGen, releaseTurn := s.beginTurn(stream.Context(), req.GetConversationId())
 	defer releaseTurn()
+	if err := s.persistDevMode(ctx, req); err != nil {
+		return err
+	}
 
 	convID := req.GetConversationId()
 

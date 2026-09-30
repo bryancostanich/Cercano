@@ -31,6 +31,7 @@ type Info struct {
 	ID         string
 	Title      string
 	ProjectDir string
+	DevWorkDir string // Explicit development-mode repository; empty for ordinary conversations.
 	Model      string
 	StartedAt  time.Time
 	LastTurnAt time.Time
@@ -194,6 +195,7 @@ const PrunedBodyStub = "[pruned after 90 days — see summary]"
 // Store is the persistent conversation store interface. The runtime
 // implementation is SQLite-backed (modernc.org/sqlite, pure Go — no cgo).
 type Store interface {
+	SetDevWorkDir(ctx context.Context, conversationID, workDir string) error
 	// EnsureConversation idempotently creates the conversation row. Title is
 	// auto-derived from the first user turn (deferred to first Append).
 	EnsureConversation(ctx context.Context, id, projectDir, model string) error
@@ -404,6 +406,7 @@ func Open(path string) (Store, error) {
 		`ALTER TABLE conversations ADD COLUMN precursor_id TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE conversations ADD COLUMN granted_tools TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE conversations ADD COLUMN dismissed INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE conversations ADD COLUMN dev_work_dir TEXT NOT NULL DEFAULT ''`,
 	} {
 		if _, err := db.Exec(alter); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			db.Close()
@@ -532,10 +535,10 @@ func (s *sqliteStore) CreateRolledOver(ctx context.Context, id, projectDir, mode
 	// Fail (not upsert) if the id already exists: a rollover mints a fresh id,
 	// so a collision means a caller bug we want to surface rather than mask.
 	res, err := tx.ExecContext(ctx, `
-		INSERT INTO conversations (id, project_dir, model, title_source, kind, precursor_id, started_at, last_turn_at)
-		VALUES (?, ?, ?, 'auto', 'main', ?, ?, ?)
+		INSERT INTO conversations (id, project_dir, model, title_source, kind, precursor_id, started_at, last_turn_at, dev_work_dir)
+		VALUES (?, ?, ?, 'auto', 'main', ?, ?, ?, COALESCE((SELECT dev_work_dir FROM conversations WHERE id = ?), ''))
 		ON CONFLICT(id) DO NOTHING`,
-		id, projectDir, model, precursorID, now, now)
+		id, projectDir, model, precursorID, now, now, precursorID)
 	if err != nil {
 		return fmt.Errorf("insert rolled-over conversation: %w", err)
 	}
@@ -648,7 +651,7 @@ func (s *sqliteStore) List(ctx context.Context, projectDir string, limit int) ([
 	// picker; they stay reachable by id via Get/GetTurns.
 	query := `
 		SELECT c.id, c.title, c.project_dir, c.model, c.started_at, c.last_turn_at,
-		       c.recap, c.recap_updated_at,
+		       c.recap, c.recap_updated_at, c.dev_work_dir,
 		       (SELECT COUNT(*) FROM turns t WHERE t.conversation_id = c.id) AS turn_count
 		FROM conversations c
 		WHERE (? = '' OR c.project_dir = ?) AND c.kind = 'main'
@@ -670,7 +673,7 @@ func (s *sqliteStore) List(ctx context.Context, projectDir string, limit int) ([
 		var info Info
 		var startedAt, lastTurnAt, recapAt int64
 		if err := rows.Scan(&info.ID, &info.Title, &info.ProjectDir, &info.Model,
-			&startedAt, &lastTurnAt, &info.Recap, &recapAt, &info.TurnCount); err != nil {
+			&startedAt, &lastTurnAt, &info.Recap, &recapAt, &info.DevWorkDir, &info.TurnCount); err != nil {
 			return nil, err
 		}
 		info.StartedAt = time.Unix(startedAt, 0)
@@ -948,11 +951,11 @@ func (s *sqliteStore) Get(ctx context.Context, conversationID string) (Info, err
 	var startedAt, lastTurnAt, recapAt int64
 	err := s.db.QueryRowContext(ctx, `
 		SELECT c.id, c.title, c.project_dir, c.model, c.started_at, c.last_turn_at,
-		       c.recap, c.recap_updated_at, c.kind, c.parent_id, c.precursor_id,
+		       c.recap, c.recap_updated_at, c.kind, c.parent_id, c.precursor_id, c.dev_work_dir,
 		       (SELECT COUNT(*) FROM turns t WHERE t.conversation_id = c.id) AS turn_count
 		FROM conversations c WHERE c.id = ?`, conversationID).
 		Scan(&info.ID, &info.Title, &info.ProjectDir, &info.Model,
-			&startedAt, &lastTurnAt, &info.Recap, &recapAt, &info.Kind, &info.ParentID, &info.PrecursorID, &info.TurnCount)
+			&startedAt, &lastTurnAt, &info.Recap, &recapAt, &info.Kind, &info.ParentID, &info.PrecursorID, &info.DevWorkDir, &info.TurnCount)
 	if err != nil {
 		return Info{}, err
 	}
@@ -1103,4 +1106,26 @@ func (s *sqliteStore) SaveCompaction(ctx context.Context, c Compaction) error {
 		c.ConversationID, c.FrozenThrough, c.SegmentSummariesJSON, c.ConsolidatedJSON,
 		c.CompactedTokens, time.Now().Unix())
 	return err
+}
+
+// SetDevWorkDir records an explicit development-mode request, never transcript
+// inference. It does not change the conversation's original project directory.
+func (s *sqliteStore) SetDevWorkDir(ctx context.Context, conversationID, workDir string) error {
+	if conversationID == "" || !filepath.IsAbs(workDir) {
+		return errors.New("dev mode requires a conversation and absolute repository path")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	result, err := s.db.ExecContext(ctx, `UPDATE conversations SET dev_work_dir=? WHERE id=?`, filepath.Clean(workDir), conversationID)
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }

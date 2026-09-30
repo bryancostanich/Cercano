@@ -526,6 +526,7 @@ type RuntimeLogMsg struct {
 
 // ConversationInfo is a persisted conversation summary returned by ListConversations.
 type ConversationInfo struct {
+	DevWorkDir     string
 	ID             string
 	Title          string
 	ProjectDir     string
@@ -565,6 +566,7 @@ const (
 // older pages carry chronological turns with StartIndex/TotalTurns describing
 // their logical position in the full persisted transcript.
 type ResumeViewportEvent struct {
+	DevWorkDir     string
 	Kind           ResumeViewportEventKind
 	ConversationID string
 	Turns          []PersistedTurn
@@ -588,6 +590,7 @@ func (c *Client) ListConversations(ctx context.Context, projectDir string, limit
 			ID:             c.GetId(),
 			Title:          c.GetTitle(),
 			ProjectDir:     c.GetProjectDir(),
+			DevWorkDir:     c.GetDevWorkDir(),
 			Model:          c.GetModel(),
 			StartedAt:      time.Unix(c.GetStartedAt(), 0),
 			LastTurnAt:     time.Unix(c.GetLastTurnAt(), 0),
@@ -629,7 +632,7 @@ func (c *Client) StreamResumeConversationViewportFirst(ctx context.Context, conv
 }
 
 func resumeViewportEventFromProto(ev *proto.ResumeConversationViewportFirstEvent) ResumeViewportEvent {
-	out := ResumeViewportEvent{
+	out := ResumeViewportEvent{DevWorkDir: ev.GetDevWorkDir(),
 		Kind:           resumeViewportKindFromProto(ev.GetKind()),
 		ConversationID: ev.GetConversationId(),
 		StartIndex:     int(ev.GetStartIndex()),
@@ -773,6 +776,7 @@ func (c *Client) GetConversation(ctx context.Context, conversationID string) (Co
 		ID:             resp.GetId(),
 		Title:          resp.GetTitle(),
 		ProjectDir:     resp.GetProjectDir(),
+		DevWorkDir:     resp.GetDevWorkDir(),
 		Model:          resp.GetModel(),
 		StartedAt:      time.Unix(resp.GetStartedAt(), 0),
 		LastTurnAt:     time.Unix(resp.GetLastTurnAt(), 0),

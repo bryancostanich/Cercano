@@ -859,6 +859,7 @@ message Conversation {
   int32  turn_count = 7;
   string recap = 8;
   int64  recap_updated_at = 9;
+  string dev_work_dir = 10; // explicit persisted development-mode repository
 }
 
 // PersistedTurn is one stored role-emission returned by Resume.
@@ -909,6 +910,7 @@ message ResumeConversationViewportFirstEvent {
   int32 start_index = 4;
   int32 total_turns = 5;
   string error = 6;
+  string dev_work_dir = 7; // supplied with TAIL, before hydration enables input
 }
 
 message DeleteConversationRequest  { string conversation_id = 1; }

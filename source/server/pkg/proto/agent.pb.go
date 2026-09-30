@@ -4338,6 +4338,7 @@ type Conversation struct {
 	TurnCount      int32                  `protobuf:"varint,7,opt,name=turn_count,json=turnCount,proto3" json:"turn_count,omitempty"`
 	Recap          string                 `protobuf:"bytes,8,opt,name=recap,proto3" json:"recap,omitempty"`
 	RecapUpdatedAt int64                  `protobuf:"varint,9,opt,name=recap_updated_at,json=recapUpdatedAt,proto3" json:"recap_updated_at,omitempty"`
+	DevWorkDir     string                 `protobuf:"bytes,10,opt,name=dev_work_dir,json=devWorkDir,proto3" json:"dev_work_dir,omitempty"` // explicit persisted development-mode repository
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -4433,6 +4434,13 @@ func (x *Conversation) GetRecapUpdatedAt() int64 {
 		return x.RecapUpdatedAt
 	}
 	return 0
+}
+
+func (x *Conversation) GetDevWorkDir() string {
+	if x != nil {
+		return x.DevWorkDir
+	}
+	return ""
 }
 
 // PersistedTurn is one stored role-emission returned by Resume.
@@ -4843,6 +4851,7 @@ type ResumeConversationViewportFirstEvent struct {
 	StartIndex     int32                                     `protobuf:"varint,4,opt,name=start_index,json=startIndex,proto3" json:"start_index,omitempty"`
 	TotalTurns     int32                                     `protobuf:"varint,5,opt,name=total_turns,json=totalTurns,proto3" json:"total_turns,omitempty"`
 	Error          string                                    `protobuf:"bytes,6,opt,name=error,proto3" json:"error,omitempty"`
+	DevWorkDir     string                                    `protobuf:"bytes,7,opt,name=dev_work_dir,json=devWorkDir,proto3" json:"dev_work_dir,omitempty"` // supplied with TAIL, before hydration enables input
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -4915,6 +4924,13 @@ func (x *ResumeConversationViewportFirstEvent) GetTotalTurns() int32 {
 func (x *ResumeConversationViewportFirstEvent) GetError() string {
 	if x != nil {
 		return x.Error
+	}
+	return ""
+}
+
+func (x *ResumeConversationViewportFirstEvent) GetDevWorkDir() string {
+	if x != nil {
+		return x.DevWorkDir
 	}
 	return ""
 }
@@ -18536,7 +18552,7 @@ const file_agent_proto_rawDesc = "" +
 	"\x05error\x18\x02 \x01(\tR\x05error\"F\n" +
 	"\x18StreamRuntimeLogsRequest\x12\x12\n" +
 	"\x04tail\x18\x01 \x01(\x05R\x04tail\x12\x16\n" +
-	"\x06source\x18\x02 \x01(\tR\x06source\"\x8b\x02\n" +
+	"\x06source\x18\x02 \x01(\tR\x06source\"\xad\x02\n" +
 	"\fConversation\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05title\x18\x02 \x01(\tR\x05title\x12\x1f\n" +
@@ -18550,7 +18566,10 @@ const file_agent_proto_rawDesc = "" +
 	"\n" +
 	"turn_count\x18\a \x01(\x05R\tturnCount\x12\x14\n" +
 	"\x05recap\x18\b \x01(\tR\x05recap\x12(\n" +
-	"\x10recap_updated_at\x18\t \x01(\x03R\x0erecapUpdatedAt\"\x93\x02\n" +
+	"\x10recap_updated_at\x18\t \x01(\x03R\x0erecapUpdatedAt\x12 \n" +
+	"\fdev_work_dir\x18\n" +
+	" \x01(\tR\n" +
+	"devWorkDir\"\x93\x02\n" +
 	"\rPersistedTurn\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12'\n" +
 	"\x0fconversation_id\x18\x02 \x01(\tR\x0econversationId\x12\x12\n" +
@@ -18580,7 +18599,7 @@ const file_agent_proto_rawDesc = "" +
 	"\x0fconversation_id\x18\x01 \x01(\tR\x0econversationId\x12\x1d\n" +
 	"\n" +
 	"tail_turns\x18\x02 \x01(\x05R\ttailTurns\x12*\n" +
-	"\x11older_chunk_turns\x18\x03 \x01(\x05R\x0folderChunkTurns\"\xfb\x02\n" +
+	"\x11older_chunk_turns\x18\x03 \x01(\x05R\x0folderChunkTurns\"\x9d\x03\n" +
 	"$ResumeConversationViewportFirstEvent\x12D\n" +
 	"\x04kind\x18\x01 \x01(\x0e20.agent.ResumeConversationViewportFirstEvent.KindR\x04kind\x12'\n" +
 	"\x0fconversation_id\x18\x02 \x01(\tR\x0econversationId\x12*\n" +
@@ -18589,7 +18608,9 @@ const file_agent_proto_rawDesc = "" +
 	"startIndex\x12\x1f\n" +
 	"\vtotal_turns\x18\x05 \x01(\x05R\n" +
 	"totalTurns\x12\x14\n" +
-	"\x05error\x18\x06 \x01(\tR\x05error\"`\n" +
+	"\x05error\x18\x06 \x01(\tR\x05error\x12 \n" +
+	"\fdev_work_dir\x18\a \x01(\tR\n" +
+	"devWorkDir\"`\n" +
 	"\x04Kind\x12\x14\n" +
 	"\x10KIND_UNSPECIFIED\x10\x00\x12\b\n" +
 	"\x04TAIL\x10\x01\x12\t\n" +

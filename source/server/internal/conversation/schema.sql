@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS conversations (
     id           TEXT PRIMARY KEY,
     title        TEXT NOT NULL DEFAULT '',
     project_dir  TEXT NOT NULL DEFAULT '',
+    dev_work_dir TEXT NOT NULL DEFAULT '',
     model        TEXT NOT NULL DEFAULT '',
     title_source TEXT NOT NULL DEFAULT 'user',
     started_at   INTEGER NOT NULL,

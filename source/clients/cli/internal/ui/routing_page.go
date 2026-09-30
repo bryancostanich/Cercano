@@ -100,17 +100,21 @@ func (sp *settingsPage) buildRoutingSections() []form.Section {
 		}
 		return out
 	}
-	primaryFields := []form.Field{form.NewSelect("routing-primary", "Account", primaryOptions(a.Primary, true), a.Primary)}
 	backups := a.PrimaryBackupAccounts()
+	primaryFields := []form.Field{
+		form.NewSelect("routing-primary", "Account 1 (first)", primaryOptions(a.Primary, true), a.Primary),
+		form.NewButton("routing-primary-down", "  Move down", len(backups) > 0),
+		form.NewButton("routing-primary-remove", "  Remove account", a.Primary != ""),
+	}
 	for i, name := range backups {
 		key := fmt.Sprintf("routing-primary-backup-%d", i)
 		primaryFields = append(primaryFields,
-			form.NewSelect(key, fmt.Sprintf("Backup %d", i+1), primaryOptions(name, false), name),
-			form.NewButton(key+"-up", "  Move up", i > 0),
+			form.NewSelect(key, fmt.Sprintf("Account %d", i+2), primaryOptions(name, false), name),
+			form.NewButton(key+"-up", "  Move up", true),
 			form.NewButton(key+"-down", "  Move down", i+1 < len(backups)),
-			form.NewButton(key+"-remove", "  Remove backup", true))
+			form.NewButton(key+"-remove", "  Remove account", true))
 	}
-	primaryFields = append(primaryFields, form.NewSelect("routing-primary-backup-add", "Add backup", primaryOptions("", false), ""))
+	primaryFields = append(primaryFields, form.NewSelect("routing-primary-backup-add", "Add account", primaryOptions("", false), ""))
 	tiers := form.Section{Title: "Model tiers", Groups: []form.Group{
 		{Title: "Primary", Fields: primaryFields},
 		{Title: "Secondary", Fields: []form.Field{
@@ -122,7 +126,7 @@ func (sp *settingsPage) buildRoutingSections() []form.Section {
 			form.NewReadOnly("routing-local-setup", "Setup", "Runtime and Local Models tabs", ""),
 			form.NewSelect("routing-local-redirect", "Redirect all work to", []form.Option{{Label: "No redirect", Value: ""}, {Label: "Primary", Value: "primary"}, {Label: "Secondary", Value: "secondary"}}, a.LocalRedirect),
 		}},
-		{Fields: []form.Field{form.NewReadOnly("routing-behavior", "Behavior", "Primary cycles through backups on quota exhaustion and stays on the selected account. Redirects send all work to another model tier.", "")}},
+		{Fields: []form.Field{form.NewReadOnly("routing-behavior", "Behavior", "Accounts are tried in order, starting with Account 1. Quota exhaustion advances to the next account and stays there. Redirects send all work to another model tier.", "")}},
 	}}
 	c := sp.routingConfig()
 	var tasks []form.Field
@@ -177,10 +181,31 @@ func (sp *settingsPage) commitRouting(field, value string) (string, tea.Cmd, err
 		defer cancel()
 		warning, err := sp.agent.UpdateRoutingAssignments(ctx, sp.routingDraft.Clone())
 		return sp.finishRoutingSave(warning, err)
+	case "routing-primary-down":
+		if len(sp.routingDraft.PrimaryBackupAccounts()) > 0 {
+			if err := sp.editPrimaryBackup("0-up", ""); err != nil {
+				return "", nil, err
+			}
+		}
+	case "routing-primary-remove":
+		backups := sp.routingDraft.PrimaryBackupAccounts()
+		sp.routingDraft.Primary = ""
+		if len(backups) > 0 {
+			sp.routingDraft.Primary = backups[0]
+			backups = backups[1:]
+		}
+		sp.routingDraft.SetPrimaryBackupAccounts(backups)
 	case "routing-primary":
 		for _, name := range sp.routingDraft.PrimaryBackupAccounts() {
 			if value != "" && name == value {
 				return "", nil, fmt.Errorf("account is already a backup")
+			}
+		}
+		if value == "" {
+			backups := sp.routingDraft.PrimaryBackupAccounts()
+			if len(backups) > 0 {
+				value = backups[0]
+				sp.routingDraft.SetPrimaryBackupAccounts(backups[1:])
 			}
 		}
 		sp.routingDraft.Primary = value
@@ -328,9 +353,16 @@ func (sp *settingsPage) editPrimaryBackup(action, value string) error {
 		switch parts[1] {
 		case "up":
 			if index == 0 {
-				return nil
+				previous := a.Primary
+				a.Primary = backups[0]
+				if previous == "" {
+					backups = backups[1:]
+				} else {
+					backups[0] = previous
+				}
+			} else {
+				backups[index-1], backups[index] = backups[index], backups[index-1]
 			}
-			backups[index-1], backups[index] = backups[index], backups[index-1]
 		case "down":
 			if index+1 == len(backups) {
 				return nil
@@ -366,7 +398,11 @@ func (sp *settingsPage) editPrimaryBackup(action, value string) error {
 				return fmt.Errorf("account %q is not configured", value)
 			}
 			if action == "add" {
-				backups = append(backups, value)
+				if a.Primary == "" {
+					a.Primary = value
+				} else {
+					backups = append(backups, value)
+				}
 			} else {
 				backups[index] = value
 			}

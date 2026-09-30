@@ -56,6 +56,19 @@ func TestOrderedAccountsRoutingRPC(t *testing.T) {
 	if !reflect.DeepEqual(view.GetAssignments().GetPrimaryBackups(), []string{"b", "c"}) {
 		t.Fatal("RPC lost ordered accounts", view.GetAssignments())
 	}
+	// Promoting a backup is one atomic full-list edit, not a duplicate binding.
+	assignment.Primary = "b"
+	assignment.PrimaryBackup = "a"
+	assignment.PrimaryBackups = []string{"a", "c"}
+	resp, err = client.UpdateRoutingAssignments(ctx, &proto.UpdateRoutingAssignmentsRequest{Assignments: assignment})
+	if err != nil || !resp.GetOk() {
+		t.Fatalf("promote backup: %v %v", resp, err)
+	}
+	promoted := s.cfgSvc.Get()
+	if promoted.ActiveCloudProfile != "b" || !reflect.DeepEqual(promoted.PrimaryBackups(), []string{"a", "c"}) {
+		t.Fatal("promotion lost an account or its order")
+	}
+	assignment.Primary = "a"
 	assignment.PrimaryBackups = []string{"c", "b"}
 	assignment.PrimaryBackup = "c"
 	resp, err = client.UpdateRoutingAssignments(ctx, &proto.UpdateRoutingAssignmentsRequest{Assignments: assignment})

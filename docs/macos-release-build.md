@@ -127,7 +127,7 @@ approval. Add these secrets to that environment:
 | Secret | Contents |
 |---|---|
 | `MACOS_CERTIFICATE_P12` | Base64-encoded Developer ID Application certificate (`.p12`) |
-| `MACOS_CERTIFICATE_PASSWORD` | Password for that `.p12` |
+| `MACOS_CERTIFICATE_PASSWORD` | **Optional** password for that `.p12`. Leave unset for passwordless export. |
 | `APPLE_ID` | Apple ID for app-specific password authentication |
 | `APPLE_TEAM_ID` | Apple Developer Team ID |
 | `APPLE_APP_SPECIFIC_PASSWORD` | App-specific password for Apple ID authentication |
@@ -139,6 +139,11 @@ including failure and cancellation. Default permissions are read-only; write
 access is scoped to the publish job alone. Publication refuses to replace an
 asset already attached to the tag and re-checks the artifact digest before
 uploading.
+
+**Passwordless certificates:** If your Developer ID certificate was exported
+without a password, leave `MACOS_CERTIFICATE_PASSWORD` unset or empty. The
+workflow will notice and proceed with passwordless import. Base64 encoding is
+not encryption — GitHub secrets remain private even when unset.
 
 ## Tests
 

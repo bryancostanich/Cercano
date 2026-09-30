@@ -108,6 +108,8 @@ class ReleaseWorkflowTest(unittest.TestCase):
             self.assertNotIn(f'echo "${secret}"', self.text)
         # The resolved identity fingerprint is masked in logs.
         self.assertIn("::add-mask::", self.text)
+        # Passwordless import should notice when password is empty
+        self.assertIn("::notice::Using passwordless certificate import", self.text)
 
     def test_signing_identity_is_resolved_from_the_keychain(self):
         run = self.step("build", "import signing identity")["run"]
@@ -190,6 +192,37 @@ class ReleaseWorkflowTest(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0,
                                 "a tag on another commit must not label this checkout")
             self.assertIn("does not match", result.stdout + result.stderr)
+
+    def test_certificate_preflight_executes_with_empty_password(self):
+        script = self.step("build", "import signing identity")["run"]
+        # Execute only validation, stopping before random password generation
+        # and every real Keychain operation. No signing credentials are used.
+        preflight = script.split('KEYCHAIN_PASSWORD="$(openssl', 1)[0]
+        self.assertNotIn('security ', preflight)
+        for certificate, password, allowed in [
+                ("", "", False), ("inert-fixture", "", True),
+                ("inert-fixture", "fixture-password", True)]:
+            result = subprocess.run(
+                ["bash", "-c", preflight + '\necho PREFLIGHT_OK\n'],
+                env={"CERTIFICATE_P12": certificate,
+                     "CERTIFICATE_PASSWORD": password},
+                capture_output=True, text=True)
+            self.assertEqual(result.returncode == 0, allowed, result.stderr)
+            self.assertEqual("PREFLIGHT_OK" in result.stdout, allowed)
+
+    def test_passwordless_certificate_import_is_supported(self):
+        """Test that empty MACOS_CERTIFICATE_PASSWORD is allowed with valid P12."""
+        import_step = self.step("build", "import signing identity")
+        run_script = import_step["run"]
+        
+        # Check that only CERTIFICATE_P12 is required
+        self.assertIn('[[ -n "$CERTIFICATE_P12" ]]', run_script)
+        # Check that empty password is allowed
+        self.assertIn('[[ -z "$CERTIFICATE_PASSWORD" ]]', run_script)
+        # Check that notice is shown for passwordless import
+        self.assertIn('echo "::notice::Using passwordless certificate import"', run_script)
+        # Check that security import still uses the password variable (which may be empty)
+        self.assertIn('security import "$CERT_PATH" -k "$KEYCHAIN_PATH" -P "$CERTIFICATE_PASSWORD"', run_script)
 
     def test_concurrency_prevents_overlapping_runs_for_a_version(self):
         concurrency = self.workflow["concurrency"]

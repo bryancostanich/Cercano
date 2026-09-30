@@ -78,8 +78,9 @@ jobs:
           CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
         run: |
           set -euo pipefail
-          [[ -n "$CERTIFICATE_P12" && -n "$CERTIFICATE_PASSWORD" ]] \
-            || { echo "::error::Signing secrets are not configured in the release environment."; exit 1; }
+          [[ -n "$CERTIFICATE_P12" ]] \
+            || { echo "::error::MACOS_CERTIFICATE_P12 is not configured in the release environment."; exit 1; }
+          [[ -z "$CERTIFICATE_PASSWORD" ]] && echo "::notice::Using passwordless certificate import"
           KEYCHAIN_PASSWORD="$(openssl rand -base64 32)"
           KEYCHAIN_PATH="$RUNNER_TEMP/cercano-signing.keychain-db"
           CERT_PATH="$RUNNER_TEMP/certificate.p12"

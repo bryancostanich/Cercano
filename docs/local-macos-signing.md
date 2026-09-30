@@ -51,8 +51,12 @@ hardened runtime and a nonempty secure timestamp. Any error stops the script.
 Signing is not transactional: discard the staging directory on failure and
 extract fresh copies before retrying.
 
-## Password prompts: two separate issues
+## Password prompts: three separate issues
 
+- **When exporting:** Developer ID certificates can be exported with or without
+  a password. Passwordless exports are supported in the CI pipeline — leave
+  `MACOS_CERTIFICATE_PASSWORD` unset. Base64 encoding is not encryption; GitHub
+  secrets remain private even when unset.
 - **When signing:** macOS may ask to unlock the Keychain or authorize `codesign`
   to use the certificate's private key. This pipeline does not bypass that
   authorization or change private-key access controls.

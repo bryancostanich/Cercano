@@ -58,6 +58,10 @@ func (*quotaLabelProvider) Chat(context.Context, inference.Call) (inference.Resu
 }
 func TestBackupResolvesInheritedRequestedQuality(t *testing.T) {
 	c := config.Defaults()
+	// Inheritance is what's under test: an unset call tier must fall back to the
+	// destination's task quality. Pin Chat to premium so the expected fallback
+	// is most_capable, independent of the product default.
+	c.TaskAssignments = map[config.Task]config.TaskAssignment{config.TaskChat: {Quality: config.CostPremium}}
 	c.ActiveCloudProfile = "primary"
 	c.BackupCloudProfile = "backup"
 	c.CloudProfiles = []config.CloudProfile{{Name: "primary", Provider: "anthropic", Flavor: "messages"}, {Name: "backup", Provider: "anthropic", Flavor: "messages"}}

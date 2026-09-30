@@ -6,7 +6,7 @@
 # binary gets a fresh ad-hoc signature each build and looks like a stranger
 # to the Keychain.
 #
-# Usage: codesign-if-available.sh <binary>
+# Usage: codesign-if-available.sh <binary> [stable-identifier]
 #
 # Identity: $CERCANO_CODESIGN_ID when set ("none" disables signing entirely);
 # otherwise the first "Developer ID Application" identity in the keychain.
@@ -24,5 +24,8 @@ if [[ -z "$id" ]]; then
 fi
 [[ -z "$id" ]] && exit 0
 
-codesign --force --sign "$id" "$bin"
+# The launcher builds into a PID-suffixed temporary file. Use the final
+# executable name as its identifier so Keychain requirements survive rebuilds.
+identifier="${2:-$(basename "$bin")}"
+codesign --force --sign "$id" --identifier "$identifier" "$bin"
 echo "[codesign] signed $bin as $id" >&2

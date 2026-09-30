@@ -92,3 +92,14 @@ func TestHumanizeResult(t *testing.T) {
 		}
 	}
 }
+
+func TestRunCommandCompatibilityPresentation(t *testing.T) {
+	for _, name := range []string{"RunCommand", "Bash", "run_command"} {
+		if got := dispatchToolRisk(name); !strings.Contains(got, "arbitrary command execution") {
+			t.Fatalf("%s: %s", name, got)
+		}
+		if got := gitStashCommand(&pendingToolCall{Name: name, Args: `{"cmd":["git","stash"]}`}); got != "git stash" {
+			t.Fatalf("%s: %s", name, got)
+		}
+	}
+}

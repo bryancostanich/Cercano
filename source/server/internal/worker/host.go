@@ -22,6 +22,7 @@ package worker
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -29,6 +30,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -39,6 +41,7 @@ import (
 	"cercano/source/server/internal/anthropicauth"
 	"cercano/source/server/internal/chatgptauth"
 	"cercano/source/server/internal/cloudfactory"
+	"cercano/source/server/internal/conversation"
 	cfgsvc "cercano/source/server/internal/hostsvc/config"
 	"cercano/source/server/internal/hostsvc/credentials"
 	"cercano/source/server/internal/hostsvc/permissions"
@@ -91,11 +94,38 @@ type workerRunner struct {
 	// on dial-injected (test) runners (sub-agent rows are then not created).
 	ensureSubagent EnsureSubagentFunc
 
+	// mcpTools returns the host's live MCP-origin tools for advertisement to the
+	// worker, and mcpCall invokes one by fully-qualified name. The host owns
+	// every MCP subprocess and its session, so the worker holds no connections
+	// and proxies each call back here. Both nil on dial-injected test runners
+	// and whenever no MCP server is configured — the worker then simply sees no
+	// MCP tools, which is the pre-proxy behavior.
+	mcpTools func() []McpToolAdvert
+	mcpCall  func(ctx context.Context, name string, args json.RawMessage) (json.RawMessage, error)
+
 	// setProfile switches the host session's active capability profile when a
 	// worker-side session-control capability (suggest_plan/request_plan_approval)
 	// asks for it. The worker must not own this state. The convID scopes the
 	// switch to the worker's conversation so planning mode stays per-conversation.
 	setProfile func(ctx context.Context, convID, name string) error
+
+	// autonomyLedger applies autonomy-ledger operations (create / update /
+	// get_active) to the host-owned conversation store when a worker-side
+	// autonomous-mode capability asks for one over the stream. The ledger is
+	// durable, user-visible state, so it has exactly one owner — the host —
+	// and the crash-isolated worker never opens SQLite. Wired via
+	// SetAutonomyLedger from the server's store; nil on dial-injected (test)
+	// runners (ledger operations then error clearly, as pre-fix).
+	autonomyLedger AutonomyLedgerFunc
+
+	// dispatchEventSink appends one dispatch-evidence event to the host-owned
+	// append-only store when a worker-side dispatch loop sends one over the
+	// stream. Same single-owner rule as the autonomy ledger: durable, user-
+	// visible evidence has exactly one owner — the host — and the crash-
+	// isolated worker never opens SQLite. Wired via SetDispatchEventSink from
+	// the server's store; nil on dial-injected (test) runners (appends then
+	// error clearly instead of silently dropping evidence).
+	dispatchEventSink DispatchEventFunc
 
 	// dial is called instead of the pool when non-nil (test injection). When
 	// nil, RunTurn acquires a warm worker from the per-conversation pool.
@@ -149,6 +179,248 @@ func NewWorkerRunner(
 		modelEvidence:  modelEvidence,
 		pool:           pool,
 	}
+}
+
+// McpBridgeSetter is implemented by turn runners that can proxy host MCP tools
+// into the worker. NewWorkerRunner returns a runner.TurnRunner, so the server
+// asserts against this narrow interface rather than widening TurnRunner itself
+// with a concept only the worker runner has.
+type McpBridgeSetter interface {
+	SetMCPBridge(
+		tools func() []McpToolAdvert,
+		call func(ctx context.Context, name string, args json.RawMessage) (json.RawMessage, error),
+	)
+}
+
+// SetMCPBridge wires host MCP advertisement + invocation into this runner.
+// Optional and set after construction (rather than as two more positional
+// constructor parameters) because MCP is configuration-dependent: no configured
+// server means no bridge, and every existing test runner keeps working with the
+// nil default. A nil bridge advertises no tools, which is exactly the behavior
+// before worker MCP proxying existed.
+func (w *workerRunner) SetMCPBridge(
+	tools func() []McpToolAdvert,
+	call func(ctx context.Context, name string, args json.RawMessage) (json.RawMessage, error),
+) {
+	w.mcpTools = tools
+	w.mcpCall = call
+}
+
+// AutonomyLedgerFunc applies one autonomy-ledger operation to the host-owned
+// conversation store: op is "create" | "update" | "get_active", runJSON is the
+// JSON-encoded conversation.AutonomyRun for create/update, convID scopes
+// get_active. It returns the stored/loaded run JSON ("" on a get_active miss)
+// and whether an active run was found.
+type AutonomyLedgerFunc func(ctx context.Context, op, runJSON, convID string) (storedRunJSON string, found bool, err error)
+
+// AutonomyLedgerSetter is implemented by turn runners that proxy autonomy-ledger
+// operations from the worker to the host store. The server asserts against this
+// narrow interface rather than widening the constructor with another positional
+// parameter every test call site would have to repeat.
+type AutonomyLedgerSetter interface {
+	SetAutonomyLedger(fn AutonomyLedgerFunc)
+}
+
+// SetAutonomyLedger wires the host's conversation store as the autonomy ledger
+// the worker's autonomous-mode capabilities proxy to over the stream. Not wired
+// means those capabilities error clearly in worker turns.
+func (w *workerRunner) SetAutonomyLedger(fn AutonomyLedgerFunc) {
+	w.autonomyLedger = fn
+}
+
+// DispatchEventFunc appends one dispatch-evidence event to the host-owned
+// append-only store (conversation.DispatchEventStore.AppendDispatchEvent).
+// Acknowledged by contract: the worker's dispatch loop proceeds only after this
+// returns nil, so evidence is never silently lost.
+type DispatchEventFunc func(ctx context.Context, ev conversation.DispatchEvent) error
+
+// DispatchEventSinkSetter is implemented by turn runners that proxy
+// dispatch-evidence appends from the worker to the host store. The server
+// asserts against this narrow interface rather than widening the constructor
+// with another positional parameter every test call site would have to repeat —
+// same pattern as AutonomyLedgerSetter.
+type DispatchEventSinkSetter interface {
+	SetDispatchEventSink(fn DispatchEventFunc)
+}
+
+// SetDispatchEventSink wires the host's dispatch-event store as the sink a
+// worker-side dispatch loop proxies to over the stream. Not wired means the
+// loop's evidence appends error clearly instead of silently dropping evidence.
+func (w *workerRunner) SetDispatchEventSink(fn DispatchEventFunc) {
+	w.dispatchEventSink = fn
+}
+
+// HostDispatchEventSink adapts the host's conversation store to
+// DispatchEventFunc. The parameter is the NARROW DispatchEventStore interface
+// (not the full Store), so callers type-assert just this slice and any durable
+// host implementing it can be wired. A nil store still yields a callable sink
+// that errors clearly — dispatch evidence must never be silently dropped.
+func HostDispatchEventSink(store conversation.DispatchEventStore) DispatchEventFunc {
+	return func(ctx context.Context, ev conversation.DispatchEvent) error {
+		if store == nil {
+			return errors.New("dispatch event store is not available")
+		}
+		return store.AppendDispatchEvent(ctx, ev)
+	}
+}
+
+// handleDispatchEvent processes one WorkerToHost_DispatchEvent on the drain path
+// and builds the acknowledgment. It authorizes the conversation against scope —
+// child ids successfully created under this turn or its descendants on this
+// stream (see the EnsureSubagent case in RunTurn) — then appends through the
+// host sink and acknowledges only after the store write completed. Store errors
+// are sanitized before crossing the wire: the well-formed duplicate report
+// is reduced to a stable code; other driver-level failures are logged as
+// metadata only and reduced to a generic message.
+func (w *workerRunner) handleDispatchEvent(ctx context.Context, req *proto.DispatchEventRequest, scope map[string]bool) *proto.DispatchEventResponse {
+	response := &proto.DispatchEventResponse{Id: req.GetId()}
+	if req == nil {
+		response.Error = "dispatch event request is empty"
+		return response
+	}
+	if !scope[req.GetConversationId()] {
+		response.Error = "dispatch event conversation not authorized for this turn"
+		return response
+	}
+	if w.dispatchEventSink == nil {
+		response.Error = "dispatch event store is not available"
+		return response
+	}
+	ts := req.GetTimestampUnix()
+	ev := conversation.DispatchEvent{
+		ConversationID: req.GetConversationId(),
+		Seq:            req.GetSeq(),
+		Kind:           req.GetKind(),
+		Iteration:      int(req.GetIteration()),
+		Timestamp:      time.Unix(ts, 0),
+		PayloadJSON:    req.GetPayloadJson(),
+	}
+	if ts == 0 {
+		ev.Timestamp = time.Time{} // host stamps now
+	}
+	if err := w.dispatchEventSink(ctx, ev); err != nil {
+		if errors.Is(err, conversation.ErrDispatchEventDuplicate) {
+			response.Error = "dispatch event already exists"
+			return response
+		}
+		log.Printf("[workerRunner] append dispatch event failed: seq=%d", req.GetSeq())
+		response.Error = "dispatch event append failed"
+	}
+	return response
+}
+
+// ProfileHandlerSetter is implemented by turn runners that proxy host session
+// profile switches from worker session-control capabilities. The server asserts
+// against this narrow interface rather than widening the constructor; the
+// dial-injected test constructor has no profile handler parameter.
+type ProfileHandlerSetter interface {
+	SetProfileHandler(fn func(ctx context.Context, convID, name string) error)
+}
+
+// SetProfileHandler wires the host's profile switch handler (the production
+// NewWorkerRunner setProfile parameter) into a runner built without it, such as
+// the dial-injected test constructor. Nil means worker profile requests fail
+// with "session profile control not configured".
+func (w *workerRunner) SetProfileHandler(fn func(ctx context.Context, convID, name string) error) {
+	w.setProfile = fn
+}
+
+// HostAutonomyLedger adapts a conversation store to AutonomyLedgerFunc. A nil
+// store yields a func that errors clearly (the ledger is unavailable in this
+// execution environment), so the worker capability sees the same error an
+// in-process turn without a store would.
+func HostAutonomyLedger(store conversation.Store) AutonomyLedgerFunc {
+	return func(ctx context.Context, op, runJSON, convID string) (string, bool, error) {
+		if store == nil {
+			return "", false, errors.New("autonomy ledger is not available")
+		}
+		switch op {
+		case autonomyOpCreate:
+			var r conversation.AutonomyRun
+			if err := json.Unmarshal([]byte(runJSON), &r); err != nil {
+				return "", false, fmt.Errorf("decode autonomy run: %w", err)
+			}
+			stored, err := store.CreateAutonomyRun(ctx, r)
+			if err != nil {
+				return "", false, err
+			}
+			b, err := json.Marshal(stored)
+			if err != nil {
+				return "", false, fmt.Errorf("encode stored autonomy run: %w", err)
+			}
+			return string(b), true, nil
+		case autonomyOpUpdate:
+			var r conversation.AutonomyRun
+			if err := json.Unmarshal([]byte(runJSON), &r); err != nil {
+				return "", false, fmt.Errorf("decode autonomy run: %w", err)
+			}
+			if err := store.UpdateAutonomyRun(ctx, r); err != nil {
+				return "", false, err
+			}
+			return runJSON, true, nil // acknowledged; echo the updated run
+		case autonomyOpGetActive:
+			run, err := store.GetActiveAutonomyRun(ctx, convID)
+			if errors.Is(err, sql.ErrNoRows) {
+				return "", false, nil
+			}
+			if err != nil {
+				return "", false, err
+			}
+			b, err := json.Marshal(run)
+			if err != nil {
+				return "", false, fmt.Errorf("encode active autonomy run: %w", err)
+			}
+			return string(b), true, nil
+		default:
+			return "", false, fmt.Errorf("unknown autonomy ledger op %q", op)
+		}
+	}
+}
+
+// McpToolAdvert is one host MCP tool described for the worker. The host builds
+// these from its live registry per turn (not once at startup): MCP servers
+// connect in the background and can be added at runtime, so a startup snapshot
+// would advertise nothing on an otherwise healthy setup.
+type McpToolAdvert struct {
+	Name        string
+	Description string
+	Schema      json.RawMessage
+	Destructive bool
+}
+
+// advertiseMCPTools snapshots the host's MCP tools for this turn's StartTurn.
+// Empty when no resolver is wired or no MCP server is connected.
+func (w *workerRunner) advertiseMCPTools() []*proto.McpToolDescriptor {
+	if w.mcpTools == nil {
+		return nil
+	}
+	adverts := w.mcpTools()
+	if len(adverts) == 0 {
+		return nil
+	}
+	out := make([]*proto.McpToolDescriptor, 0, len(adverts))
+	for _, a := range adverts {
+		out = append(out, &proto.McpToolDescriptor{
+			Name:        a.Name,
+			Description: a.Description,
+			Schema:      a.Schema,
+			Destructive: a.Destructive,
+		})
+	}
+	return out
+}
+
+// mcpAllowPatterns returns the host's MCP allowlist so worker-side gating
+// matches the host's. Nil when no permission broker is wired.
+func (w *workerRunner) mcpAllowPatterns() []string {
+	if w.perms == nil {
+		return nil
+	}
+	store := w.perms.Store()
+	if store == nil {
+		return nil
+	}
+	return store.MCPAllowPatterns()
 }
 
 // resolveOpenTiers returns the effective open model id per tier for the active
@@ -302,6 +574,8 @@ func (w *workerRunner) RunTurn(
 		History:        historyProto,
 		ProjectContext: projectCtx,
 		PermissionMode: permMode,
+		McpTools:       w.advertiseMCPTools(),
+		McpAllow:       w.mcpAllowPatterns(),
 	}
 
 	// ── 5. Acquire a warm worker (pool) or use injected dial ──────────────
@@ -391,6 +665,11 @@ func (w *workerRunner) RunTurn(
 	// ── 7. Drain loop ─────────────────────────────────────────────────────
 	var turnDone bool
 	var result runner.Result
+
+	// dispatchScope contains only successfully ensured descendants. The current
+	// turn is a permitted parent for creation, not itself a dispatch-event target.
+
+	dispatchScope := map[string]bool{}
 
 	for {
 		// Check for context cancellation before blocking on Recv.
@@ -528,10 +807,21 @@ func (w *workerRunner) RunTurn(
 		case *proto.WorkerToHost_EnsureSubagent:
 			// A worker-side dispatch created a sub-agent: persist its conversation
 			// row on the host so the tab survives restart and is post-mortemable.
-			if w.ensureSubagent != nil && m.EnsureSubagent != nil {
-				e := m.EnsureSubagent
-				if err := w.ensureSubagent(ctx, e.GetId(), e.GetParentId(), e.GetProjectDir(), e.GetModel(), e.GetGrantedTools()); err != nil {
-					log.Printf("[workerRunner] ensure subagent conversation: %v", err)
+			if err := w.ensureDispatchChild(ctx, m.EnsureSubagent, req.ConversationID, dispatchScope); err != nil {
+				log.Print("[workerRunner] dispatch child creation failed")
+			}
+
+		case *proto.WorkerToHost_DispatchEvent:
+			// A worker-side dispatch loop appended one evidence event. Handled ON
+			// the drain path (not a goroutine) so any EnsureSubagent that created
+			// the child conversation on this stream has already run — scope
+			// authorization therefore sees the child. The ack is sent only after
+			// the host store write completed; the worker never treats evidence as
+			// recorded before this acknowledgment.
+			if m.DispatchEvent != nil {
+				resp := w.handleDispatchEvent(ctx, m.DispatchEvent, dispatchScope)
+				if err := safeSend(&proto.HostToWorker{Msg: &proto.HostToWorker_DispatchEventResponse{DispatchEventResponse: resp}}); err != nil {
+					log.Printf("[workerRunner] send dispatch event response: %v", err)
 				}
 			}
 
@@ -553,6 +843,54 @@ func (w *workerRunner) RunTurn(
 					log.Printf("[workerRunner] runtime response: %v", err)
 				}
 			}()
+		case *proto.WorkerToHost_McpRequest:
+			// The worker invoked a proxied MCP tool. Resolve against the LIVE host
+			// registry (not the advertisement snapshot) so a server restarted
+			// mid-turn is picked up transparently and a vanished one errors
+			// cleanly. Runs in its own goroutine: an MCP call can block on server
+			// warm-up, and the stream reader must stay responsive to Cancel.
+			request := m.McpRequest
+			go func() {
+				response := &proto.McpCallResponse{Id: request.GetId()}
+				if w.mcpCall == nil {
+					response.Error = "mcp not configured on host"
+				} else {
+					result, err := w.mcpCall(ctx, request.GetName(), request.GetArgsJson())
+					if err != nil {
+						response.Error = err.Error()
+					} else {
+						response.ResultJson = result
+					}
+				}
+				if err := safeSend(&proto.HostToWorker{Msg: &proto.HostToWorker_McpResponse{McpResponse: response}}); err != nil {
+					log.Printf("[workerRunner] mcp response: %v", err)
+				}
+			}()
+
+		case *proto.WorkerToHost_AutonomyRequest:
+			// A worker-side autonomous-mode capability touched the autonomy
+			// ledger. Apply the operation to the host-owned conversation store
+			// (the ledger's only owner) and acknowledge, so the capability's
+			// control flow depends on the durable write completing.
+			request := m.AutonomyRequest
+			go func() {
+				response := &proto.AutonomyLedgerResponse{Id: request.GetId()}
+				if w.autonomyLedger == nil {
+					response.Error = "autonomy ledger is not available"
+				} else {
+					runJSON, found, err := w.autonomyLedger(ctx, request.GetOp(), string(request.GetRunJson()), request.GetConversationId())
+					if err != nil {
+						response.Error = err.Error()
+					} else {
+						response.RunJson = []byte(runJSON)
+						response.Found = found
+					}
+				}
+				if err := safeSend(&proto.HostToWorker{Msg: &proto.HostToWorker_AutonomyResponse{AutonomyResponse: response}}); err != nil {
+					log.Printf("[workerRunner] autonomy ledger response: %v", err)
+				}
+			}()
+
 		case *proto.WorkerToHost_ProfileRequest:
 			// Session-control capabilities run in the worker but own no session
 			// state. Apply profile changes on the host profile broker and respond so
@@ -785,4 +1123,20 @@ func (w *workerRunner) serveOpenInference(ctx context.Context, req *proto.OpenIn
 		}
 		emit(&proto.OpenInferenceEvent{Kind: &proto.OpenInferenceEvent_Event{Event: MarshalStreamEvent(ev)}})
 	}
+}
+
+// ensureDispatchChild runs on the stream drain path, before evidence appends.
+// Only successfully created descendants can acquire an event-writing scope.
+func (w *workerRunner) ensureDispatchChild(ctx context.Context, e *proto.EnsureSubagentConversation, parent string, scope map[string]bool) error {
+	if e == nil || e.GetId() == "" || e.GetId() == parent || e.GetId() == e.GetParentId() || (e.GetParentId() != parent && !scope[e.GetParentId()]) {
+		return errors.New("dispatch parent not authorized")
+	}
+	if w.ensureSubagent == nil {
+		return errors.New("dispatch conversation store unavailable")
+	}
+	if err := w.ensureSubagent(ctx, e.GetId(), e.GetParentId(), e.GetProjectDir(), e.GetModel(), e.GetGrantedTools()); err != nil {
+		return err
+	}
+	scope[e.GetId()] = true
+	return nil
 }

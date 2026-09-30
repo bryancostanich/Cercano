@@ -19,6 +19,7 @@ package anthropicauth
 
 import (
 	"bytes"
+	"cercano/source/server/pkg/accountidentity"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -64,9 +65,10 @@ var DefaultScopes = []string{
 // place API keys live, never in a client-side file. Unlike the ChatGPT flow
 // there is no account id; the bearer token is self-sufficient.
 type TokenSet struct {
-	Access    string    `json:"access"`
-	Refresh   string    `json:"refresh"`
-	ExpiresAt time.Time `json:"expires_at"`
+	Identity  accountidentity.Identity `json:"identity,omitempty"`
+	Access    string                   `json:"access"`
+	Refresh   string                   `json:"refresh"`
+	ExpiresAt time.Time                `json:"expires_at"`
 }
 
 // Expired reports whether the access token needs a refresh. A small skew
@@ -97,6 +99,7 @@ type Flow struct {
 	TokenURL     string       // defaults to DefaultTokenURL
 	Scopes       []string     // defaults to DefaultScopes
 	Client       *http.Client // defaults to http.DefaultClient
+	ProfileURL   string       // optional override for the advisory account profile lookup
 	UserAgent    string       // defaults to "cercano"
 }
 
@@ -189,7 +192,7 @@ func (f Flow) authorizeURL(redirectURI, challenge, state string) string {
 // exchange trades an approved authorization code (plus its PKCE verifier and
 // the original redirect_uri/state) for a token set.
 func (f Flow) exchange(ctx context.Context, code, state, verifier, redirectURI string) (*TokenSet, error) {
-	return f.tokenRequest(ctx, map[string]string{
+	ts, err := f.tokenRequest(ctx, map[string]string{
 		"grant_type":    "authorization_code",
 		"code":          code,
 		"state":         state,
@@ -197,6 +200,10 @@ func (f Flow) exchange(ctx context.Context, code, state, verifier, redirectURI s
 		"redirect_uri":  redirectURI,
 		"code_verifier": verifier,
 	})
+	if err == nil && ts.Identity.Email == "" {
+		f.fillIdentity(ctx, ts)
+	}
+	return ts, err
 }
 
 // Refresh exchanges a refresh token for a fresh access token. Anthropic's
@@ -218,9 +225,10 @@ func (f Flow) Refresh(ctx context.Context, refreshToken string) (*TokenSet, erro
 }
 
 type tokenResponse struct {
-	AccessToken  string `json:"access_token"`
-	RefreshToken string `json:"refresh_token"`
-	ExpiresIn    int    `json:"expires_in"`
+	Account      json.RawMessage `json:"account"`
+	AccessToken  string          `json:"access_token"`
+	RefreshToken string          `json:"refresh_token"`
+	ExpiresIn    int             `json:"expires_in"`
 }
 
 // tokenRequest POSTs a JSON body to the token endpoint and decodes the token
@@ -257,6 +265,7 @@ func (f Flow) tokenRequest(ctx context.Context, body map[string]string) (*TokenS
 		expires = 3600
 	}
 	return &TokenSet{
+		Identity:  accountidentity.Decode(tr.Account),
 		Access:    tr.AccessToken,
 		Refresh:   tr.RefreshToken,
 		ExpiresAt: time.Now().Add(time.Duration(expires) * time.Second),

@@ -49,7 +49,8 @@ func TestPackSummaryChunks_MultipleChunksStableOrder(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		msgs = append(msgs, budgetTextMsg(llm.RoleUser, fmt.Sprintf("msg-%d %s", i, string(make([]byte, 1800)))))
 	}
-	chunks, err := PackSummaryChunks(msgs, 3000, 256)
+	window := int(float64(estimateTokens(BuildSummaryPrompt(msgs[:1]))+256)/summaryBudgetSafetyFraction) + 4
+	chunks, err := PackSummaryChunks(msgs, window, 256)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +59,7 @@ func TestPackSummaryChunks_MultipleChunksStableOrder(t *testing.T) {
 	}
 	var got []string
 	for _, chunk := range chunks {
-		budget := EstimateSummaryBudget(BuildSummaryPrompt(chunk), 256, 3000)
+		budget := EstimateSummaryBudget(BuildSummaryPrompt(chunk), 256, window)
 		if !budget.Fits {
 			t.Fatalf("chunk over budget: %+v", budget)
 		}

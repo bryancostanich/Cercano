@@ -16,11 +16,12 @@ func (v *NodeValidator) Validate(ctx context.Context, workDir string) (Decision,
 	if _, err := exec.LookPath("npm"); err != nil {
 		return Failed, errors.New("node validator: command 'npm' not found in PATH — install Node.js or set validator.command in .cercano/config.yaml to override")
 	}
-	cmd := exec.CommandContext(ctx, "npm", "run", "build", "--silent")
-	cmd.Dir = workDir
-	out, err := cmd.CombinedOutput()
+	out, ok, err := runValidator(ctx, nodeValidateTimeout, workDir, "npm", "run", "build", "--silent")
 	if err != nil {
-		return Failed, fmt.Errorf("npm run build failed:\n%s", cleanOutput(string(out)))
+		return Failed, fmt.Errorf("npm run build failed: %w\n%s", err, out)
+	}
+	if !ok {
+		return Failed, fmt.Errorf("npm run build failed:\n%s", out)
 	}
 	return Passed, nil
 }

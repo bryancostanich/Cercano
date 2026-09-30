@@ -40,6 +40,15 @@ func messagesToOpenAI(msgs []llm.Message, system string) []goopenai.ChatCompleti
 		var parts []goopenai.ChatMessagePart
 		for _, b := range m.Blocks {
 			switch b.Type {
+			case llm.BlockReasoning:
+				// Opaque round-trip state captured from reasoning_content on a
+				// prior assistant tool-call turn (see stream.go). Returned
+				// verbatim per the GLM chat_completions protocol; assistant-only
+				// because no other role legally carries it. ReasoningID stays
+				// empty on this wire — Responses-flavor state never routes here.
+				if m.Role == llm.RoleAssistant && b.ReasoningData != "" && b.ReasoningID == "" {
+					cm.ReasoningContent = b.ReasoningData
+				}
 			case llm.BlockText:
 				text += b.Text
 				parts = append(parts, goopenai.ChatMessagePart{Type: goopenai.ChatMessagePartTypeText, Text: b.Text})
@@ -108,7 +117,7 @@ func toolsToOpenAI(tools []llm.Tool) []goopenai.Tool {
 }
 
 // blocksFromOpenAI maps a completed assistant message to llm blocks.
-func blocksFromOpenAI(m goopenai.ChatCompletionMessage) []llm.Block {
+func blocksFromOpenAI(m goopenai.ChatCompletionMessage, keepToolReasoning bool) []llm.Block {
 	var blocks []llm.Block
 	// Some local models (notably qwen3 served via mistral.rs) occasionally emit
 	// their tool call twice: once as a correctly structured tool_call, and once
@@ -133,6 +142,11 @@ func blocksFromOpenAI(m goopenai.ChatCompletionMessage) []llm.Block {
 	// stays false but ToolCalls are present), so we never resurrect that noise.
 	if !emittedText && len(m.ToolCalls) == 0 && m.ReasoningContent != "" {
 		blocks = append(blocks, llm.Block{Type: llm.BlockText, Text: m.ReasoningContent})
+	}
+	if keepToolReasoning && len(m.ToolCalls) > 0 && m.ReasoningContent != "" {
+		// Mirror of the streaming capture: reasoning alongside tool calls is
+		// round-trip state for the continuation, not display text.
+		blocks = append(blocks, llm.Block{Type: llm.BlockReasoning, ReasoningData: m.ReasoningContent})
 	}
 	for _, tc := range m.ToolCalls {
 		blocks = append(blocks, llm.Block{

@@ -9,6 +9,28 @@ import (
 	"time"
 )
 
+// AutonomyLedger is the narrow slice of Store the autonomous-mode capabilities
+// need: creating, updating, and reading the active durable autonomy run for one
+// conversation. It exists so execution environments that must NOT open the
+// SQLite database (the crash-isolated worker process) can still back every
+// autonomous tool (entry, capture_decision, exit) through a per-operation proxy
+// to the host-owned store, instead of proxying the full conversation Store.
+// Store satisfies it; hosts wire their store directly.
+type AutonomyLedger interface {
+	// CreateAutonomyRun inserts one append-only autonomy ledger row.
+	CreateAutonomyRun(ctx context.Context, r AutonomyRun) (AutonomyRun, error)
+	// UpdateAutonomyRun updates an existing autonomous run by run id.
+	UpdateAutonomyRun(ctx context.Context, r AutonomyRun) error
+	// GetActiveAutonomyRun returns the current running/review_pending run for
+	// the conversation, or sql.ErrNoRows when none is active.
+	GetActiveAutonomyRun(ctx context.Context, conversationID string) (AutonomyRun, error)
+}
+
+// Store satisfies the narrow autonomy ledger seam; asserted at compile time so
+// a signature drift in either interface fails the build instead of surfacing at
+// a worker turn.
+var _ AutonomyLedger = Store(nil)
+
 const defaultAutonomyState = "proposed"
 
 func migrateAutonomyRunsToAppendOnly(db *sql.DB) error {
@@ -136,13 +158,23 @@ func (s *sqliteStore) UpdateAutonomyRun(ctx context.Context, r AutonomyRun) erro
 	if r.UpdatedAt.IsZero() {
 		r.UpdatedAt = time.Now()
 	}
-	res, err := s.db.ExecContext(ctx, `
+	// Scope the update to the run's conversation whenever the caller carries
+	// one, so a run id borrowed from another conversation is rejected (no rows
+	// affected) instead of silently updating across the conversation boundary.
+	query := `
 		UPDATE autonomy_runs SET
 			state=?, source_kind=?, source_plan_path=?, source_spec_path=?,
 			brief_json=?, revisions_json=?, decisions_json=?, review_json=?, updated_at=?
-		WHERE run_id=?`,
+		WHERE run_id=?`
+	args := []any{
 		r.State, r.SourceKind, r.SourcePlanPath, r.SourceSpecPath,
-		r.BriefJSON, r.RevisionsJSON, r.DecisionsJSON, r.ReviewJSON, r.UpdatedAt.Unix(), r.RunID)
+		r.BriefJSON, r.RevisionsJSON, r.DecisionsJSON, r.ReviewJSON, r.UpdatedAt.Unix(), r.RunID,
+	}
+	if strings.TrimSpace(r.ConversationID) != "" {
+		query += ` AND conversation_id=?`
+		args = append(args, r.ConversationID)
+	}
+	res, err := s.db.ExecContext(ctx, query, args...)
 	if err != nil {
 		return err
 	}

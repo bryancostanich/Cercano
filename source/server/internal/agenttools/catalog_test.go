@@ -50,3 +50,53 @@ func TestBuildToolCatalog_PreservesPermissionTier(t *testing.T) {
 		t.Errorf("Read should be R, got %v", byName["Read"].Permission)
 	}
 }
+
+func TestRunCommandCatalogAndLegacyGrant(t *testing.T) {
+	reg := buildTestRegistry()
+	for _, r := range []*agenttools.Registry{reg, reg.Subset([]string{"Bash"})} {
+		found := false
+		for _, tool := range agenttools.BuildToolCatalog(r) {
+			if tool.Name == "Bash" {
+				t.Fatal("legacy name advertised")
+			}
+			if tool.Name == "RunCommand" {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatal("RunCommand not advertised")
+		}
+		tool, ok := r.Get("Bash")
+		if !ok || tool.Name() != "RunCommand" {
+			t.Fatal("legacy lookup not resolved")
+		}
+	}
+}
+
+func TestLegacyAliasIsolationAndLifecycle(t *testing.T) {
+	reg := buildTestRegistry()
+	if _, ok := reg.Subset([]string{"Read"}).Get("Bash"); ok {
+		t.Fatal("read-only grant leaked command tool")
+	}
+	if err := reg.RegisterAlias("Read", "RunCommand"); err == nil {
+		t.Fatal("alias shadowed real tool")
+	}
+	if err := reg.RegisterAlias("Other", "Missing"); err == nil {
+		t.Fatal("accepted missing target")
+	}
+	if err := reg.RegisterAlias("Bash", "Read"); err == nil {
+		t.Fatal("alias overwritten")
+	}
+	reg.Unregister("Bash")
+	if _, ok := reg.Get("RunCommand"); !ok {
+		t.Fatal("alias removal removed primary")
+	}
+	if err := reg.RegisterAlias("Bash", "RunCommand"); err != nil {
+		t.Fatal(err)
+	}
+	reg.Unregister("RunCommand")
+	if _, ok := reg.Get("Bash"); ok {
+		t.Fatal("dangling alias")
+	}
+	reg.MustRegister(agentadapter.AsTool(builtins.RunCommand(), "Bash", capabilities.Services{}))
+}

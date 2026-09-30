@@ -43,7 +43,7 @@ func (s *Server) runChatGPTLogin(req *proto.StartChatGPTLoginRequest, stream pro
 	}
 
 	np := config.CloudProfile{Name: profile, Flavor: cloudfactory.FlavorResponses, Route: cloudfactory.RouteChatGPT, Model: model, ModelPinned: strings.TrimSpace(req.GetModel()) != ""}
-	login, err := s.cfgSvc.BeginCloudLogin(ctx, np, req.GetSetActive(), reauthenticate)
+	login, err := s.cfgSvc.BeginCloudLogin(ctx, np, req.GetSetActive(), reauthenticate, req.GetCreateOnly())
 	if err != nil {
 		return sendChatGPTLoginResult(stream, false, profile, "", loginFailure(err))
 	}
@@ -72,11 +72,12 @@ func (s *Server) runChatGPTLogin(req *proto.StartChatGPTLoginRequest, stream pro
 	if err != nil {
 		return sendChatGPTLoginResult(stream, false, profile, "", loginFailure(err))
 	}
-	result, err := login.Commit(encoded)
+	result, err := login.Commit(encoded, ts.Identity)
 	if err != nil {
 		return sendChatGPTLoginResult(stream, false, profile, "", loginFailure(err))
 	}
 	if result.Reauthenticated {
+		s.persistConfig()
 		return sendChatGPTLoginResult(stream, true, profile, ts.AccountID, "")
 	}
 	isActive := result.Active

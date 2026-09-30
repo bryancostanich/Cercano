@@ -240,18 +240,10 @@ func Advance(ctx context.Context, turns []conversation.Turn, state conversation.
 	if len(live) <= cfg.VerbatimRecent {
 		return state, false, false, nil // nothing past the verbatim window
 	}
-	eligible := live[:len(live)-cfg.VerbatimRecent]
+	// Hold back the complete tool exchange whenever the verbatim cutoff lands
+	// inside it. Pair repair after cutting cannot recover evidence already lost.
+	eligible := live[:safeFreezeCount(live, len(live)-cfg.VerbatimRecent)]
 
-	// Never freeze a turn that shares the first verbatim turn's wall-clock second.
-	// FrozenThrough is a second-granularity timestamp and liveTurns keeps turns
-	// strictly after it, so a frozen turn at the same second as a live one would
-	// exclude that live turn forever (neither frozen nor live → dropped). Trimming
-	// keeps the boundary strictly below every live turn. Tool-use bursts routinely
-	// persist several turns in one second, so this case is common, not theoretical.
-	boundarySec := live[len(live)-cfg.VerbatimRecent].CreatedAt.Unix()
-	for len(eligible) > 0 && eligible[len(eligible)-1].CreatedAt.Unix() >= boundarySec {
-		eligible = eligible[:len(eligible)-1]
-	}
 	if len(eligible) == 0 {
 		return state, false, false, nil // all eligible share the verbatim window's second; wait
 	}
@@ -292,13 +284,8 @@ func Advance(ctx context.Context, turns []conversation.Turn, state conversation.
 
 	// Map the capped message boundary back to the last covered eligible turn.
 	b := turnIdx[coveredMsgs-1]
-	// Same-second trim at the capped boundary — the identical rule applied to the
-	// verbatim boundary above: never freeze a turn that shares its wall-clock
-	// second with a turn that will remain live (the next un-covered turn), or
-	// liveTurns' strict '>' compare would drop that turn forever.
-	for b >= 0 && b+1 < len(eligible) && eligible[b].CreatedAt.Unix() >= eligible[b+1].CreatedAt.Unix() {
-		b--
-	}
+	b = safeFreezeCount(eligible, b+1) - 1
+
 	if b < 0 {
 		// more=false intentional: identical input can't progress; rescheduling would spin.
 		return state, false, false, nil // capped chunk collapses into one second; wait
@@ -361,9 +348,8 @@ func Advance(ctx context.Context, turns []conversation.Turn, state conversation.
 				covered += len(seg.Messages)
 			}
 			pb := turnIdx[covered-1]
-			for pb >= 0 && pb+1 < len(eligible) && eligible[pb].CreatedAt.Unix() >= eligible[pb+1].CreatedAt.Unix() {
-				pb--
-			}
+			pb = safeFreezeCount(eligible, pb+1) - 1
+
 			if pb < 0 {
 				continue
 			}
@@ -523,4 +509,24 @@ func eligibleMessagesWithTurns(turns []conversation.Turn) ([]llm.Message, []int)
 		idxs = append(idxs, tg.idx)
 	}
 	return msgs, idxs
+}
+
+// safeFreezeCount enforces BOTH timestamp and tool-exchange boundaries. A
+// timestamp rollback can itself reopen an exchange, so converge monotonically.
+func safeFreezeCount(turns []conversation.Turn, n int) int {
+	msgs := make([]llm.Message, len(turns))
+	for i, t := range turns {
+		_ = json.Unmarshal([]byte(t.BlocksJSON), &msgs[i].Blocks)
+	}
+	for n > 0 {
+		before := n
+		n = compaction.ToolSafePrefix(msgs, n)
+		for n > 0 && n < len(turns) && turns[n-1].CreatedAt.Unix() >= turns[n].CreatedAt.Unix() {
+			n--
+		}
+		if n == before {
+			break
+		}
+	}
+	return n
 }

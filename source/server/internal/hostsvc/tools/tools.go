@@ -9,8 +9,10 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
+	"regexp"
 	"runtime"
 	"sort"
 	"strings"
@@ -21,6 +23,7 @@ import (
 	"cercano/source/server/internal/capabilities"
 	"cercano/source/server/internal/conversation"
 	"cercano/source/server/internal/dispatch"
+	"cercano/source/server/internal/dispatchhistory"
 	"cercano/source/server/internal/failurelog"
 	"cercano/source/server/internal/hostsvc/permissions"
 	"cercano/source/server/internal/inference"
@@ -52,6 +55,12 @@ type Catalog interface {
 	SetContextWindowResolver(fn func(model string, isCloud bool) int)
 	// SetFailureLog installs the sanitized failure/degradation diagnostic sink.
 	SetFailureLog(w *failurelog.Writer)
+	// SetCaptureReasoning opts dispatch history into recording plaintext model
+	// reasoning. Debugging aid, off by default.
+	SetCaptureReasoning(on bool)
+	// SetLoopCompactorFactory installs the per-dispatch synchronous history
+	// compactor factory for sub-agent tool loops. Unset = no compaction.
+	SetLoopCompactorFactory(fn func() agent.LoopCompactor)
 	// GrantedRegistry builds the least-privilege sub-registry for a dispatch.
 	// Returns the registry, the granted tool names, the ignored-unknown names,
 	// and any error (e.g. empty resulting catalog).
@@ -88,10 +97,15 @@ type Service struct {
 	// persistence.Service interface. hostsvc/persistence doesn't exist yet
 	// (Task 5); the func-value seam keeps this package from importing it, so
 	// tools depends only on the closures it is handed.
-	permBroker   permissions.Broker
-	systemPrompt func(workDir string) string
-	store        func() conversation.Store
-	persistTurn  func(ctx context.Context, convID string, m llm.Message)
+	permBroker        permissions.Broker
+	systemPrompt      func(workDir string) string
+	store             func() conversation.Store
+	persistTurn       func(ctx context.Context, convID string, m llm.Message)
+	dispatchEventSink func(context.Context, conversation.DispatchEvent) error
+	// captureReasoning records plaintext model reasoning in dispatch history.
+	// Debugging aid, off by default: reasoning restates conversation and tool
+	// content, so it is normally redacted to a byte count.
+	captureReasoning bool
 
 	// ensureSubagent creates the sub-agent conversation row. In-process this is
 	// unset and RunAgenticDispatch falls back to the store directly; the worker
@@ -108,6 +122,30 @@ type Service struct {
 
 	// failureLog records sanitized dispatch failure/degradation events. Nil disables logging.
 	failureLog *failurelog.Writer
+
+	// newLoopCompactor builds a per-dispatch synchronous compactor for the
+	// sub-agent tool loop. Sub-agent history lives only in memory, so the
+	// store-backed background generator that compacts main turns cannot serve
+	// it; this runs the same algorithm inline. A func-value seam (like
+	// contextWindowFor) so this package need not import the compaction stack.
+	// nil, or a nil return, disables compaction and the loop runs uncompacted.
+	newLoopCompactor func() agent.LoopCompactor
+}
+
+// SetLoopCompactorFactory installs the per-dispatch compactor factory. The
+// factory is called once per dispatch because compaction state (frozen
+// segment summaries) is per-conversation and must not be shared across
+// concurrent sub-agents.
+func (x *Service) SetLoopCompactorFactory(fn func() agent.LoopCompactor) {
+	x.newLoopCompactor = fn
+}
+
+// LoopCompactorFactory returns the installed per-dispatch compactor factory,
+// or nil when none is wired. Read-only observation seam for construction-parity
+// tests (the worker assembles this service itself and must install the same
+// factory the host front door does).
+func (x *Service) LoopCompactorFactory() func() agent.LoopCompactor {
+	return x.newLoopCompactor
 }
 
 // SetContextWindowResolver installs the resolver that maps a dispatch
@@ -193,15 +231,15 @@ func (x *Service) GetToolCallStore() conversation.Store {
 //
 // Returns the resolved name and true on success, or ("", false) on miss.
 func (x *Service) resolveGrantName(requested string) (string, bool) {
-	if _, ok := x.toolRegistry.Get(requested); ok {
-		return requested, true
+	if t, ok := x.toolRegistry.Get(requested); ok {
+		return t.Name(), true
 	}
 	if rest, ok := strings.CutPrefix(requested, "mcp__"); ok {
 		if idx := strings.Index(rest, "__"); idx >= 0 {
 			stripped := rest[idx+2:]
 			if stripped != "" {
-				if _, ok := x.toolRegistry.Get(stripped); ok {
-					return stripped, true
+				if t, ok := x.toolRegistry.Get(stripped); ok {
+					return t.Name(), true
 				}
 			}
 		}
@@ -259,6 +297,8 @@ func (x *Service) GrantedRegistry(tools []string) (*agenttools.Registry, []strin
 			)
 		}
 	}
+	// Preserve lookup-only compatibility names without advertising them.
+	reg = x.toolRegistry.Subset(registryToolNames(reg))
 	logGrantSuccess(reg, normalized)
 	return reg, registryToolNames(reg), ignored, nil
 }
@@ -317,7 +357,8 @@ func calledToolNames(history []llm.Message) map[string]bool {
 }
 
 // detectSuspiciousNoOp decides whether a finished agentic dispatch looks like a
-// no-op that lied about completing. It reports the HIGH-CONFIDENCE case only:
+// no-op that lied about completing. In addition to exact synthetic tools-only
+// summaries (which contain no deliverable), it reports the HIGH-CONFIDENCE case:
 // the sub-agent was granted at least one write/execute tool, called NONE of
 // them, yet returned a non-empty final answer. That is a provable
 // contradiction — a fix/migration cannot have happened without a write or exec
@@ -334,16 +375,25 @@ func suspiciousNoOpMessage(reason string) string {
 	return "sub-agent failed validation: " + reason
 }
 
+// Match only the synthetic sentence and a list of tool identifiers. A real
+// answer following or quoting the sentence must not be rejected.
+var syntheticToolSummary = regexp.MustCompile(`^I used the granted tools: [A-Za-z_][A-Za-z0-9_-]*(, [A-Za-z_][A-Za-z0-9_-]*)*\.$`)
+
 func detectSuspiciousNoOp(finalText string, called, mutating map[string]bool) (bool, string) {
+	synthetic := syntheticToolSummary.MatchString(strings.TrimSpace(finalText))
+	syntheticReason := ""
+	if synthetic {
+		syntheticReason = "returned only a synthetic tools-used summary, not a task result"
+	}
 	if len(mutating) == 0 {
-		return false, "" // no write/exec tool was granted — no contradiction possible
+		return synthetic, syntheticReason
 	}
 	if strings.TrimSpace(finalText) == "" {
 		return false, "" // no "done" claim to contradict
 	}
 	for name := range called {
 		if mutating[name] {
-			return false, "" // it used at least one write/exec tool — genuine work
+			return synthetic, syntheticReason // work happened, but still require a task result
 		}
 	}
 	granted := make([]string, 0, len(mutating))
@@ -458,7 +508,7 @@ func (x *Service) ensureSubagentConv(ctx context.Context, id, parentID, projectD
 //
 // It builds a least-privilege registry, assembles a system prompt, and runs
 // agent.RunToolLoop, returning the final text and token counts.
-func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, sel inference.Selection, model string) (dispatch.Result, error) {
+func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, sel inference.Selection, model string) (out dispatch.Result, dispatchErr error) {
 	// 1. Build the least-privilege tool registry. W/X grants are legitimate
 	// here: the dispatch call itself gated as X at the parent when the grant
 	// was write-capable, so execution implies human approval (or bypass).
@@ -556,6 +606,53 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 	if route := inference.TargetForContext(ctx, sel.Provider, inference.Call{Model: model, Tier: string(spec.Tier), FallbackTier: string(spec.FallbackTier)}); route.Profile != "" {
 		contextWindow, contextWindowKnown = route.ContextWindow, route.ContextWindowKnown
 	}
+	// Every persisted dispatch retains its evidence in the conversation DB.
+	sink := x.dispatchEventSink
+	if sink == nil && x.store != nil {
+		if store, ok := x.store().(conversation.DispatchEventStore); ok {
+			sink = store.AppendDispatchEvent
+		}
+	}
+	if sink == nil && persisted {
+		sink = func(context.Context, conversation.DispatchEvent) error {
+			return errors.New("dispatch event store unavailable")
+		}
+	}
+	tr := dispatchhistory.Begin(ctx, subConvID, sink)
+	tr.CaptureReasoning(x.captureReasoning)
+
+	ctx = dispatchhistory.WithRecorder(ctx, tr)
+	tr.DispatchStart(dispatchhistory.DispatchStartEvent{
+		Mode:               "agentic",
+		Task:               spec.Task,
+		WorkDir:            spec.WorkDir,
+		ParentConversation: spec.ConversationID,
+		Provider:           provider,
+		Model:              model,
+		Tier:               string(spec.Tier),
+		FallbackTier:       string(spec.FallbackTier),
+		IsCloud:            sel.IsCloud,
+		GrantedTools:       granted,
+		IgnoredTools:       ignored,
+		MaxIterations:      spec.MaxIterations,
+		TokenBudget:        spec.TokenBudget,
+		ContextWindow:      contextWindow,
+		ContextWindowKnown: contextWindowKnown,
+	})
+	defer func() {
+		tr.Close()
+		if n := tr.Failures(); n > 0 {
+			warning := fmt.Sprintf("Dispatch evidence incomplete: %d database writes failed.", n)
+			out.Text += "\n\n[" + warning + "]"
+			emitDispatchProgress(spec.Emit, agenttools.ProgressEvent{SubAgentID: subConvID, Kind: "error", Text: warning, IsError: true})
+			x.logDispatchFailure("dispatch.degraded", spec, subConvID, provider, model, sel.IsCloud, granted, ignored, nil, failurelog.Event{"error_class": "dispatch_persistence_failed", "failed_writes": n})
+		}
+	}()
+	// Per-dispatch compactor: state is per-conversation, never shared.
+	var loopCompactor agent.LoopCompactor
+	if x.newLoopCompactor != nil {
+		loopCompactor = x.newLoopCompactor()
+	}
 	res, err := agent.RunToolLoop(ctx, agent.ToolLoopInput{
 		Provider:           sel.Provider,
 		Model:              model,
@@ -567,9 +664,20 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 		Registry:           reg,
 		Permissions:        perms,
 		UserInput:          spec.Task,
+		PinUserInput:       true,
 		MaxIterations:      spec.MaxIterations,
+		TokenBudget:        spec.TokenBudget,
+		LoopCompactor:      loopCompactor,
+		DetectNonProgress:  true,
 		Temperature:        &greedy,
-		FlattenToolResults: true,
+		// Only mistral.rs needs the flattened tool-history workaround. Other
+		// providers support native history; synthetic assistant summaries can
+		// instead induce premature completion. Consult the current route because
+		// startup fallback can change providers inside this loop.
+		FlattenToolResultsFor: func() bool {
+			current, _ := dispatch.CurrentRoute(sel, model)
+			return !current.IsCloud && current.Provider != nil && current.Provider.Name() == "mistralrs"
+		},
 		WorkDir:            spec.WorkDir,
 		ConversationID:     subConvID, // nested dispatches link to this sub-conversation
 		PreauthorizedTools: granted,
@@ -610,10 +718,34 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 
 	if err != nil {
 		log.Printf("[dispatch] subagent done: conv=%s err=%v", subConvID, err)
+		tr.DispatchDone(dispatchhistory.DispatchDoneEvent{
+			Err:          dispatchhistory.ErrorCode(err),
+			Iterations:   res.Iterations,
+			InputTokens:  res.InputTokens,
+			OutputTokens: res.OutputTokens,
+			CalledTools:  res.CalledTools,
+		})
 		extra := failurelog.Event{}
 		addDispatchRequestBudgetFields(extra, res)
 		x.logDispatchFailure("dispatch.tool_loop_failed", spec, subConvID, provider, model, sel.IsCloud, granted, ignored, err, extra)
 		emitDispatchProgress(spec.Emit, agenttools.ProgressEvent{SubAgentID: subConvID, SubAgentParentID: spec.ConversationID, SubAgentTitle: subTitle, Kind: "error", Text: fmt.Sprintf("sub-agent failed: conv=%s err=%v", subConvID, err), GrantedTools: granted, IgnoredTools: ignored, IsError: true})
+		var le *llm.Error
+		if errors.As(err, &le) && le.Class == llm.ErrTokenBudgetExhausted {
+			handoff := res.FinalText
+			if handoff == "" {
+				handoff = "Partial work — task not completed; review the recorded transcript."
+			}
+			subID := ""
+			location := "Persistent transcript unavailable in this environment."
+			if persisted {
+				subID = subConvID
+				location = fmt.Sprintf("Partial transcript: sub-conversation %s (%d model responses).", subID, res.Iterations)
+			}
+			text := handoff + "\n" + location
+			emitDispatchProgress(spec.Emit, agenttools.ProgressEvent{SubAgentID: subConvID, Kind: "error", Text: text, IsError: true})
+			return dispatch.Result{Text: text, SubConversationID: subID, Model: model, Provider: provider, IsCloud: sel.IsCloud, GrantedTools: granted, IgnoredTools: ignored}, fmt.Errorf("%w\n%s", err, text)
+		}
+
 		return dispatch.Result{}, err
 	}
 	log.Printf("[dispatch] subagent done: conv=%s route=%s provider=%s model=%s tier=%s iterations=%d tokens_in=%d tokens_out=%d",
@@ -654,6 +786,7 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 	if suspicious {
 		log.Printf("[dispatch] subagent SUSPICIOUS no-op: conv=%s granted_write=%v called=%v reason=%q",
 			subConvID, sortedKeys(mutating), sortedKeys(called), reason)
+		tr.DispatchDone(dispatchhistory.DispatchDoneEvent{Err: "suspicious_noop", Iterations: res.Iterations, InputTokens: res.InputTokens, OutputTokens: res.OutputTokens, CalledTools: res.CalledTools})
 		x.logDispatchFailure("dispatch.degraded", spec, subConvID, provider, model, sel.IsCloud, granted, ignored, nil, failurelog.Event{
 			"error_class":        "suspicious_noop",
 			"message":            suspiciousNoOpMessage(reason),
@@ -689,6 +822,12 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 		})
 	}
 
+	tr.DispatchDone(dispatchhistory.DispatchDoneEvent{
+		Iterations:   res.Iterations,
+		InputTokens:  res.InputTokens,
+		OutputTokens: res.OutputTokens,
+		CalledTools:  res.CalledTools,
+	})
 	route := llm.ServingRoute{Profile: sel.Profile, Destination: string(sel.Destination), ContextWindow: contextWindow, ContextWindowKnown: contextWindowKnown}
 	if res.Route != nil {
 		route = *res.Route
@@ -730,6 +869,7 @@ func buildSubagentSystemPrompt(workDir string, grantedTools []string) string {
 	var b strings.Builder
 	b.WriteString("You are a bounded Cercano sub-agent. Complete only the delegated task.\n\n")
 	b.WriteString("Rules:\n")
+	b.WriteString("- The first user message is the original task. Its scope and constraints remain authoritative; execution-history summaries do not replace or relax them.\n")
 	b.WriteString("- Use only the tools provided in this request. Do not mention or call unavailable tools.\n")
 	b.WriteString("- Do not delegate to another agent. Do not call dispatch/workflow.\n")
 	b.WriteString("- If the answer depends on repository contents, call Read, Grep, Glob, or another granted inspection tool before answering.\n")
@@ -841,4 +981,17 @@ func (x *Service) InvokeCapability(ctx context.Context, name string, argsJSON js
 		return nil, true, "marshal result: " + err.Error()
 	}
 	return b, false, ""
+}
+
+// SetCaptureReasoning opts dispatch history into recording plaintext model
+// reasoning. Reasoning explains why a model chose a tool call, which cannot be
+// recovered from the tool calls themselves; it is off by default because it
+// restates conversation and tool content on disk.
+func (x *Service) SetCaptureReasoning(on bool) {
+	x.captureReasoning = on
+}
+
+// SetDispatchEventSink injects the acknowledged host proxy for worker dispatches.
+func (x *Service) SetDispatchEventSink(fn func(context.Context, conversation.DispatchEvent) error) {
+	x.dispatchEventSink = fn
 }

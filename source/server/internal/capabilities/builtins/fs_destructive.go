@@ -2,7 +2,6 @@ package builtins
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -19,22 +18,35 @@ type rmFileCap struct{}
 // confirms even under tiered bypass.
 func RmFile() capabilities.Capability { return rmFileCap{} }
 
-func (rmFileCap) Name() string                  { return "rm_file" }
-func (rmFileCap) Tier() capabilities.Tier        { return capabilities.TierX }
-func (rmFileCap) Surfaces() capabilities.Surface { return capabilities.SurfaceAgent | capabilities.SurfaceMCP }
+func (rmFileCap) Name() string            { return "rm_file" }
+func (rmFileCap) Tier() capabilities.Tier { return capabilities.TierX }
+func (rmFileCap) Surfaces() capabilities.Surface {
+	return capabilities.SurfaceAgent | capabilities.SurfaceMCP
+}
 func (rmFileCap) Description() string {
 	return "Delete a single file (NOT a directory; refuses dirs for safety). Args: {path: string}."
 }
 func (rmFileCap) Schema() capabilities.Schema {
-	return capabilities.Schema(`{"type":"object","required":["path"],"properties":{"path":{"type":"string"}}}`)
+	return capabilities.Schema(`{
+	"type": "object",
+	"required": [
+		"path"
+	],
+	"properties": {
+		"path": {
+			"type": "string"
+		}
+	},
+	"additionalProperties": false
+}`)
 }
 
 func (rmFileCap) Execute(ctx context.Context, call *capabilities.Call) (*capabilities.Result, error) {
 	var a struct {
 		Path string `json:"path"`
 	}
-	if err := json.Unmarshal(call.Args, &a); err != nil {
-		return nil, fmt.Errorf("rm_file: parse args: %w", err)
+	if err := decodeDeclaredArguments(call.Args, rmFileCap{}, &a); err != nil {
+		return nil, err
 	}
 	if a.Path == "" {
 		return nil, errors.New("rm_file: path is required")

@@ -3,6 +3,7 @@
 package routingwire
 
 import (
+	"cercano/source/server/pkg/accountidentity"
 	"cercano/source/server/pkg/config"
 	"cercano/source/server/pkg/proto"
 )
@@ -30,7 +31,8 @@ func ApplyChoices(p *config.CloudProfile, choices *proto.ProfileModelChoices) er
 	return nil
 }
 func Profile(p config.CloudProfile, models config.ModelProfiles) *proto.CloudProfileInfo {
-	out := &proto.CloudProfileInfo{Name: p.Name, Flavor: p.Flavor, Backend: p.Backend, BaseUrl: p.BaseURL, Route: p.Route, Provider: p.Provider, Region: p.Region, AwsProfile: p.AWSProfile, ModelChoices: Choices(p), EffectiveQualityModels: map[string]string{}}
+	identity := p.AccountIdentity.Normalized()
+	out := &proto.CloudProfileInfo{AccountEmail: identity.Email, AccountDisplayName: identity.Name, Name: p.Name, Flavor: p.Flavor, Backend: p.Backend, BaseUrl: p.BaseURL, Route: p.Route, Provider: p.Provider, Region: p.Region, AwsProfile: p.AWSProfile, ModelChoices: Choices(p), EffectiveQualityModels: map[string]string{}}
 	recommended := p.Clone()
 	recommended.TierOverrides = nil
 	out.RecommendedQualityModels = map[string]string{}
@@ -41,12 +43,12 @@ func Profile(p config.CloudProfile, models config.ModelProfiles) *proto.CloudPro
 	return out
 }
 func DecodeProfile(p *proto.CloudProfileInfo) (config.CloudProfile, error) {
-	out := config.CloudProfile{Name: p.GetName(), Flavor: p.GetFlavor(), Backend: p.GetBackend(), BaseURL: p.GetBaseUrl(), Route: p.GetRoute(), Provider: p.GetProvider(), Region: p.GetRegion(), AWSProfile: p.GetAwsProfile()}
+	out := config.CloudProfile{AccountIdentity: (accountidentity.Identity{Email: p.GetAccountEmail(), Name: p.GetAccountDisplayName()}).Normalized(), Name: p.GetName(), Flavor: p.GetFlavor(), Backend: p.GetBackend(), BaseURL: p.GetBaseUrl(), Route: p.GetRoute(), Provider: p.GetProvider(), Region: p.GetRegion(), AWSProfile: p.GetAwsProfile()}
 	err := ApplyChoices(&out, p.GetModelChoices())
 	return out, err
 }
 func Assignments(c config.Config) *proto.RoutingAssignments {
-	out := &proto.RoutingAssignments{Primary: c.ActiveCloudProfile, PrimaryBackup: c.BackupCloudProfile, Secondary: c.SecondaryCloudProfile, SecondaryBackup: c.SecondaryBackupCloudProfile, SecondaryRedirect: string(c.SecondaryRedirect), LocalRedirect: string(c.LocalRedirect), Tasks: map[string]*proto.TaskModelAssignment{}}
+	out := &proto.RoutingAssignments{Primary: c.ActiveCloudProfile, PrimaryBackup: c.BackupCloudProfile, PrimaryBackups: c.PrimaryBackups(), Secondary: c.SecondaryCloudProfile, SecondaryBackup: c.SecondaryBackupCloudProfile, SecondaryRedirect: string(c.SecondaryRedirect), LocalRedirect: string(c.LocalRedirect), Tasks: map[string]*proto.TaskModelAssignment{}}
 	for task, a := range c.TaskAssignments {
 		out.Tasks[string(task)] = &proto.TaskModelAssignment{Destination: string(a.Destination), Quality: string(a.Quality)}
 	}
@@ -56,7 +58,12 @@ func ApplyAssignments(c *config.Config, p *proto.RoutingAssignments) {
 	if p == nil {
 		return
 	}
-	c.ActiveCloudProfile, c.BackupCloudProfile = p.Primary, p.PrimaryBackup
+	c.ActiveCloudProfile = p.Primary
+	backups := p.PrimaryBackups
+	if len(backups) == 0 && p.PrimaryBackup != "" {
+		backups = []string{p.PrimaryBackup}
+	}
+	c.SetPrimaryBackups(backups)
 	c.SecondaryCloudProfile, c.SecondaryBackupCloudProfile = p.Secondary, p.SecondaryBackup
 	c.SecondaryRedirect, c.LocalRedirect = config.Destination(p.SecondaryRedirect), config.Destination(p.LocalRedirect)
 	c.TaskAssignments = map[config.Task]config.TaskAssignment{}

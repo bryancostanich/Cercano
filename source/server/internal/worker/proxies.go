@@ -3,11 +3,13 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
 
 	"cercano/source/server/internal/agent"
+	"cercano/source/server/internal/conversation"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/runner"
 	proto "cercano/source/server/pkg/proto"
@@ -421,19 +423,45 @@ func (pf *streamPersistFunc) persist(m llm.Message) {
 }
 
 // streamSubagentPersist proxies a worker-side dispatch's sub-agent conversation
-// creation and turn persistence to the host over the worker stream. Fire-and-
-// forget/best-effort, same policy as streamPersistFunc: the sub-agent still runs
-// and tabs even if a host store write fails. Sub-agent turns carry their own
+// creation, turn persistence, and dispatch-evidence appends to the host over
+// the worker stream. Sub-agent rows/turns are fire-and-forget/best-effort (the
+// sub-agent still runs and tabs even if a host store write fails), but dispatch
+// evidence is acknowledged: appendEvent blocks for the host's
+// DispatchEventResponse, so the dispatch loop never treats evidence as recorded
+// before the host's durable write completed. Sub-agent turns carry their own
 // conversation id so the host writes them to the sub-conversation, not the
 // parent turn.
 type streamSubagentPersist struct {
 	sndr *sender
 	gen  uint64
+
+	// Acknowledged dispatch-event round-trips (request id → waiting caller).
+	next    atomic.Uint64
+	mu      sync.Mutex
+	pending map[uint64]chan *proto.DispatchEventResponse
+
+	// sendFn overrides the stream send for dispatch events. Production leaves
+	// it nil and uses sndr; tests set it to answer requests without standing
+	// up a gRPC stream.
+	sendFn func(*proto.WorkerToHost)
+}
+
+func newStreamSubagentPersist(sndr *sender, gen uint64) *streamSubagentPersist {
+	return &streamSubagentPersist{sndr: sndr, gen: gen, pending: map[uint64]chan *proto.DispatchEventResponse{}}
+}
+
+// emit puts one message on the wire via the test hook when set, else the sender.
+func (s *streamSubagentPersist) emit(m *proto.WorkerToHost) {
+	if s.sendFn != nil {
+		s.sendFn(m)
+		return
+	}
+	s.sndr.send(m)
 }
 
 // ensure satisfies tools.Service's ensureSubagent seam.
 func (s *streamSubagentPersist) ensure(_ context.Context, id, parentID, projectDir, model string, grantedTools []string) error {
-	s.sndr.send(&proto.WorkerToHost{Msg: &proto.WorkerToHost_EnsureSubagent{EnsureSubagent: &proto.EnsureSubagentConversation{
+	s.emit(&proto.WorkerToHost{Msg: &proto.WorkerToHost_EnsureSubagent{EnsureSubagent: &proto.EnsureSubagentConversation{
 		Id:           id,
 		ParentId:     parentID,
 		ProjectDir:   projectDir,
@@ -451,7 +479,7 @@ func (s *streamSubagentPersist) persistTurn(_ context.Context, convID string, m 
 	if err != nil {
 		return // best-effort
 	}
-	s.sndr.send(&proto.WorkerToHost{Msg: &proto.WorkerToHost_Persist{Persist: &proto.PersistTurn{
+	s.emit(&proto.WorkerToHost{Msg: &proto.WorkerToHost_Persist{Persist: &proto.PersistTurn{
 		Message:        msg,
 		Gen:            s.gen,
 		ConversationId: convID,
@@ -465,6 +493,77 @@ func subagentPersistTurn(sp *streamSubagentPersist) func(ctx context.Context, co
 		return nil
 	}
 	return sp.persistTurn
+}
+
+// appendEvent proxies one append-only dispatch-evidence write to the host-owned
+// store over the worker stream and blocks for the acknowledged
+// DispatchEventResponse. Unlike ensure/persistTurn this is NOT fire-and-forget:
+// the caller proceeds only after the host reports the durable write completed.
+// Cancellation-safe — a turn cancel unwinds the caller with the context error.
+func (s *streamSubagentPersist) appendEvent(ctx context.Context, ev conversation.DispatchEvent) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	id := s.next.Add(1)
+	ch := make(chan *proto.DispatchEventResponse, 1)
+	s.mu.Lock()
+	if s.pending == nil {
+		s.pending = map[uint64]chan *proto.DispatchEventResponse{}
+	}
+	s.pending[id] = ch
+	s.mu.Unlock()
+	defer func() { s.mu.Lock(); delete(s.pending, id); s.mu.Unlock() }()
+
+	var ts int64
+	if !ev.Timestamp.IsZero() {
+		ts = ev.Timestamp.Unix()
+	}
+	s.emit(&proto.WorkerToHost{Msg: &proto.WorkerToHost_DispatchEvent{DispatchEvent: &proto.DispatchEventRequest{
+		Id:             id,
+		ConversationId: ev.ConversationID,
+		Seq:            ev.Seq,
+		Kind:           ev.Kind,
+		Iteration:      int32(ev.Iteration),
+		TimestampUnix:  ts, // 0 = host stamps now
+		PayloadJson:    ev.PayloadJSON,
+	}}})
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case resp := <-ch:
+		if e := resp.GetError(); e != "" {
+			return errors.New(e)
+		}
+		return nil
+	}
+}
+
+// deliverDispatchEvent routes one host acknowledgment to its waiting caller.
+// Unknown ids (late/bogus deliveries) are dropped — never a panic or a wedge.
+func (s *streamSubagentPersist) deliverDispatchEvent(resp *proto.DispatchEventResponse) {
+	if resp == nil {
+		return
+	}
+	s.mu.Lock()
+	ch := s.pending[resp.GetId()]
+	s.mu.Unlock()
+	if ch != nil {
+		select {
+		case ch <- resp:
+		default:
+		}
+	}
+}
+
+// subagentDispatchEventSink returns sp's appendEvent seam for a
+// tools.Service.SetDispatchEventSink-style wiring, or nil when sp is nil
+// (tests / no proxy — dispatch evidence recording is then not installed).
+func subagentDispatchEventSink(sp *streamSubagentPersist) func(ctx context.Context, ev conversation.DispatchEvent) error {
+	if sp == nil {
+		return nil
+	}
+	return sp.appendEvent
 }
 
 // ─── preloadedHistory ─────────────────────────────────────────────────────────

@@ -3,7 +3,6 @@ package tools
 import (
 	"context"
 	"fmt"
-	"os/exec"
 )
 
 // CustomValidator runs a user-supplied shell command via 'sh -c' in workDir.
@@ -17,11 +16,12 @@ func NewCustomValidator(command string) *CustomValidator {
 }
 
 func (v *CustomValidator) Validate(ctx context.Context, workDir string) (Decision, error) {
-	cmd := exec.CommandContext(ctx, "sh", "-c", v.command)
-	cmd.Dir = workDir
-	out, err := cmd.CombinedOutput()
+	out, ok, err := runValidator(ctx, customValidateTimeout, workDir, "sh", "-c", v.command)
 	if err != nil {
-		return Failed, fmt.Errorf("custom validator failed: %s\n%s", err, cleanOutput(string(out)))
+		return Failed, fmt.Errorf("custom validator failed: %s\n%s", err, out)
+	}
+	if !ok {
+		return Failed, fmt.Errorf("custom validator failed: %s\n%s", "non-zero exit", out)
 	}
 	return Passed, nil
 }

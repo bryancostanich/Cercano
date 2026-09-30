@@ -39,7 +39,7 @@ func TestCaptureDecision_PersistsStructuredDecision(t *testing.T) {
 			"reversibility":"moderate",
 			"stop_required":false
 		}`),
-		Svc: capabilities.Services{Conversations: store},
+		Svc: capabilities.Services{Autonomy: store},
 	})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -88,7 +88,7 @@ func TestCaptureDecision_AppendsInOrder(t *testing.T) {
 	if err := store.SaveAutonomyRun(ctx, conversation.AutonomyRun{ConversationID: "conv-order", State: "running", DecisionsJSON: string(firstJSON)}); err != nil {
 		t.Fatalf("SaveAutonomyRun: %v", err)
 	}
-	_, err = CaptureDecision().Execute(ctx, &capabilities.Call{ConversationID: "conv-order", Args: minimalDecisionArgs("second"), Svc: capabilities.Services{Conversations: store}})
+	_, err = CaptureDecision().Execute(ctx, &capabilities.Call{ConversationID: "conv-order", Args: minimalDecisionArgs("second"), Svc: capabilities.Services{Autonomy: store}})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}

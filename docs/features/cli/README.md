@@ -14,6 +14,10 @@ Cercano today is consumed via MCP (Claude Code, Cursor) and IDE extensions (VS C
 
 **What does NOT change:** existing MCP server mode (`cercano --mcp`), VS Code / Zed extensions, existing SmartRouter / Coordinator / engine layer / Ollama (enriched, not replaced).
 
+## Multiple cloud accounts
+
+**Cloud → provider → Add another account** creates a separately named account using the existing authentication flow. Credentials are isolated by profile; adding an account does not replace an existing sign-in or change Primary. **Routing → Primary** offers an ordered backup list with add, remove, and move controls, including multiple accounts from the same provider. Quota exhaustion advances through the list and stays on the next account without cooldown-based return. Configuration and execution details are in [Cloud routing](../../cloud-routing.md).
+
 ## Design / Approach
 
 ### Design principles (load-bearing)
@@ -256,3 +260,40 @@ Authentication prompts queue behind existing confirmations. Concurrent requests 
 A disconnect preserves the pending decision and its captured retry text, like existing tool confirmations. After reconnect, a lost request is marked stale: choosing login or fallback explicitly starts a fresh turn rather than approving an old waiter. Late login events cannot restart canceled work. If part of a response has already been emitted, the CLI does not silently replay it; follow the recovery error with an explicit new request.
 
 Programmatic clients that cannot answer prompts should use the noninteractive API, which returns an error instead of waiting. Host, worker, and CLI upgrades must be compatible; unsupported recovery is an error, not permission to fall back silently.
+
+## Token Metrics (`/config`)
+
+`/config` has an eighth **Token Metrics** tab, immediately before Context. With the tab strip focused, press
+**8**, or cycle with left/right arrows; press **Enter** to focus the page.
+This page requires both the updated CLI and agent (`GetTokenMetrics` RPC).
+A running older CLI will not gain the tab until it is rebuilt/relaunched; an
+older agent returns a query error rather than fabricated zero totals.
+
+- Use up/down to select a control, Enter to edit text, and left/right or Enter
+  to cycle date presets or the record population. Enter applies edited filters.
+  `r` refreshes; Page Up/Page Down scroll; Shift+Tab returns to the tab strip.
+- Date presets are Today, Past 7 days, Past 30 days, All time, and custom
+  inclusive calendar dates. The visible IANA timezone controls day boundaries,
+  including daylight-saving transitions. If viewer-zone detection fails, the
+  page explicitly uses UTC and lets you edit it.
+- Provider/model/source filters use `*` for all and `?` for unknown attribution.
+  Use `=literal` to match a reserved value (for example `=*`). Source selects
+  the reporter when viewing external reports.
+- Internal inference attempts are the primary population. External reports
+  are separate: **never add the two populations together**. Legacy telemetry
+  and context-window estimates are excluded from both new summaries.
+- Input/output counts are reported usage, not estimates. Missing counts stay
+  unknown; incomplete usage and unknown attribution have separate counts.
+  Cache/reasoning categories are subsets and are not added to input/output.
+- Graphs show bounded calendar buckets (widened for long ranges) and the top
+  50 provider/model values. Totals include all matching records, not only the
+  visible breakdown values. Empty buckets mean **no records**, not proven zero
+  consumption. Current and incomplete buckets are labeled.
+- The page refreshes every five seconds while open, except during filter edits.
+  Global health shows pending writes, retries, failures, loss/uncertainty, last
+  persistence, and known coverage gaps. Historical pending snapshots are
+  conservatively treated as gaps; exact gap dates are not available.
+
+Full inference-path coverage certification and final cutover acceptance remain
+separate work in the token-accounting plan. The page discloses these limitations
+and SDK counter-presence limitations; it is not a billing-grade report.

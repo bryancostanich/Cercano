@@ -35,7 +35,7 @@ func TestRequestAutonomousExecution_ExecuteStartsAutonomousForApprovedPlan(t *te
 	}
 	var enteredConv, enteredName string
 	svc := capabilities.Services{
-		Conversations: store,
+		Autonomy: store,
 		EnterProfile: func(convID, name string) error {
 			enteredConv = convID
 			enteredName = name
@@ -101,8 +101,8 @@ func TestRequestAutonomousExecution_RejectsExistingActiveRun(t *testing.T) {
 		ConversationID: "conv-active",
 		Args:           []byte(`{"goal":"second"}`),
 		Svc: capabilities.Services{
-			Conversations: store,
-			EnterProfile:  func(string, string) error { return nil },
+			Autonomy:     store,
+			EnterProfile: func(string, string) error { return nil },
 		},
 	})
 	if err == nil || !strings.Contains(err.Error(), "already active") {

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"cercano/source/server/internal/reasoningexperiment"
 	"cercano/source/server/internal/routingwire"
 	"cercano/source/server/internal/runtimecontrol"
 	"context"
@@ -149,10 +150,9 @@ type Server struct {
 	// Two runners coexist so the front door can pick per turn. inProcessRunner is
 	// always built (NewServer / SetPermissions) and is the embedded runnersvc.Core
 	// the test suite constructs. workerRunner is nil until SelectExecutionMode
-	// picks worker mode; when non-nil, a turn that touches NO host-side MCP tool
-	// runs in a child process. MCP-involving turns fall back to inProcessRunner
-	// (the worker excludes host-side MCP tools) — see hasMCPTools + the per-turn
-	// pick in streamProcessRequestWithToolLoop.
+	// picks worker mode; when non-nil, every turn runs in a child process —
+	// including MCP-involving turns, whose tools are proxied back to the host
+	// (SetMCPBridge) rather than duplicated in the worker.
 	inProcessRunner runnersvc.TurnRunner // in-process turn execution; rebuilt when perms arrive
 	workerRunner    runnersvc.TurnRunner // worker-process execution; nil unless worker mode selected
 
@@ -275,11 +275,11 @@ func (s *Server) ToolRegistry() *agenttools.Registry { return s.toolSvc.Registry
 func (s *Server) InstallCapabilities() {
 	cfgSnapshot := s.cfgSvc.Get()
 	toolstack.InstallCapabilities(s.toolSvc, toolstack.CapDeps{
-		Cloud:         s.providerSvc.Cloud(),
-		Open:          s.providerSvc.Open(),
-		Config:        &cfgSnapshot,
-		Conversations: s.persistSvc.Store(),
-		CtxLoader:     s.persistSvc.ContextLoader(),
+		Cloud:     s.providerSvc.Cloud(),
+		Open:      s.providerSvc.Open(),
+		Config:    &cfgSnapshot,
+		Autonomy:  s.persistSvc.Store(),
+		CtxLoader: s.persistSvc.ContextLoader(),
 		// suggest_plan enters planning mode via the profile broker once the user
 		// approves the suggestion at the confirm gate.
 		EnterProfile: func(convID, name string) error {
@@ -289,6 +289,13 @@ func (s *Server) InstallCapabilities() {
 		// user approves at the confirm gate. Same drain+child-stop path as the
 		// ShutdownAgent RPC; the CLI reconnect loop auto-launches a fresh agent.
 		RestartRuntime: s.restartRuntimeTool,
+		ReasoningDiagnostic: func(ctx context.Context, spec reasoningexperiment.Spec) (reasoningexperiment.Report, error) {
+			svc, ok := s.providerSvc.(reasoningexperiment.Service)
+			if !ok {
+				return reasoningexperiment.Report{}, fmt.Errorf("reasoning diagnostic unavailable")
+			}
+			return svc.RunReasoningDiagnostic(ctx, spec)
+		},
 		RestartAgent: func(reason string) error {
 			log.Printf("restart_agent capability accepted: %s", reason)
 			s.scheduleSelfShutdown()
@@ -857,6 +864,7 @@ func (s *Server) UpsertCloudProfile(ctx context.Context, req *proto.UpsertCloudP
 	c := s.cfgSvc.Get()
 	np, _ := c.Profile(name)
 	np.Name = name
+	previous := np.Clone()
 	if structure := req.GetStructure(); structure != nil {
 		np.Flavor = structure.Flavor
 		np.Backend = structure.Backend
@@ -888,6 +896,11 @@ func (s *Server) UpsertCloudProfile(ctx context.Context, req *proto.UpsertCloudP
 			np.AWSProfile = req.GetAwsProfile()
 		}
 	}
+	// A different connection/auth path must not inherit the old sign-in label.
+	if np.Flavor != previous.Flavor || np.Route != previous.Route || np.BaseURL != previous.BaseURL || np.Backend != previous.Backend || np.Provider != previous.Provider {
+		np.AccountIdentity.Email = ""
+		np.AccountIdentity.Name = ""
+	}
 	if !knownFlavor(np.Flavor) {
 		return &proto.UpsertCloudProfileResponse{Error: fmt.Sprintf("unknown flavor %q", np.Flavor)}, nil
 	}
@@ -899,7 +912,24 @@ func (s *Server) UpsertCloudProfile(ctx context.Context, req *proto.UpsertCloudP
 	if err := routingwire.ApplyChoices(&np, req.ModelChoices); err != nil {
 		return &proto.UpsertCloudProfileResponse{Error: err.Error()}, nil
 	}
-	s.cfgSvc.UpsertProfile(np)
+	if req.GetCreateOnly() {
+		var collision error
+		err := s.cfgSvc.Mutate(func(current *config.Config) {
+			if _, exists := current.Profile(name); exists {
+				collision = fmt.Errorf("account %q already exists", name)
+				return
+			}
+			current.CloudProfiles = append(current.CloudProfiles, np.Clone())
+		})
+		if err != nil {
+			return &proto.UpsertCloudProfileResponse{Error: err.Error()}, nil
+		}
+		if collision != nil {
+			return &proto.UpsertCloudProfileResponse{Error: collision.Error()}, nil
+		}
+	} else {
+		s.cfgSvc.UpsertProfile(np)
+	}
 	if c.ReferencesProfile(name) {
 		if err := s.rebuildCloud(); err != nil {
 			// active is set, but the provider couldn't be built — report it, keep going.
@@ -979,6 +1009,18 @@ func (s *Server) SetRetentionSweeper(sw *retention.Sweeper) { s.persistSvc.SetRe
 // SetBuildVersion records the binary version for generated metadata such as
 // trajectory exports. Empty versions fall back to "dev" at point of use.
 func (s *Server) SetBuildVersion(v string) { s.buildVersion = strings.TrimSpace(v) }
+
+// SetLoopCompactorFactory attaches the per-dispatch synchronous compactor
+// factory used by sub-agent tool loops. Main turns compact asynchronously via
+// the store-backed generator (SetCompactionGenerator); sub-agent history lives
+// only in memory and is never read back, so it needs an inline pass running
+// the same algorithm. The front door supplies the factory because it owns the
+// summarizer and compaction config.
+func (s *Server) SetLoopCompactorFactory(fn func() agent.LoopCompactor) {
+	if s.toolSvc != nil {
+		s.toolSvc.SetLoopCompactorFactory(fn)
+	}
+}
 
 // SetCompactionGenerator attaches the background compaction scheduler so that
 // /config compaction-enabled true|false flips it at runtime without a restart.
@@ -1072,6 +1114,9 @@ func NewServer(a *agent.Agent, router RouterCloudUpdater, coordinator *loop.ADKC
 		s.persistSvc.PersistTurn,
 	)
 	s.toolSvc.SetFailureLog(failureLog)
+	// Read at wiring time: dispatch reasoning capture is a debugging opt-in, not
+	// a hot-reloaded setting, so a config edit takes effect on the next start.
+	s.toolSvc.SetCaptureReasoning(s.cfgSvc.Get().CaptureDispatchReasoning)
 	// Wire the dispatch pre-flight context-window resolver. Local sub-agents run
 	// on the managed llama-server; a cloud sub-agent's window we don't track, so
 	// return 0 to disable the guard (the provider's own overflow error remains
@@ -1154,13 +1199,14 @@ func (s *Server) runnerDeps() runnersvc.Deps {
 //     ALONGSIDE the in-process runner. The front door then picks per turn:
 //     turns that touch no host-side MCP tool run in the worker (a crash takes
 //     down only that turn's process; the host survives — see
-//     TestWorker_CrashMidTurnIsIsolated); MCP-involving turns fall back to
-//     in-process because the worker excludes host-side MCP tools.
+//     TestWorker_CrashMidTurnIsIsolated). MCP-involving turns run there too:
+//     host MCP tools are advertised into the worker and invoked back on the
+//     host over the turn stream.
 //
-// The per-turn pick (not a startup registry snapshot) is deliberate: MCP servers
-// connect in the BACKGROUND after this method runs, and AddMcpServer can register
-// tools at runtime — so a one-time check here would see zero MCP tools even when
-// servers are configured. hasMCPTools reads the live registry at turn time.
+// MCP advertisement happens per turn (not as a startup snapshot) for the same
+// reason the runner pick did: MCP servers connect in the BACKGROUND after this
+// method runs, and AddMcpServer can register tools at runtime — so a one-time
+// snapshot would advertise nothing even when servers are configured.
 //
 // Called from cmd/cercano/main.go's server wiring AFTER the real config,
 // permissions, and secrets are injected — so production arms worker mode while
@@ -1193,9 +1239,77 @@ func (s *Server) SelectExecutionMode() {
 		s.turnModelEvidence, // host-resolved capability evidence for every model the turn might address
 		s.restartRuntimeTool,
 	)
+	// Bridge host MCP tools into the worker. The host keeps sole ownership of
+	// every MCP subprocess, its ready-state machine and its restart semantics;
+	// the worker gets proxy tools that call back over the turn stream. Both
+	// closures read the LIVE registry per call, so servers that connect in the
+	// background or are added at runtime are picked up without a restart.
+	if bridge, ok := s.workerRunner.(worker.McpBridgeSetter); ok {
+		bridge.SetMCPBridge(s.advertiseMCPTools, s.callMCPTool)
+	}
+
+	// Wire the host conversation store as the autonomy ledger the worker's
+	// autonomous-mode capabilities proxy to over the turn stream. The ledger is
+	// durable, user-visible state, so it stays host-owned; the worker never
+	// opens SQLite.
+	if ledger, ok := s.workerRunner.(worker.AutonomyLedgerSetter); ok {
+		ledger.SetAutonomyLedger(worker.HostAutonomyLedger(s.persistSvc.Store()))
+	}
+
+	if recorder, ok := s.workerRunner.(worker.DispatchEventSinkSetter); ok {
+		if store, ok := s.persistSvc.Store().(conversation.DispatchEventStore); ok {
+			recorder.SetDispatchEventSink(worker.HostDispatchEventSink(store))
+		}
+	}
+
 	s.configureWorkerAccounting()
 	log.Printf("[server] execution mode: worker (turns run in isolated child processes; " +
-		"MCP-involving turns fall back to in-process — worker MCP proxying is a future refinement)")
+		"host MCP tools are proxied into the worker)")
+}
+
+// advertiseMCPTools snapshots the live MCP-origin tools for a worker turn.
+func (s *Server) advertiseMCPTools() []worker.McpToolAdvert {
+	if s.toolSvc == nil || s.toolSvc.Registry() == nil {
+		return nil
+	}
+	var out []worker.McpToolAdvert
+	for _, t := range s.toolSvc.Registry().All() {
+		if agenttools.OriginOf(t) != agenttools.OriginMCP {
+			continue
+		}
+		out = append(out, worker.McpToolAdvert{
+			Name:        t.Name(),
+			Description: t.Description(),
+			Schema:      t.Schema(),
+			Destructive: agenttools.IsDestructive(t),
+		})
+	}
+	return out
+}
+
+// callMCPTool invokes one MCP tool on behalf of a worker and returns the
+// marshalled agenttools.Result. Resolution happens against the live registry at
+// call time, so a server restarted mid-turn is picked up and a removed one
+// yields a clean error the model can act on.
+func (s *Server) callMCPTool(ctx context.Context, name string, args json.RawMessage) (json.RawMessage, error) {
+	if s.toolSvc == nil || s.toolSvc.Registry() == nil {
+		return nil, fmt.Errorf("mcp tool %q unavailable: no tool registry", name)
+	}
+	t, ok := s.toolSvc.Registry().Get(name)
+	if !ok {
+		return nil, fmt.Errorf("mcp tool %q is no longer registered", name)
+	}
+	if agenttools.OriginOf(t) != agenttools.OriginMCP {
+		// Refuse to run a non-MCP tool through the MCP path: the worker has its
+		// own built-ins, and honoring this would let a stale advertisement reach
+		// a first-party tool under MCP naming.
+		return nil, fmt.Errorf("tool %q is not an MCP tool", name)
+	}
+	res, err := t.Execute(ctx, args)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(res)
 }
 
 // pickTurnRunner chooses the runner for THIS turn. Default: the in-process
@@ -1204,18 +1318,19 @@ func (s *Server) SelectExecutionMode() {
 // MCP tools, so an MCP-involving turn must run in-process to keep them. One
 // if-check on the hot path; no logging (the mode was logged once at selection).
 func (s *Server) pickTurnRunner() runnersvc.TurnRunner {
-	if s.workerRunner != nil && !s.hasMCPTools() {
+	if s.workerRunner != nil {
 		return s.workerRunner
 	}
 	return s.inProcessRunner
 }
 
 // hasMCPTools reports whether the host tool registry currently holds any
-// MCP-origin tool. Called per turn to route MCP-involving turns to the
-// in-process runner (the worker excludes host-side MCP tools). The registry read
-// is cheap and concurrency-safe (agenttools.Registry guards All() with an
-// RWMutex), so a concurrent AddMcpServer at worst yields a momentarily stale
-// answer — self-correcting on the next turn.
+// MCP-origin tool. It no longer influences runner selection — host MCP tools are
+// proxied into the worker, so MCP-involving turns keep their process isolation.
+// Retained as the canonical live-registry query (advertiseMCPTools applies the
+// same origin filter). The registry read is cheap and concurrency-safe
+// (agenttools.Registry guards All() with an RWMutex), so a concurrent
+// AddMcpServer at worst yields a momentarily stale answer.
 func (s *Server) hasMCPTools() bool {
 	if s.toolSvc == nil || s.toolSvc.Registry() == nil {
 		return false
@@ -2963,7 +3078,7 @@ type loopEnv struct {
 func buildToolLoopSystem(env loopEnv, steering, dirSnapshot, projectContext string) string {
 	var b strings.Builder
 	b.WriteString("You are Cercano, an agentic coding assistant operating in a terminal.\n\n")
-	b.WriteString("A note on tool naming: depending on your cloud route, some tools in your schema may appear under a host prefix like `mcp__oc__Read` instead of plain `Read`. That prefix is a wire-level routing artifact from the provider (e.g. an OpenCode/Meridian adapter) — it does not mean you are running inside a different host. You are Cercano either way. Call tools using whatever name is in your schema. But when you pass tool names as data — for example, in the `tools` argument of `dispatch` or `workflow` — always use the plain registered names (Read, Write, Edit, Bash, Glob, Grep, LS, git_info, git_status, etc.) without any host prefix.\n\n")
+	b.WriteString("A note on tool naming: depending on your cloud route, some tools in your schema may appear under a host prefix like `mcp__oc__Read` instead of plain `Read`. That prefix is a wire-level routing artifact from the provider (e.g. an OpenCode/Meridian adapter) — it does not mean you are running inside a different host. You are Cercano either way. Call tools using whatever name is in your schema. But when you pass tool names as data — for example, in the `tools` argument of `dispatch` or `workflow` — always use the plain registered names (Read, Write, Edit, RunCommand, Glob, Grep, LS, git_info, git_status, etc.) without any host prefix.\n\n")
 	b.WriteString("Never end your turn on a promise. Your turn ends the moment you send a reply with no tool calls — anything you say you are \"about to\" do (\"let me check…\", \"running it now…\") will never happen unless you do it in this same turn, with tool calls, before replying. Either do the work now, or state plainly that you are not doing it and why. Never claim you checked, ran, or verified something unless a tool call in this turn actually did it.\n\n")
 	if strings.TrimSpace(steering) != "" {
 		b.WriteString(steering)

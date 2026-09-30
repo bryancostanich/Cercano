@@ -121,7 +121,7 @@ func ProviderTotalTokens(tok contextmeter.Tokenizer, msgs []llm.Message) int {
 }
 
 // SegmentByTokens splits msgs into contiguous segments, each accumulating up to
-// perSegment tokens (a single oversized message becomes its own segment). Never
+// perSegment tokens (an oversized message or tool exchange stands alone). Never
 // drops or reorders messages.
 func SegmentByTokens(msgs []llm.Message, tok contextmeter.Tokenizer, perSegment int) []Segment {
 	if perSegment < 1 {
@@ -137,12 +137,12 @@ func SegmentByTokens(msgs []llm.Message, tok contextmeter.Tokenizer, perSegment 
 			curTok = 0
 		}
 	}
-	for _, m := range msgs {
-		mt := MessageTokens(tok, m)
+	for _, group := range toolGroups(msgs) {
+		mt := TotalTokens(tok, group)
 		if curTok > 0 && curTok+mt > perSegment {
 			flush()
 		}
-		cur = append(cur, m)
+		cur = append(cur, group...)
 		curTok += mt
 	}
 	flush()

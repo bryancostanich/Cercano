@@ -1116,7 +1116,7 @@ func (m Model) Update(msg tea.Msg) (nextModel tea.Model, nextCmd tea.Cmd) {
 				return m, nil
 			}
 			if m.configSurface != nil && mouse.Y == m.configStripTop() {
-				if tab := configTabAtX(mouse.X); tab >= 0 {
+				if tab := configTabAtVisibleX(mouse.X, m.width, m.configSurface.active); tab >= 0 {
 					return m, m.switchConfigTab(tab)
 				}
 				return m, nil
@@ -1668,6 +1668,16 @@ func (m Model) Update(msg tea.Msg) (nextModel tea.Model, nextCmd tea.Cmd) {
 	case chatStatusMsg, chatAssistantMsg, chatDoneMsg, chatErrorMsg, chatConfirmMsg:
 		return m.routeChatMsg(msg)
 
+	case tokenMetricsResultMsg:
+		if p, ok := m.content.(*tokenMetricsPage); ok {
+			return m, p.apply(msg)
+		}
+		return m, nil
+	case tokenMetricsTickMsg:
+		if p, ok := m.content.(*tokenMetricsPage); ok {
+			return m, p.tick(msg)
+		}
+		return m, nil
 	case contextRefreshTickMsg:
 		// /c auto-refresh. Stops ticking once /c is closed. Skips the reload mid-
 		// edit (active proposal or a busy pane) to avoid disrupting the
@@ -2243,7 +2253,7 @@ func (m Model) Update(msg tea.Msg) (nextModel tea.Model, nextCmd tea.Cmd) {
 		if m.claudeLoginModal == nil {
 			m.claudeLoginAttempt++
 			m.claudeLoginModal = newClaudeLoginModal(msg.profile, msg.model)
-			return m, startClaudeLoginCmd(m.agent, msg.profile, msg.model, msg.setActive, m.claudeLoginAttempt)
+			return m, startClaudeLoginCmd(m.agent, msg.profile, msg.model, msg.setActive, m.claudeLoginAttempt, msg.createOnly)
 		}
 		return m, nil
 
@@ -2291,6 +2301,9 @@ func (m Model) Update(msg tea.Msg) (nextModel tea.Model, nextCmd tea.Cmd) {
 					m.claudeLoginModal.profile = msg.frame.ProfileName
 				}
 				m.claudeLoginModal.setDone()
+				if sp, ok := m.content.(*settingsPage); ok {
+					sp.cloudAccountSignedIn(m.claudeLoginModal.profile, "subscription")
+				}
 			} else {
 				m.claudeLoginModal.setFailed(msg.frame.Error)
 			}
@@ -2316,7 +2329,7 @@ func (m Model) Update(msg tea.Msg) (nextModel tea.Model, nextCmd tea.Cmd) {
 		if m.chatgptLoginModal == nil {
 			m.chatgptLoginAttempt++
 			m.chatgptLoginModal = newChatGPTLoginModal(msg.profile, msg.model)
-			return m, startChatGPTLoginCmd(m.agent, msg.profile, msg.model, msg.setActive, m.chatgptLoginAttempt)
+			return m, startChatGPTLoginCmd(m.agent, msg.profile, msg.model, msg.setActive, m.chatgptLoginAttempt, msg.createOnly)
 		}
 		return m, nil
 
@@ -2364,6 +2377,9 @@ func (m Model) Update(msg tea.Msg) (nextModel tea.Model, nextCmd tea.Cmd) {
 					m.chatgptLoginModal.profile = msg.frame.ProfileName
 				}
 				m.chatgptLoginModal.setDone(msg.frame.AccountID)
+				if sp, ok := m.content.(*settingsPage); ok {
+					sp.cloudAccountSignedIn(m.chatgptLoginModal.profile, "chatgpt")
+				}
 			} else {
 				m.chatgptLoginModal.setFailed(msg.frame.Error)
 			}
@@ -4186,7 +4202,7 @@ func (m Model) confirmPromptHints(p *pendingToolCall) string {
 // gitStashCommand recognizes the argv form used by the automatic stash gate.
 // Do not infer stash operations from shell strings or incidental argument text.
 func gitStashCommand(p *pendingToolCall) string {
-	if p.Name != "Bash" {
+	if p.Name != "Bash" && p.Name != "RunCommand" && p.Name != "run_command" {
 		return ""
 	}
 	obj, ok := decodeArgObject(p.Args)
@@ -4452,8 +4468,8 @@ func confirmPromptDetails(p *pendingToolCall) []string {
 func dispatchToolRisk(tools string) string {
 	parts := strings.Split(tools, ",")
 	for _, part := range parts {
-		if strings.TrimSpace(part) == "Bash" {
-			return "Bash grants shell access; approve only trusted tasks."
+		if name := strings.TrimSpace(part); name == "Bash" || name == "RunCommand" || name == "run_command" {
+			return "RunCommand grants arbitrary command execution; approve only trusted tasks."
 		}
 	}
 	if tools != "" {

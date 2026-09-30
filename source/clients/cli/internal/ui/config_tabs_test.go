@@ -66,3 +66,15 @@ func TestConfigTabLabelsCoverAllTabs(t *testing.T) {
 		}
 	}
 }
+
+func TestConfigMetricsImmediatelyBeforeContext(t *testing.T) {
+	if configTabMetrics != 7 || configTabContext != configTabMetrics+1 {
+		t.Fatal("expected Token Metrics eighth, followed by Context")
+	}
+	if configTabMetrics.label() != "Token Metrics" || configTabContext.label() != "Context" {
+		t.Fatal("tab labels out of order")
+	}
+	if cycleConfigTab(configTabMetrics, 1) != configTabContext || cycleConfigTab(configTabContext, -1) != configTabMetrics {
+		t.Fatal("adjacent tab navigation incorrect")
+	}
+}

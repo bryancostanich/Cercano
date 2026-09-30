@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os/exec"
@@ -23,23 +22,40 @@ type grepCap struct{}
 // Grep constructs the grep capability.
 func Grep() capabilities.Capability { return grepCap{} }
 
-func (grepCap) Name() string                  { return "grep" }
-func (grepCap) Tier() capabilities.Tier        { return capabilities.TierR }
-func (grepCap) Surfaces() capabilities.Surface { return capabilities.SurfaceAgent | capabilities.SurfaceMCP }
+func (grepCap) Name() string            { return "grep" }
+func (grepCap) Tier() capabilities.Tier { return capabilities.TierR }
+func (grepCap) Surfaces() capabilities.Surface {
+	return capabilities.SurfaceAgent | capabilities.SurfaceMCP
+}
 func (grepCap) Description() string {
 	return "Search files under a directory for a pattern. Returns rows of {path, line, content}. Prefers ripgrep when present; falls back to grep. Args: {pattern: string, path?: string, case_insensitive?: bool, glob?: string}."
 }
 func (grepCap) Schema() capabilities.Schema {
 	return capabilities.Schema(`{
-		"type": "object",
-		"required": ["pattern"],
-		"properties": {
-			"pattern":          {"type": "string", "description": "Regex pattern (rg/grep dialect)."},
-			"path":             {"type": "string", "description": "Directory or file to search. Defaults to cwd."},
-			"case_insensitive": {"type": "boolean", "default": false},
-			"glob":             {"type": "string", "description": "Glob filter (rg --glob, grep --include). Optional."}
+	"type": "object",
+	"additionalProperties": false,
+	"required": [
+		"pattern"
+	],
+	"properties": {
+		"pattern": {
+			"type": "string",
+			"description": "Regex pattern (rg/grep dialect)."
+		},
+		"path": {
+			"type": "string",
+			"description": "Directory or file to search. Defaults to cwd."
+		},
+		"case_insensitive": {
+			"type": "boolean",
+			"default": false
+		},
+		"glob": {
+			"type": "string",
+			"description": "Glob filter (rg --glob, grep --include). Optional."
 		}
-	}`)
+	}
+}`)
 }
 
 type grepArgs struct {
@@ -51,8 +67,8 @@ type grepArgs struct {
 
 func (grepCap) Execute(ctx context.Context, call *capabilities.Call) (*capabilities.Result, error) {
 	var a grepArgs
-	if err := json.Unmarshal(call.Args, &a); err != nil {
-		return nil, fmt.Errorf("grep: parse args: %w", err)
+	if err := decodeDeclaredArguments(call.Args, grepCap{}, &a); err != nil {
+		return nil, err
 	}
 	if a.Pattern == "" {
 		return nil, errors.New("grep: pattern is required")

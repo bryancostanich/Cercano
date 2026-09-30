@@ -9,6 +9,8 @@ package worker
 // Process-group and pidfile patterns mirror internal/meridian/manager.go.
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -137,13 +139,7 @@ func spawnWorker(ctx context.Context, conversationID string, gen uint64) (*worke
 	_ = pw.Close() // parent's copy; child inherits it
 
 	// Tee worker output to the log in the background.
-	go func() {
-		data, _ := io.ReadAll(pr)
-		_ = pr.Close()
-		if len(data) > 0 {
-			log.Printf("[worker pid=%d] %s", cmd.Process.Pid, data)
-		}
-	}()
+	go forwardWorkerOutput(pr, cmd.Process.Pid, log.Printf)
 
 	// Write pidfile so a future host startup can reap orphans (Phase 6).
 	if pidPath != "" {
@@ -302,4 +298,26 @@ func splitLines(s string) []string {
 		out = append(out, s[start:])
 	}
 	return out
+}
+
+// forwardWorkerOutput forwards complete lines as they arrive, not when a warm
+// worker exits. ReadSlice also drains oversized lines in bounded chunks, so a
+// long diagnostic cannot grow memory indefinitely or stop pipe consumption.
+// An unterminated final fragment is flushed when the pipe closes.
+func forwardWorkerOutput(r io.ReadCloser, pid int, logf func(string, ...any)) {
+	defer r.Close()
+	reader := bufio.NewReaderSize(r, 32*1024)
+	for {
+		data, err := reader.ReadSlice('\n')
+		if len(data) > 0 {
+			logf("[worker pid=%d] %s", pid, bytes.TrimSuffix(data, []byte("\n")))
+		}
+		if err == nil || errors.Is(err, bufio.ErrBufferFull) {
+			continue
+		}
+		if !errors.Is(err, io.EOF) {
+			logf("[worker pid=%d] output read failed: %v", pid, err)
+		}
+		return
+	}
 }

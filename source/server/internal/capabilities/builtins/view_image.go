@@ -44,9 +44,11 @@ type viewImageCap struct{}
 // ViewImage constructs the view_image capability (display name "ViewImage").
 func ViewImage() capabilities.Capability { return viewImageCap{} }
 
-func (viewImageCap) Name() string                  { return "view_image" }
-func (viewImageCap) Tier() capabilities.Tier        { return capabilities.TierR }
-func (viewImageCap) Surfaces() capabilities.Surface { return capabilities.SurfaceAgent | capabilities.SurfaceMCP }
+func (viewImageCap) Name() string            { return "view_image" }
+func (viewImageCap) Tier() capabilities.Tier { return capabilities.TierR }
+func (viewImageCap) Surfaces() capabilities.Surface {
+	return capabilities.SurfaceAgent | capabilities.SurfaceMCP
+}
 func (viewImageCap) Description() string {
 	return "Load an image file (PNG, JPEG, GIF, or WebP) from disk and place its pixels in front of the model. Use this to actually see an image — unlike Read, which only handles text and refuses binaries. Args: {path: string}."
 }

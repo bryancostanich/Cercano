@@ -50,3 +50,19 @@ func TestAccountingRecognizesNativeEndpoints(t *testing.T) {
 		}
 	}
 }
+
+// A custom Responses-compatible endpoint with a named cloud profile must
+// attribute attempts to the profile name; official endpoints keep their
+// canonical identity regardless of profile.
+func TestAccountingFallsBackToProfileNameForCustomEndpoint(t *testing.T) {
+	if got := NewClient(Config{BaseURL: "https://example.com/v1", APIKey: "k", AccountingProfile: "my-relay"}).accountingProviderName(); got != "my-relay" {
+		t.Fatalf("accountingProviderName=%q want profile name %q", got, "my-relay")
+	}
+	if got := NewClient(Config{BaseURL: "https://example.com/v1", APIKey: "k"}).accountingProviderName(); got != "" {
+		t.Fatalf("accountingProviderName=%q want unknown without profile", got)
+	}
+	official := NewClient(Config{APIKey: "k", AccountingProfile: "my-openai"})
+	if got := official.accountingProviderName(); got == "my-openai" || got == "" {
+		t.Fatalf("accountingProviderName=%q want canonical identity for official endpoint", got)
+	}
+}

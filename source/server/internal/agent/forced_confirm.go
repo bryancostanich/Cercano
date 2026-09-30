@@ -38,7 +38,7 @@ func requiresForcedConfirm(toolName string, args json.RawMessage) bool {
 // appear on the wire depending on which surface the model was trained against,
 // so the guard must recognize both — matching only one is a silent bypass.
 func isShellToolName(name string) bool {
-	return name == "run_command" || name == "Bash"
+	return name == "run_command" || name == "Bash" || name == "RunCommand"
 }
 
 // isWIPConsumingStash reports whether argv runs a `git stash` that sets

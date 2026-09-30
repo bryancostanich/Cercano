@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
+
+	"cercano/source/server/internal/procx"
 )
 
 // Divergence summarizes how a feature branch relates to trunk.
@@ -108,7 +110,8 @@ func (r *Repo) Land(ctx context.Context, feature, trunk string, strategy Strateg
 		op = "rebase"
 		st.Strategy = StrategyRebase
 	}
-	if _, err := r.run(ctx, op, trunk); err != nil {
+	// Rewriting history across many commits can legitimately take minutes.
+	if _, err := r.runFor(ctx, gitWriteTimeout, op, trunk); err != nil {
 		// Distinguish a conflict (expected) from a hard failure.
 		conf, cErr := r.conflictedFiles(ctx)
 		if cErr == nil && len(conf) > 0 {
@@ -182,30 +185,52 @@ func (r *Repo) LandContinue(ctx context.Context, strategy Strategy) (LandState, 
 		op = "merge"
 	}
 	// GIT_EDITOR=true avoids an interactive editor on merge/rebase --continue.
-	cmd := exec.CommandContext(ctx, "git", op, "--continue")
-	cmd.Dir = r.Dir
-	cmd.Env = append(cmd.Environ(), "GIT_EDITOR=true")
-	if out, err := cmd.CombinedOutput(); err != nil {
+	res, err := procx.Run(ctx, procx.Options{
+		Args:    []string{"git", op, "--continue"},
+		Dir:     r.Dir,
+		Env:     append(os.Environ(), "GIT_EDITOR=true"),
+		Timeout: gitWriteTimeout,
+	})
+	if err != nil || res.ExitCode != 0 {
 		conf, _ := r.conflictedFiles(ctx)
 		if len(conf) > 0 {
 			st.Conflicts = conf
 			return st, nil
 		}
-		return st, fmt.Errorf("gitflow: land --continue: %s: %w: %s", op, err, strings.TrimSpace(string(out)))
+		out := strings.TrimSpace(string(res.Combined()))
+		if err == nil {
+			err = fmt.Errorf("exit status %d", res.ExitCode)
+		}
+		return st, fmt.Errorf("gitflow: land --continue: %s: %w: %s", op, err, out)
 	}
 	st.Reconciled = true
 	return st, nil
 }
 
+// TestGateTimeout bounds the land test gate. Generous, because a full suite on
+// a cold cache legitimately takes a long while — but not unbounded: a gate that
+// wedges (a test prompting for input, a hung container) would otherwise block
+// the land forever with no output. Exported so callers can see the bound.
+const TestGateTimeout = 30 * time.Minute
+
 // RunTests runs testCommand via `sh -c` in the repo dir; non-zero exit is an error.
+// The command runs in its own process group, so a timeout reaps any helper
+// processes the suite spawned rather than leaving them behind.
 func (r *Repo) RunTests(ctx context.Context, testCommand string) (string, error) {
-	cmd := exec.CommandContext(ctx, "sh", "-c", testCommand)
-	cmd.Dir = r.Dir
-	out, err := cmd.CombinedOutput()
+	res, err := procx.Run(ctx, procx.Options{
+		Args:    []string{"sh", "-c", testCommand},
+		Dir:     r.Dir,
+		Timeout: TestGateTimeout,
+	})
+	out := strings.TrimSpace(string(res.Combined()))
 	if err != nil {
-		return strings.TrimSpace(string(out)), fmt.Errorf("gitflow: test gate failed: %w", err)
+		// Includes the timeout case; out carries however far the suite got.
+		return out, fmt.Errorf("gitflow: test gate failed: %w", err)
 	}
-	return strings.TrimSpace(string(out)), nil
+	if res.ExitCode != 0 {
+		return out, fmt.Errorf("gitflow: test gate failed: exit status %d", res.ExitCode)
+	}
+	return out, nil
 }
 
 // Finalize fast-forwards trunk to feature. Errors if not fast-forwardable.

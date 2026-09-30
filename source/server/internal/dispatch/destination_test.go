@@ -65,11 +65,17 @@ func TestDestinationChainsAndTaskTarget(t *testing.T) {
 			if len(p.calls) != 1 || len(s.calls) != 1 || len(local.calls) != 0 {
 				t.Fatal("destination isolation failed")
 			}
-			if withPBackup && pb.calls[0].Model != "pb-most_capable" {
-				t.Fatal("Primary backup quality lost")
+			// The engine reads built-in task defaults directly, so derive the
+			// expected tier from the task rather than hardcoding one: this
+			// asserts "backup inherits the task's quality" and stays correct
+			// when a product default changes.
+			chatTier := string((config.Config{}).TaskAssignment(config.TaskChat).Quality.CapabilityTier())
+			dispatchTier := string((config.Config{}).TaskAssignment(config.TaskDispatch).Quality.CapabilityTier())
+			if withPBackup && pb.calls[0].Model != "pb-"+chatTier {
+				t.Fatalf("Primary backup quality lost: got %q want %q", pb.calls[0].Model, "pb-"+chatTier)
 			}
-			if withSBackup && sb.calls[0].Model != "sb-most_capable" {
-				t.Fatal("Secondary backup quality lost")
+			if withSBackup && sb.calls[0].Model != "sb-"+dispatchTier {
+				t.Fatalf("Secondary backup quality lost: got %q want %q", sb.calls[0].Model, "sb-"+dispatchTier)
 			}
 		}
 	}

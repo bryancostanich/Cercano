@@ -53,9 +53,9 @@ func sampleSettingsPage(w, h int) *settingsPage {
 	return sp
 }
 
-// openLocus opens the locus-mode select. After the "Open Model" section was
-// removed, locus-mode is the first field in the form — no navigation needed.
-func openLocus(sp *settingsPage) {
+// openPermissions opens the first General select. Retired locus-mode routing
+// is absent; permission-mode is now first, so no navigation is needed.
+func openPermissions(sp *settingsPage) {
 	sp.form.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 }
 
@@ -135,7 +135,7 @@ func TestSettingsBoxesFillWidth(t *testing.T) {
 // rule glyph — i.e. no value/option wrapped flush against the left margin.
 func TestSettingsNarrowNoFlushLeftWrap(t *testing.T) {
 	sp := sampleSettingsPage(30, 80)
-	openLocus(sp)
+	openPermissions(sp)
 	out := layoutStrip(sp.View())
 	for _, ln := range strings.Split(out, "\n") {
 		rs := []rune(ln)
@@ -158,33 +158,33 @@ func TestSettingsNarrowNoFlushLeftWrap(t *testing.T) {
 // right-hand column.
 func TestSettingsNarrowSelectGoesUnderLabel(t *testing.T) {
 	sp := sampleSettingsPage(30, 80)
-	openLocus(sp)
+	openPermissions(sp)
 	out := layoutStrip(sp.View())
 	lines := strings.Split(out, "\n")
 	labelRow := -1
 	for i, ln := range lines {
-		if strings.Contains(ln, "locus-mode") {
+		if strings.Contains(ln, "permission-mode") {
 			labelRow = i
 			break
 		}
 	}
 	if labelRow < 0 {
-		t.Fatalf("locus-mode label not found:\n%s", out)
+		t.Fatalf("permission-mode label not found:\n%s", out)
 	}
 	// The label row must NOT also carry an option (options are underneath).
-	if strings.Contains(lines[labelRow], "cloud_only") {
+	if strings.Contains(lines[labelRow], "strict") {
 		t.Fatalf("at narrow width options should be under the label, not on it:\n%s", lines[labelRow])
 	}
 	// A following row must carry the first option, indented (leading spaces).
 	joined := strings.Join(lines[labelRow+1:], "\n")
-	if !strings.Contains(joined, "cloud_only") {
+	if !strings.Contains(joined, "strict") {
 		t.Fatalf("options should appear under the label:\n%s", out)
 	}
 	// In the narrow under-label layout the options must form a single vertical
 	// column: one per line, with no "·" separator joining options. (Only lines
-	// that actually carry locus options are checked — section titles like
+	// that actually carry permission options are checked — section titles like
 	// "Theme · Chrome" legitimately contain a middle dot.)
-	opts := []string{"cloud_only", "cloud_primary", "open_primary", "open_only"}
+	opts := []string{"strict", "permissive", "bypass"}
 	for _, ln := range lines {
 		n := 0
 		for _, o := range opts {

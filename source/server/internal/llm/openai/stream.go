@@ -68,7 +68,16 @@ type streamReader struct {
 	// buffer it and, only if no normal text delta was emitted, flush it as a
 	// visible text delta at EOF. emittedText tracks whether real content streamed.
 	reasoningBuf strings.Builder
-	emittedText  bool
+
+	// Wire-presence evidence: nonempty reasoning_content deltas and their bytes.
+	// Counted even when reasoningBuf is later promoted to visible text.
+	reasoningChunks int64
+	emittedText     bool
+
+	// keepToolReasoning: reasoning that accompanied tool calls becomes an
+	// EventReasoning round-trip block instead of being dropped. GLM-family
+	// cloud models only (see newStreamReaderRoundTrip caller).
+	keepToolReasoning bool
 
 	// emittedToolCall is set once any tool-call fragment is seen. A tool-use turn
 	// is an action, and its reasoning is just thinking — never promote reasoning
@@ -86,6 +95,12 @@ type streamReader struct {
 
 func newStreamReader(s *goopenai.ChatCompletionStream) *streamReader {
 	return &streamReader{stream: s}
+}
+
+func newStreamReaderRoundTrip(s *goopenai.ChatCompletionStream, keepReasoning bool) *streamReader {
+	r := newStreamReader(s)
+	r.keepToolReasoning = keepReasoning
+	return r
 }
 
 // Next pops one event from the pending queue; refills via Recv() when empty.
@@ -118,10 +133,24 @@ func (r *streamReader) Next() (llm.StreamEvent, bool, error) {
 					Type:      llm.EventTextDelta,
 					TextDelta: r.reasoningBuf.String(),
 				})
+			} else if r.keepToolReasoning && r.emittedToolCall && r.reasoningBuf.Len() > 0 {
+				// GLM-style chat_completions reasoning that accompanied tool calls
+				// must ride the turn as opaque round-trip state: z.ai's protocol
+				// requires reasoning_content back on the continuation, and losing
+				// it measurably degrades hosted GLM agentic quality. Plain-text
+				// answers (no tool calls) keep the promotion path above instead.
+				r.pending = append(r.pending, llm.StreamEvent{
+					Type:          llm.EventReasoning,
+					ReasoningData: r.reasoningBuf.String(),
+				})
 			}
 			// Terminal event carries both token counts (OpenAI only reports usage
 			// on the final chunk, so both live on EventMessageStop rather than split
 			// across EventMessageStart/EventMessageStop as in the Anthropic contract).
+			// Reasoning presence is measured by this adapter itself, so confirmed
+			// absence (zero) is evidence too — unlike provider-reported counts.
+			r.usage.ReasoningChunks = llm.ReportedTokens(r.reasoningChunks)
+			r.usage.ReasoningBytes = llm.ReportedTokens(int64(r.reasoningBuf.Len()))
 			r.pending = append(r.pending, llm.StreamEvent{
 				Type:         llm.EventMessageStop,
 				StopReason:   r.stopReason,
@@ -188,6 +217,7 @@ func (r *streamReader) Next() (llm.StreamEvent, bool, error) {
 		// normal content may still arrive — and flush it at EOF only if no real
 		// text streamed. See reasoningBuf comment above.
 		if delta.ReasoningContent != "" {
+			r.reasoningChunks++
 			r.reasoningBuf.WriteString(delta.ReasoningContent)
 		}
 

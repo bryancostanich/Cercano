@@ -1,6 +1,7 @@
 package anthropicauth
 
 import (
+	"cercano/source/server/pkg/accountidentity"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -61,7 +62,7 @@ func TestSource_ReturnsCachedWhenFresh(t *testing.T) {
 
 func TestSource_RefreshesWhenExpired(t *testing.T) {
 	store := newFakeStore()
-	seedToken(t, store, "p", TokenSet{Access: "old", Refresh: "old-refresh", ExpiresAt: time.Now().Add(-time.Hour)})
+	seedToken(t, store, "p", TokenSet{Identity: accountidentity.Identity{Email: "keep@example.com"}, Access: "old", Refresh: "old-refresh", ExpiresAt: time.Now().Add(-time.Hour)})
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -82,6 +83,9 @@ func TestSource_RefreshesWhenExpired(t *testing.T) {
 	// The rotated token must be persisted so the next request uses it.
 	raw, _ := store.Get("p")
 	ts, _ := DecodeTokenSet(raw)
+	if ts.Identity.Email != "keep@example.com" {
+		t.Fatal("refresh lost identity")
+	}
 	if ts.Access != "fresh" || ts.Refresh != "rotated" {
 		t.Errorf("persisted token = %+v, want fresh/rotated", ts)
 	}

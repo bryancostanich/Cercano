@@ -1,8 +1,10 @@
 package config
 
 import (
+	"cercano/source/server/pkg/accountidentity"
 	"context"
 	"errors"
+	"fmt"
 
 	"cercano/source/server/internal/cloudfactory"
 	"cercano/source/server/internal/hostsvc/credentials"
@@ -24,15 +26,22 @@ type CloudLoginResult struct {
 	Active, Reauthenticated bool
 }
 
-func (s *svc) BeginCloudLogin(ctx context.Context, profile cfg.CloudProfile, activate, reauthenticate bool) (*CloudLogin, error) {
+func (s *svc) BeginCloudLogin(ctx context.Context, profile cfg.CloudProfile, activate, reauthenticate bool, createOnly ...bool) (*CloudLogin, error) {
 	if profile.Name == "" || !cloudfactory.IsSubscription(profile) {
 		return nil, errors.New("subscription profile required")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	before, exists := profileByName(s.current.CloudProfiles, profile.Name)
+	if exists && len(createOnly) > 0 && createOnly[0] {
+		return nil, fmt.Errorf("account %q already exists; select it to sign in again", profile.Name)
+	}
 	if reauthenticate && (!exists || before.Flavor != profile.Flavor || before.Route != profile.Route) {
 		return nil, errors.New("matching subscription profile required for reauthentication")
+	}
+	// Signing into the same auth path changes credentials, not account settings.
+	if exists && before.Flavor == profile.Flavor && before.Route == profile.Route {
+		profile = before.Clone()
 	}
 	provider := "anthropic"
 	if profile.Route == cloudfactory.RouteChatGPT {
@@ -46,7 +55,7 @@ func (s *svc) BeginCloudLogin(ctx context.Context, profile cfg.CloudProfile, act
 }
 func (l *CloudLogin) Context() context.Context { return l.attempt.Context() }
 func (l *CloudLogin) Close()                   { l.attempt.Close() }
-func (l *CloudLogin) Commit(encoded string) (CloudLoginResult, error) {
+func (l *CloudLogin) Commit(encoded string, identity ...accountidentity.Identity) (CloudLoginResult, error) {
 	s := l.owner
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -57,8 +66,8 @@ func (l *CloudLogin) Commit(encoded string) (CloudLoginResult, error) {
 	if err := l.attempt.Commit(encoded); err != nil {
 		return CloudLoginResult{}, err
 	}
-	if l.reauthenticate {
-		return CloudLoginResult{Profile: current.Clone(), Active: s.current.ActiveCloudProfile == current.Name, Reauthenticated: true}, nil
+	if len(identity) > 0 {
+		l.proposed.AccountIdentity = identity[0].Normalized()
 	}
 	replaced := false
 	for i, p := range s.current.CloudProfiles {
@@ -71,10 +80,10 @@ func (l *CloudLogin) Commit(encoded string) (CloudLoginResult, error) {
 	if !replaced {
 		s.current.CloudProfiles = append(s.current.CloudProfiles, l.proposed.Clone())
 	}
-	if l.activate {
+	if l.activate && !l.reauthenticate {
 		s.setActiveProfileLocked(l.proposed.Name)
 	}
-	return CloudLoginResult{Profile: l.proposed.Clone(), Active: s.current.ActiveCloudProfile == l.proposed.Name}, nil
+	return CloudLoginResult{Reauthenticated: l.reauthenticate, Profile: l.proposed.Clone(), Active: s.current.ActiveCloudProfile == l.proposed.Name}, nil
 }
 
 // Called under the config lock. Profile identity/configuration changes cancel

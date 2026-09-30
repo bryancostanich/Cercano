@@ -153,6 +153,7 @@ func TestRequiresForcedConfirm(t *testing.T) {
 		want     bool
 	}{
 		{"run_command bare stash", "run_command", mk("git", "stash"), true},
+		{"RunCommand bare stash", "RunCommand", mk("git", "stash"), true},
 		{"Bash alias bare stash", "Bash", mk("git", "stash"), true},
 		{"run_command stash push", "run_command", mk("git", "stash", "push"), true},
 		{"Bash alias stash pop", "Bash", mk("git", "stash", "pop"), false},

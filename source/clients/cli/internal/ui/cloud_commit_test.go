@@ -63,8 +63,8 @@ func TestClaudeSettingsSignInUsesSelectedProfile(t *testing.T) {
 	if msg.profile != "anthropic" {
 		t.Fatalf("profile = %q; want anthropic", msg.profile)
 	}
-	if !msg.setActive {
-		t.Fatal("settings sign-in should activate the selected profile")
+	if msg.setActive {
+		t.Fatal("settings sign-in must preserve the existing Primary selection")
 	}
 }
 

@@ -27,7 +27,8 @@ import (
 	"testing"
 
 	"cercano/source/server/internal/cloudfactory"
-	"cercano/source/server/internal/inference/resilience"
+	"cercano/source/server/internal/inference"
+	"cercano/source/server/internal/inference/profilechain"
 	"cercano/source/server/internal/llm"
 	pkgcfg "cercano/source/server/pkg/config"
 )
@@ -57,6 +58,11 @@ func (f *fakeCredFetcher) sawFetch(name string) bool {
 	return false
 }
 
+// engineWrapped reports whether Primary routes through the shared account
+// cycle, which owns the resilience engine (retry policy and narration) for
+// every configured account rather than a single wrapper instance.
+func engineWrapped(p inference.Provider) bool { return profilechain.StateOf(p) != nil }
+
 // chatCompletionBody is a minimal, valid non-streaming chat completion JSON.
 func chatCompletionBody(content string) string {
 	return `{"id":"cmpl-1","object":"chat.completion","model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"` + content + `"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`
@@ -80,7 +86,10 @@ func TestWorkerBackupFailover_WrapsCompositeAndFailsOver(t *testing.T) {
 	defer backupSrv.Close()
 
 	cfg := pkgcfg.Config{
-		LocusMode:          "cloud_primary",
+		LocusMode: "cloud_primary",
+		// This test exercises failover, not the product's default Chat quality.
+		// Pin Chat to premium so the fixture's premium-only TierOverrides resolve.
+		TaskAssignments:    map[pkgcfg.Task]pkgcfg.TaskAssignment{pkgcfg.TaskChat: {Quality: pkgcfg.CostPremium}},
 		ActiveCloudProfile: "primary",
 		BackupCloudProfile: "backup",
 		CloudProfiles: []pkgcfg.CloudProfile{
@@ -104,8 +113,8 @@ func TestWorkerBackupFailover_WrapsCompositeAndFailsOver(t *testing.T) {
 	}
 
 	// Structural parity: the resolved provider must be the resilience engine.
-	if _, ok := resolver.Candidates().Cloud.(*resilience.Provider); !ok {
-		t.Fatalf("raw cloud provider is %T, want *resilience.Provider (worker did not wrap active+backup)", resolver.Candidates().Cloud)
+	if !engineWrapped(resolver.Candidates().Cloud) {
+		t.Fatalf("raw cloud provider is %T, want the account cycle owning the resilience engine (worker did not wrap active+backup)", resolver.Candidates().Cloud)
 	}
 
 	// Both credentials must have been fetched via the proxy (active during the
@@ -162,8 +171,8 @@ func TestWorkerBackupFailover_NoBackupIsBareProvider(t *testing.T) {
 	}
 	// The engine wraps even without a backup — retry policy and narration are
 	// not conditional on failover being available.
-	if _, ok := resolver.Candidates().Cloud.(*resilience.Provider); !ok {
-		t.Fatalf("raw cloud provider is %T, want *resilience.Provider even without a backup", resolver.Candidates().Cloud)
+	if !engineWrapped(resolver.Candidates().Cloud) {
+		t.Fatalf("raw cloud provider is %T, want engine-wrapped even without a backup", resolver.Candidates().Cloud)
 	}
 	if creds.sawFetch("backup") {
 		t.Error("backup credential fetched but no backup configured")

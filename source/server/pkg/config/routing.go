@@ -19,6 +19,7 @@ type Task string
 
 const (
 	TaskChat                  Task = "chat"
+	TaskCompaction            Task = "compaction"
 	TaskDispatch              Task = "dispatch"
 	TaskReconnaissance        Task = "reconnaissance"
 	TaskMechanicalDevelopment Task = "mechanical_development"
@@ -45,7 +46,8 @@ type TaskDefinition struct {
 }
 
 var taskDefinitions = [...]TaskDefinition{
-	{TaskChat, "Chat", TaskAssignment{DestinationPrimary, CostPremium}},
+	{TaskChat, "Chat", TaskAssignment{DestinationPrimary, CostStandard}},
+	{TaskCompaction, "Compaction", TaskAssignment{DestinationSecondary, CostEconomy}},
 	{TaskDispatch, "Default dispatch", TaskAssignment{DestinationSecondary, CostPremium}},
 	{TaskReconnaissance, "Reconnaissance", TaskAssignment{DestinationLocal, CostEconomy}},
 	{TaskMechanicalDevelopment, "Mechanical development", TaskAssignment{DestinationLocal, CostStandard}},
@@ -97,6 +99,42 @@ func (c Config) TaskAssignment(task Task) TaskAssignment {
 	return a
 }
 
+// DispatchTokenBudget is the default cumulative billed-token cap (input +
+// output summed over every model call) for one delegated dispatch of this
+// cost class. Scale: a healthy recon dispatch bills well under 100K tokens;
+// the runaway that motivated the budget billed ~3.7M in one dispatch
+// (docs/bugs/deepinfra-dispatch-followups.md). UnlimitedDispatchTokenBudget
+// disables the cap; main turns — not dispatches — run uncapped.
+//
+// The sum is dominated by resent history, not by work produced. A measured
+// implementation dispatch billed 2,780,649 input against 82,942 output: 97%
+// input, ~34x the cumulative cap per unique generated token. Input grows
+// roughly quadratically with turn count because every turn resends the
+// conversation, so this cap converts to a turn ceiling that is independent of
+// how productive those turns are. At ~37K mean input the old 3M Premium
+// ceiling bound that dispatch at 74 turns, stopping it mid-implementation with
+// its plan still in context.
+//
+// Premium is therefore sized for sustained implementation rather than for the
+// runaway: enough headroom to finish a substantial refactor and verify it,
+// while still tripping well before an unbounded loop runs unattended. Economy
+// and Standard are unchanged; they bound recon and investigation work, where
+// the existing ceilings are already generous.
+func (q CostTier) DispatchTokenBudget() int {
+	switch q {
+	case CostEconomy:
+		return 300_000
+	case CostStandard:
+		return 1_000_000
+	case CostPremium:
+		return 10_000_000
+	}
+	return 1_000_000
+}
+
+// UnlimitedDispatchTokenBudget explicitly disables the dispatch token cap.
+const UnlimitedDispatchTokenBudget = -1
+
 func (q CostTier) CapabilityTier() Tier {
 	switch q {
 	case CostEconomy:
@@ -136,7 +174,11 @@ func (c Config) ResolveTask(task Task, difficulty string) TaskAssignment {
 func (c Config) DestinationProfiles(d Destination) (preferred, backup string) {
 	switch d {
 	case DestinationPrimary:
-		return c.ActiveCloudProfile, c.BackupCloudProfile
+		backups := c.PrimaryBackups()
+		if len(backups) != 0 {
+			return c.ActiveCloudProfile, backups[0]
+		}
+		return c.ActiveCloudProfile, ""
 	case DestinationSecondary:
 		return c.SecondaryCloudProfile, c.SecondaryBackupCloudProfile
 	}
@@ -154,18 +196,56 @@ func (c Config) Profile(name string) (CloudProfile, bool) {
 	return CloudProfile{}, false
 }
 
-func (c Config) ReferencesProfile(name string) bool {
-	return name != "" && (name == c.ActiveCloudProfile || name == c.BackupCloudProfile || name == c.SecondaryCloudProfile || name == c.SecondaryBackupCloudProfile)
+// PrimaryBackups returns an independent ordered list, accepting legacy configs.
+func (c Config) PrimaryBackups() []string {
+	if c.BackupCloudProfiles != nil {
+		return append([]string{}, c.BackupCloudProfiles...)
+	}
+	if c.BackupCloudProfile != "" {
+		return []string{c.BackupCloudProfile}
+	}
+	return nil
 }
 
-// ReferencedProfiles deduplicates by identity and does not substitute missing
-// profiles. Credentials remain outside this graph and are fetched by name.
+// SetPrimaryBackups synchronizes the legacy first-entry field, including clears.
+// Callers editing user routing must validate the candidate before publishing it.
+func (c *Config) SetPrimaryBackups(names []string) {
+	c.BackupCloudProfiles = append([]string{}, names...)
+	c.BackupCloudProfile = ""
+	if len(names) > 0 {
+		c.BackupCloudProfile = names[0]
+	}
+}
+
+// DestinationProfileNames retains configuration order; it does not hide duplicates.
+func (c Config) DestinationProfileNames(d Destination) []string {
+	if d == DestinationPrimary {
+		return append([]string{c.ActiveCloudProfile}, c.PrimaryBackups()...)
+	}
+	preferred, backup := c.DestinationProfiles(d)
+	return []string{preferred, backup}
+}
+
+func (c Config) ReferencesProfile(name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, d := range []Destination{DestinationPrimary, DestinationSecondary} {
+		for _, n := range c.DestinationProfileNames(d) {
+			if n == name {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// ReferencedProfiles deduplicates by identity; credentials stay outside the graph.
 func (c Config) ReferencedProfiles() []CloudProfile {
 	var profiles []CloudProfile
 	seen := map[string]bool{}
 	for _, d := range []Destination{DestinationPrimary, DestinationSecondary} {
-		preferred, backup := c.DestinationProfiles(d)
-		for _, name := range []string{preferred, backup} {
+		for _, name := range c.DestinationProfileNames(d) {
 			if p, ok := c.Profile(name); ok && !seen[name] {
 				profiles = append(profiles, p)
 				seen[name] = true
@@ -220,15 +300,20 @@ func (c Config) ValidateRouting() error {
 		return err
 	}
 	for _, d := range []Destination{DestinationPrimary, DestinationSecondary} {
-		preferred, backup := c.DestinationProfiles(d)
-		if preferred != "" && preferred == backup {
-			return fmt.Errorf("%s preferred and backup must differ", d)
-		}
-		for _, name := range []string{preferred, backup} {
-			if name != "" {
-				if _, ok := c.Profile(name); !ok {
-					return fmt.Errorf("%s references missing profile %q", d, name)
+		seen := map[string]bool{}
+		for i, name := range c.DestinationProfileNames(d) {
+			if name == "" {
+				if d == DestinationPrimary && i > 0 {
+					return fmt.Errorf("primary backup must not be empty")
 				}
+				continue
+			}
+			if seen[name] {
+				return fmt.Errorf("%s preferred and backups must differ: duplicate profile %q", d, name)
+			}
+			seen[name] = true
+			if _, ok := c.Profile(name); !ok {
+				return fmt.Errorf("%s references missing profile %q", d, name)
 			}
 		}
 	}
@@ -285,7 +370,12 @@ func (c *Config) SetDestinationProfiles(d Destination, preferred, backup string)
 	next := c.Clone()
 	switch d {
 	case DestinationPrimary:
-		next.ActiveCloudProfile, next.BackupCloudProfile = preferred, backup
+		next.ActiveCloudProfile = preferred
+		if backup == "" {
+			next.SetPrimaryBackups(nil)
+		} else {
+			next.SetPrimaryBackups([]string{backup})
+		}
 	case DestinationSecondary:
 		next.SecondaryCloudProfile, next.SecondaryBackupCloudProfile = preferred, backup
 	default:

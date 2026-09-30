@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/compaction"
 	"cercano/source/server/internal/compactor"
 	"cercano/source/server/internal/contextmeter"
@@ -25,13 +26,6 @@ type Store interface {
 	GetCompaction(ctx context.Context, conversationID string) (conversation.Compaction, error)
 	SaveCompaction(ctx context.Context, c conversation.Compaction) error
 }
-
-// runTimeout bounds one scheduled compaction pass. It must comfortably fit
-// maxSegmentsPerPass summarizer calls at local-model speed (~40s each at 8k
-// segment tokens) plus an occasional re-consolidation call — the previous
-// 2-minute budget could expire mid-pass on every attempt. Advance now keeps
-// partial progress on deadline expiry, so this is headroom, not a cliff.
-const runTimeout = 6 * time.Minute
 
 // Generator debounces compaction per conversation.
 type Generator struct {
@@ -169,7 +163,7 @@ func (g *Generator) Schedule(conversationID string) {
 		g.mu.Lock()
 		delete(g.timers, conversationID)
 		g.mu.Unlock()
-		ctx, cancel := context.WithTimeout(context.Background(), runTimeout)
+		ctx, cancel := compaction.WithExecutionBudget(context.Background())
 		defer cancel()
 		_ = g.runCompaction(ctx, conversationID)
 	})
@@ -201,6 +195,8 @@ func (g *Generator) release(conversationID string) {
 }
 
 func (g *Generator) runCompaction(ctx context.Context, conversationID string) error {
+	ctx, cancel := compaction.WithExecutionBudget(ctx)
+	defer cancel()
 	ctx, release, ok := g.startWork(ctx)
 	if !ok {
 		return context.Canceled
@@ -262,7 +258,15 @@ func (g *Generator) runCompaction(ctx context.Context, conversationID string) er
 	pre := compaction.TotalTokens(g.tok, preView)
 	g.logf("[compaction] pass start %s: %d tokens\n", conversationID, pre)
 
-	newState, changed, more, err := compactor.Advance(ctx, turns, state, g.summarize, g.cfg, g.tok)
+	// A main conversation has no assigned task. Its latest user message is
+	// usually conversational ("push", "continue"), so it informs only the
+	// rejection gate's exemptions and is never shown to the summarizer as an
+	// objective. Sub-agent dispatches, which do have a task, use
+	// WithTaskReference in the tool loop instead.
+	taskRef := compaction.LatestUserMessage(agent.BuildLLMHistory(turns))
+	taskCtx := compaction.WithUserIntentHint(ctx, taskRef)
+
+	newState, changed, more, err := compactor.Advance(taskCtx, turns, state, g.summarize, g.cfg, g.tok)
 	if err != nil {
 		var deferral *compaction.DeferralError
 		if errors.As(err, &deferral) {
@@ -308,6 +312,8 @@ func (g *Generator) runCompaction(ctx context.Context, conversationID string) er
 // receives one human-readable line per step. Unlike Schedule this ignores the
 // kill switch: it only ever runs as an explicit user action.
 func (g *Generator) Regenerate(ctx context.Context, conversationID string, incremental bool, progress func(string)) (preTokens, postTokens int, err error) {
+	ctx, cancel := compaction.WithExecutionBudget(ctx)
+	defer cancel()
 	ctx, release, ok := g.startWork(ctx)
 	if !ok {
 		return 0, 0, context.Canceled
@@ -346,20 +352,21 @@ func (g *Generator) Regenerate(ctx context.Context, conversationID string, incre
 		state.FrozenThrough = 0
 		state.SegmentSummariesJSON = ""
 		state.ConsolidatedJSON = ""
-		if err := g.store.SaveCompaction(ctx, state); err != nil {
-			return preTokens, 0, fmt.Errorf("clear derived state: %w", err)
-		}
+		// Stage the reset locally: a rejected first summary must not erase
+		// the currently persisted derived state.
 	}
 
+	// Same reasoning as runCompaction: hint only, never an invented task.
+	taskCtx := compaction.WithUserIntentHint(ctx, compaction.LatestUserMessage(agent.BuildLLMHistory(turns)))
 	pass := 0
 	for {
 		pass++
 		start := time.Now()
-		next, changed, more, err := compactor.Advance(ctx, turns, state, g.summarize, g.cfg, g.tok)
+		next, changed, more, err := compactor.Advance(taskCtx, turns, state, g.summarize, g.cfg, g.tok)
 		if err != nil {
 			return preTokens, 0, fmt.Errorf("pass %d: %w", pass, err)
 		}
-		if changed {
+		if changed || (!incremental && pass == 1 && !more) {
 			if err := g.store.SaveCompaction(ctx, next); err != nil {
 				return preTokens, 0, fmt.Errorf("persist pass %d: %w", pass, err)
 			}

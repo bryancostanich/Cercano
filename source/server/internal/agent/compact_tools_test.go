@@ -35,7 +35,7 @@ func TestToolLoop_CompactFallbackAdvertisesFewerTools(t *testing.T) {
 		t.Fatalf("compact fallback should advertise fewer tools: compact=%d full=%d", len(compactProv.lastReq.Tools), len(fullProv.lastReq.Tools))
 	}
 	set := toolSet(compactProv.lastReq.Tools)
-	for _, want := range []string{"Read", "Grep", "Edit", "Bash", "git_status", "checkpoint", "dispatch", "plan_set_status"} {
+	for _, want := range []string{"Read", "Grep", "Edit", "RunCommand", "git_status", "checkpoint", "dispatch", "plan_set_status"} {
 		if !set[want] {
 			t.Fatalf("compact fallback missing core tool %q; tools=%v", want, set)
 		}
@@ -86,7 +86,7 @@ func TestToolLoop_CompactFallbackDeniesHydrationBlockedByProfile(t *testing.T) {
 	prov := &mockProvider{
 		caps: inference.Capabilities{SupportsTools: true},
 		scripts: [][]llm.Block{
-			{{Type: llm.BlockToolUse, ToolUseID: "h1", ToolName: enableToolsName, ToolInput: []byte(`{"tools":["Bash"]}`)}},
+			{{Type: llm.BlockToolUse, ToolUseID: "h1", ToolName: enableToolsName, ToolInput: []byte(`{"tools":["RunCommand"]}`)}},
 			{{Type: llm.BlockText, Text: "done"}},
 		},
 	}
@@ -100,7 +100,7 @@ func TestToolLoop_CompactFallbackDeniesHydrationBlockedByProfile(t *testing.T) {
 	if len(prov.reqs) < 2 {
 		t.Fatalf("expected two requests, got %d", len(prov.reqs))
 	}
-	if toolSet(prov.reqs[1].Tools)["Bash"] {
+	if toolSet(prov.reqs[1].Tools)["RunCommand"] {
 		t.Fatalf("Bash must not hydrate through plan profile: %v", toolSet(prov.reqs[1].Tools))
 	}
 }
@@ -152,7 +152,7 @@ func TestToolLoop_CompactFallbackIntersectsActiveProfile(t *testing.T) {
 		t.Fatal(err)
 	}
 	set := toolSet(prov.lastReq.Tools)
-	if set["Bash"] {
+	if set["RunCommand"] {
 		t.Fatal("compact fallback must not advertise Bash through the plan profile")
 	}
 	if !set["Read"] || !set["Write"] || !set["request_plan_approval"] {

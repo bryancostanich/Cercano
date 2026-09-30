@@ -41,7 +41,7 @@ func accountingBatchToWire(id string, observations []usage.AttemptObservation) (
 		out.Observations = append(out.Observations, &wire.AccountingAttemptObservation{
 			Id: a.ID, Revision: a.Revision, OperationId: a.Attribution.OperationID, ConversationId: a.Attribution.ConversationID, SessionId: a.Attribution.SessionID, WorkerId: a.Attribution.WorkerID, Source: a.Attribution.Source,
 			Provider: a.Provider, Model: a.Model, Profile: a.Profile, Destination: a.Destination, StartedAtUtcMicros: optionalMicros(a.StartedAt), EndedAtUtcMicros: optionalMicros(a.EndedAt), Outcome: string(a.Outcome),
-			UsageFinal: a.Tokens.Final, InputTokens: optionalCount(a.Tokens.Input), OutputTokens: optionalCount(a.Tokens.Output), CacheReadTokens: optionalCount(a.Tokens.CacheRead), CacheWriteTokens: optionalCount(a.Tokens.CacheWrite), ReasoningTokens: optionalCount(a.Tokens.Reasoning),
+			UsageFinal: a.Tokens.Final, InputTokens: optionalCount(a.Tokens.Input), OutputTokens: optionalCount(a.Tokens.Output), CacheReadTokens: optionalCount(a.Tokens.CacheRead), CacheWriteTokens: optionalCount(a.Tokens.CacheWrite), ReasoningTokens: optionalCount(a.Tokens.Reasoning), ReasoningChunks: optionalCount(a.Tokens.ReasoningChunks), ReasoningBytes: optionalCount(a.Tokens.ReasoningBytes),
 		})
 	}
 	if pb.Size(out) > maxAccountingWireBytes {
@@ -66,8 +66,8 @@ func accountingBatchFromWire(batch *wire.WorkerAccountingBatch) ([]usage.Attempt
 		if v.EndedAtUtcMicros != nil {
 			a.EndedAt = time.UnixMicro(*v.EndedAtUtcMicros).UTC()
 		}
-		targets := []*llm.TokenCount{&a.Tokens.Input, &a.Tokens.Output, &a.Tokens.CacheRead, &a.Tokens.CacheWrite, &a.Tokens.Reasoning}
-		for i, value := range []*int64{v.InputTokens, v.OutputTokens, v.CacheReadTokens, v.CacheWriteTokens, v.ReasoningTokens} {
+		targets := []*llm.TokenCount{&a.Tokens.Input, &a.Tokens.Output, &a.Tokens.CacheRead, &a.Tokens.CacheWrite, &a.Tokens.Reasoning, &a.Tokens.ReasoningChunks, &a.Tokens.ReasoningBytes}
+		for i, value := range []*int64{v.InputTokens, v.OutputTokens, v.CacheReadTokens, v.CacheWriteTokens, v.ReasoningTokens, v.ReasoningChunks, v.ReasoningBytes} {
 			if value != nil {
 				if *value < 0 {
 					return nil, fmt.Errorf("negative accounting token count")

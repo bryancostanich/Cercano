@@ -58,7 +58,7 @@ func (m *mockCoordinator) Coordinate(ctx context.Context, instruction, inputCode
 
 func TestAgent_ProcessRequest_ChatIntent(t *testing.T) {
 	router := &mockRouter{intent: IntentChat, provider: &mockModelProvider{name: "mock"}}
-	// Mock coordinator needs the new signature if initialized via NewGenerationCoordinator, 
+	// Mock coordinator needs the new signature if initialized via NewGenerationCoordinator,
 	// but here it's a mock struct implementing the interface.
 	coordinator := &mockCoordinator{}
 	a := NewAgent(router, coordinator)
@@ -97,7 +97,7 @@ func TestAgent_ProcessRequest_CodingIntent(t *testing.T) {
 
 func TestAgent_ProcessRequest_UnitTestFilenameAdjustment(t *testing.T) {
 	router := &mockRouter{intent: IntentCoding, provider: &mockModelProvider{name: "mock"}}
-	
+
 	capturedFile := ""
 	coordinator := &MockCoordinator{
 		CoordinateFunc: func(ctx context.Context, instruction, inputCode, workDir, fileName string, progress ProgressFunc) (*Response, error) {
@@ -462,7 +462,7 @@ func TestAgent_ProcessRequest_DirectOpen(t *testing.T) {
 		intent:   IntentChat,
 		provider: cloudProvider, // Router would normally pick cloud
 		ModelProviders: map[string]TurnRunner{
-			"OpenModel": openProvider,
+			"OpenModel":  openProvider,
 			"CloudModel": cloudProvider,
 		},
 	}
@@ -471,7 +471,7 @@ func TestAgent_ProcessRequest_DirectOpen(t *testing.T) {
 
 	ctx := context.Background()
 	res, err := a.ProcessRequest(ctx, &Request{
-		Input:       "Summarize this text...",
+		Input:      "Summarize this text...",
 		DirectOpen: true,
 	})
 	if err != nil {

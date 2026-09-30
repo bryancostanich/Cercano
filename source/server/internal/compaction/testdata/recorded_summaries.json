@@ -1,0 +1,72 @@
+[
+  {
+    "response_seq": 55,
+    "iteration": 9,
+    "recorded_output": "GOAL: Summarize the conversation span for later reference\nDECISIONS:\nPROPOSALS:\nFILES:\n- /Users/bryancostanich/git_repos/bryan_costanich/lunie-game-production-globe-integration/docs: [verified] source sha256:78f39499ab241974fbb7d5c3dcb468ed\n- /Users/bryancostanich/git_repos/bryan_costanich/lunie-game-production-globe-integration/source: [verified] source sha256:65a6d7d74cfc19e408e54454c1a2b9af\n- /Users/bryancostanich/git_repos/bryan_costanich/lunie-game-production-globe-integration/docs/workflow: [verified] source sha256:4f17f21087a51454db59a286329d044c\n- /Users/bryancostanich/git_repos/bryan_costanich/lunie-game-production-globe-integration/docs/agent-driven-inner-loop.md: [verified] source sha256:a3f9c0b156ffad31b1fabb37d8cf7ecd\nOPEN:\nSTATE: Conversation summarized.",
+    "transcript_chars": 23231,
+    "has_code": false
+  },
+  {
+    "response_seq": 57,
+    "iteration": 9,
+    "recorded_output": "GOAL: Summarize the provided inner-loop and verification strategy documents for later reference.\n\nFILES:\n- docs/workflow/inner-loop.md: [verified] source sha256:69c307de7f7de85cd6a484fbad42fbf2\n- docs/workflow/verification-strategy.md: [verified] source sha256:69c307de7f7de85cd6a484fbad42fbf2\n\nSTATE: Summary generated.",
+    "transcript_chars": 23707,
+    "has_code": false
+  },
+  {
+    "response_seq": 59,
+    "iteration": 9,
+    "recorded_output": "GOAL: Identify code locations for \u201caperture\u201d and \u201cgrading\u201d in the repository\n\nDECISIONS:\n- [unverified] No explicit decisions were made in this span\n\nPROPOSALS:\n- [unverified] No proposals were made in this span\n\nFILES:\n- [unverified] No file modifications were performed; only search results were returned (source sha256:6c2e92948b8a1350849ca955ea2708e3, 81dd5c83c32b668c4effa4a785873d02)\n\nOPEN:\n- [unverified] No unresolved questions or pending actions remain\n\nSTATE: Grep searches for \u201caperture\u201d and \u201cgrading\u201d completed, results recorded.",
+    "transcript_chars": 66281,
+    "has_code": true
+  },
+  {
+    "response_seq": 112,
+    "iteration": 18,
+    "recorded_output": "GOAL: Summarize the conversation span for later reference  \nFILES:\n- source/lunie-game/src/mcp/drain.rs: [verified] source sha256:c0094139c3de5ce27ced3801b23a178b  \nSTATE: Summary prepared",
+    "transcript_chars": 3643,
+    "has_code": true
+  },
+  {
+    "response_seq": 114,
+    "iteration": 18,
+    "recorded_output": "GOAL: Summarize the conversation span for later reference  \n\nDECISIONS:  \n\nPROPOSALS:  \n\nFILES:\n- /Users/bryancostanich/git_repos/bryan_costanich/lunie-game-production-globe-integration/source/lunie-globe-render/src/site_mesh_job.rs: [verified] source sha256:8fb51aa3495a29e16604f4fb940bc93c  \n\nOPEN:  \n\nSTATE: Summary prepared.",
+    "transcript_chars": 33143,
+    "has_code": true
+  },
+  {
+    "response_seq": 139,
+    "iteration": 21,
+    "recorded_output": "GOAL: Summarize the conversation span for later reference  \n\nDECISIONS:  \n\nPROPOSALS:  \n\nFILES:  \n- /Users/bryancostanich/git_repos/bryan_costanich/lunie-game-production-globe-integration/source/lunie-globe-render/src/site_mesh_job.rs: [verified] source sha256:f726bb34001ffccf06c11c35c905518b, user content sha256:5885c14bedf68a8ef77b793bef7c5f05  \n\nOPEN:  \n\nSTATE: awaiting further instruction",
+    "transcript_chars": 33200,
+    "has_code": true
+  },
+  {
+    "response_seq": 141,
+    "iteration": 21,
+    "recorded_output": "GOAL: Summarize the following conversation span for later reference  \nDECISIONS:  \nPROPOSALS:  \nFILES:  \n- /Users/bryancostanich/git_repos/bryan_costanich/lunie-game-production-globe-integration/source/lunie-globe-render/src/site_mesh_job.rs: [verified] read lines 560\u2011700, source sha256:6dc22ef4025b60549c45fb979183cf5f  \n- /Users/bryancostanich/git_repos/bryan_costanich/lunie-game-production-globe-integration/source/lunie-globe-render/src/site_mesh_job.rs: [verified] grep for `fn build_site_mesh_for_key_with_stats_cancellable`, source sha256:5a13f0a28922352705a1b494eb5c00b7  \n- /Users/bryancostanich/git_repos/bryan_costanich/lunie-game-production-globe-integration/source/lunie-globe-render/src/site_mesh_job.rs: [verified] grep for `fn build_site_mesh`, source sha256:66ffd96be0f819ddfcc4aa144a9c8c93  \n- /Users/bryancostanich/git_repos/bryan_costanich/lunie-game-production-globe-integration/source/lunie-globe-render/src/site_mesh_job.rs: [verified] read lines 1600\u20111820, source sha256:3be84034dd05d2a046b518d415c2f1b7  \n- /Users/bryancostanich/git_repos/bryan_costanich/lunie-game-production-globe-integration/source/lunie-globe-render/src/mesh_mode.rs: [verified] read lines 2881\u20113220, source sha256:5d18bd295513518fa39d91aa7dc7cd6a  \n- /Users/bryancostanich/git_repos/bryan_costanich/lunie-game-production-globe-integration/source/lunie-globe-render/src/mesh_mode.rs: [verified] grep for `fn build_graded_site_mesh_with_metadata_cancellable|fn build_adaptive_geodesic_or_site_mesh|fn build_adaptive_geodesic_or_site_mesh_with_stats|fn build_adaptive_geodesic_or_site_mesh_with_stats_cancellable|fn build_adaptive_geodesic_or_site_mesh_with_metadata_cancellable|fn build_graded_site_mesh_with_metadata_cancellable`, source sha256:e13611a34b0aeb35743ee1c37284bede  \nOPEN:  \nSTATE: Conversation span summarized.",
+    "transcript_chars": 32336,
+    "has_code": true
+  },
+  {
+    "response_seq": 143,
+    "iteration": 21,
+    "recorded_output": "GOAL: Summarize the conversation span.\n\nSTATE: awaiting further instruction.",
+    "transcript_chars": 20297,
+    "has_code": true
+  },
+  {
+    "response_seq": 145,
+    "iteration": 21,
+    "recorded_output": "GOAL: Summarize the provided code snippet for later reference\nDECISIONS:\nPROPOSALS:\nFILES:\n- /Users/bryancostanich/git_repos/bryan_costanich/lunie-game-production-globe-integration/source/lunie-globe-mesh/src/terrain_site.rs: [verified] source sha256:4be6f5207695dd4c736c1bb6ba38cbb7, result source sha256:75b41d09651a89d845d57de7dfb05526\nOPEN:\nSTATE: Awaiting further instructions",
+    "transcript_chars": 13278,
+    "has_code": true
+  },
+  {
+    "response_seq": 204,
+    "iteration": 30,
+    "recorded_output": "GOAL: Summarize the conversation span for later reference\n\nDECISIONS:\n- [none]\n\nPROPOSALS:\n- [none]\n\nFILES:\n- /Users/bryancostanich/git_repos/bryan_costanich/lunie-game-production-globe-integration/docs/workflow/inner-loop.md: [verified] source sha256:067dcbfe3d3f6a0a23a8158cf309cee9\n- /Users/bryancostanich/git_repos/bryan_costanich/lunie-game-production-globe-integration/source/lunie-globe-render/src/mesh_mode.rs: [verified] source sha256:351e0372b38e72fe1183d64f46630bf1\n- /Users/bryancostanich/git_repos/bryan_costanich/lunie-game-production-globe-integration/source/lunie-globe-render/src/site_mesh_job.rs: [verified] source sha256:351e0372b38e72fe1183d64f46630bf1\n\nOPEN:\n- [none]\n\nSTATE: summarized the provided inner-loop documentation and grep matches.",
+    "transcript_chars": 26072,
+    "has_code": true
+  }
+]

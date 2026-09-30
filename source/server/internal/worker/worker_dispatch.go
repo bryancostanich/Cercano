@@ -1,18 +1,23 @@
 package worker
 
 import (
+	"cercano/source/server/internal/reasoningexperiment"
 	"context"
 	"fmt"
+	"log"
 
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/capabilities"
 	projectctx "cercano/source/server/internal/context"
+	"cercano/source/server/internal/conversation"
 	"cercano/source/server/internal/dispatch"
 	"cercano/source/server/internal/failurelog"
+	cfgsvc "cercano/source/server/internal/hostsvc/config"
 	"cercano/source/server/internal/hostsvc/permissions"
 	toolssvc "cercano/source/server/internal/hostsvc/tools"
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
+	"cercano/source/server/internal/loopcompact"
 	"cercano/source/server/internal/runner"
 	"cercano/source/server/internal/toolstack"
 	pkgcfg "cercano/source/server/pkg/config"
@@ -41,6 +46,10 @@ func openTierModel(cfg pkgcfg.Config, t pkgcfg.Tier) string {
 // RunAgenticDispatch already degrades cleanly when the store is nil. The
 // sub-agent system prompt reuses the runner's builder via a context-only history
 // shim so it still gets env grounding + project context.
+//
+// autonomy is the streamAutonomyLedger proxy (as conversation.AutonomyLedger):
+// the durable ledger for the autonomous-mode capabilities is host-owned, and
+// worker turns reach it over the acknowledged stream proxy rather than SQLite.
 func buildWorkerToolSvc(
 	permBroker permissions.Broker,
 	engine *dispatch.Engine,
@@ -51,8 +60,22 @@ func buildWorkerToolSvc(
 	enterProfile func(context.Context, string) error,
 	vision capabilities.VisionService,
 	failures *failurelog.Writer,
+	autonomy conversation.AutonomyLedger,
 	restart ...runtimeRestartFunc,
 ) runner.ToolSvc {
+	return buildWorkerToolSvcWithDiagnostic(permBroker, engine, ctxLoader, cloud, open, cfg, subPersist, enterProfile, vision, failures, nil, autonomy, nil, restart...)
+}
+
+func buildWorkerToolSvcWithDiagnostic(
+	permBroker permissions.Broker, engine *dispatch.Engine, ctxLoader *projectctx.Loader,
+	cloud, open inference.Provider, cfg pkgcfg.Config, subPersist *streamSubagentPersist,
+	enterProfile func(context.Context, string) error, vision capabilities.VisionService,
+	failures *failurelog.Writer, diagnostic reasoningexperiment.Service, autonomy conversation.AutonomyLedger, candidates func() inference.Tiers, restart ...runtimeRestartFunc,
+) runner.ToolSvc {
+	var runDiagnostic func(context.Context, reasoningexperiment.Spec) (reasoningexperiment.Report, error)
+	if diagnostic != nil {
+		runDiagnostic = diagnostic.RunReasoningDiagnostic
+	}
 	var restartRuntime runtimeRestartFunc
 	if len(restart) > 0 {
 		restartRuntime = restart[0]
@@ -66,15 +89,27 @@ func buildWorkerToolSvc(
 	svc := toolssvc.New(permBroker, systemPrompt, nil, subagentPersistTurn(subPersist))
 	svc.SetFailureLog(failures)
 	svc.SetEngine(engine) // installs the agentic runner for sub-agent dispatch
+	// Sub-agent dispatches compact INLINE exactly as in-process: the worker
+	// installs the SAME per-dispatch factory the host front door does, built
+	// from the shared internal/loopcompact wiring (no worker-specific policy).
+	// The worker's providers are host-streamed inference.Proxies; they adapt
+	// to the summarizer's TurnRunner seam via agent.InferenceTurnRunner.
+	if factory := loopcompact.NewFactory(workerLoopCompactDeps(cfg, cloud, open, candidates)); factory != nil {
+		svc.SetLoopCompactorFactory(factory)
+	}
+	svc.SetCaptureReasoning(cfg.CaptureDispatchReasoning)
 	if subPersist != nil {
+		svc.SetDispatchEventSink(subagentDispatchEventSink(subPersist))
 		svc.SetEnsureSubagent(subPersist.ensure) // worker creates sub-agent conversation rows on the host
 	}
 	toolstack.InstallCapabilities(svc, toolstack.CapDeps{
-		RestartRuntime: restartRuntime,
-		Cloud:          cloud,
-		Open:           open,
-		Config:         &cfg,
-		CtxLoader:      ctxLoader,
+		RestartRuntime:      restartRuntime,
+		ReasoningDiagnostic: runDiagnostic,
+		Cloud:               cloud,
+		Open:                open,
+		Config:              &cfg,
+		CtxLoader:           ctxLoader,
+		Autonomy:            autonomy,
 		EnterProfile: func(convID, name string) error {
 			if enterProfile == nil {
 				return fmt.Errorf("session profile control not configured")
@@ -87,6 +122,29 @@ func buildWorkerToolSvc(
 		Vision: vision,
 	})
 	return svc
+}
+
+// workerLoopCompactDeps uses the worker's existing destination graph, including
+// Secondary and its profile backup chain. The fallback graph is for constructors
+// with only primary/local providers (tests); it cannot invent a Secondary.
+func workerLoopCompactDeps(cfg pkgcfg.Config, cloud, open inference.Provider, candidates ...func() inference.Tiers) loopcompact.WiringDeps {
+	if proxy, ok := open.(*streamOpenProvider); ok && proxy == nil {
+		open = nil
+	}
+	deps := loopcompact.WiringDeps{Cfg: cfg, ChatModel: openTierModel(cfg, pkgcfg.TierEveryday), Log: func(format string, args ...any) { log.Printf(format, args...) }}
+	if cloud != nil || open != nil {
+		resolver := &workerResolver{cfgSvc: cfgsvc.New("", cfg, nil), cloudProv: cloud, openProv: open}
+		deps.Candidates = resolver.Candidates
+	}
+	if len(candidates) > 0 && candidates[0] != nil {
+		deps.Candidates = candidates[0]
+	}
+	if runtime, ok := open.(interface {
+		RuntimeContext(context.Context, string, bool) (llm.RuntimeContext, error)
+	}); ok {
+		deps.OpenRuntimeContext = runtime.RuntimeContext
+	}
+	return deps
 }
 
 // workerCtxHistory adapts the project-context Loader to runner.TurnHistory so

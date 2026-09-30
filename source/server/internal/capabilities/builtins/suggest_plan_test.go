@@ -77,8 +77,8 @@ func TestSuggestPlanDescriptionRequiresSignificantWork(t *testing.T) {
 	desc := SuggestPlan().Description()
 	for _, want := range []string{
 		"Default to direct execution", "clear, bounded", "even across multiple files",
-		"File count or multiple steps alone", "substantial", "architecture",
-		"explicitly asks", "brief inspection or a focused question",
+		"never justify planning mode on their own", "design itself is still open",
+		"architecture",
 	} {
 		if !strings.Contains(desc, want) {
 			t.Errorf("suggest_plan description missing %q", want)
@@ -92,5 +92,38 @@ func TestSuggestPlanDescriptionRequiresSignificantWork(t *testing.T) {
 	schema := string(SuggestPlan().Schema())
 	if strings.Contains(schema, "spans 4 files") || !strings.Contains(schema, "migration") {
 		t.Fatal("reason example must describe consequential planning needs, not file count")
+	}
+}
+
+// Regression for observed over-suggestion: in a long session the model proposed
+// planning 15 times and the user denied 12. The denials shared four shapes --
+// the approach was already agreed in chat and only implementation remained; the
+// user had issued a bare execute command ("build it", "do it", "fix it"); the
+// user asked for "a plan"/"the shape" meaning prose, not planning mode; or a
+// bug fix had failed repeatedly and planning was floated instead of debugging.
+// Cross-subsystem sequencing was the stated justification for most of them, so
+// it must no longer stand alone as a reason.
+func TestSuggestPlanDescriptionExcludesObservedFalsePositives(t *testing.T) {
+	desc := SuggestPlan().Description()
+	for _, want := range []string{
+		// Settled design -> execution, regardless of breadth.
+		"agreed in conversation",
+		"however many subsystems it spans",
+		// Bare imperatives are execution instructions.
+		"instruction to build, fix, do, or try",
+		// "give me a plan" means prose in the reply.
+		"asks for prose in your reply",
+		"spec or plan file",
+		// Keep debugging instead of proposing a design.
+		"keep debugging and fixing",
+	} {
+		if !strings.Contains(desc, want) {
+			t.Errorf("suggest_plan description must exclude observed false positive; missing %q", want)
+		}
+	}
+	// Breadth alone was the most common bad justification: it must not appear
+	// as a standalone planning criterion.
+	if strings.Contains(desc, "complex cross-subsystem sequencing") {
+		t.Error("cross-subsystem sequencing must not stand alone as a planning criterion")
 	}
 }

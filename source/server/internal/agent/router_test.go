@@ -54,7 +54,6 @@ func (m *MockRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) 
 	return nil, fmt.Errorf("no mock response for body: %s", string(body))
 }
 
-
 type mockEmbedder struct {
 	responses map[string]string
 }
@@ -258,8 +257,8 @@ providers:
 		"implement function": `{"embedding": [1.0, -1.0, 0.0]}`,
 		"create module":      `{"embedding": [0.0, 0.0, 1.0]}`,
 		// Chat prototypes: all consistently close to query direction [1,1,0]
-		"explain this code":  `{"embedding": [0.9, 1.0, 0.1]}`,
-		"what does this do":  `{"embedding": [1.0, 0.9, 0.1]}`,
+		"explain this code":    `{"embedding": [0.9, 1.0, 0.1]}`,
+		"what does this do":    `{"embedding": [1.0, 0.9, 0.1]}`,
 		"summarize this class": `{"embedding": [0.95, 0.95, 0.1]}`,
 		// Provider prototypes (needed for initialization)
 		"local task": `{"embedding": [1.0, 0.0, 0.0]}`,
@@ -313,14 +312,14 @@ providers:
 
 	// All coding prototypes cluster near [1,0,0], chat near [0,1,0]
 	mockResponses := map[string]string{
-		"write code":       `{"embedding": [0.95, 0.05, 0.0]}`,
+		"write code":        `{"embedding": [0.95, 0.05, 0.0]}`,
 		"generate function": `{"embedding": [0.9, 0.1, 0.0]}`,
-		"create class":     `{"embedding": [0.85, 0.15, 0.0]}`,
-		"hello there":      `{"embedding": [0.05, 0.95, 0.0]}`,
-		"what is life":     `{"embedding": [0.1, 0.9, 0.0]}`,
-		"tell me a joke":   `{"embedding": [0.15, 0.85, 0.0]}`,
-		"local task":       `{"embedding": [1.0, 0.0, 0.0]}`,
-		"cloud task":       `{"embedding": [0.0, 1.0, 0.0]}`,
+		"create class":      `{"embedding": [0.85, 0.15, 0.0]}`,
+		"hello there":       `{"embedding": [0.05, 0.95, 0.0]}`,
+		"what is life":      `{"embedding": [0.1, 0.9, 0.0]}`,
+		"tell me a joke":    `{"embedding": [0.15, 0.85, 0.0]}`,
+		"local task":        `{"embedding": [1.0, 0.0, 0.0]}`,
+		"cloud task":        `{"embedding": [0.0, 1.0, 0.0]}`,
 		// Query is clearly in coding territory
 		"implement a sorting algorithm": `{"embedding": [0.92, 0.08, 0.0]}`,
 	}
@@ -568,19 +567,19 @@ providers:
 	//   like "add" but in interrogative form, so closer to chat than coding
 	mockResponses := map[string]string{
 		// Coding prototypes (explicit)
-		"write a function":           `{"embedding": [0.95, 0.05, 0.0]}`,
-		"implement the interface":    `{"embedding": [0.90, 0.10, 0.0]}`,
+		"write a function":              `{"embedding": [0.95, 0.05, 0.0]}`,
+		"implement the interface":       `{"embedding": [0.90, 0.10, 0.0]}`,
 		"add a new field to the struct": `{"embedding": [0.88, 0.12, 0.0]}`,
 		// Coding prototypes (referential follow-ups)
-		"add those to the file":              `{"embedding": [0.85, 0.15, 0.0]}`,
+		"add those to the file":                 `{"embedding": [0.85, 0.15, 0.0]}`,
 		"update the class with those additions": `{"embedding": [0.83, 0.17, 0.0]}`,
-		"make those changes":                 `{"embedding": [0.82, 0.18, 0.0]}`,
-		"go ahead and add them":              `{"embedding": [0.80, 0.20, 0.0]}`,
+		"make those changes":                    `{"embedding": [0.82, 0.18, 0.0]}`,
+		"go ahead and add them":                 `{"embedding": [0.80, 0.20, 0.0]}`,
 		// Chat prototypes (explanatory)
-		"explain this code":      `{"embedding": [0.05, 0.95, 0.0]}`,
-		"what does this do":      `{"embedding": [0.10, 0.90, 0.0]}`,
+		"explain this code":        `{"embedding": [0.05, 0.95, 0.0]}`,
+		"what does this do":        `{"embedding": [0.10, 0.90, 0.0]}`,
 		"tell me about this class": `{"embedding": [0.08, 0.92, 0.0]}`,
-		"how does this work":     `{"embedding": [0.07, 0.93, 0.0]}`,
+		"how does this work":       `{"embedding": [0.07, 0.93, 0.0]}`,
 		// Chat prototypes (suggestion-seeking — use action words but interrogative)
 		"what would you add to improve this": `{"embedding": [0.30, 0.70, 0.0]}`,
 		"what changes would you suggest":     `{"embedding": [0.25, 0.75, 0.0]}`,

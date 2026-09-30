@@ -19,6 +19,7 @@ type StructuredSummary struct {
 	Files       map[string]string // path -> latest known state/summary
 	OpenThreads []string          // unresolved questions / next steps
 	State       string            // one-line current state
+	Findings    []string          `json:"findings,omitempty"` // historical evidence/observations (not approvals/current state)
 }
 
 // Segment is a contiguous, token-budgeted slice of the history.

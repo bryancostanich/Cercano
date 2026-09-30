@@ -42,7 +42,7 @@ func TestPlanProfile_AllowsReadAndFileWritesOnly(t *testing.T) {
 		{llm.PermW, "Edit", true},                  // file edit — permitted to author the plan
 		{llm.PermX, "request_plan_approval", true}, // handoff tool — permitted to leave planning after approval
 		{llm.PermX, "bash", false},                 // exec tier — fenced
-		{llm.PermX, "Bash", false},                 // exec tier — fenced (display alias)
+		{llm.PermX, "RunCommand", false},                 // exec tier — fenced (display alias)
 		{llm.PermW, "git_commit", false},           // non-file write tool — fenced
 		{llm.PermW, "Checkpoint", false},           // git mutation — fenced
 	}
@@ -64,7 +64,7 @@ func TestAutonomousProfile_AllowsEveryKnownTierButSignalsActiveProfile(t *testin
 	}{
 		{llm.PermR, "Read"},
 		{llm.PermW, "Write"},
-		{llm.PermX, "Bash"},
+		{llm.PermX, "RunCommand"},
 	}
 	for _, c := range cases {
 		if !p.Allows(c.tier, c.name) {
@@ -88,7 +88,7 @@ func TestIsSessionControlTool(t *testing.T) {
 			t.Errorf("IsSessionControlTool(%q) = false, want true", name)
 		}
 	}
-	ordinary := []string{"Read", "Write", "Bash", "capture_decision", "plan_set_status", "get_protocol"}
+	ordinary := []string{"Read", "Write", "RunCommand", "capture_decision", "plan_set_status", "get_protocol"}
 	for _, name := range ordinary {
 		if IsSessionControlTool(name) {
 			t.Errorf("IsSessionControlTool(%q) = true, want false", name)
@@ -103,11 +103,11 @@ func TestPlanProfile_FiltersExecToolsButKeepsFileWrites(t *testing.T) {
 	full := agenttools.BuildToolCatalog(reg)
 	filtered := agenttools.BuildToolCatalogFiltered(reg, PlanProfile().Allows)
 
-	if !hasTool(full, "Bash") {
+	if !hasTool(full, "RunCommand") {
 		t.Fatal("precondition: unfiltered catalog should advertise Bash")
 	}
 	// Exec tool is fenced — not advertised while planning.
-	if hasTool(filtered, "Bash") {
+	if hasTool(filtered, "RunCommand") {
 		t.Fatal("plan profile must NOT advertise the Bash (X) tool to the model")
 	}
 	// File-write tools ARE advertised — the model authors spec.md/plan.md with them.
@@ -146,7 +146,7 @@ func TestPlanProfile_DeniesExecAtGate_NoConfirm(t *testing.T) {
 	prov := &mockProvider{
 		scripts: [][]llm.Block{
 			{
-				{Type: llm.BlockToolUse, ToolUseID: "u1", ToolName: "Bash",
+				{Type: llm.BlockToolUse, ToolUseID: "u1", ToolName: "RunCommand",
 					ToolInput: json.RawMessage(`{"cmd":["rm","-rf","/tmp/x"]}`)},
 			},
 			// After the fence denies the write, the loop feeds the error result

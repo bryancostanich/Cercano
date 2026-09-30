@@ -71,7 +71,7 @@ func (c *Client) GetCloudProviders(ctx context.Context) (CloudProvidersView, err
 func cloudProfileInfoFromProto(p *proto.CloudProfileInfo) CloudProfileInfo {
 	return CloudProfileInfo{
 		Choices: choicesFromProto(p.GetModelChoices()), EffectiveQualityModels: copyStringMap(p.GetEffectiveQualityModels()), RecommendedQualityModels: copyStringMap(p.GetRecommendedQualityModels()), Provider: p.GetProvider(), Region: p.GetRegion(), AWSProfile: p.GetAwsProfile(),
-		Name:    p.GetName(),
+		Name: p.GetName(), AccountEmail: p.GetAccountEmail(), AccountDisplayName: p.GetAccountDisplayName(),
 		Flavor:  p.GetFlavor(),
 		BaseURL: p.GetBaseUrl(),
 		Model:   p.GetModel(),

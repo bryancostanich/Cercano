@@ -2474,18 +2474,20 @@ func (c *Client) ListCloudProfileModels(ctx context.Context, profileName string)
 
 // CloudProfileInfo is a point-in-time view of one cloud profile.
 type CloudProfileInfo struct {
-	ReplaceStructure             bool // Send a complete structural draft, including explicit clears.
-	Choices                      *CloudModelChoices
-	EffectiveQualityModels       map[string]string
-	RecommendedQualityModels     map[string]string
-	Provider, Region, AWSProfile string
-	Name                         string
-	Flavor                       string
-	BaseURL                      string
-	Model                        string
-	HasKey                       bool // a key exists in the keychain for this profile
-	Backend                      string
-	Route                        string // "direct" (default), "meridian", "ccr" (future) — selects adapter-specific auth
+	AccountEmail, AccountDisplayName string // Optional sign-in display metadata.
+	CreateOnly                       bool   // New-account saves reject existing names.
+	ReplaceStructure                 bool   // Send a complete structural draft, including explicit clears.
+	Choices                          *CloudModelChoices
+	EffectiveQualityModels           map[string]string
+	RecommendedQualityModels         map[string]string
+	Provider, Region, AWSProfile     string
+	Name                             string
+	Flavor                           string
+	BaseURL                          string
+	Model                            string
+	HasKey                           bool // a key exists in the keychain for this profile
+	Backend                          string
+	Route                            string // "direct" (default), "meridian", "ccr" (future) — selects adapter-specific auth
 }
 
 // GetCloudProfiles returns all configured cloud profiles and the name of the
@@ -2534,7 +2536,7 @@ func (c *Client) UpsertCloudProfile(ctx context.Context, p CloudProfileInfo) err
 
 func (c *Client) SaveCloudProfile(ctx context.Context, p CloudProfileInfo) (string, error) {
 	resp, err := c.agent.UpsertCloudProfile(ctx, &proto.UpsertCloudProfileRequest{
-		Name: p.Name, Flavor: p.Flavor, Backend: p.Backend, BaseUrl: p.BaseURL, Route: p.Route,
+		Name: p.Name, Flavor: p.Flavor, Backend: p.Backend, BaseUrl: p.BaseURL, Route: p.Route, CreateOnly: p.CreateOnly,
 		ModelChoices: choicesToProto(p.Choices), Structure: profileStructureToProto(p), Provider: nonemptyProfileField(p.Provider), Region: nonemptyProfileField(p.Region), AwsProfile: nonemptyProfileField(p.AWSProfile),
 	})
 	if err != nil {
@@ -2607,11 +2609,12 @@ type ChatGPTLoginMsg struct {
 // StartChatGPTLogin opens the ChatGPT subscription sign-in stream and returns
 // a channel of frames. The caller shows the first frame's code + URL, then
 // waits for the terminal (Done) frame. Cancel ctx to abort the sign-in.
-func (c *Client) StartChatGPTLogin(ctx context.Context, profileName, model string, setActive bool) (<-chan ChatGPTLoginMsg, error) {
+func (c *Client) StartChatGPTLogin(ctx context.Context, profileName, model string, setActive bool, createOnly ...bool) (<-chan ChatGPTLoginMsg, error) {
 	stream, err := c.agent.StartChatGPTLogin(ctx, &proto.StartChatGPTLoginRequest{
 		ProfileName: profileName,
 		Model:       model,
 		SetActive:   setActive,
+		CreateOnly:  len(createOnly) > 0 && createOnly[0],
 	})
 	if err != nil {
 		return nil, err
@@ -2659,11 +2662,12 @@ type ClaudeLoginMsg struct {
 // channel of frames. The caller opens the first frame's authorize URL in a
 // browser, then waits for the terminal (Done) frame. Cancel ctx to abort the
 // sign-in.
-func (c *Client) StartClaudeLogin(ctx context.Context, profileName, model string, setActive bool) (<-chan ClaudeLoginMsg, error) {
+func (c *Client) StartClaudeLogin(ctx context.Context, profileName, model string, setActive bool, createOnly ...bool) (<-chan ClaudeLoginMsg, error) {
 	stream, err := c.agent.StartClaudeLogin(ctx, &proto.StartClaudeLoginRequest{
 		ProfileName: profileName,
 		Model:       model,
 		SetActive:   setActive,
+		CreateOnly:  len(createOnly) > 0 && createOnly[0],
 	})
 	if err != nil {
 		return nil, err

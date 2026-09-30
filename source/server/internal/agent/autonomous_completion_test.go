@@ -35,7 +35,7 @@ func TestAutonomousCompletionSingleConfirmation(t *testing.T) {
 				t.Fatal(err)
 			}
 			profile := "autonomous"
-			caps := capabilities.NewRegistry(capabilities.Services{Conversations: store, EnterProfile: func(_ string, name string) error { profile = name; return nil }})
+			caps := capabilities.NewRegistry(capabilities.Services{Autonomy: store, EnterProfile: func(_ string, name string) error { profile = name; return nil }})
 			caps.MustRegister(builtins.RequestAutonomousExit())
 			reg := agentadapter.BuildAgentRegistry(caps, nil, nil)
 			prov := &mockProvider{scripts: [][]llm.Block{

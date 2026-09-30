@@ -90,6 +90,12 @@ func (s *Source) Token(ctx context.Context) (access, accountID string, err error
 	if refreshed.AccountID == "" {
 		refreshed.AccountID = ts.AccountID
 	}
+	if refreshed.Identity.Email == "" {
+		refreshed.Identity.Email = ts.Identity.Email
+	}
+	if refreshed.Identity.Name == "" {
+		refreshed.Identity.Name = ts.Identity.Name
+	}
 	if err := Save(s.store, s.profile, *refreshed); err != nil {
 		return "", "", s.failure(llm.ErrCredential, llm.CredentialStore, err)
 	}

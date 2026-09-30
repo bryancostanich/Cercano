@@ -169,3 +169,7 @@ type ContextAware interface{ WantsProjectContext() bool }
 type ArgsTiered interface {
 	TierFor(args json.RawMessage) Tier
 }
+
+// LegacyAgentNamer supplies lookup-only compatibility names for renamed agent tools.
+// These names are not advertised in model catalogs.
+type LegacyAgentNamer interface{ LegacyAgentNames() []string }

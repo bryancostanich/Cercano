@@ -38,6 +38,9 @@ type normalizingDoer struct {
 }
 
 func (d *normalizingDoer) Do(req *http.Request) (*http.Response, error) {
+	if session, ok := req.Context().Value(reasoningDiagnosticKey{}).(*ReasoningDiagnostic); ok {
+		return session.do(req, d.next)
+	}
 	patched, err := patchExplicitZeroTemperature(req)
 	if err != nil {
 		return nil, err

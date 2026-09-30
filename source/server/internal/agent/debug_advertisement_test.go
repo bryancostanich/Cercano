@@ -57,3 +57,28 @@ func TestToolLoopDebugFlagControlsAdvertisement(t *testing.T) {
 		}
 	}
 }
+
+type debugReasoningTool struct{ debugRuntimeTool }
+
+func (debugReasoningTool) Name() string { return "reasoning_diagnostic" }
+func TestReasoningDiagnosticDebugAdvertisementAndConfirmation(t *testing.T) {
+	reg := agenttools.NewRegistry()
+	called := false
+	reg.MustRegister(debugReasoningTool{debugRuntimeTool{&called}})
+	for _, tight := range []bool{false, true} {
+		for _, debug := range []bool{false, true} {
+			catalog := buildCompactToolCatalog(reg, Profile{}, tight, nil, debug)
+			if toolSet(catalog)["reasoning_diagnostic"] != debug {
+				t.Fatal("incorrect debug advertisement")
+			}
+			if !debug && strings.Contains(compactToolDirectory(reg, Profile{}, nil, debug), "reasoning_diagnostic") {
+				t.Fatal("tool leaked into directory")
+			}
+		}
+	}
+	for _, mode := range []PermissionMode{ModeStrict, ModePermissive, ModeBypass} {
+		if !GateDecisionForTool(mode, "X", "reasoning_diagnostic", false, true) {
+			t.Fatal("paid experiment not confirmed")
+		}
+	}
+}

@@ -13,7 +13,7 @@ import (
 )
 
 func wireAttemptFixture() usage.AttemptObservation {
-	return usage.AttemptObservation{ID: "attempt", Revision: 2, Attribution: usage.Attribution{OperationID: "operation", ConversationID: "conversation", SessionID: "session", WorkerID: "worker", Source: "main"}, Provider: "provider", Model: "model", Profile: "profile", Destination: "local", StartedAt: time.Unix(100, 123456000).UTC(), EndedAt: time.Unix(101, 654321000).UTC(), Outcome: usage.Completed, Tokens: llm.TokenUsage{Final: true, Input: llm.ReportedTokens(0), Output: llm.ReportedTokens(17), CacheRead: llm.ReportedTokens(3), CacheWrite: llm.ReportedTokens(0)}}
+	return usage.AttemptObservation{ID: "attempt", Revision: 2, Attribution: usage.Attribution{OperationID: "operation", ConversationID: "conversation", SessionID: "session", WorkerID: "worker", Source: "main"}, Provider: "provider", Model: "model", Profile: "profile", Destination: "local", StartedAt: time.Unix(100, 123456000).UTC(), EndedAt: time.Unix(101, 654321000).UTC(), Outcome: usage.Completed, Tokens: llm.TokenUsage{Final: true, Input: llm.ReportedTokens(0), Output: llm.ReportedTokens(17), CacheRead: llm.ReportedTokens(3), CacheWrite: llm.ReportedTokens(0), ReasoningChunks: llm.ReportedTokens(0), ReasoningBytes: llm.ReportedTokens(8383)}}
 }
 func TestAccountingWireRoundTrip(t *testing.T) {
 	original := wireAttemptFixture()
@@ -36,7 +36,7 @@ func TestAccountingWireRoundTrip(t *testing.T) {
 	if len(decoded) != 1 || !reflect.DeepEqual(original, decoded[0]) {
 		t.Fatalf("round trip: %+v", decoded)
 	}
-	if received.Observations[0].InputTokens == nil || received.Observations[0].ReasoningTokens != nil {
+	if received.Observations[0].InputTokens == nil || received.Observations[0].ReasoningTokens != nil || received.Observations[0].ReasoningChunks == nil || *received.Observations[0].ReasoningChunks != 0 {
 		t.Fatal("zero and unknown lost their distinction")
 	}
 }

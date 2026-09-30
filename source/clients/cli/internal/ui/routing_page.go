@@ -1,9 +1,11 @@
 package ui
 
 import (
+	"cercano/source/server/pkg/agentclient"
 	"context"
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,9 +22,25 @@ func (sp *settingsPage) ensureRoutingDraft() {
 	sp.routingDraft = sp.cloudView.Assignments.Clone()
 	if sp.cloudView.Assignments == nil {
 		sp.routingDraft.Primary = sp.cloudView.Active
-		sp.routingDraft.PrimaryBackup = sp.cloudView.Backup
+		if sp.cloudView.Backup != "" {
+			sp.routingDraft.SetPrimaryBackupAccounts([]string{sp.cloudView.Backup})
+		}
 	}
 }
+
+// Fresh server snapshots own model-tier fields; only task edits remain drafts.
+func (sp *settingsPage) refreshRoutingModelTiers() {
+	pending := sp.routingDirty && sp.routingDraft != nil
+	previous := sp.routingDraft
+	sp.routingDraft = nil
+	sp.ensureRoutingDraft()
+	saved := sp.routingDraft.Clone()
+	if pending {
+		sp.routingDraft.Tasks = previous.Clone().Tasks
+	}
+	sp.routingDirty = !reflect.DeepEqual(sp.routingDraft, saved)
+}
+
 func qualityLabel(q config.CostTier) string {
 	if q == config.CostEconomy {
 		return "Light"
@@ -69,11 +87,11 @@ func (sp *settingsPage) buildRoutingSections() []form.Section {
 		seen := map[string]bool{"": true}
 		for _, p := range sp.profiles {
 			if !seen[p.Name] {
-				options = append(options, form.Option{Label: p.Name, Value: p.Name})
+				options = append(options, form.Option{Label: sp.routingAccountLabel(p.Name), Value: p.Name})
 				seen[p.Name] = true
 			}
 		}
-		for _, name := range []string{a.Primary, a.PrimaryBackup, a.Secondary, a.SecondaryBackup} {
+		for _, name := range append([]string{a.Primary, a.Secondary, a.SecondaryBackup}, a.PrimaryBackupAccounts()...) {
 			if !seen[name] {
 				options = append(options, form.Option{Label: name + " (unavailable)", Value: name})
 				seen[name] = true
@@ -81,13 +99,41 @@ func (sp *settingsPage) buildRoutingSections() []form.Section {
 		}
 		return options
 	}
+	primaryOptions := func(current string, primary bool) []form.Option {
+		selected := map[string]bool{}
+		for _, name := range a.PrimaryBackupAccounts() {
+			selected[name] = true
+		}
+		if !primary {
+			selected[a.Primary] = true
+		}
+		var out []form.Option
+		for _, option := range profileOptions("Choose account…") {
+			if option.Value == current || !selected[option.Value] {
+				out = append(out, option)
+			}
+		}
+		return out
+	}
+	backups := a.PrimaryBackupAccounts()
+	primaryFields := []form.Field{
+		form.NewSelect("routing-primary", "Account 1 (first)", primaryOptions(a.Primary, true), a.Primary),
+		form.NewButton("routing-primary-down", "  Move down", len(backups) > 0),
+		form.NewButton("routing-primary-remove", "  Remove account", a.Primary != ""),
+	}
+	for i, name := range backups {
+		key := fmt.Sprintf("routing-primary-backup-%d", i)
+		primaryFields = append(primaryFields,
+			form.NewSelect(key, fmt.Sprintf("Account %d", i+2), primaryOptions(name, false), name),
+			form.NewButton(key+"-up", "  Move up", true),
+			form.NewButton(key+"-down", "  Move down", i+1 < len(backups)),
+			form.NewButton(key+"-remove", "  Remove account", true))
+	}
+	primaryFields = append(primaryFields, form.NewSelect("routing-primary-backup-add", "Add account", primaryOptions("", false), ""))
 	tiers := form.Section{Title: "Model tiers", Groups: []form.Group{
-		{Title: "Primary", Fields: []form.Field{
-			form.NewSelect("routing-primary", "Profile", profileOptions("No profile selected"), a.Primary),
-			form.NewSelect("routing-primary-backup", "Backup", profileOptions("No backup"), a.PrimaryBackup),
-		}},
+		{Title: "Primary", Fields: primaryFields},
 		{Title: "Secondary", Fields: []form.Field{
-			form.NewSelect("routing-secondary", "Profile", profileOptions("No profile selected"), a.Secondary),
+			form.NewSelect("routing-secondary", "Account", profileOptions("No profile selected"), a.Secondary),
 			form.NewSelect("routing-secondary-backup", "Backup", profileOptions("No backup"), a.SecondaryBackup),
 			form.NewSelect("routing-secondary-redirect", "Redirect all work to", []form.Option{{Label: "No redirect", Value: ""}, {Label: "Primary", Value: "primary"}, {Label: "Local", Value: "local"}}, a.SecondaryRedirect),
 		}},
@@ -95,7 +141,7 @@ func (sp *settingsPage) buildRoutingSections() []form.Section {
 			form.NewReadOnly("routing-local-setup", "Setup", "Runtime and Local Models tabs", ""),
 			form.NewSelect("routing-local-redirect", "Redirect all work to", []form.Option{{Label: "No redirect", Value: ""}, {Label: "Primary", Value: "primary"}, {Label: "Secondary", Value: "secondary"}}, a.LocalRedirect),
 		}},
-		{Fields: []form.Field{form.NewReadOnly("routing-behavior", "Behavior", "Backups are used after failures. Redirects send all work to another model tier.", "")}},
+		{Fields: []form.Field{form.NewReadOnly("routing-behavior", "Behavior", "Accounts are tried in order, starting with Account 1. Quota exhaustion advances to the next account and stays there. Redirects send all work to another model tier.", "")}},
 	}}
 	c := sp.routingConfig()
 	var tasks []form.Field
@@ -125,21 +171,29 @@ func (sp *settingsPage) buildRoutingSections() []form.Section {
 	if sp.routingDirty {
 		status = "Unsaved changes"
 	}
-	tiers.Groups = append(tiers.Groups, form.Group{Title: status, Fields: []form.Field{form.NewButton("routing-save-tiers", "Save routing", sp.routingDirty)}})
+	tiers.Groups = append(tiers.Groups, form.Group{Fields: []form.Field{form.NewReadOnly("routing-autosave", "", "Changes save automatically", "")}})
 	routing := form.Section{Title: "Task routing", ColumnHeadings: [3]string{"Task", "Model tier", "Quality"}, Groups: []form.Group{
 		{Fields: tasks},
 		{Title: status, Fields: []form.Field{form.NewButton("routing-save", "Save routing", sp.routingDirty), form.NewButton("routing-discard", "Discard routing", sp.routingDirty)}},
 	}}
 	return []form.Section{tiers, routing}
 }
-func (sp *settingsPage) commitRouting(field, value string) (string, tea.Cmd, error) {
+func (sp *settingsPage) commitRouting(field, value string) (message string, command tea.Cmd, err error) {
 	sp.ensureRoutingDraft()
+	before, beforeDirty := sp.routingDraft.Clone(), sp.routingDirty
+	// A failed immediate update must not leave an apparently applied selection.
+	defer func() {
+		if err != nil {
+			sp.routingDraft = before
+			sp.routingDirty = beforeDirty
+		}
+	}()
 	switch field {
 	case "routing-discard":
 		sp.routingDraft = nil
 		sp.routingDirty = false
 		return "discarded routing draft", nil, nil
-	case "routing-save", "routing-save-tiers":
+	case "routing-save":
 		if err := sp.routingConfig().ValidateDestinationRedirects(); err != nil {
 			return "", nil, err
 		}
@@ -150,10 +204,40 @@ func (sp *settingsPage) commitRouting(field, value string) (string, tea.Cmd, err
 		defer cancel()
 		warning, err := sp.agent.UpdateRoutingAssignments(ctx, sp.routingDraft.Clone())
 		return sp.finishRoutingSave(warning, err)
+	case "routing-primary-down":
+		if len(sp.routingDraft.PrimaryBackupAccounts()) > 0 {
+			if err := sp.editPrimaryBackup("0-up", ""); err != nil {
+				return "", nil, err
+			}
+		}
+	case "routing-primary-remove":
+		backups := sp.routingDraft.PrimaryBackupAccounts()
+		sp.routingDraft.Primary = ""
+		if len(backups) > 0 {
+			sp.routingDraft.Primary = backups[0]
+			backups = backups[1:]
+		}
+		sp.routingDraft.SetPrimaryBackupAccounts(backups)
 	case "routing-primary":
+		for _, name := range sp.routingDraft.PrimaryBackupAccounts() {
+			if value != "" && name == value {
+				return "", nil, fmt.Errorf("account is already a backup")
+			}
+		}
+		if value == "" {
+			backups := sp.routingDraft.PrimaryBackupAccounts()
+			if len(backups) > 0 {
+				value = backups[0]
+				sp.routingDraft.SetPrimaryBackupAccounts(backups[1:])
+			}
+		}
 		sp.routingDraft.Primary = value
 	case "routing-primary-backup":
-		sp.routingDraft.PrimaryBackup = value
+		if value == "" {
+			sp.routingDraft.SetPrimaryBackupAccounts(nil)
+		} else {
+			sp.routingDraft.SetPrimaryBackupAccounts([]string{value})
+		}
 	case "routing-secondary":
 		sp.routingDraft.Secondary = value
 	case "routing-secondary-backup":
@@ -163,6 +247,12 @@ func (sp *settingsPage) commitRouting(field, value string) (string, tea.Cmd, err
 	case "routing-local-redirect":
 		sp.routingDraft.LocalRedirect = value
 	default:
+		if strings.HasPrefix(field, "routing-primary-backup-") {
+			if err := sp.editPrimaryBackup(strings.TrimPrefix(field, "routing-primary-backup-"), value); err != nil {
+				return "", nil, err
+			}
+			break
+		}
 		key := strings.TrimPrefix(field, "routing-task-")
 		cut := strings.LastIndex(key, "-")
 		if cut < 0 {
@@ -200,7 +290,12 @@ func (sp *settingsPage) commitRouting(field, value string) (string, tea.Cmd, err
 	saved := sp.cloudView.Assignments.Clone()
 	if sp.cloudView.Assignments == nil {
 		saved.Primary = sp.cloudView.Active
-		saved.PrimaryBackup = sp.cloudView.Backup
+		if sp.cloudView.Backup != "" {
+			saved.SetPrimaryBackupAccounts([]string{sp.cloudView.Backup})
+		}
+	}
+	if !strings.HasPrefix(field, "routing-task-") {
+		return sp.saveModelTierChange(saved)
 	}
 	sp.routingDirty = !reflect.DeepEqual(sp.routingDraft, saved)
 	if !sp.routingDirty {
@@ -208,6 +303,37 @@ func (sp *settingsPage) commitRouting(field, value string) (string, tea.Cmd, err
 	}
 	return "routing draft changed; Save to apply", nil, nil
 }
+
+// Persist only model-tier fields. Pending task edits remain local until their
+// separate Save routing action; a subsequent task discard cannot undo this save.
+func (sp *settingsPage) saveModelTierChange(saved *agentclient.RoutingAssignments) (string, tea.Cmd, error) {
+	if err := sp.routingConfig().ValidateDestinationRedirects(); err != nil {
+		return "", nil, err
+	}
+	candidate := sp.routingDraft.Clone()
+	candidate.Tasks = saved.Clone().Tasks
+	if reflect.DeepEqual(candidate, saved) {
+		sp.routingDirty = !reflect.DeepEqual(sp.routingDraft, saved)
+		return "model tiers match saved settings", nil, nil
+	}
+	if sp.agent == nil {
+		return "", nil, fmt.Errorf("agent reconnecting — change was not saved; retry in a moment")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	sp.profilesLoaded = false // Reconcile server state even if a reply is lost.
+	warning, err := sp.agent.UpdateRoutingAssignments(ctx, candidate)
+	if err != nil {
+		return "", nil, err
+	}
+	sp.cloudView.Assignments = candidate.Clone()
+	sp.routingDirty = !reflect.DeepEqual(sp.routingDraft, sp.cloudView.Assignments)
+	if warning != "" {
+		return "saved model tiers; provider unavailable: " + warning, nil, nil
+	}
+	return "saved model tiers", nil, nil
+}
+
 func (sp *settingsPage) finishRoutingSave(warning string, err error) (string, tea.Cmd, error) {
 	sp.profilesLoaded = false
 	if err != nil {
@@ -239,4 +365,106 @@ func (sp *settingsPage) discardSettingsDrafts() {
 		sp.routingDirty = false
 	}
 	sp.settingsPendingLeave = ""
+}
+
+func (sp *settingsPage) routingAccountLabel(name string) string {
+	for _, provider := range sp.cloudView.Providers {
+		for _, p := range provider.Profiles {
+			if p.Name == name {
+				return p.DistinctAccountLabel(provider.Label, provider.Profiles)
+			}
+		}
+	}
+	for _, p := range sp.cloudView.CustomProfiles {
+		if p.Name == name {
+			return p.DistinctAccountLabel(p.Provider, sp.cloudView.CustomProfiles)
+		}
+	}
+	for _, p := range sp.profiles {
+		if p.Name == name {
+			if p.Provider != "" {
+				return p.DistinctAccountLabel(p.Provider, sp.profiles)
+			}
+			if p.Flavor != "" {
+				return p.DistinctAccountLabel(p.Flavor, sp.profiles)
+			}
+			return p.DistinctAccountLabel("", sp.profiles)
+		}
+	}
+	return name
+}
+
+func (sp *settingsPage) editPrimaryBackup(action, value string) error {
+	a := sp.routingDraft
+	backups := a.PrimaryBackupAccounts()
+	parts := strings.Split(action, "-")
+	index := len(backups)
+	if action != "add" {
+		var err error
+		index, err = strconv.Atoi(parts[0])
+		if err != nil || index < 0 || index >= len(backups) {
+			return fmt.Errorf("invalid backup position")
+		}
+	}
+	if len(parts) == 2 {
+		switch parts[1] {
+		case "up":
+			if index == 0 {
+				previous := a.Primary
+				a.Primary = backups[0]
+				if previous == "" {
+					backups = backups[1:]
+				} else {
+					backups[0] = previous
+				}
+			} else {
+				backups[index-1], backups[index] = backups[index], backups[index-1]
+			}
+		case "down":
+			if index+1 == len(backups) {
+				return nil
+			}
+			backups[index+1], backups[index] = backups[index], backups[index+1]
+		case "remove":
+			backups = append(backups[:index], backups[index+1:]...)
+		default:
+			return fmt.Errorf("unknown backup action")
+		}
+	} else {
+		if value == "" {
+			if action == "add" {
+				return nil
+			}
+			backups = append(backups[:index], backups[index+1:]...)
+		} else {
+			if value == a.Primary {
+				return fmt.Errorf("Primary cannot also be a backup")
+			}
+			for i, name := range backups {
+				if name == value && i != index {
+					return fmt.Errorf("account is already a backup")
+				}
+			}
+			exists := false
+			for _, p := range sp.profiles {
+				if p.Name == value {
+					exists = true
+				}
+			}
+			if !exists {
+				return fmt.Errorf("account %q is not configured", value)
+			}
+			if action == "add" {
+				if a.Primary == "" {
+					a.Primary = value
+				} else {
+					backups = append(backups, value)
+				}
+			} else {
+				backups[index] = value
+			}
+		}
+	}
+	a.SetPrimaryBackupAccounts(backups)
+	return nil
 }

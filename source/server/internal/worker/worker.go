@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"cercano/source/server/internal/reasoningexperiment"
 	"cercano/source/server/internal/visioninspect"
 	"context"
 	"errors"
@@ -8,10 +9,12 @@ import (
 	"log"
 	"runtime/debug"
 	"sync"
+	"sync/atomic"
 
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/cloudfactory"
 	projectctx "cercano/source/server/internal/context"
+	"cercano/source/server/internal/conversation"
 	"cercano/source/server/internal/dispatch"
 	"cercano/source/server/internal/engine"
 	"cercano/source/server/internal/failurelog"
@@ -121,15 +124,36 @@ func (w *WorkerServer) runTurn(stream proto.Worker_RunTurnServer, authRecovery b
 
 	// Sub-agent persistence proxy: a worker-side dispatch creates its sub-agent
 	// conversation row and persists its turns on the host via this stream proxy
-	// (the worker has no local store). Built before buildDeps so the tool stack
-	// can wire it, same as credSource.
-	subPersist := &streamSubagentPersist{sndr: sndr, gen: start.GetGen()}
+	// (the worker has no local store). Dispatch-evidence appends ride the same
+	// proxy as acknowledged round-trips. Built before buildDeps so the tool
+	// stack can wire it, same as credSource.
+	subPersist := newStreamSubagentPersist(sndr, start.GetGen())
 
 	// Session profile proxy: session-control capabilities such as suggest_plan
 	// must mutate the host's live profile broker, not a worker-local copy.
 	profileCtl := newStreamSessionProfileController(sndr, start.GetConversationId())
 	authRequest := newStreamAuthentication(sndr)
 	runtimeControl := newStreamRuntimeControl(sndr)
+
+	// Autonomy ledger proxy: autonomous-mode session-control capabilities
+	// (suggest_autonomous / request_autonomous_execution, capture_decision,
+	// auto_exit / request_autonomous_exit) read and write the host-owned
+	// autonomy ledger over this stream. The worker never opens SQLite: every
+	// operation round-trips and the capability proceeds only on the host's
+	// acknowledgment. Built before buildDeps so the tool stack can wire it,
+	// same as credSource.
+	autonomyLedger := newStreamAutonomyLedger(sndr)
+
+	// MCP proxy: host-side MCP tools advertised in StartTurn become worker-side
+	// proxy tools that call back over this stream. The worker owns no MCP
+	// connections — the host does.
+	mcpControl := newStreamMCPControl(sndr)
+
+	// The permission store is built inside buildDeps (below), but the recv loop
+	// starts first and may receive a PermissionUpdate at any time. Publish the
+	// store through an atomic pointer so an update that races construction is
+	// simply dropped (StartTurn's values still apply) rather than panicking.
+	var permStoreRef atomic.Pointer[agent.PermissionStore]
 
 	// Recv loop: routes incoming HostToWorker messages from the host.
 	recvDone := make(chan struct{})
@@ -143,6 +167,33 @@ func (w *WorkerServer) runTurn(stream proto.Worker_RunTurnServer, authRecovery b
 			switch {
 			case msg.GetRuntimeResponse() != nil:
 				runtimeControl.deliver(msg.GetRuntimeResponse())
+			case msg.GetMcpResponse() != nil:
+				mcpControl.deliver(msg.GetMcpResponse())
+			case msg.GetAutonomyResponse() != nil:
+				autonomyLedger.deliver(msg.GetAutonomyResponse())
+			case msg.GetDispatchEventResponse() != nil:
+				// The host acknowledged one dispatch-evidence append; route it
+				// to the waiting dispatch loop.
+				subPersist.deliverDispatchEvent(msg.GetDispatchEventResponse())
+			case msg.GetPermUpdate() != nil:
+				// Mid-turn permission change on the host. Apply it so the gate
+				// sees the same values an in-process turn would re-read from
+				// permissions.yaml on its NEXT decision — a tightening must not
+				// wait for the turn to end.
+				//
+				// NOTE: nothing sends this yet. The host-side trigger is
+				// unwired, so a mid-turn tightening currently does not reach a
+				// running worker; gating uses the values pinned at StartTurn
+				// for the life of the turn. See
+				// docs/bugs/2026-09-17-worker-mcp-permission-liveness.md.
+				u := msg.GetPermUpdate()
+				if store := permStoreRef.Load(); store != nil {
+					m := agent.ModePermissive
+					if parsed, err := agent.ParseMode(u.GetMode()); err == nil {
+						m = parsed
+					}
+					store.ApplyRuntimeUpdate(m, u.GetMcpAllow())
+				}
 			case msg.GetAuthResponse() != nil:
 				authRequest.deliver(msg.GetAuthResponse())
 			case msg.GetPermResponse() != nil:
@@ -161,7 +212,7 @@ func (w *WorkerServer) runTurn(stream proto.Worker_RunTurnServer, authRecovery b
 	}()
 
 	// Build Deps from StartTurn.
-	deps, buildErr := w.buildDeps(ctx, start, credSource, openProxy, subPersist, profileCtl, runtimeControl.Restart)
+	deps, buildErr := w.buildDeps(ctx, start, credSource, openProxy, subPersist, profileCtl, mcpControl, autonomyLedger, &permStoreRef, runtimeControl.Restart)
 	if buildErr != nil {
 		sndr.close()
 		cancel() // returning finalizes the stream; the recv goroutine unwinds on the Recv error
@@ -273,7 +324,7 @@ func (w *WorkerServer) runTurn(stream proto.Worker_RunTurnServer, authRecovery b
 
 // ─── buildDeps ────────────────────────────────────────────────────────────────
 
-func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, credSource *streamCredentialSource, openProxy *streamOpenProvider, subPersist *streamSubagentPersist, profileCtl *streamSessionProfileController, restart ...runtimeRestartFunc) (runner.Deps, error) {
+func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, credSource *streamCredentialSource, openProxy *streamOpenProvider, subPersist *streamSubagentPersist, profileCtl *streamSessionProfileController, mcpControl *streamMCPControl, autonomyLedger *streamAutonomyLedger, permStoreRef *atomic.Pointer[agent.PermissionStore], restart ...runtimeRestartFunc) (runner.Deps, error) {
 	// Build config from snapshot.
 	cfg := ConfigFromSnapshot(start.GetConfig())
 	cfgService := cfgsvc.New("", cfg, secrets.NewMemory())
@@ -341,8 +392,17 @@ func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, cr
 	if m, err := agent.ParseMode(start.GetPermissionMode()); err == nil {
 		mode = m
 	}
-	permStore := agent.NewStaticPermissionStore(mode)
+	// The allowlist travels with the mode for the same reason: the worker cannot
+	// read the host's permissions.yaml, and a store built without it reports
+	// NOTHING as allowlisted — so every allowlisted MCP tool would re-prompt on
+	// worker turns while behaving correctly in-process.
+	permStore := agent.NewStaticPermissionStoreWithMCPAllow(mode, start.GetMcpAllow())
 	permBroker := permissions.New(permStore, nil, nil)
+	// Publish for the recv loop so a mid-turn PermissionUpdate can tighten this
+	// store's mode/allowlist, matching the in-process per-decision re-read.
+	if permStoreRef != nil {
+		permStoreRef.Store(permStore)
+	}
 
 	// Build the worker's dispatch engine ONCE via the shared internal/toolstack
 	// builder — the SAME assembly the host uses — with a real project-context
@@ -405,7 +465,26 @@ func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, cr
 			return runner.Deps{}, fmt.Errorf("build tools: %w", err)
 		}
 	} else {
-		toolSvc = buildWorkerToolSvc(permBroker, engine, ctxLoader, provSvc.Cloud(), provSvc.Open(), cfg, subPersist, profileCtl.SetProfile, visionSvc, failureLog, restart...)
+		diagnostic, _ := provSvc.(reasoningexperiment.Service)
+		// Autonomy seam: wire the stream ledger proxy as the capabilities'
+		// AutonomyLedger (typed-nil guard keeps a missing proxy an unwired
+		// seam rather than a panic).
+		var autonomy conversation.AutonomyLedger
+		if autonomyLedger != nil {
+			autonomy = autonomyLedger
+		}
+		toolSvc = buildWorkerToolSvcWithDiagnostic(permBroker, engine, ctxLoader, provSvc.Cloud(), provSvc.Open(), cfg, subPersist, profileCtl.SetProfile, visionSvc, failureLog, diagnostic, autonomy, provSvc.Candidates, restart...)
+	}
+
+	// Register a proxy per host-advertised MCP tool. Done AFTER the built-in
+	// stack so built-ins win a name collision, matching the host ordering where
+	// the built-in registry is populated before MCP servers connect. Proxies
+	// report OriginMCP, so the tool loop's gate treats them as third-party
+	// exactly as the host does.
+	if mcpControl != nil && len(start.GetMcpTools()) > 0 && toolSvc != nil {
+		if n := registerMCPProxies(toolSvc.Registry(), start.GetMcpTools(), mcpControl); n > 0 {
+			log.Printf("[worker] registered %d host MCP tool proxies", n)
+		}
 	}
 
 	// Build the protocol-supervision watchdog from the snapshotted config
@@ -451,10 +530,11 @@ func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, cr
 // It holds pre-built cloud + open providers and delegates model selection to
 // the config service.
 type workerResolver struct {
-	secondaryProv inference.Provider
-	cloudProv     inference.Provider
-	openProv      inference.Provider
-	cfgSvc        cfgsvc.Service
+	diagnosticBuild func(pkgcfg.CloudProfile) (inference.Provider, error)
+	secondaryProv   inference.Provider
+	cloudProv       inference.Provider
+	openProv        inference.Provider
+	cfgSvc          cfgsvc.Service
 }
 
 // profileByName selects a cloud profile by name, mirroring
@@ -520,6 +600,7 @@ func buildWorkerProviders(ctx context.Context, cfg pkgcfg.Config, credSource cre
 		}
 		return profilechain.GuardVision(provider, confirmed, metadataFor), nil
 	}
+	r.diagnosticBuild = build
 	r.cloudProv, _ = profilechain.Build(cfg, pkgcfg.DestinationPrimary, build, workerChainEvents(pkgcfg.DestinationPrimary))
 	r.secondaryProv, _ = profilechain.Build(cfg, pkgcfg.DestinationSecondary, build, workerChainEvents(pkgcfg.DestinationSecondary))
 
@@ -663,4 +744,11 @@ func workerChainEvents(d pkgcfg.Destination) func(resilience.Event) {
 	return func(ev resilience.Event) {
 		log.Printf("[worker] %s resilience %s (%s, %s): %s: %v", d, ev.Action, ev.Stage, ev.Class, ev.Notice(), ev.Err)
 	}
+}
+
+func (r *workerResolver) RunReasoningDiagnostic(ctx context.Context, spec reasoningexperiment.Spec) (reasoningexperiment.Report, error) {
+	if r.diagnosticBuild == nil {
+		return reasoningexperiment.Report{}, fmt.Errorf("reasoning diagnostic unavailable")
+	}
+	return reasoningexperiment.Run(ctx, r.cfgSvc.Get(), spec, r.diagnosticBuild)
 }

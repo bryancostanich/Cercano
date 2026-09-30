@@ -91,14 +91,6 @@ func accentColorOptions() []form.Option {
 
 func buildSettingsSections(cfg *agentclient.Config, mode, accentToken string) []form.Section {
 	return []form.Section{
-		{Title: "Routing", Fields: []form.Field{
-			form.NewSelect("locus-mode", "locus-mode", []form.Option{
-				{Label: "cloud_only", Value: "cloud_only"},
-				{Label: "cloud_primary", Value: "cloud_primary"},
-				{Label: "open_primary", Value: "open_primary"},
-				{Label: "open_only", Value: "open_only"},
-			}, cfg.LocusMode),
-		}},
 		{Title: "Permissions", Fields: []form.Field{
 			form.NewSelect("permission-mode", "permission-mode", []form.Option{
 				{Label: "strict", Value: "strict"},
@@ -163,8 +155,6 @@ func classifyCommit(key, value string, currentChecks []string) commitAction {
 		u.OpenModel = value
 	case "ollama-url":
 		u.OllamaURL = value
-	case "locus-mode":
-		u.LocusMode = value
 	case "agent-shutdown-on-last-client":
 		u.AgentShutdownOnLastClient = value
 	case "watchdog-enabled":

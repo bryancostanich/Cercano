@@ -55,7 +55,7 @@ Choose `class` at the semantic entry point:
 - `git_land`: the existing landing workflow including its nested review (Local/Premium).
 - `watchdog`: normal Watchdog routing (Local/Standard); no special placement exemption.
 
-Chat is Primary/Premium; omitted dispatch class uses Default dispatch (Secondary/Premium). Unknown explicit classes are rejected. Prefer omitting `tier` so the chosen class's saved quality applies. Explicit `light`, `standard`, or `deep` changes quality only; it never chooses a destination, class or permission grant. Light uses the persisted `economy` value.
+Chat is Primary/Standard; omitted dispatch class uses Default dispatch (Secondary/Premium). Unknown explicit classes are rejected. Prefer omitting `tier` so the chosen class's saved quality applies. Explicit `light`, `standard`, or `deep` changes quality only; it never chooses a destination, class or permission grant. Light uses the persisted `economy` value.
 
 Secondary/Local redirects resolve before placement and model selection. Only the final destination's models, credentials and backup chain apply. Saved source assignments remain unchanged. Locus policy still prohibits forbidden placement; final Secondary cannot fall through to Primary/Local. Tool permissions remain the explicit grant and approval system, independent of model quality. See [the routing guide](../cloud-routing.md).
 
@@ -176,8 +176,21 @@ background job (recap, compaction, watchdog) fails, triage by the error's
 | `llama-server exited during startup: exit status 1` | the file or binary is the problem, not Cercano — reproduce manually (below) | GGUF/llama.cpp compatibility |
 | `chat error (status 400) … exceeds the available context size` | config — `llama_server.context_size` must exceed the caller's prompt (compaction sends ~8k-token segments plus overhead, so 8192 can never fit; 16384+ works) | `llama_server.context_size` |
 
-Reproduce a spawn failure outside the agent (macOS has no `timeout`; use
-background + kill):
+Reproduce a spawn failure outside the agent. macOS has no coreutils `timeout`,
+but you do **not** need the old background-and-kill dance from a Cercano tool
+call: the `Bash` tool enforces `timeout_seconds` itself (default 60), killing
+the command's whole process group and returning any partial output. Pass
+`timeout_seconds` rather than hand-rolling a cap.
+
+`timeout_seconds` values: omit it (or pass `0`) for the 60s default, a positive
+number for that many seconds, or `-1` for **no timeout** — use `-1` for
+genuinely unbounded work such as a cold-cache build, a large migration, or a
+long sweep, where guessing a bound risks killing legitimate work. Any other
+negative is rejected, so a typo'd `-60` cannot silently mean "forever".
+Unbounded is not unstoppable: `-1` only removes the deadline, and cancelling
+the turn (Esc) still reaps the whole process group.
+
+The background + kill form below is for running this by hand in a plain shell:
 
 ```bash
 /opt/homebrew/bin/llama-server -m ~/.cercano/models/<file>.gguf \

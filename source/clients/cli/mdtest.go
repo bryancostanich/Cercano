@@ -67,7 +67,7 @@ const markdownSample = "# Cercano Markdown Render Test\n" +
 	"| Tool | Tier | Args | What it does |\n" +
 	"| --- | --- | --- | --- |\n" +
 	"| Read | R | path | Read a file from disk into the context |\n" +
-	"| Bash | W | cmd | Run a shell command with a 16 KiB output cap |\n" +
+	"| RunCommand | W | cmd, cwd | Execute a program directly with a 16 KiB output cap |\n" +
 	"| git_push | X | remote, branch | Push commits, force-with-lease when forced |\n" +
 	"\n" +
 	"---\n" +

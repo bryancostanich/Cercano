@@ -90,6 +90,17 @@ func TestRetryable(t *testing.T) {
 	}
 }
 
+// The budget guard exists to stop spend: rerunning or failing over an
+// exhausted loop would double the very cost it capped. Pin both answers.
+func TestTokenBudgetExhaustedNeverRetriesOrFailsOver(t *testing.T) {
+	if Retryable(ErrTokenBudgetExhausted) {
+		t.Fatal("budget exhaustion retryable")
+	}
+	if Failoverable(ErrTokenBudgetExhausted, nil) {
+		t.Fatal("budget exhaustion failoverable")
+	}
+}
+
 func TestFailoverable(t *testing.T) {
 	cases := []struct {
 		name  string

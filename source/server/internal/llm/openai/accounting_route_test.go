@@ -68,3 +68,18 @@ func TestAccountingRecognizesNativeEndpoint(t *testing.T) {
 		}
 	}
 }
+
+// A custom OpenAI-compatible endpoint with no backend selector but a named
+// cloud profile must attribute attempts to the profile name instead of
+// recording unknown provider identity. An explicit backend still wins.
+func TestAccountingFallsBackToProfileNameForCustomEndpoint(t *testing.T) {
+	if got := NewClient(Config{BaseURL: "https://api.deepinfra.com/v1/openai", APIKey: "k", AccountingProfile: "deepinfra"}).accountingProvider; got != "deepinfra" {
+		t.Fatalf("accountingProvider=%q want profile name %q", got, "deepinfra")
+	}
+	if got := NewClient(Config{BaseURL: "https://api.groq.com/openai/v1", APIKey: "k", Backend: "groq", AccountingProfile: "my-groq"}).accountingProvider; got != "groq" {
+		t.Fatalf("accountingProvider=%q want backend %q to win over profile", got, "groq")
+	}
+	if got := NewClient(Config{BaseURL: "https://api.example.com/v1", APIKey: "k"}).accountingProvider; got != "" {
+		t.Fatalf("accountingProvider=%q want unknown when neither backend nor profile set", got)
+	}
+}

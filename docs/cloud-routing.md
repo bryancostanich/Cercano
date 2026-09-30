@@ -6,7 +6,7 @@ A **model tier** (called a `destination` in configuration and APIs) chooses wher
 
 | Task | Default model tier | Default quality |
 | --- | --- | --- |
-| Chat | Primary | Premium |
+| Chat | Primary | Standard |
 | Default dispatch (class omitted) | Secondary | Premium |
 | Reconnaissance | Local | Light |
 | Mechanical development | Local | Standard |
@@ -17,7 +17,7 @@ A **model tier** (called a `destination` in configuration and APIs) chooses wher
 | Git land | Local | Premium |
 | Watchdog | Local | Standard |
 
-Primary and Secondary each have their own preferred profile and optional backup. Secondary is not Primary's backup. Local uses its independently managed runtime and models. Light is the display label for the existing `economy` cost tier.
+Primary has a preferred account and an ordered list of backup accounts; Secondary keeps its own preferred profile and single optional backup. Secondary is not Primary's backup. Local uses its independently managed runtime and models. Light is the display label for the existing `economy` cost tier.
 
 Secondary can redirect to Primary or Local; Local can redirect to Primary or Secondary. Chains are followed to their final destination; self-loops, cycles and unknown destinations are rejected atomically. **No redirect** clears a redirect. Redirects change effective placement without overwriting saved profile bindings or task destination/quality. They are not failover: only the final destination's profile, model, credentials and backup chain are used.
 
@@ -43,13 +43,27 @@ Image inspection uses the profile's separate `image_model`, never its text quali
 
 Legacy profile-wide `model`/`model_pinned` choices no longer override quality selection and are not migrated into every quality slot. The legacy `UpdateConfig.cloud_model` mutation is rejected. Re-select intentional choices in the Cloud profile editor.
 
+## Multiple accounts on one provider
+
+A provider can hold several independently authenticated accounts. In **Cloud**, a configured provider row offers **Add another account**, which starts a distinct named account draft that copies only connection structure — never credentials, keys or quality choices. Each subscription account keeps its own sign-in action, so any account can be refreshed without touching another. Adding an account never replaces an existing account with the same name and never changes the current Primary selection; reauthenticating an existing account preserves its saved model and image choices.
+
+When the account serving Primary exhausts its quota, Primary advances to the next configured backup account and stays there for later requests rather than returning on a timer. Traversal visits each configured account at most once per request, wraps around to earlier accounts after the list end, and stops with `all configured cloud accounts exhausted` when every account reports quota exhaustion. Other failure classes keep their existing behavior: transient errors still get their bounded retry, and authentication problems still surface their normal recovery prompt. A quota failure after output has already been streamed does not replay that response; it only affects which account serves the next request. The active account survives unrelated provider reconfiguration and resets to the preferred account when the configured list no longer contains it.
+
+### Signed-in identity labels
+
+Cloud settings and routing selectors show the signed-in email when supplied by the provider, falling back to its display name and then the configured account name. The email is primary, for example `ChatGPT — person@example.com`. The internal profile ID is appended only when needed to distinguish accounts with identical labels. Cloud details show **Account** separately from **Profile ID**; the latter is not a username. Subscription accounts without identity are explicitly labelled `unidentified account (chatgpt-work)`. Emails never replace profile IDs or credential-storage keys.
+
+ChatGPT identity comes from the token claims received at sign-in. Claude identity comes from the token response, with a best-effort OAuth profile lookup if email is missing. That lookup has a two-second deadline, rejects redirects, and cannot invalidate an otherwise successful login. Malformed or absent optional identity is ignored. Refresh responses that omit identity preserve the stored metadata.
+
+Display metadata is saved under the profile's `account_identity` in the local configuration so opening settings does not need to unlock credentials or contact a provider. Treat configuration exports as containing personal information. Existing accounts without this metadata show their configured names until they sign in again. Reauthentication updates the label without renaming the account; if identity is unavailable for the new sign-in, an old email is not displayed as though it belonged to that sign-in.
+
 ## Editing settings
 
 The **Routing** tab has two sections:
 
 ### Model tiers
 
-Primary and Secondary each group their profile and backup controls. **No profile selected** means that tier has no cloud profile binding; **No backup** means no backup is configured. These are absent bindings, not hidden default selections.
+Primary shows one ordered account list: **Account 1 (first)**, **Account 2**, and so on, with **Move up**, **Move down**, **Remove account**, and **Add account** controls. Moving Account 2 up swaps it into the first position; the previous first account becomes Account 2. The first account can move down or be removed just like any other entry, and removing it promotes the next account. Adding to an empty list fills the first position. These account-order edits save immediately. The **Model tiers** section has no Save routing button. Existing configuration fields remain compatible: the first position is stored as Primary, followed by the ordered backups. Secondary groups its profile and single backup control. Selections show provider and account name, so several accounts from one provider stay distinguishable, and an account already used in that tier is not offered again. An empty Primary account or Secondary **No backup** is an absent binding, not a hidden default selection.
 
 Secondary and Local each have **Redirect all work to**, with **No redirect** as the normal selection. A redirect always changes where work runs; a backup is tried after a failure. Local's runtime/model setup remains in **Runtime / Local Models**, rather than becoming a cloud-profile binding.
 
@@ -61,15 +75,15 @@ The row shows actual values, including defaults—not “inherit” or “unset.
 
 There is no permanent “effective” row. A note such as **Redirected to Primary** appears only when a redirect changes the task's destination. This note is not a report of runtime failover or which provider served a request.
 
-**Save routing** applies the whole draft atomically; **Discard routing** restores saved assignments. The page distinguishes **Unsaved changes** from saved overrides. Selecting an unchanged value or undoing edits back to the saved state does not mark the page unsaved. Save/Discard are disabled when there are no pending changes. Failed saves and disconnected-agent errors preserve edits.
+In **Model tiers**, account selections, order changes, and redirects save immediately when committed. Unchanged selections send no update; a failed save reports an error and restores the previous selection. These saves do not apply pending task edits. In **Task routing**, **Save routing** applies task edits atomically and **Discard routing** restores saved task assignments without undoing model-tier changes. The page distinguishes **Unsaved changes** from saved overrides. Selecting an unchanged value or undoing edits back to the saved state does not mark the page unsaved. Save/Discard are disabled when there are no pending changes. Failed saves and disconnected-agent errors preserve edits.
 
 In **Cloud**, edit profile credentials, quality and image choices using the separate profile Save/Discard actions. Cloud no longer displays Primary/backup routing badges or supports the obsolete activation/backup actions; authentication and account identity annotations remain. Routing is the sole owner of tier bindings and backups.
 
-All choice edits are drafts, including existing profiles. Cancelling a picker keeps the original value. Unsaved edits prompt before leaving their page or changing profiles; cancelling navigation preserves the draft. Cloud and Routing save/discard operations do not apply or clear each other's draft. Authentication and API-key operations remain separate actions.
+Cloud model-choice edits and task-routing edits remain drafts, including choices on existing profiles. Cancelling a picker keeps the original value. Unsaved edits prompt before leaving their page or changing profiles; cancelling navigation preserves the draft. Cloud and Routing save/discard operations do not apply or clear each other's draft. Authentication and API-key operations remain separate actions.
 
-Activating a profile does not silently make the previous Primary its backup. If the requested Primary is already the Primary backup, use the routing draft to change both bindings atomically instead of creating a self-loop.
+Activating a profile does not silently make the previous Primary its backup. If the requested Primary is already the Primary backup, use **Move up** to promote it; the order saves atomically instead of creating a self-loop.
 
-Validation failures retain the draft. A valid routing or profile save can succeed while a selected provider is unavailable; that condition is reported as an availability warning, not as an unsaved draft.
+Validation failures retain Cloud/task drafts but reject and revert immediate model-tier edits. A valid routing or profile save can succeed while a selected provider is unavailable; that condition is reported as an availability warning, not as an unsaved draft.
 
 **Local Models** contains downloadable/local-runtime models only. Hosted catalog entries do not enter Local download or RAM-estimate paths. Existing source-qualified model references, embedding choices, and local runtime overrides remain in use.
 
@@ -114,7 +128,7 @@ cloud_profiles:
       economy: openai/gpt-oss-120b
 ```
 
-To add backups, define their profiles and set `backup_cloud_profile` and/or `secondary_backup_cloud_profile` to their names. Missing references and preferred-equals-backup loops are rejected by the settings API.
+To add backups, define their profiles and set `backup_cloud_profiles` (ordered list, Primary), `backup_cloud_profile` (single legacy Primary spelling, kept in step with the list's first entry) and/or `secondary_backup_cloud_profile` to their names. Missing references, empty backup entries, and any duplicate account within one tier are rejected by the settings API, so an account never fails over to itself. An older single-backup configuration keeps working: the legacy field loads as the first backup, and clearing the list clears both spellings.
 
 ## Setup wizard and verification limits
 

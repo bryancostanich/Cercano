@@ -16,11 +16,12 @@ func (v *RustValidator) Validate(ctx context.Context, workDir string) (Decision,
 	if _, err := exec.LookPath("cargo"); err != nil {
 		return Failed, errors.New("rust validator: command 'cargo' not found in PATH — install the Rust toolchain or set validator.command in .cercano/config.yaml to override")
 	}
-	cmd := exec.CommandContext(ctx, "cargo", "build", "--quiet")
-	cmd.Dir = workDir
-	out, err := cmd.CombinedOutput()
+	out, ok, err := runValidator(ctx, rustValidateTimeout, workDir, "cargo", "build", "--quiet")
 	if err != nil {
-		return Failed, fmt.Errorf("cargo build failed:\n%s", cleanOutput(string(out)))
+		return Failed, fmt.Errorf("cargo build failed: %w\n%s", err, out)
+	}
+	if !ok {
+		return Failed, fmt.Errorf("cargo build failed:\n%s", out)
 	}
 	return Passed, nil
 }

@@ -242,6 +242,20 @@ func queryMetricsHealth(ctx context.Context, tx *sql.Tx, writer string, live *Ac
 	if err != nil {
 		return nil, err
 	}
+	// RFC3339Nano is not lexically sortable when fractional precision differs.
+	// Keep aggregation in SQL, selecting only the extreme timestamp per field.
+	for _, q := range []struct {
+		field, order string
+		target       *string
+	}{
+		{"last_persistence", "DESC", &h.LastPersistence}, {"oldest_pending", "ASC", &h.OldestPending},
+	} {
+		value := "json_extract(snapshot,'$." + q.field + "')"
+		query := "SELECT COALESCE((SELECT " + value + " FROM accounting_health WHERE writer_id!=? AND " + value + "!='0001-01-01T00:00:00Z' AND julianday(" + value + ") IS NOT NULL ORDER BY julianday(" + value + ") " + q.order + ",rtrim(" + value + ",'Z') " + q.order + " LIMIT 1),'')"
+		if err = tx.QueryRowContext(ctx, query, writer).Scan(q.target); err != nil {
+			return nil, err
+		}
+	}
 	if h.Pending > 0 {
 		h.CoverageIncomplete = true
 	}
@@ -254,7 +268,7 @@ func queryMetricsHealth(ctx context.Context, tx *sql.Tx, writer string, live *Ac
 		h.CoverageIncomplete = h.CoverageIncomplete || live.CoverageIncomplete
 		if !live.LastPersistence.IsZero() {
 			t := live.LastPersistence.UTC().Format(time.RFC3339Nano)
-			if t > h.LastPersistence {
+			if metricsTimeAfter(t, h.LastPersistence) {
 				h.LastPersistence = t
 			}
 		}
@@ -263,7 +277,7 @@ func queryMetricsHealth(ctx context.Context, tx *sql.Tx, writer string, live *Ac
 		}
 		if !live.OldestPending.IsZero() {
 			t := live.OldestPending.UTC().Format(time.RFC3339Nano)
-			if h.OldestPending == "" || t < h.OldestPending {
+			if h.OldestPending == "" || metricsTimeAfter(h.OldestPending, t) {
 				h.OldestPending = t
 			}
 		}
@@ -285,4 +299,10 @@ func (c *Collector) TokenMetrics(ctx context.Context, r *proto.GetTokenMetricsRe
 	}
 	h := attempts.Health()
 	return store.QueryTokenMetrics(ctx, r, time.Now(), attempts.WriterID(), &h)
+}
+
+func metricsTimeAfter(a, b string) bool {
+	ta, ea := time.Parse(time.RFC3339Nano, a)
+	tb, eb := time.Parse(time.RFC3339Nano, b)
+	return ea == nil && (eb != nil || ta.After(tb))
 }

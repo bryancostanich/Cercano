@@ -1,6 +1,7 @@
 package config
 
 import (
+	"cercano/source/server/pkg/accountidentity"
 	"fmt"
 	"log"
 	"os"
@@ -63,10 +64,12 @@ type AgentConfig struct {
 }
 
 type CloudProfile struct {
-	Name    string `yaml:"name"`
-	Flavor  string `yaml:"flavor"`            // messages | chat_completions | responses | bedrock
-	Backend string `yaml:"backend,omitempty"` // chat_completions only: selects per-backend quirks (openai|gemini|groq|…); empty → defensive default
-	Route   string `yaml:"route,omitempty"`   // direct (default) | subscription | ccr (future) | …
+	// AccountIdentity is optional sign-in display metadata, not a credential key.
+	AccountIdentity accountidentity.Identity `yaml:"account_identity,omitempty"`
+	Name            string                   `yaml:"name"`
+	Flavor          string                   `yaml:"flavor"`            // messages | chat_completions | responses | bedrock
+	Backend         string                   `yaml:"backend,omitempty"` // chat_completions only: selects per-backend quirks (openai|gemini|groq|…); empty → defensive default
+	Route           string                   `yaml:"route,omitempty"`   // direct (default) | subscription | ccr (future) | …
 	// Provider names the vendor whose cost-tier table this profile draws its
 	// per-request models from (anthropic|openai|google|…). It bridges "how I
 	// connect" (route/flavor/auth on this profile) to "which vendor's model
@@ -340,6 +343,12 @@ func vendorByHost(baseURL string) string {
 // strips them so disk reflects the profile-only world. New code should
 // always read through the active profile (see Server.activeCloudModel).
 type Config struct {
+	// CaptureDispatchReasoning records plaintext model reasoning in dispatch
+	// history. Debugging aid, off by default: reasoning restates conversation
+	// and tool content, so it is normally redacted to a byte count. Enable it
+	// only while diagnosing why a dispatch behaved the way it did.
+	CaptureDispatchReasoning bool `yaml:"capture_dispatch_reasoning,omitempty"`
+
 	OllamaURL          string         `yaml:"ollama_url"`
 	OpenRuntime        string         `yaml:"open_runtime"`
 	OpenModel          string         `yaml:"open_model,omitempty"`
@@ -353,7 +362,10 @@ type Config struct {
 	// BackupCloudProfile names the profile that serves a request when the
 	// active profile's provider fails (see internal/llm/fallback for what
 	// counts as a failure worth failing over). Empty = no fallback.
-	BackupCloudProfile          string                  `yaml:"backup_cloud_profile,omitempty"`
+	BackupCloudProfile string `yaml:"backup_cloud_profile,omitempty"`
+	// BackupCloudProfiles is the ordered Primary account list. The scalar above
+	// remains the first-entry compatibility field for older configurations.
+	BackupCloudProfiles         []string                `yaml:"backup_cloud_profiles,omitempty"`
 	SecondaryCloudProfile       string                  `yaml:"secondary_cloud_profile,omitempty"`
 	SecondaryBackupCloudProfile string                  `yaml:"secondary_backup_cloud_profile,omitempty"`
 	TaskAssignments             map[Task]TaskAssignment `yaml:"task_assignments,omitempty"`
@@ -454,11 +466,10 @@ type CompactionConfig struct {
 	// than byte-identical elision (measured ~58% vs ~0.4% on a 190-turn
 	// real conversation).
 	LossyToolElision bool `yaml:"lossy_tool_elision"`
-	// SummarizerModel overrides the local model used for compaction
-	// summarization. Empty falls back to the fast_light tier's open model.
-	// Useful because a code-focused model (qwen3-coder) tends to fabricate
-	// when asked to write extractive summaries; a text-focused model
-	// (phi4, llama3.1) grounds better. Not applied to the main tool loop.
+	// SummarizerModel is a legacy local-model override. It applies only when
+	// the Compaction task explicitly selects Local and resolves to local inference.
+	// It never changes the task's destination or cloud quality/model selection.
+
 	SummarizerModel string `yaml:"summarizer_model,omitempty"`
 }
 
@@ -848,8 +859,27 @@ func collapseLegacySubscriptionAliases(cfg *Config) {
 	if removed[cfg.ActiveCloudProfile] {
 		cfg.ActiveCloudProfile = canonical
 	}
-	if removed[cfg.BackupCloudProfile] {
-		cfg.BackupCloudProfile = canonical
+	backups := cfg.PrimaryBackups()
+	keptBackups := make([]string, 0, len(backups))
+	seen := map[string]bool{}
+	for _, name := range backups {
+		if removed[name] {
+			name = canonical
+		}
+		if !seen[name] {
+			keptBackups = append(keptBackups, name)
+			seen[name] = true
+		}
+	}
+	cfg.SetPrimaryBackups(keptBackups)
+	if removed[cfg.SecondaryCloudProfile] {
+		cfg.SecondaryCloudProfile = canonical
+	}
+	if removed[cfg.SecondaryBackupCloudProfile] {
+		cfg.SecondaryBackupCloudProfile = canonical
+	}
+	if cfg.SecondaryBackupCloudProfile == cfg.SecondaryCloudProfile {
+		cfg.SecondaryBackupCloudProfile = ""
 	}
 }
 
@@ -1185,6 +1215,9 @@ func applyEnvOverrides(cfg *Config) {
 // array.
 func (c Config) Clone() Config {
 	out := c
+	if c.BackupCloudProfiles != nil {
+		out.BackupCloudProfiles = append([]string{}, c.BackupCloudProfiles...)
+	}
 	// A routing graph must not observe later edits to per-runtime model slots.
 	if c.Models.Open.Overrides != nil {
 		out.Models.Open.Overrides = make(map[string]map[string]string, len(c.Models.Open.Overrides))

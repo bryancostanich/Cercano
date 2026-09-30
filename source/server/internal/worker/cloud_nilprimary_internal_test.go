@@ -32,7 +32,10 @@ func (f *splitFetcher) Fetch(_ context.Context, name string) (string, string, er
 
 func TestBuildWorkerProviders_PrimaryFetchFail_UsesConfiguredBackupWithoutNilPanic(t *testing.T) {
 	cfg := pkgcfg.Config{
-		LocusMode:          "cloud_primary",
+		LocusMode: "cloud_primary",
+		// Pin Chat to premium: this test covers nil-primary handling, and the
+		// fixture profiles below only define a premium TierOverride.
+		TaskAssignments:    map[pkgcfg.Task]pkgcfg.TaskAssignment{pkgcfg.TaskChat: {Quality: pkgcfg.CostPremium}},
 		OllamaURL:          "http://localhost:11434", // open exists for graceful degradation
 		ActiveCloudProfile: "primary",
 		BackupCloudProfile: "bkp",

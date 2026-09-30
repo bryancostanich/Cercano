@@ -167,7 +167,7 @@ export default function Home() {
       </main>
 
       <footer>
-        <span>Cercano · open source</span>
+        <span>Cercano - 100% Free + Open</span>
         <span>External co-processor mode is deprecated; the standalone agent and native delegation remain current.</span>
       </footer>
     </div>

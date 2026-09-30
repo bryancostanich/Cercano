@@ -25,10 +25,13 @@ func TestBuildSettingsSectionsCoversKeys(t *testing.T) {
 		}
 	}
 	// "Cloud" section is removed; "Cloud Providers" is now built by buildCloudSection.
-	for _, want := range []string{"Routing", "Permissions", "Server"} {
+	for _, want := range []string{"Permissions", "Server"} {
 		if !titles[want] {
 			t.Errorf("missing section %q", want)
 		}
+	}
+	if titles["Routing"] || keys["locus-mode"] {
+		t.Error("retired locus routing must not appear in General settings")
 	}
 	if titles["Cloud"] {
 		t.Errorf("legacy \"Cloud\" section should not exist in buildSettingsSections output")
@@ -37,7 +40,7 @@ func TestBuildSettingsSectionsCoversKeys(t *testing.T) {
 		t.Errorf("\"Open Model\" section should not exist in buildSettingsSections output")
 	}
 	for _, want := range []string{
-		"locus-mode", "permission-mode", "port", "agent-shutdown-on-last-client",
+		"permission-mode", "port", "agent-shutdown-on-last-client",
 	} {
 		if !keys[want] {
 			t.Errorf("missing field %q", want)
@@ -49,7 +52,7 @@ func TestClassifyCommit(t *testing.T) {
 	if a := classifyCommit("local-model", "qwen", nil); a.kind != commitConfig || a.update.OpenModel != "qwen" {
 		t.Fatalf("local-model -> %+v", a)
 	}
-	if a := classifyCommit("locus-mode", "open_only", nil); a.kind != commitConfig || a.update.LocusMode != "open_only" {
+	if a := classifyCommit("locus-mode", "open_only", nil); a.kind != commitNoop || a.update.LocusMode != "" {
 		t.Fatalf("locus-mode -> %+v", a)
 	}
 	if a := classifyCommit("agent-shutdown-on-last-client", "false", nil); a.kind != commitConfig || a.update.AgentShutdownOnLastClient != "false" {

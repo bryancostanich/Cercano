@@ -42,6 +42,8 @@ read-only task in a repository you know:
 
 **Local release rehearsal:** `scripts/build-macos-unsigned.sh` targets macOS 12.0 on Apple Silicon. Actual macOS 12 runtime support remains unverified; this is not yet a supported release. See [local signing and notarization](docs/local-macos-signing.md).
 
+**Windows:** there is an experimental, explicitly **unsigned** Windows x64 ZIP built by the same manual release pipeline. It is not a supported release; see [docs/windows-artifact.md](docs/windows-artifact.md).
+
 For scripts and automation:
 
 ```bash

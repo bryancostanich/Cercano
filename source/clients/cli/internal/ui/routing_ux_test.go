@@ -89,6 +89,7 @@ func TestRoutingUXPartialOverridesAndDefaultSelection(t *testing.T) {
 }
 func TestRoutingUXRedirectNotesAreConditional(t *testing.T) {
 	sp := routingUXPage(t)
+	attachRoutingAutosaveAgent(t, sp)
 	if routingUXRow(t, sp, config.TaskDispatch).Note != "" {
 		t.Fatal("redundant effective note")
 	}
@@ -123,9 +124,9 @@ func TestRoutingUXOverridesAreNotUnsavedChanges(t *testing.T) {
 	if sections[1].Groups[1].Title != "No unsaved changes" {
 		t.Fatal("saved overrides marked unsaved")
 	}
-	sp.commitRouting("routing-primary", "example")
+	sp.commitRouting("routing-task-review-quality", "economy")
 	if sp.buildRoutingSections()[1].Groups[1].Title != "Unsaved changes" {
-		t.Fatal("pending profile change not marked")
+		t.Fatal("pending task change not marked")
 	}
 	sp.commitRouting("routing-discard", "")
 	sp.ensureRoutingDraft()

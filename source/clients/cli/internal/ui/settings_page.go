@@ -160,9 +160,7 @@ func (sp *settingsPage) snapshotSections() []form.Section {
 		defer cancel()
 		if view, err := sp.agent.GetCloudProviders(ctx); err == nil {
 			sp.cloudView = view
-			if !sp.routingDirty {
-				sp.routingDraft = nil
-			}
+			sp.refreshRoutingModelTiers()
 			sp.activeProfile = view.Active
 			var profs []agentclient.CloudProfileInfo
 			for _, prov := range view.Providers {

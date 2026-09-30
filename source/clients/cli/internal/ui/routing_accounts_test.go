@@ -11,6 +11,7 @@ import (
 
 func TestRoutingOrderedBackupEditor(t *testing.T) {
 	sp := cloudSamplePage()
+	attachRoutingAutosaveAgent(t, sp)
 	sp.profiles = []agentclient.CloudProfileInfo{{Name: "a", Provider: "openai"}, {Name: "b", Provider: "openai"}, {Name: "c", Provider: "anthropic"}}
 	sp.cloudView.Assignments = &agentclient.RoutingAssignments{Primary: "a", PrimaryBackup: "b"}
 	sp.routingDraft = nil
@@ -37,7 +38,7 @@ func TestRoutingOrderedBackupEditor(t *testing.T) {
 		}
 	}
 	commit("routing-primary-backup-add", value)
-	if !reflect.DeepEqual(sp.routingDraft.PrimaryBackupAccounts(), []string{"b", "c"}) || !sp.routingDirty {
+	if !reflect.DeepEqual(sp.routingDraft.PrimaryBackupAccounts(), []string{"b", "c"}) || sp.routingDirty {
 		t.Fatal("add lost order")
 	}
 	if _, _, err := sp.commitRouting("routing-primary-backup-add", "b"); err == nil {
@@ -51,18 +52,16 @@ func TestRoutingOrderedBackupEditor(t *testing.T) {
 		t.Fatal("reorder not synchronized")
 	}
 	sp.buildRoutingSections()
-	if _, _, err := sp.finishRoutingSave("", nil); err != nil {
-		t.Fatal(err)
-	}
 	commit("routing-primary-backup-0-remove", "")
-	if !reflect.DeepEqual(sp.cloudView.Assignments.PrimaryBackupAccounts(), []string{"c", "b"}) {
-		t.Fatal("draft mutates saved list")
+	if !reflect.DeepEqual(sp.cloudView.Assignments.PrimaryBackupAccounts(), []string{"b"}) {
+		t.Fatal("removal was not saved")
 	}
 	commit("routing-discard", "")
 	sp.ensureRoutingDraft()
-	if !reflect.DeepEqual(sp.routingDraft.PrimaryBackupAccounts(), []string{"c", "b"}) {
-		t.Fatal("discard lost order")
+	if !reflect.DeepEqual(sp.routingDraft.PrimaryBackupAccounts(), []string{"b"}) {
+		t.Fatal("discard undid saved order")
 	}
+	commit("routing-primary-backup-add", "c")
 	commit("routing-primary-backup-0-down", "")
 	commit("routing-primary-backup-1-remove", "")
 	commit("routing-primary-backup-0-remove", "")

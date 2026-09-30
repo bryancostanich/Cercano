@@ -54,6 +54,7 @@ func TestRoutingPageUsesSharedMetadata(t *testing.T) {
 }
 func TestRoutingDraftResetAndIsolation(t *testing.T) {
 	sp := draftTestPage()
+	attachRoutingAutosaveAgent(t, sp)
 	sp.scope = scopeRouting
 	sp.applyCloudDraftEdit("cloud-image", "unsaved-image")
 	sp.onCommit("routing-local-redirect", "secondary")
@@ -80,7 +81,7 @@ func TestRoutingDraftResetAndIsolation(t *testing.T) {
 	}
 	sp.onCommit("routing-secondary-redirect", "local")
 	sp.commitCloud(classifyCloudCommit("cloud-discard", ""))
-	if !sp.routingDirty || sp.routingDraft.SecondaryRedirect != "local" {
+	if sp.routingDirty || sp.routingDraft.SecondaryRedirect != "local" || sp.cloudView.Assignments.SecondaryRedirect != "local" {
 		t.Fatal("Cloud discard touched Routing")
 	}
 }
@@ -94,10 +95,10 @@ func TestRoutingFailedSaveAndUnavailableAgentRetainDraft(t *testing.T) {
 	if _, _, err := sp.finishRoutingSave("", errors.New("fixture transport failure")); err == nil || !sp.routingDirty || sp.routingDraft.Tasks["review"].Quality != "economy" {
 		t.Fatal("failed save lost draft")
 	}
+	attachRoutingAutosaveAgent(t, sp)
 	sp.onCommit("routing-secondary-redirect", "local")
-	sp.onCommit("routing-local-redirect", "secondary")
-	if _, _, err := sp.onCommit("routing-save", ""); err == nil || !strings.Contains(err.Error(), "cycle") || !sp.routingDirty {
-		t.Fatalf("cycle not retained/rejected: %v", err)
+	if _, _, err := sp.onCommit("routing-local-redirect", "secondary"); err == nil || !strings.Contains(err.Error(), "cycle") || !sp.routingDirty || sp.routingDraft.LocalRedirect != "" {
+		t.Fatalf("cycle not rejected immediately: %v", err)
 	}
 	sp.onCommit("routing-local-redirect", "")
 	sp.cloudDirty = true
@@ -118,7 +119,7 @@ func TestRoutingFailedSaveAndUnavailableAgentRetainDraft(t *testing.T) {
 func TestRoutingNavigationCancellationAndEighthTab(t *testing.T) {
 	sp := draftTestPage()
 	sp.scope = scopeRouting
-	sp.onCommit("routing-secondary", "changed")
+	sp.onCommit("routing-task-review-quality", "economy")
 	m := Model{content: sp, configSurface: &configSurface{active: configTabRouting, focused: true}}
 	m.switchConfigTab(configTabCloud)
 	if m.configSurface.active != configTabRouting || m.configSurface.pendingTab == nil {
@@ -139,10 +140,10 @@ func TestRoutingNavigationCancellationAndEighthTab(t *testing.T) {
 func TestSelectingCurrentRoutingTabPreservesDraft(t *testing.T) {
 	sp := draftTestPage()
 	sp.scope = scopeRouting
-	sp.onCommit("routing-secondary", "unsaved")
+	sp.onCommit("routing-task-review-quality", "economy")
 	m := Model{content: sp, configSurface: &configSurface{active: configTabRouting, focused: true}}
 	m.switchConfigTab(configTabRouting)
-	if m.content != sp || !sp.routingDirty || sp.routingDraft.Secondary != "unsaved" {
+	if m.content != sp || !sp.routingDirty || sp.routingDraft.Tasks["review"].Quality != "economy" {
 		t.Fatal("selecting current tab discarded routing page/draft")
 	}
 }

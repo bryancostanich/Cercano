@@ -61,6 +61,8 @@ cercano
 
 Note: The development launcher `cercano` is separate from the Homebrew-installed `cercano-cli` and `cercano` binaries. See [local signing and notarization](docs/local-macos-signing.md) for contributor information on macOS builds.
 
+**Windows:** there is an experimental, explicitly **unsigned** Windows x64 ZIP built by the same manual release pipeline. It is not a supported release; see [docs/windows-artifact.md](docs/windows-artifact.md).
+
 For scripts and automation:
 
 ```bash

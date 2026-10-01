@@ -60,3 +60,10 @@ source/server/cercano
 
 # Local databases (conversations, telemetry, etc.)
 *.db
+
+# Stray build output at the repo root
+/bin/
+
+# Python release-tool test caches
+__pycache__/
+*.pyc

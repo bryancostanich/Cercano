@@ -171,3 +171,26 @@ func TestTokenMetricsSectionWrappers(t *testing.T) {
 		}
 	}
 }
+
+func TestTokenMetricsStartsWithFilters(t *testing.T) {
+	for _, width := range []int{12, 40, 100} {
+		p := metricsDaylightPage(t, width)
+		lines := p.lines()
+		if len(lines) == 0 || strings.TrimSpace(ansi.Strip(lines[0])) == "" {
+			t.Fatalf("width=%d: unexpected leading blank space", width)
+		}
+		text := ansi.Strip(strings.Join(lines, "\n"))
+		for _, removed := range []string{"Token Metrics", "reported consumption", "select ·", "Enter edit", "Shift+Tab tabs"} {
+			if strings.Contains(text, removed) {
+				t.Fatalf("width=%d: redundant header text %q", width, removed)
+			}
+		}
+		if width >= 16 {
+			if !strings.HasPrefix(ansi.Strip(lines[0]), "╭") || !strings.Contains(ansi.Strip(lines[1]), "Filters") {
+				t.Fatalf("width=%d: first section is not Filters", width)
+			}
+		} else if !strings.HasPrefix(text, "Filters") {
+			t.Fatalf("width=%d: narrow content does not start with Filters", width)
+		}
+	}
+}

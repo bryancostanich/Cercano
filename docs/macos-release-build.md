@@ -246,3 +246,21 @@ bypassing protections.
 This automation requires the workflow change on the selected release commit
 and the secret provisioned. It does not retroactively update earlier releases
 such as v0.20.3, nor has a live cross-repository write been verified by offline tests.
+
+### Tap-only update for an already-published release
+
+For a release that predates automatic tap updates, run the dedicated recovery
+workflow on current `main`, supplying its successful release run ID:
+
+```bash
+gh workflow run update-homebrew.yml --repo bryancostanich/Cercano --ref main \
+  -f version=0.20.3 -f run_id=36933561441
+```
+
+This checks the published tag's commit against the completed release workflow,
+requires successful macOS signing and publication jobs, and downloads the macOS
+artifact from that exact run. It then performs the same checksum/template/public
+asset verification and guarded tap update. It does not build, sign, retag,
+republish assets, or update Windows/Linux packages. The source Actions artifact
+must still be within its retention period. This workflow shares the automatic
+tap job's concurrency group and uses the same narrow token.

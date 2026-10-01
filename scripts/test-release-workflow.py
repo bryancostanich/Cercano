@@ -506,6 +506,30 @@ class BashResolutionTest(unittest.TestCase):
                 bash_executable()
 
 
+class TapRecoveryWorkflowTest(unittest.TestCase):
+    def test_manual_scoped_tap_only_recovery(self):
+        w = load_workflow_file(REPO / '.github/workflows/update-homebrew.yml')
+        trigger = next(w[k] for k in ('on', True, 'true') if k in w)
+        self.assertEqual(list(trigger), ['workflow_dispatch'])
+        self.assertEqual(w['permissions'], {'contents': 'read', 'actions': 'read'})
+        self.assertEqual(list(w['jobs']), ['update-homebrew'])
+        job = w['jobs']['update-homebrew']
+        self.assertEqual(job['environment'], 'release')
+        self.assertEqual(job['concurrency']['group'], 'cercano-homebrew-tap')
+        self.assertIs(job['concurrency']['cancel-in-progress'], False)
+        steps = job['steps']
+        self.assertIn('check_release_run.py', steps[2]['run'])
+        self.assertEqual(steps[3]['with']['run-id'], '${{ inputs.run_id }}')
+        self.assertIn('update_tap.py', steps[4]['run'])
+        self.assertEqual([i for i, s in enumerate(steps) if 'HOMEBREW_TAP_TOKEN' in s.get('env', {})], [4])
+        for step in steps:
+            if 'run' in step:
+                result = subprocess.run([bash_executable(), '-n'], input=step['run'],
+                                        capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertNotIn('gh release create', step['run'])
+
+
 class NoAutomaticPublishingTest(unittest.TestCase):
     """No workflow may publish a release without an explicit operator run.
 

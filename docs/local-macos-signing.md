@@ -130,6 +130,10 @@ This uploads both signed binaries to Apple. The output directory must not exist,
 and its parent must exist. Optional `--keychain PATH` selects a nondefault
 Keychain. No raw-password argument is accepted. The command preserves a submission
 ZIP, SHA-256, submission ID when returned, tool stdout/stderr, and notarization log.
+It also writes `diagnostic-report.json` — a sanitized summary of well-known
+notarytool fields (`id`, `status`, `message`, return codes, timeout flags) with
+credential-like values redacted — and prints that summary to stdout on failure,
+so the outcome is diagnosable without the runner-only raw captures.
 It reports success only after a successful Accepted response and a matching
 Accepted log. It has a bounded wait (default 1800 seconds per request) and never
 automatically resubmits. On failure inspect the printed history/info/log commands;

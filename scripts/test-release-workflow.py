@@ -115,6 +115,34 @@ class ReleaseWorkflowTest(unittest.TestCase):
         self.assertEqual(self.jobs["publish"]["needs"],
                          ["build", "build-windows", "build-linux"])
 
+    def test_notarization_diagnostics_upload_is_failure_only_and_sanitized(self):
+        """A failed notarization must explain itself without leaking secrets.
+
+        The upload runs only on failure, before the keychain cleanup, and
+        with `if: failure()` (never `always()`) so it cannot prevent that
+        unconditional cleanup. It carries exactly the script-generated
+        sanitized JSON report: never raw stdout/stderr captures, the
+        submission ZIP, submission-id files, the keychain, certificates or
+        any authentication parameter.
+        """
+        step = self.step("build", "Upload notarization diagnostics on failure")
+        self.assertEqual(step["if"], "failure()")
+        path = step["with"]["path"]
+        self.assertIn("diagnostic-report.json", path)
+        for forbidden in ("submit-stdout", "submit-stderr", "log-stdout",
+                          "log-stderr", "submission-id", "result.json",
+                          ".zip", ".p12", ".p8", "keychain"):
+            self.assertNotIn(forbidden, path,
+                             "raw or credential-bearing files must never leave the runner")
+        # The failure upload is separate from the success artifact upload,
+        # which must not sweep up notarization files.
+        review = self.step("build", "Upload artifacts for review")
+        self.assertNotIn("notarization", review["with"]["path"])
+        # And it must come before the unconditional keychain cleanup.
+        names = [str(s.get("name", "")).lower() for s in self.jobs["build"]["steps"]]
+        self.assertLess(names.index("upload notarization diagnostics on failure"),
+                        names.index("destroy signing keychain"))
+
     def test_keychain_is_destroyed_on_every_path(self):
         cleanup = self.step("build", "destroy signing keychain")
         self.assertEqual(cleanup["if"], "always()")

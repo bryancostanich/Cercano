@@ -148,6 +148,22 @@ jobs:
           python3 scripts/notarize-macos-local.py "$STAGE" "$RUNNER_TEMP/notarization" \
             --keychain-profile cercano-notary --keychain "$KEYCHAIN_PATH"
 
+      # Failure-only diagnostics: exactly the script-generated sanitized JSON
+      # report (well-known notarytool id/status/message/error plus return
+      # codes and timeout flags, credential-like values redacted). Raw
+      # stdout/stderr captures, the submission ZIP, submission-id.txt, the
+      # keychain, certificates and auth parameters never leave the runner.
+      # `if: failure()` (not `always()`) so it cannot block the unconditional
+      # keychain cleanup below, and it is separate from the success artifacts.
+      - name: Upload notarization diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cercano-${{ inputs.version }}-notarization-diagnostics
+          path: ${{ runner.temp }}/notarization/diagnostic-report.json
+          if-no-files-found: warn
+          retention-days: 3
+
       - name: Verify finished archive
         env:
           VERSION: ${{ inputs.version }}

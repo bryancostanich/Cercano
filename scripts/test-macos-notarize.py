@@ -86,6 +86,52 @@ class NotaryTests(unittest.TestCase):
         self.execute(False)
         self.assertEqual(json.loads((self.out / 'log-stdout.txt').read_text())['status'], 'Invalid')
 
+    def test_rejected_summary_is_printed(self):
+        """A generic rejection must explain itself, not just name the save dir.
+
+        run36922503915 failed with only 'Submission did not return a
+        successful Accepted result' and the runner-only files were lost, so
+        the well-known notarytool fields have to reach stdout too.
+        """
+        self.env['SUBMIT'] = json.dumps(
+            {'id': SID, 'status': 'Invalid', 'message': 'The binary contains an invalid signature.'})
+        result = self.execute(False)
+        self.assertIn('status=Invalid', result.stdout)
+        self.assertIn('id=' + SID, result.stdout)
+        self.assertIn('returncode=0', result.stdout)
+        self.assertIn('invalid signature', result.stdout)
+
+    def test_summary_report_written_on_success(self):
+        """The sanitized report exists for CI on both success and failure."""
+        self.execute()
+        report = json.loads((self.out / 'diagnostic-report.json').read_text())
+        self.assertEqual(report['submit']['id'], SID)
+        self.assertEqual(report['submit']['status'], 'Accepted')
+        self.assertEqual(report['submit']['returncode'], 0)
+        self.assertFalse(report['submit']['timed_out'])
+        self.assertEqual(report['log']['status'], 'Accepted')
+        self.assertEqual(report['log']['returncode'], 0)
+
+    def test_summary_redacts_credential_like_values(self):
+        """Even a hostile message must not leak credential-shaped values.
+
+        Raw submit/log captures stay on the runner; only the sanitized
+        summary and report reach CI stdout and the failure artifact.
+        """
+        self.env['SUBMIT'] = json.dumps({
+            'id': SID, 'status': 'Invalid',
+            'message': 'password=hunter2 token=zzz-secret api_key=abc123 '
+                       'passwd: qwerty123 leaked abcd-efgh-ijkl-mnop end'})
+        result = self.execute(False)
+        report_text = (self.out / 'diagnostic-report.json').read_text()
+        for marker in ('hunter2', 'zzz-secret', 'abc123', 'qwerty123',
+                       'abcd-efgh-ijkl-mnop'):
+            self.assertNotIn(marker, report_text)
+            self.assertNotIn(marker, result.stdout)
+            self.assertNotIn(marker, result.stderr)
+        self.assertIn('[REDACTED]', report_text)
+        self.assertIn('status=Invalid', result.stdout)
+
     def test_nonzero_accepted(self):
         self.env['SUBMIT_EXIT'] = '1'
         self.execute(False)

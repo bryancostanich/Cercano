@@ -55,11 +55,22 @@ WELL_KNOWN_FIELDS = ('id', 'status', 'message', 'error')
 # Keychain profile), but a hostile or unexpected tool message must not be
 # able to smuggle credential-like text into logs or the CI artifact.
 SECRET_KEY_PATTERN = r'(?:password|passwd|secret|token|credential|api[-_]?key|private[-_]?key)'
+EXPLICIT_CREDENTIAL_ENVS = (
+    'APPLE_APP_SPECIFIC_PASSWORD',
+    'MACOS_CERTIFICATE_PASSWORD', 
+    'CERTIFICATE_PASSWORD',
+    'MACOS_CERTIFICATE_P12',
+    'CERTIFICATE_P12'
+)
 REDACTION_PATTERNS = (
     # Apple app-specific password shape: four hyphen-separated groups.
     re.compile(r'\b[A-Za-z]{4}-[A-Za-z]{4}-[A-Za-z]{4}-[A-Za-z]{4}\b'),
+    # Explicit credential environment variables with their values
+    re.compile(r'(' + '|'.join(re.escape(env) for env in EXPLICIT_CREDENTIAL_ENVS) + r')(=)[^\s\n]+'),
     # key=value / key: value pairs naming a credential-like key.
     re.compile(r'(?i)\b(' + SECRET_KEY_PATTERN + r')\b(["\']?\s*[:=]\s*)["\']?[^\s"\',;&]+'),
+    # PEM blocks (private keys, certificates)
+    re.compile(r'-----BEGIN\s+(?:PRIVATE KEY|CERTIFICATE|RSA PRIVATE KEY)-----.+?-----END\s+(?:PRIVATE KEY|CERTIFICATE|RSA PRIVATE KEY)-----', re.DOTALL),
 )
 REDACTED = '[REDACTED]'
 SUMMARY_LIMIT = 400
@@ -76,9 +87,14 @@ def sanitize(value):
     """Return a bounded, single-line, credential-redacted copy of value."""
     if not isinstance(value, str):
         return None
-    text_value = ' '.join(value.split())
+    text_value = value
+    for name in EXPLICIT_CREDENTIAL_ENVS:
+        secret = os.environ.get(name)
+        if secret:
+            text_value = text_value.replace(secret, REDACTED)
     for pattern in REDACTION_PATTERNS:
         text_value = pattern.sub(_redact, text_value)
+    text_value = ' '.join(text_value.split())
     if len(text_value) > SUMMARY_LIMIT:
         text_value = text_value[:SUMMARY_LIMIT].rstrip() + '[truncated]'
     return text_value
@@ -123,6 +139,13 @@ def recorded(argv, timeout, output, label):
         payload = json.loads(stdout)
     except ValueError:
         payload = None
+    # Read the actual subprocess stderr, never fixture/environment overrides.
+    # Preserve absence of a status or id: a failed upload is not an Apple
+    # Invalid verdict and must not fabricate one.
+    if stderr.strip() and (code != 0 or timed_out or not isinstance(payload, dict)):
+        payload = dict(payload) if isinstance(payload, dict) else {}
+        if not payload.get('error'):
+            payload['error'] = stderr
     return code, timed_out, payload
 
 
@@ -157,6 +180,8 @@ def main():
         # Exclusive mkdir also rejects dangling symlinks and concurrent reuse.
         output.mkdir(mode=0o700, parents=False, exist_ok=False)
         created = True
+        # Initialize diagnostic report early so it's available even on early failures
+        (output / 'diagnostic-report.json').write_text(json.dumps(report, indent=2, sort_keys=True) + '\n')
         sources = [args.staging_bin_dir.absolute() / name for name in ('cercano', 'cercano-cli')]
         for binary in sources:
             verify(binary)

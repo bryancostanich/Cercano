@@ -27,6 +27,7 @@ elif name == 'codesign':
 elif name == 'xcrun':
     action = args[1].upper()
     print(os.environ[action], flush=True)
+    print(os.environ.get(action + '_STDERR', ''), file=sys.stderr, flush=True)
     time.sleep(float(os.environ.get(action + '_SLEEP', '0')))
     sys.exit(int(os.environ.get(action + '_EXIT', '0')))
 else: sys.exit(99)
@@ -186,6 +187,66 @@ class NotaryTests(unittest.TestCase):
         binary.symlink_to(self.stage / 'cercano')
         self.execute(False)
         self.assertEqual(self.uploads(), [])
+
+    def test_submit_stderr_fallback(self):
+        """Test that stderr fallback is captured and sanitized when submit fails with plain stderr."""
+        self.env['SUBMIT'] = 'bad json'
+        self.env['SUBMIT_EXIT'] = '1'
+        self.env['SUBMIT_STDERR'] = 'HTTP 403: Forbidden - Invalid credentials\nAdditional error details'
+        result = self.execute(False)
+        # Check that stderr fallback is captured in the report
+        report = json.loads((self.out / 'diagnostic-report.json').read_text())
+        self.assertIn('submit', report)
+        self.assertEqual(report['submit']['returncode'], 1)
+        self.assertFalse(report['submit']['timed_out'])  # Not a timeout, explicit failure
+        # Check that useful error information is surfaced
+        self.assertIn('HTTP 403', result.stdout)
+        self.assertIn('Forbidden', result.stdout)
+
+    def test_network_unavailable_fallback(self):
+        """Test that network errors are properly surfaced in summary/report."""
+        self.env['SUBMIT'] = ''
+        self.env['SUBMIT_EXIT'] = '1'
+        self.env['SUBMIT_STDERR'] = 'Network unavailable: Connection refused\nUnable to reach Apple servers'
+        result = self.execute(False)
+        # Check that network error is surfaced
+        self.assertIn('network unavailable', result.stdout.lower())
+        self.assertIn('connection refused', result.stdout.lower())
+        # Check that the report contains the fallback information
+        report = json.loads((self.out / 'diagnostic-report.json').read_text())
+        self.assertIn('submit', report)
+        self.assertEqual(report['submit']['returncode'], 1)
+        self.assertFalse(report['submit']['timed_out'])  # Not a timeout, explicit failure
+
+    def test_exact_secret_values_are_redacted_without_labels(self):
+        self.env['SUBMIT'] = ''
+        self.env['SUBMIT_EXIT'] = '1'
+        self.env['APPLE_APP_SPECIFIC_PASSWORD'] = 'arbitrary private value with spaces'
+        self.env['CERTIFICATE_P12'] = 'base64-fixture-value'
+        self.env['SUBMIT_STDERR'] = ('Network unavailable: arbitrary private value with spaces '
+                                     'base64-fixture-value')
+        result = self.execute(False)
+        report = (self.out / 'diagnostic-report.json').read_text()
+        for secret in (self.env['APPLE_APP_SPECIFIC_PASSWORD'], self.env['CERTIFICATE_P12']):
+            self.assertNotIn(secret, result.stdout)
+            self.assertNotIn(secret, report)
+        self.assertIn('Network unavailable', report)
+        self.assertIn('[REDACTED]', report)
+
+    def test_explicit_credential_redaction(self):
+        """Test explicit redaction of known credential env values."""
+        self.env['SUBMIT'] = 'bad json'
+        self.env['SUBMIT_STDERR'] = f'APPLE_APP_SPECIFIC_PASSWORD=abc123 MACOS_CERTIFICATE_PASSWORD=secret123 CERTIFICATE_PASSWORD=pwd123 MACOS_CERTIFICATE_P12=p12file.pem CERTIFICATE_P12=pem-content\n-----BEGIN PRIVATE KEY-----\nsecretkeydata\n-----END PRIVATE KEY-----'
+        self.env['SUBMIT_EXIT'] = '1'
+        result = self.execute(False)
+        # Check that known credential values are redacted
+        report_text = (self.out / 'diagnostic-report.json').read_text()
+        for credential in ('abc123', 'secret123', 'pwd123', 'p12file.pem', 'pem-content', 'secretkeydata'):
+            self.assertNotIn(credential, report_text)
+        self.assertIn('[REDACTED]', report_text)
+        # Check that the error message is still useful
+        self.assertNotIn('status=Invalid', result.stdout)
+        self.assertIn('APPLE_APP_SPECIFIC_PASSWORD=[REDACTED]', result.stdout)
 
 if __name__ == '__main__':
     unittest.main()

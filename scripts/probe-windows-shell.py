@@ -19,7 +19,7 @@ for shell in shells:
                  (['-c', 'set -euo pipefail\n[[ -n "$CERTIFICATE_P12" ]] || exit 1\nprintf "PREFLIGHT_OK\\n"'], None)]
         for args, stdin in cases:
             try:
-                r = subprocess.run([shell, *args], input=stdin, env=env,
+                r = subprocess.run([shell, *args], input=stdin.encode() if stdin is not None else None, env=env,
                                    capture_output=True, timeout=20)
                 print(repr({'shell': shell, 'minimal_env': minimal, 'args': args,
                             'exit': r.returncode, 'stdout': r.stdout[:2000],

@@ -15,11 +15,13 @@ Apple, or prove that a real signed release succeeds.
 """
 
 import json
+import shutil
 import tempfile
 import subprocess
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 REPO = Path(__file__).resolve().parents[1]
 WORKFLOW_PATH = REPO / ".github" / "workflows" / "release-macos.yml"
@@ -28,6 +30,16 @@ try:
     import yaml
 except ImportError:  # pragma: no cover - depends on the host
     yaml = None
+
+
+def bash_executable():
+    # Native Windows CreateProcess searches System32 before PATH for a bare
+    # executable name, selecting the WSL stub even when Git Bash is first on
+    # PATH. Resolve explicitly so Python launches the same shell as the job.
+    executable = shutil.which("bash")
+    if executable is None:
+        raise AssertionError("Bash is required for workflow shell checks")
+    return str(Path(executable).absolute())
 
 
 def load_workflow_file(path):
@@ -375,7 +387,7 @@ class ReleaseWorkflowTest(unittest.TestCase):
             git("commit", "--allow-empty", "-m", "tagged source")
             git("tag", "-a", "v1.2.3", "-m", "release fixture")
             def validate():
-                return subprocess.run(["bash", "-c", 'VERSION=1.2.3\n' + script],
+                return subprocess.run([bash_executable(), "-c", 'VERSION=1.2.3\n' + script],
                                       cwd=directory, capture_output=True, text=True)
             self.assertEqual(validate().returncode, 0)
             git("commit", "--allow-empty", "-m", "different source")
@@ -394,7 +406,7 @@ class ReleaseWorkflowTest(unittest.TestCase):
                 ("", "", False), ("inert-fixture", "", True),
                 ("inert-fixture", "fixture-password", True)]:
             result = subprocess.run(
-                ["bash", "-c", preflight + '\necho PREFLIGHT_OK\n'],
+                [bash_executable(), "-c", preflight + '\necho PREFLIGHT_OK\n'],
                 env={"CERTIFICATE_P12": certificate,
                      "CERTIFICATE_PASSWORD": password},
                 capture_output=True, text=True)
@@ -427,10 +439,23 @@ class ReleaseWorkflowTest(unittest.TestCase):
                 if not script:
                     continue
                 name = step.get("name", "unnamed")
-                result = subprocess.run(["bash", "-n"], input=script,
+                result = subprocess.run([bash_executable(), "-n"], input=script,
                                         capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0,
                                  f"{job}/{name} shell syntax error: {result.stderr}")
+
+
+class BashResolutionTest(unittest.TestCase):
+    def test_uses_absolute_path_from_path_lookup(self):
+        expected = str(Path("fixture/Git Bash/bash.exe").absolute())
+        with patch.object(shutil, "which", return_value=expected) as lookup:
+            self.assertEqual(bash_executable(), expected)
+            lookup.assert_called_once_with("bash")
+
+    def test_missing_bash_is_a_failure_not_a_skip(self):
+        with patch.object(shutil, "which", return_value=None):
+            with self.assertRaisesRegex(AssertionError, "Bash is required"):
+                bash_executable()
 
 
 class NoAutomaticPublishingTest(unittest.TestCase):

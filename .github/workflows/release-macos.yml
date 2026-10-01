@@ -343,9 +343,14 @@ jobs:
           [[ "$TAG_COMMIT" == "$(git rev-parse --verify 'HEAD^{commit}')" ]] \
             || { echo "::error::Selected workflow ref does not match v$VERSION; refusing to label different source as this release."; exit 1; }
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
       - name: Run release test gate
         run: |
           set -euo pipefail
+          # Use setup-python rather than modifying Ubuntu's managed Python.
           # Match the Windows gate: exercise the builder's refusal paths and
           # this workflow's own structure before anything is packaged.
           python3 -m pip install --disable-pip-version-check --quiet pyyaml

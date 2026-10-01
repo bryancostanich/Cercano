@@ -23,15 +23,18 @@ of task runs—on your hardware or with a hosted provider.
 
 ## Get started
 
-Standalone release publishing is in progress. For now, follow the
-[source build instructions](docs/agent/self-dev.md#layout--build) and the
-[agent setup guide](docs/agent/README.md). The server and terminal client are
-separate Go modules; the development launcher handles building both.
+### macOS (Apple Silicon) installation
 
-Once the launcher is installed:
+Install via Homebrew (requires macOS 12+; Intel not supported):
 
 ```bash
-cercano
+brew install bryancostanich/tap/cercano
+```
+
+This installs both the `cercano-cli` terminal client and the `cercano` agent server. To upgrade:
+
+```bash
+brew upgrade cercano
 ```
 
 Open `/config` to configure models, routing, and permissions. Then try a bounded,
@@ -40,7 +43,17 @@ read-only task in a repository you know:
 > Find where this project loads its configuration. Delegate the code search to
 > a read-only subagent, then explain the result with file references. Do not edit files.
 
-**Local release rehearsal:** `scripts/build-macos-unsigned.sh` targets macOS 12.0 on Apple Silicon. Actual macOS 12 runtime support remains unverified; this is not yet a supported release. See [local signing and notarization](docs/local-macos-signing.md).
+### Development source build
+
+For development work, follow the [source build instructions](docs/agent/self-dev.md#layout--build) and the [agent setup guide](docs/agent/README.md). The server and terminal client are separate Go modules; the development launcher handles building both.
+
+Once the launcher is installed:
+
+```bash
+cercano
+```
+
+Note: The development launcher `cercano` is separate from the Homebrew-installed `cercano-cli` and `cercano` binaries. See [local signing and notarization](docs/local-macos-signing.md) for contributor information on macOS builds.
 
 For scripts and automation:
 

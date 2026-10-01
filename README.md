@@ -31,7 +31,13 @@ Install via Homebrew (requires macOS 12+; Intel not supported):
 brew install bryancostanich/tap/cercano
 ```
 
-This installs both the `cercano-cli` terminal client and the `cercano` agent server. To upgrade:
+This installs both the `cercano-cli` terminal client and the `cercano` agent server. Start the terminal client:
+
+```bash
+cercano-cli
+```
+
+To upgrade:
 
 ```bash
 brew upgrade cercano

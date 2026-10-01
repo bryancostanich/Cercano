@@ -18,3 +18,32 @@ jobs:
       - name: Compare native Python shell launch paths
         shell: bash
         run: python scripts/probe-windows-shell.py
+      - name: Verify original workflow test failures
+        shell: bash
+        run: |
+          python -m pip install --quiet pyyaml
+          python scripts/test-release-workflow.py
+          python scripts/test-windows-release-build.py
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: source/server/go.mod
+          cache-dependency-path: source/server/go.sum
+      - name: Build native Windows diagnostic binaries
+        shell: bash
+        env:
+          CERCANO_ALLOW_UNTAGGED: '1'
+        run: python scripts/build-windows-release.py 0.0.0 dist
+      - name: Check exact diagnostic binaries offline
+        shell: bash
+        run: |
+          set -euo pipefail
+          ISOLATED="$RUNNER_TEMP/cercano-diagnostic-smoke"
+          mkdir -p "$ISOLATED/home" "$ISOLATED/appdata" "$ISOLATED/localappdata" "$ISOLATED/temp" "$ISOLATED/run"
+          export HOME="$ISOLATED/home" USERPROFILE="$ISOLATED/home"
+          export APPDATA="$ISOLATED/appdata" LOCALAPPDATA="$ISOLATED/localappdata"
+          export TEMP="$ISOLATED/temp" TMP="$ISOLATED/temp"
+          cd "$ISOLATED/run"
+          python -m zipfile -e "$GITHUB_WORKSPACE/dist/cercano-0.0.0-windows-x64.zip" .
+          test "$(./cercano-0.0.0-windows-x64/bin/cercano.exe --version | tr -d '\r')" = 'cercano v0.0.0'
+          test "$(./cercano-0.0.0-windows-x64/bin/cercano-cli.exe --version | tr -d '\r')" = 'cercano-cli v0.0.0'
+          test -z "$(find "$HOME" "$APPDATA" "$LOCALAPPDATA" -type f -print -quit)"

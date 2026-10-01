@@ -103,6 +103,10 @@ https://github.com/user-attachments/assets/89989b0f-91a1-4fa6-aca0-98ce12a446c6
 Conversations are saved automatically, with titles, history, search, and resume
 helping you find prior work and continue without reconstructing the discussion.
 
+Watch how to resume a saved conversation:
+
+https://github.com/user-attachments/assets/d4a81e65-0206-475c-994b-067174f3a5f2
+
 [Explore session retention →](docs/agent/features/automatic-session-retention.md)
 
 ### One agent, more than one way to work

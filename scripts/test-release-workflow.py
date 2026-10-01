@@ -5,7 +5,10 @@ A mistake in the release workflow surfaces only during a real signed run, when
 credentials are already in play. These tests assert the safety properties that
 matter — no untrusted trigger, least privilege, protected environment, keychain
 cleanup on every path, verification before publication, and no silent
-replacement of published artifacts.
+replacement of published artifacts. The same applies to the experimental
+unsigned Windows and Linux jobs: they must stay manual-only, secret-free and
+outside the protected environment, and publication must wait for all three
+builds and verify all three checksums.
 
 This validates structure only. It does not run the workflow, contact GitHub or
 Apple, or prove that a real signed release succeeds.
@@ -82,7 +85,7 @@ class ReleaseWorkflowTest(unittest.TestCase):
 
     def test_write_permission_is_scoped_to_the_publish_job(self):
         self.assertEqual(self.jobs["publish"]["permissions"], {"contents": "write"})
-        for job in ("build", "build-windows"):
+        for job in ("build", "build-windows", "build-linux"):
             self.assertNotIn("permissions", self.jobs[job], job)
 
     def test_credentialed_jobs_use_the_protected_environment(self):
@@ -94,9 +97,11 @@ class ReleaseWorkflowTest(unittest.TestCase):
 
     def test_publication_requires_explicit_opt_in(self):
         self.assertEqual(self.jobs["publish"]["if"], "inputs.publish")
-        # Publication waits for BOTH build jobs: an unsigned Windows archive
-        # must not attach to a release whose macOS build failed (or vice versa).
-        self.assertEqual(self.jobs["publish"]["needs"], ["build", "build-windows"])
+        # Publication waits for ALL THREE build jobs: an unsigned Windows or
+        # Linux archive must not attach to a release whose macOS build failed
+        # (or vice versa).
+        self.assertEqual(self.jobs["publish"]["needs"],
+                         ["build", "build-windows", "build-linux"])
 
     def test_keychain_is_destroyed_on_every_path(self):
         cleanup = self.step("build", "destroy signing keychain")
@@ -168,21 +173,26 @@ class ReleaseWorkflowTest(unittest.TestCase):
         run = self.step("publish", "refuse to replace")["run"]
         self.assertIn("gh release view", run)
         self.assertIn("exit 1", run)
-        # Both platforms' assets are protected: an already-published Windows
-        # zip must refuse replacement exactly like the macOS tarball does.
-        for asset in ("darwin-arm64.tar.gz", "windows-x64.zip"):
+        # Every platform's assets are protected: an already-published Windows
+        # zip or Linux tarball must refuse replacement exactly like the macOS
+        # tarball does.
+        for asset in ("darwin-arm64.tar.gz", "windows-x64.zip", "linux-x64.tar.gz"):
+            self.assertIn(asset, run)
+        for asset in ("linux-x64.tar.gz.sha256", "windows-x64.zip.sha256"):
             self.assertIn(asset, run)
         # The published bytes must match the digest the build recorded.
         self.assertIn("shasum -a 256 -c -", run)
-        # Digests from BOTH build jobs are verified before publication.
+        # Digests from ALL THREE build jobs are verified before publication.
         self.assertIn("needs.build.outputs.sha256", run)
         self.assertIn("needs.build-windows.outputs.sha256", run)
+        self.assertIn("needs.build-linux.outputs.sha256", run)
 
     def test_publish_attaches_both_platforms_artifacts(self):
         run = self.step("publish", "publish release")
         files = run["with"]["files"]
         for asset in ("darwin-arm64.tar.gz", "darwin-arm64.tar.gz.sha256",
-                      "windows-x64.zip", "windows-x64.zip.sha256"):
+                      "windows-x64.zip", "windows-x64.zip.sha256",
+                      "linux-x64.tar.gz", "linux-x64.tar.gz.sha256"):
             self.assertIn(asset, files, f"publish must attach {asset}")
 
     def test_build_windows_job_exists_and_is_manual_only(self):
@@ -264,6 +274,89 @@ class ReleaseWorkflowTest(unittest.TestCase):
         run = self.step("build-windows", "native helper tests")["run"]
         self.assertIn("go test", run)
         self.assertIn("./internal/localruntime/llamaserver", run)
+
+    def test_build_linux_job_exists_and_is_manual_only(self):
+        """The Linux job must exist, run natively, and never skip."""
+        job = self.jobs["build-linux"]
+        self.assertEqual(job["runs-on"], "ubuntu-24.04",
+                         "the Linux artifact must be built on the target platform")
+        # The workflow is manual-dispatch only, so no untrusted trigger can
+        # start the Linux build either; assert the job carries no `if`
+        # that could skip it when publish is false.
+        self.assertNotIn("if", job)
+
+    def test_build_linux_job_holds_no_signing_secrets_or_environment(self):
+        """The Linux job must never see signing secrets or the release env.
+
+        There is no Linux code signing yet: the artifact is explicitly
+        unsigned (docs/linux-artifact.md). Granting it the protected
+        `release` environment or any secret would put signing credentials
+        on a host that has no need for them.
+        """
+        job = self.jobs["build-linux"]
+        self.assertNotIn("environment", job)
+        job_text = json.dumps(job)
+        self.assertNotIn("secrets.", job_text)
+        # No signing tool may appear anywhere in the job.
+        for tool in ("codesign", "signtool", "gpg", "gpgsign", "notarytool"):
+            self.assertNotIn(tool, job_text)
+        # And the whole workflow still only touches Apple secrets in the
+        # credentialed jobs.
+        for secret in ("MACOS_CERTIFICATE_P12", "MACOS_CERTIFICATE_PASSWORD",
+                       "APPLE_APP_SPECIFIC_PASSWORD"):
+            self.assertNotIn(secret, job_text)
+
+    def test_build_linux_smoke_test_isolates_user_directories(self):
+        """The smoke test must not touch real user state on the runner.
+
+        HOME/XDG_* directories are pointed at throwaway paths under
+        RUNNER_TEMP, outside the checkout, before either binary runs. Only
+        `--version` is exercised: no agent launch, credentials, models or
+        downloads.
+        """
+        run = self.step("build-linux", "smoke test")["run"]
+        for variable in ("HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME",
+                         "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_RUNTIME_DIR",
+                         "TMPDIR", "TEMP", "TMP"):
+            self.assertIn(f'export {variable}="$ISOLATED', run)
+        self.assertIn("RUNNER_TEMP", run)
+        # Both binaries are exercised with --version only, and their exact
+        # output is enforced.
+        self.assertIn('AGENT="$ISOLATED/run/cercano-$VERSION-linux-x64/bin/cercano"', run)
+        self.assertIn('CLI="$ISOLATED/run/cercano-$VERSION-linux-x64/bin/cercano-cli"', run)
+        self.assertIn('"$AGENT" --version', run)
+        self.assertIn('"$CLI" --version', run)
+        self.assertIn("cercano v$VERSION", run)
+        self.assertIn("cercano-cli v$VERSION", run)
+        # A failed smoke test must fail the job, and stray writes are a
+        # failure too.
+        self.assertIn("exit 1", run)
+        self.assertIn("refusing", run)
+        # The smoke test runs the exact archived binaries, extracted to the
+        # isolated directory, not the repo working tree.
+        self.assertIn("tar -xzf", run)
+        self.assertIn("$ISOLATED/run", run)
+
+    def test_build_linux_tests_gates_before_packaging(self):
+        """The release test gate must precede the packaging step."""
+        names = [str(s.get("name", "")).lower()
+                 for s in self.jobs["build-linux"]["steps"]]
+        gate = names.index("run release test gate")
+        build = names.index("build unsigned linux archive")
+        smoke = names.index("smoke test binaries with isolated user directories")
+        self.assertLess(gate, build)
+        self.assertLess(build, smoke)
+
+    def test_build_linux_gate_covers_both_suites(self):
+        run = self.step("build-linux", "test gate")["run"]
+        self.assertIn("test-linux-release-build.py", run)
+        self.assertIn("test-release-workflow.py", run)
+
+    def test_build_linux_runs_native_helper_tests(self):
+        """Available Linux-safe hermetic native tests must run in the job."""
+        run = self.step("build-linux", "native helper tests")["run"]
+        self.assertIn("go test", run)
+        self.assertIn("./internal/procx", run)
 
     def test_version_input_is_validated_against_a_real_tag(self):
         run = self.step("build", "validate inputs")["run"]

@@ -63,6 +63,8 @@ Note: The development launcher `cercano` is separate from the Homebrew-installed
 
 **Windows:** there is an experimental, explicitly **unsigned** Windows x64 ZIP built by the same manual release pipeline. It is not a supported release; see [docs/windows-artifact.md](docs/windows-artifact.md).
 
+**Linux:** there is also an experimental, explicitly **unsigned** Linux x86_64 tarball built natively on `ubuntu-24.04` by the same pipeline. Linux is **not a supported platform yet**; see [docs/linux-artifact.md](docs/linux-artifact.md).
+
 For scripts and automation:
 
 ```bash

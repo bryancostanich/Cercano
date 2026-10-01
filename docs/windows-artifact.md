@@ -50,9 +50,9 @@ The `build-windows` job of [release-macos.yml](../.github/workflows/release-maco
 - runs the Windows-native, hermetic helper tests
   (`localruntime/llamaserver` registry/PATH unit tests);
 - verifies the archive layout and integrity before upload;
-- publishes only under the explicit `publish=true` opt-in, after **both** the
-  macOS and Windows build jobs succeed, and refuses to replace any already
-  published asset (macOS or Windows).
+- publishes only under the explicit `publish=true` opt-in, after **all three**
+  build jobs (macOS, Windows, Linux) succeed, and refuses to replace any already
+  published asset (macOS, Windows or Linux).
 
 The smoke test exercises **only** `--version` on both binaries. It does not
 launch the agent, does not use provider credentials, and does not download

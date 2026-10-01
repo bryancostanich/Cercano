@@ -1,7 +1,9 @@
-name: Release (signed macOS, unsigned experimental Windows)
+name: Release (signed macOS, unsigned experimental Windows and Linux)
 
 # Signed, notarized Apple Silicon release, plus an explicitly unsigned,
-# experimental Windows x64 artifact (docs/windows-artifact.md).
+# experimental Windows x64 artifact (docs/windows-artifact.md) and an
+# explicitly unsigned, experimental Linux x86_64 artifact
+# (docs/linux-artifact.md).
 #
 # Deliberately manual: there is no push, tag or pull_request trigger, so
 # untrusted code can never reach the signing credentials. An operator starts
@@ -11,10 +13,11 @@ name: Release (signed macOS, unsigned experimental Windows)
 # Configure that environment with required reviewers so a run cannot reach
 # Apple credentials without human approval. See docs/macos-release-build.md.
 #
-# The `build-windows` job is deliberately OUTSIDE that environment: it holds
-# no secrets of any kind and produces an explicitly unsigned, experimental
-# Windows x64 artifact (docs/windows-artifact.md). It must never gain
-# signing secrets or the release environment.
+# The `build-windows` and `build-linux` jobs are deliberately OUTSIDE that
+# environment: they hold no secrets of any kind and produce explicitly
+# unsigned, experimental artifacts (docs/windows-artifact.md,
+# docs/linux-artifact.md). They must never gain signing secrets or the
+# release environment.
 on:
   workflow_dispatch:
     inputs:
@@ -304,9 +307,124 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  # Experimental, UNSIGNED Linux x86_64 artifact. This job is intentionally
+  # NOT in the protected `release` environment and references no secrets:
+  # there is no Linux signing infrastructure yet, and the artifact must be
+  # built even when no signing credentials are configured. See
+  # docs/linux-artifact.md. Linux is NOT a supported platform yet — this
+  # job produces a reviewable experimental artifact, never an implied
+  # support commitment, and the publish flag below still gates distribution.
+  build-linux:
+    name: Build unsigned experimental Linux x86_64 archive
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    outputs:
+      archive: ${{ steps.build.outputs.archive }}
+      sha256: ${{ steps.build.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # the build script requires the version tag to exist
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: source/server/go.mod
+          cache-dependency-path: source/server/go.sum
+
+      - name: Validate inputs
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] \
+            || { echo "::error::Version must be stable X.Y.Z without a leading v: $VERSION"; exit 1; }
+          TAG_COMMIT="$(git rev-parse --verify "refs/tags/v$VERSION^{commit}")" \
+            || { echo "::error::No commit tag v$VERSION in this repository."; exit 1; }
+          [[ "$TAG_COMMIT" == "$(git rev-parse --verify 'HEAD^{commit}')" ]] \
+            || { echo "::error::Selected workflow ref does not match v$VERSION; refusing to label different source as this release."; exit 1; }
+
+      - name: Run release test gate
+        run: |
+          set -euo pipefail
+          # Match the Windows gate: exercise the builder's refusal paths and
+          # this workflow's own structure before anything is packaged.
+          python3 -m pip install --disable-pip-version-check --quiet pyyaml
+          python3 scripts/test-linux-release-build.py
+          python3 scripts/test-release-workflow.py
+
+      - name: Build unsigned Linux archive
+        id: build
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          python3 scripts/build-linux-release.py "$VERSION" dist
+          ARCHIVE="dist/cercano-$VERSION-linux-x64.tar.gz"
+          echo "archive=$ARCHIVE" >> "$GITHUB_OUTPUT"
+          echo "sha256=$(sha256sum "$ARCHIVE" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+
+      # Smoke test the exact archive contents (extracted to a directory
+      # outside the repository), with every user directory pointed at
+      # throwaway paths so the binaries cannot read or write real user
+      # state. Only versions are exercised: no agent launch, credentials,
+      # models or downloads.
+      - name: Smoke test binaries with isolated user directories
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          ISOLATED="$RUNNER_TEMP/cercano-smoke"
+          rm -rf "$ISOLATED"
+          mkdir -p "$ISOLATED/home" "$ISOLATED/config" "$ISOLATED/cache" \
+                   "$ISOLATED/data" "$ISOLATED/state" "$ISOLATED/runtime" \
+                   "$ISOLATED/temp" "$ISOLATED/run"
+          chmod 700 "$ISOLATED/runtime"  # XDG_RUNTIME_DIR must be 0700
+          export HOME="$ISOLATED/home"
+          export XDG_CONFIG_HOME="$ISOLATED/config"
+          export XDG_CACHE_HOME="$ISOLATED/cache"
+          export XDG_DATA_HOME="$ISOLATED/data"
+          export XDG_STATE_HOME="$ISOLATED/state"
+          export XDG_RUNTIME_DIR="$ISOLATED/runtime"
+          export TMPDIR="$ISOLATED/temp"
+          export TEMP="$ISOLATED/temp"
+          export TMP="$ISOLATED/temp"
+          cd "$ISOLATED/run"
+          tar -xzf "$GITHUB_WORKSPACE/dist/cercano-$VERSION-linux-x64.tar.gz"
+          AGENT="$ISOLATED/run/cercano-$VERSION-linux-x64/bin/cercano"
+          CLI="$ISOLATED/run/cercano-$VERSION-linux-x64/bin/cercano-cli"
+          got="$("$AGENT" --version)"
+          [[ "$got" == "cercano v$VERSION" ]] \
+            || { echo "::error::cercano reports '$got', expected 'cercano v$VERSION'."; exit 1; }
+          got="$("$CLI" --version)"
+          [[ "$got" == "cercano-cli v$VERSION" ]] \
+            || { echo "::error::cercano-cli reports '$got', expected 'cercano-cli v$VERSION'."; exit 1; }
+          # The isolated directories must stay free of agent state.
+          [[ -z "$(find "$ISOLATED/home" "$ISOLATED/config" "$ISOLATED/cache" "$ISOLATED/data" "$ISOLATED/state" -type f -print -quit)" ]] \
+            || { echo "::error::Version smoke test wrote outside the isolated directories; refusing."; exit 1; }
+          echo "Smoke test passed: both binaries report v$VERSION from an isolated environment."
+
+      # The only Linux-safe hermetic native unit tests today: procx's
+      # unix build-tagged process-group tests (they spawn and reap throwaway
+      # /bin/sh children only). Broader Linux test coverage is still pending
+      # — see docs/linux-artifact.md.
+      - name: Run Linux-native helper tests
+        run: |
+          set -euo pipefail
+          ( cd source/server && go test -count=1 ./internal/procx/... )
+
+      - name: Upload artifacts for review
+        uses: actions/upload-artifact@v4
+        with:
+          name: cercano-${{ inputs.version }}-linux-x64
+          path: |
+            dist/cercano-${{ inputs.version }}-linux-x64.tar.gz
+            dist/cercano-${{ inputs.version }}-linux-x64.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 14
+
   publish:
     name: Publish to GitHub Releases
-    needs: [build, build-windows]
+    needs: [build, build-windows, build-linux]
     # Rehearsals stop at reviewable artifacts; publication is a separate opt-in.
     if: inputs.publish
     runs-on: ubuntu-latest
@@ -327,6 +445,11 @@ jobs:
           name: cercano-${{ inputs.version }}-windows-x64
           path: dist
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: cercano-${{ inputs.version }}-linux-x64
+          path: dist
+
       - name: Refuse to replace an existing published artifact
         env:
           GH_TOKEN: ${{ github.token }}
@@ -336,7 +459,9 @@ jobs:
           for ASSET in "cercano-$VERSION-darwin-arm64.tar.gz" \
                        "cercano-$VERSION-darwin-arm64.tar.gz.sha256" \
                        "cercano-$VERSION-windows-x64.zip" \
-                       "cercano-$VERSION-windows-x64.zip.sha256"; do
+                       "cercano-$VERSION-windows-x64.zip.sha256" \
+                       "cercano-$VERSION-linux-x64.tar.gz" \
+                       "cercano-$VERSION-linux-x64.tar.gz.sha256"; do
             if gh release view "v$VERSION" --json assets \
                  --jq '.assets[].name' 2>/dev/null | grep -qx "$ASSET"; then
               echo "::error::$ASSET is already published on v$VERSION. Publish a new version instead of replacing it."
@@ -346,6 +471,7 @@ jobs:
           # Confirm the downloaded artifacts match the digests the builds recorded.
           echo "${{ needs.build.outputs.sha256 }}  dist/cercano-$VERSION-darwin-arm64.tar.gz" | shasum -a 256 -c -
           echo "${{ needs.build-windows.outputs.sha256 }}  dist/cercano-$VERSION-windows-x64.zip" | shasum -a 256 -c -
+          echo "${{ needs.build-linux.outputs.sha256 }}  dist/cercano-$VERSION-linux-x64.tar.gz" | shasum -a 256 -c -
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
@@ -358,3 +484,5 @@ jobs:
             dist/cercano-${{ inputs.version }}-darwin-arm64.tar.gz.sha256
             dist/cercano-${{ inputs.version }}-windows-x64.zip
             dist/cercano-${{ inputs.version }}-windows-x64.zip.sha256
+            dist/cercano-${{ inputs.version }}-linux-x64.tar.gz
+            dist/cercano-${{ inputs.version }}-linux-x64.tar.gz.sha256

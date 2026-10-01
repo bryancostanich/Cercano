@@ -62,6 +62,10 @@ summarizer—with stored history kept separate from lossy summaries.
 provider, model, and source. See what's consuming your budget and use that
 visibility to tune your routes; estimated savings stay labeled as estimates.
 
+See the token metrics dashboard in action:
+
+https://github.com/user-attachments/assets/82c65acd-6b7f-4d6e-8a56-dbe0d3133d8c
+
 [Explore token metrics →](docs/agent/features/advanced-metrics.md)
 
 ### Local models, less assembly required

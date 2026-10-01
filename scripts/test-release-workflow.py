@@ -455,6 +455,26 @@ class ReleaseWorkflowTest(unittest.TestCase):
         # Check that security import still uses the password variable (which may be empty)
         self.assertIn('security import "$CERT_PATH" -k "$KEYCHAIN_PATH" -P "$CERTIFICATE_PASSWORD"', run_script)
 
+    def test_tap_job_requires_publication_and_has_readonly_default_token(self):
+        job = self.jobs["update-homebrew"]
+        self.assertEqual(job["if"], "inputs.publish")
+        self.assertEqual(set(job["needs"]), {"build", "publish"})
+        self.assertEqual(job["permissions"], {"contents": "read"})
+        self.assertEqual(job["environment"], "release")
+        self.assertEqual(job["concurrency"]["group"], "cercano-homebrew-tap")
+        self.assertIs(job["concurrency"]["cancel-in-progress"], False)
+        self.assertNotIn("env", job)
+        holders = [step for step in job["steps"]
+                   if "HOMEBREW_TAP_TOKEN" in step.get("env", {})]
+        self.assertEqual(len(holders), 1)
+        step = holders[0]
+        self.assertEqual(step["env"]["HOMEBREW_TAP_TOKEN"], "${{ secrets.HOMEBREW_TAP_TOKEN }}")
+        self.assertEqual(step["env"]["EXPECTED_SHA256"], "${{ needs.build.outputs.sha256 }}")
+        self.assertIn("update_tap.py", step["run"])
+        self.assertNotIn("--skip", step["run"])
+        self.assertNotIn("gh release", step["run"])
+        self.assertFalse(job["steps"][0]["with"]["persist-credentials"])
+
     def test_concurrency_prevents_overlapping_runs_for_a_version(self):
         concurrency = self.workflow["concurrency"]
         self.assertIn("inputs.version", concurrency["group"])

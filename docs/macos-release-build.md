@@ -193,3 +193,56 @@ workflow publishes on push or tag.
 None of these prove that a real toolchain, a real Developer ID signature, real
 notarization, or an actual Actions run succeeds; those need the real build, a
 networked Gatekeeper assessment, and the clean-Mac rehearsal.
+
+## Automatic tap update after publication
+
+Publication-enabled runs now finish with **Update Homebrew tap**. This job runs
+only after the release publication job succeeds; rehearsals (`publish=false`)
+never write to the tap. It updates only `Formula/cercano.rb` on
+`bryancostanich/homebrew-tap`'s `main`, with no pull request or approval prompt.
+
+Before writing, the updater checks the CI archive and regenerated formula,
+then downloads the publicly published macOS archive and its checksum sidecar.
+Both must match the digest recorded by the build. Nothing is extracted or run.
+An identical installed formula is a successful no-op. A newer version, or a
+same-version change of digest/formula, is refused. Concurrent edits use the
+Contents API's blob-SHA precondition; a conflict causes up to three fresh
+read/validate attempts, never a force update. Other tap files are untouched.
+
+### One-time credential setup
+
+Create a **fine-grained personal access token** at
+<https://github.com/settings/personal-access-tokens/new>:
+
+- Resource owner: `bryancostanich`.
+- Repository access: **Only select repositories**, then **homebrew-tap**.
+- Repository permission: **Contents: Read and write**. Metadata read access
+  is implicit. Do not grant workflow, administration, or all-repository access.
+- Choose an expiration and renew before it expires.
+
+Add it to Cercano's `release` environment as **HOMEBREW_TAP_TOKEN**:
+<https://github.com/bryancostanich/Cercano/settings/environments>.
+Enter it directly in GitHub, not chat, source, or a command-line argument.
+The workflow supplies it only to the formula-update step. It uses the normal
+read-only Actions token for release metadata and no credentials for public
+artifact downloads. Authenticated API redirects are refused.
+
+### Recovery
+
+A missing/expired token, unavailable artifact, or concurrent conflicting change
+fails the tap job **after** the release is already published. The release stays
+published; do not delete/recreate its assets. Correct the issue and use Actions'
+**Re-run failed jobs** (only the tap job should have failed), or rerun that
+individual job. Build output digests and artifacts belong to the same workflow
+run; retention is 14 days, so recover promptly. Do not rerun all jobs to repair
+a tap-only failure: publication deliberately refuses replacing existing assets.
+
+A downgrade refusal means a newer release already reached the tap. Leave it
+alone. Same-version formula changes require deliberate manual review rather
+than an automated overwrite. If the tap's branch protections forbid direct
+commits, explicitly configure an allowed automation identity rather than
+bypassing protections.
+
+This automation requires the workflow change on the selected release commit
+and the secret provisioned. It does not retroactively update earlier releases
+such as v0.20.3, nor has a live cross-repository write been verified by offline tests.

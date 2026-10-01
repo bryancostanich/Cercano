@@ -79,3 +79,22 @@ The Python tests build tiny inert tar fixtures and cover valid rendering, digest
 The Ruby tests exercise our formula methods against a small DSL stub. Neither suite proves Homebrew's actual lifecycle, sandbox behavior, detached-process survival, or installation of a real release archive; those need the clean-Mac rehearsal.
 
 Nothing in this directory publishes to the tap.
+
+## Automatic tap update after publication
+
+The release workflow's **Update Homebrew tap** job runs `update_tap.py` after
+successful publication, never for a rehearsal. It verifies the local formula
+against the release template and the published archive against the build digest,
+then uses optimistic locking to update only `Formula/cercano.rb`. Repeated
+identical updates succeed without a commit; older versions and same-version
+changes are refused.
+
+This remote updater is separate from `promote_to_tap.py`, which remains a
+local-only staging tool. See [release setup and recovery](../../docs/macos-release-build.md#automatic-tap-update-after-publication)
+for the scoped `HOMEBREW_TAP_TOKEN` setup and retry instructions.
+
+```bash
+python3 -m unittest discover -s release/homebrew -p 'test_update_tap.py'
+```
+
+Updater tests use simulated GitHub responses; no live tap writes are performed.

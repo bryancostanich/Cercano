@@ -1,0 +1,21 @@
+name: Windows Go updater spike
+on:
+  push:
+    branches: [spike/windows-go-updater]
+permissions:
+  contents: read
+jobs:
+  spike:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: spikes/windows-go-updater/go.mod
+          cache-dependency-path: spikes/windows-go-updater/go.sum
+      - name: Native sandboxed library and two-binary update tests
+        working-directory: spikes/windows-go-updater
+        run: go test -v -count=1 -timeout=15m ./...

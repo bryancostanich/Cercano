@@ -124,6 +124,9 @@ type StageResult struct {
 // Stage is idempotent and side-effect-free on the active manifest: if
 // anything here fails, the currently active version is untouched.
 func Stage(ctx context.Context, o Options) (*StageResult, *selfupdate.Release, error) {
+	if o.Validator == nil {
+		return nil, nil, errors.New("validator is required")
+	}
 	if o.InstallDir == "" || len(o.Binaries) == 0 {
 		return nil, nil, errors.New("InstallDir and Binaries are required")
 	}
@@ -165,6 +168,10 @@ func Stage(ctx context.Context, o Options) (*StageResult, *selfupdate.Release, e
 	data, err := fetchValidated(ctx, o.Source, o.Validator, rel)
 	if err != nil {
 		return nil, nil, err
+	}
+
+	if err := validateArchiveStructure(data, rel.AssetName, o.Binaries); err != nil {
+		return nil, nil, fmt.Errorf("archive validation failed: %w", err)
 	}
 
 	versionsDir := filepath.Join(o.InstallDir, versionsDirName)
@@ -268,8 +275,8 @@ func Abort(o Options, staged *StageResult) error {
 // RunResult for RunWithLock is RunResult above.
 
 // RunWithLock runs fn under the OS-level coordinator lock (a single
-// lock-owner across processes; lock file removed on exit). fn receives
-// nothing; it closes over its Options. Stale locks are taken over.
+// lock-owner across processes; persistent lock file). fn receives
+// nothing; it closes over its Options. The OS releases the lock when a holder exits.
 func RunWithLock(o Options, fn func() (*RunResult, error)) (*RunResult, error) {
 	lockPath := filepath.Join(o.InstallDir, lockName)
 	if err := os.MkdirAll(o.InstallDir, 0o755); err != nil {
@@ -280,7 +287,6 @@ func RunWithLock(o Options, fn func() (*RunResult, error)) (*RunResult, error) {
 		return nil, fmt.Errorf("acquire update lock %s: %w", lockPath, err)
 	}
 	defer func() {
-		_ = os.Remove(lockPath)
 		_ = lockfileClose(fd)
 	}()
 	return fn()
@@ -410,7 +416,8 @@ func fetchValidated(ctx context.Context, src selfupdate.Source, v selfupdate.Val
 	if err != nil {
 		return nil, fmt.Errorf("download archive: %w", err)
 	}
-	data, err := io.ReadAll(rc0)
+	defer rc0.Close()
+	data, err := readBounded(rc0, maxArchiveBytes)
 	if err != nil {
 		return nil, fmt.Errorf("download archive: %w", err)
 	}
@@ -422,7 +429,8 @@ func fetchValidated(ctx context.Context, src selfupdate.Source, v selfupdate.Val
 		if err != nil {
 			return nil, fmt.Errorf("download validation asset: %w", err)
 		}
-		sidedata, err := io.ReadAll(side)
+		defer side.Close()
+		sidedata, err := readBounded(side, 64*1024)
 		if err != nil {
 			return nil, fmt.Errorf("download validation asset: %w", err)
 		}

@@ -18,8 +18,9 @@ type handle = *flock.Flock
 // non-blocking attempt is made. The stale parameter is accepted for API
 // symmetry: gofrs/flock locks do not go stale while a live process holds
 // them, and a crashed holder's lock is released by the OS at process exit.
-// (The lock FILE lingers after a crash; RunWithLock removes it on exit, and
-// re-locking a leftover file is safe because the OS lock is gone.)
+// (The lock FILE lingers after a crash; the OS lock is released when the
+// process dies, but the file remains. Re-locking a leftover file is safe
+// because the OS lock is gone.)
 func lockfileCreate(path string, blocking bool, stale time.Duration) (handle, error) {
 	l := flock.New(path)
 	var (
@@ -42,7 +43,7 @@ func lockfileCreate(path string, blocking bool, stale time.Duration) (handle, er
 	return l, nil
 }
 
-// lockfileClose releases the lock (the caller separately removes the file).
+// lockfileClose releases the lock (the persistent lock file must not be removed).
 func lockfileClose(h handle) error {
 	if h == nil {
 		return nil

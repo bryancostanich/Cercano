@@ -314,7 +314,7 @@ func TestHealthFailureAfterActivationRestoresOldManifest(t *testing.T) {
 // LOCKING: two concurrent coordinators cannot overlap; the OS-level lock
 // serializes them. Proven with a REAL subprocess holding the lock:
 // the parent observes contention while the worker holds it, and free
-// acquisition after it exits. RunWithLock also removes the lock file on exit.
+// acquisition after it exits. RunWithLock preserves the lock pathname after releasing its OS lock.
 func TestCoordinatorLockPreventsConcurrentUpdaters(t *testing.T) {
 	ti := setupInstall(t, false)
 	lockPath := filepath.Join(ti.installDir, lockName)
@@ -358,7 +358,7 @@ func TestCoordinatorLockPreventsConcurrentUpdaters(t *testing.T) {
 	}
 
 	// After the worker exits, acquisition succeeds and the full
-	// RunWithLock path completes and removes the lock file.
+	// RunWithLock path completes and preserves the lock file.
 	res, err := UpdateToLatest(context.Background(), ti.options)
 	if err != nil {
 		t.Fatalf("UpdateToLatest under lock: %v", err)
@@ -366,9 +366,14 @@ func TestCoordinatorLockPreventsConcurrentUpdaters(t *testing.T) {
 	if !res.Activated {
 		t.Fatal("expected activation")
 	}
-	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
-		t.Fatalf("lock file must be removed after RunWithLock, stat err = %v", err)
+	if _, err := os.Stat(lockPath); err != nil {
+		t.Fatalf("stable lock file missing: %v", err)
 	}
+	fd, err := lockfileCreate(lockPath, false, time.Minute)
+	if err != nil {
+		t.Fatalf("lock not released: %v", err)
+	}
+	_ = lockfileClose(fd)
 }
 
 // TestLockWorkerProcess is the worker for the tests above: it holds the

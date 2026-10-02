@@ -389,10 +389,13 @@ func (p *Provider) StreamChat(ctx context.Context, req inference.Call) (inferenc
 	return r, nil
 }
 
-// reader is the streaming state machine. Until a real event has flowed it can
+// reader is the streaming state machine. Until content has flowed it can
 // recover from failures (one busy retry, then failover); once content has
 // been delivered a failure stays an error — silently re-serving would
-// duplicate already-delivered text. After a failover it never cascades.
+// duplicate already-delivered text. Framing events (message_start) carry no
+// content and are held, not delivered, until the stream proves live, so a
+// failure after response.created but before the first delta still recovers.
+// After a failover it never cascades.
 type reader struct {
 	ctx context.Context
 	p   *Provider
@@ -403,7 +406,16 @@ type reader struct {
 	queue   []llm.StreamEvent                // injected notices to deliver first
 	attempt func() (llm.StreamReader, error) // deferred action set by decide()
 
-	emitted       bool // a real event was delivered; recovery is off the table
+	// framing holds a message_start that has been read but not delivered.
+	// Framing carries no user-visible content, so it must not latch the
+	// stream as live: a busy/network failure arriving after response.created
+	// but before any content is still pre-content and stays retryable. The
+	// held event is flushed ahead of the first live event (or a clean end)
+	// and discarded with a dead attempt, so the caller sees message_start
+	// exactly once no matter how many attempts it took.
+	framing []llm.StreamEvent
+
+	emitted       bool // content was delivered; recovery is off the table
 	retried       bool // the one busy retry has been used
 	failedOver    bool // already on the backup; never cascade
 	authAttempts  map[string]bool
@@ -480,8 +492,24 @@ func (r *reader) Next() (llm.StreamEvent, bool, error) {
 			}
 			return llm.StreamEvent{}, false, r.failure(streamErr)
 		default:
-			// First real event (or a clean immediate end): the stream is live.
+			// message_start is framing, not content: hold it until the
+			// stream proves live so a pre-content failure can still be
+			// retried without re-serving framing the caller already has.
+			if ok && ev.Type == llm.EventMessageStart {
+				r.framing = append(r.framing, ev)
+				continue
+			}
+			// First live event (or a clean immediate end): the stream is
+			// committed — deliver any held framing ahead of it, in order.
 			r.emitted = true
+			if len(r.framing) > 0 {
+				if ok {
+					r.framing = append(r.framing, ev)
+				}
+				r.queue = append(r.queue, r.framing...)
+				r.framing = nil
+				continue
+			}
 			return ev, ok, err
 		}
 	}
@@ -505,6 +533,10 @@ func (r *reader) decide(stage string, err error) bool {
 		_ = r.inner.Close()
 		r.inner = nil
 	}
+	// The dead attempt's held message_start must never replay ahead of the
+	// recovery narration or the fresh attempt's own framing: the caller has
+	// not seen it, and a fresh stream delivers its own.
+	r.framing = nil
 	class := llm.ClassOf(err)
 	r.observeQuota(err)
 	p := r.p

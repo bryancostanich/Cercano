@@ -502,6 +502,74 @@ func TestStream_BusyNoticeArrivesBeforeTheWait(t *testing.T) {
 	}
 }
 
+// A Responses-style stream: the framing response.created (message_start) is
+// delivered, then the server reports overload IN BAND before any content —
+// "Our servers are currently overloaded. Please try again later." message_start
+// carries no user-visible content, so the busy retry contract still applies:
+// one narrated same-provider retry, then the fresh stream serves normally.
+// Regression: the reader latched `emitted` on the framing event, so the busy
+// error surfaced to the user instead of retrying.
+func TestStream_BusyAfterFramingEventRetries(t *testing.T) {
+	primary := &fakeProvider{name: "openai-responses"}
+	primary.streamOverride = func(context.Context, inference.Call) (inference.Stream, error) {
+		primary.calls++
+		if primary.calls == 1 {
+			// response.created flowed; the overload frame killed the stream
+			// before any text/tool/reasoning content.
+			return &fakeStream{
+				events: []llm.StreamEvent{{Type: llm.EventMessageStart}},
+				err: &llm.Error{Class: llm.ErrBusy, Provider: "openai-responses",
+					Err: errors.New("stream error: Our servers are currently overloaded. Please try again later.")},
+			}, nil
+		}
+		return &fakeStream{events: []llm.StreamEvent{
+			{Type: llm.EventMessageStart},
+			{Type: llm.EventTextDelta, TextDelta: "recovered"},
+			{Type: llm.EventMessageStop},
+		}}, nil
+	}
+	p, events, slept := build(primary, nil)
+
+	r, err := p.StreamChat(context.Background(), inference.Call{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	evs, err := collectStream(t, r)
+	if err != nil {
+		t.Fatalf("stream err = %v — busy before content must retry, not surface", err)
+	}
+	if primary.calls != 2 {
+		t.Errorf("primary calls = %d, want exactly one busy retry", primary.calls)
+	}
+	if len(*slept) != 1 {
+		t.Errorf("slept = %v, want exactly one retry wait", *slept)
+	}
+	if len(*events) != 1 || (*events)[0].Action != ActionRetry {
+		t.Errorf("events = %+v, want one narrated retry", *events)
+	}
+	// Framing must be delivered exactly once: the dead attempt's held
+	// message_start must not replay ahead of the fresh attempt's own.
+	if len(evs) < 3 || evs[0].Type != llm.EventNotice ||
+		evs[0].Notice != "openai-responses server busy — trying once more" {
+		t.Fatalf("events = %+v, want the retry notice first", evs)
+	}
+	if evs[1].Type != llm.EventMessageStart {
+		t.Errorf("evs[1] = %+v, want exactly one message_start from the retry", evs[1])
+	}
+	if evs[2].TextDelta != "recovered" {
+		t.Errorf("evs[2] = %+v, want the recovered content", evs[2])
+	}
+	starts := 0
+	for _, ev := range evs {
+		if ev.Type == llm.EventMessageStart {
+			starts++
+		}
+	}
+	if starts != 1 {
+		t.Errorf("message_start delivered %d times, want exactly once", starts)
+	}
+}
+
 func TestStream_MidStreamFailureNeverRecovers(t *testing.T) {
 	// Primary delivers one real event, THEN dies with a failover-worthy error.
 	primary := &midStreamFailure{}

@@ -142,3 +142,10 @@ CREATE TABLE IF NOT EXISTS dispatch_events (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_autonomy_runs_one_active
     ON autonomy_runs(conversation_id)
     WHERE state IN ('running', 'review_pending');
+
+-- Explicit main-chat selection; independent of global routing and child agents.
+CREATE TABLE IF NOT EXISTS conversation_chat_routes (
+    conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
+    profile TEXT NOT NULL,
+    model TEXT NOT NULL
+);

@@ -546,6 +546,10 @@ func (s *sqliteStore) CreateRolledOver(ctx context.Context, id, projectDir, mode
 		return fmt.Errorf("conversation %q already exists", id)
 	}
 
+	if _, err := tx.ExecContext(ctx, `INSERT INTO conversation_chat_routes (conversation_id, profile, model) SELECT ?, profile, model FROM conversation_chat_routes WHERE conversation_id=?`, id, precursorID); err != nil {
+		return fmt.Errorf("copy session chat route: %w", err)
+	}
+
 	// Seed the handoff as the first turn. Its timestamp anchors the new
 	// session's timeline; the frozen boundary starts at zero so no
 	// re-consolidation debt crosses the seam.

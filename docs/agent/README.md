@@ -337,3 +337,13 @@ Interactive clients explicitly opt into the authentication gate. `Reauthenticate
 Explicit fallback is authorized only for the owning user turn. It switches at an inference boundary, without replaying completed tools, and does not change default routing. If response events have already escaped, the agent does not silently replay them: login repairs credentials, then the interrupted response requires an explicit fresh request.
 
 See the [audit specification](../../efforts/cloud-auth-failover-audit/spec.md) and [verification map](../../efforts/cloud-auth-failover-audit/verification.md) for invariants, compatibility behavior, and tests.
+
+## Conversation-scoped main-chat model selection
+
+The native `session_model` capability and `SessionModel` RPC inspect, set, and
+clear a durable main-chat override. A runner receives an immutable per-turn
+profile/model snapshot, builds a single account provider without its backup
+chain, and disables cross-tier fallback. Workers proxy changes to the host's
+conversation store and receive the selected profile on the next turn. Global
+task routing and delegated/background work are unaffected. See
+[session model overrides](../features/cli/session-model.md).

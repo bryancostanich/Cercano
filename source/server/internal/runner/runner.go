@@ -5,6 +5,7 @@
 package runner
 
 import (
+	"cercano/source/server/internal/chatroute"
 	"context"
 
 	"cercano/source/server/internal/agent"
@@ -50,6 +51,8 @@ type ToolSvc interface {
 // assembles history itself (so it works across a process boundary; see the
 // plan's load-bearing decision).
 type Request struct {
+	// ChatRoute is a per-turn snapshot; changes made by tools apply next turn.
+	ChatRoute      *chatroute.Route
 	DebugMode      bool
 	AuthRecovery   llm.AuthRequester
 	ConversationID string

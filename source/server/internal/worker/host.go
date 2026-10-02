@@ -21,6 +21,8 @@ package worker
 // Cancel) — protected by sendMu.
 
 import (
+	"cercano/source/server/internal/chatroute"
+	"cercano/source/server/internal/routingwire"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -61,6 +63,7 @@ type dialFunc func(ctx context.Context) (*grpc.ClientConn, error)
 type workerRunner struct {
 	accountingMu   sync.RWMutex
 	accounting     *accountingConnections
+	sessionModel   chatroute.Control
 	restartRuntime runtimeRestartFunc
 	persist        runner.TurnHistory
 	cfg            cfgsvc.Service
@@ -534,7 +537,7 @@ func (w *workerRunner) RunTurn(
 	cfg := w.cfg.Get()
 	needsAuthProtocol := req.AuthRecovery != nil
 	for _, profile := range cfg.CloudProfiles {
-		if (profile.Name == cfg.ActiveCloudProfile || profile.Name == cfg.BackupCloudProfile) && cloudfactory.IsSubscription(profile) {
+		if (profile.Name == cfg.ActiveCloudProfile || profile.Name == cfg.BackupCloudProfile || (req.ChatRoute != nil && profile.Name == req.ChatRoute.Profile)) && cloudfactory.IsSubscription(profile) {
 			needsAuthProtocol = true
 		}
 	}
@@ -542,6 +545,25 @@ func (w *workerRunner) RunTurn(
 	// Resolve the active runtime's effective open tier models host-side (the
 	// worker cannot see the catalog); the snapshot carries them as overrides.
 	snap := SnapshotConfig(cfg, "", w.resolveOpenTiers()) // no credential — worker fetches on demand
+	// Normal snapshots contain only profiles referenced by global destinations.
+	// A session pin can select any saved account, without changing that graph.
+	if req.ChatRoute != nil {
+		profile, err := chatroute.ProfileFor(cfg, *req.ChatRoute)
+		if err != nil {
+			return runner.Result{}, err
+		}
+		found := false
+		for _, p := range snap.Routing.Profiles {
+			if p.GetName() == profile.Name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			snap.Routing.Profiles = append(snap.Routing.Profiles, routingwire.Profile(profile, cfg.ModelProfiles))
+		}
+	}
+
 	// Attach host-resolved model evidence. Discovery stays on the host: the
 	// worker has no catalog, and a per-turn snapshot keeps its view of the
 	// selected (and failover) models identical to the host's.
@@ -576,6 +598,10 @@ func (w *workerRunner) RunTurn(
 		PermissionMode: permMode,
 		McpTools:       w.advertiseMCPTools(),
 		McpAllow:       w.mcpAllowPatterns(),
+	}
+
+	if req.ChatRoute != nil {
+		startTurn.ChatRoute = &proto.SessionChatRoute{Profile: req.ChatRoute.Profile, Model: req.ChatRoute.Model}
 	}
 
 	// ── 5. Acquire a warm worker (pool) or use injected dial ──────────────
@@ -891,6 +917,27 @@ func (w *workerRunner) RunTurn(
 				}
 			}()
 
+		case *proto.WorkerToHost_SessionModelRequest:
+			request := m.SessionModelRequest
+			go func() {
+				response := &proto.SessionModelResponse{Id: request.GetId()}
+				if request.GetConversationId() != req.ConversationID {
+					response.Error = "session model control is scoped to the active conversation"
+				} else if w.sessionModel == nil {
+					response.Error = "session model control unavailable"
+				} else {
+					result, err := w.sessionModel(ctx, req.ConversationID, chatroute.Request{Action: request.GetAction(), Profile: request.GetProfile(), Model: request.GetModel()})
+					if err != nil {
+						response.Error = err.Error()
+					} else {
+						response.ResultJson, err = json.Marshal(result)
+						if err != nil {
+							response.Error = err.Error()
+						}
+					}
+				}
+				_ = safeSend(&proto.HostToWorker{Msg: &proto.HostToWorker_SessionModelResponse{SessionModelResponse: response}})
+			}()
 		case *proto.WorkerToHost_ProfileRequest:
 			// Session-control capabilities run in the worker but own no session
 			// state. Apply profile changes on the host profile broker and respond so

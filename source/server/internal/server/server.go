@@ -1,6 +1,7 @@
 package server
 
 import (
+	"cercano/source/server/internal/chatroute"
 	"cercano/source/server/internal/reasoningexperiment"
 	"cercano/source/server/internal/routingwire"
 	"cercano/source/server/internal/runtimecontrol"
@@ -288,6 +289,7 @@ func (s *Server) InstallCapabilities() {
 		// restart_agent bounces the singleton agent via a self-SIGTERM once the
 		// user approves at the confirm gate. Same drain+child-stop path as the
 		// ShutdownAgent RPC; the CLI reconnect loop auto-launches a fresh agent.
+		SessionModel:   s.sessionModel,
 		RestartRuntime: s.restartRuntimeTool,
 		ReasoningDiagnostic: func(ctx context.Context, spec reasoningexperiment.Spec) (reasoningexperiment.Report, error) {
 			svc, ok := s.providerSvc.(reasoningexperiment.Service)
@@ -1260,6 +1262,10 @@ func (s *Server) SelectExecutionMode() {
 		if store, ok := s.persistSvc.Store().(conversation.DispatchEventStore); ok {
 			recorder.SetDispatchEventSink(worker.HostDispatchEventSink(store))
 		}
+	}
+
+	if control, ok := s.workerRunner.(worker.SessionModelSetter); ok {
+		control.SetSessionModel(s.sessionModel)
 	}
 
 	s.configureWorkerAccounting()
@@ -3387,6 +3393,14 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 			}
 			if err := s.agent.PersistentStore().EnsureConversation(ctx, convID, runReq.WorkDir, model); err != nil {
 				fmt.Fprintf(os.Stderr, "[server] worker EnsureConversation(%s) failed: %v\n", convID, err)
+			}
+		}
+		if store, ok := s.persistSvc.Store().(chatroute.Store); ok {
+			var err error
+			runReq.ChatRoute, err = store.ChatRoute(ctx, convID)
+			if err != nil {
+				doneCh <- turnResult{err: fmt.Errorf("load session model: %w", err)}
+				return
 			}
 		}
 		isWorker := s.workerRunner != nil && tr == s.workerRunner

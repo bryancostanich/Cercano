@@ -445,6 +445,7 @@ func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
 	slash.RegisterLocus(reg, ag)
 	slash.RegisterContextView(reg)
 	slash.RegisterDev(reg)
+	slash.RegisterModel(reg)
 	slash.RegisterRestartAgent(reg)
 	slash.RegisterSettings(reg)
 	slash.RegisterSetup(reg)
@@ -2097,6 +2098,19 @@ func (m Model) Update(msg tea.Msg) (nextModel tea.Model, nextCmd tea.Cmd) {
 		}
 		return m, msg.next
 
+	case sessionModelMsg:
+		if msg.convID != m.convID {
+			return m, nil
+		}
+		if msg.err != nil {
+			if !msg.quiet {
+				m.mainChat().AppendNotice(&Entry{Role: RoleSystem, Content: "Session model: " + msg.err.Error()})
+			}
+		} else if !msg.quiet || msg.status.Override != nil {
+			m.mainChat().AppendNotice(&Entry{Role: RoleSystem, Content: sessionModelText(msg.status, !msg.quiet)})
+		}
+		m.refreshViewport()
+		return m, nil
 	case sessionProfileFetchedMsg:
 		// Startup/resume seed for the footer chip. Apply only if it's still the
 		// active conversation (the user may have switched during the fetch).
@@ -3184,6 +3198,8 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 		tc := &pendingToolCall{Name: res.ToolName, Args: res.ToolArgs, Permission: perm}
 		m.enqueueConfirmation(toolConfirm(tc))
 		m.refreshViewport()
+	case slash.ResultSessionModel:
+		return m, sessionModelCmd(m.agent, m.convID, m.effectiveWorkDir(), res.ModelAction, res.ModelProfile, res.ModelID, false)
 	case slash.ResultDevMode:
 		kickoff := m.applyDevMode(res.WorkDir)
 		m.refreshViewport()
@@ -3958,7 +3974,7 @@ func (m Model) applyProgressiveResumeEvent(msg resumeViewportStreamMsg) (Model, 
 	case agentclient.ResumeViewportEventHydrationComplete:
 		m.resumeHydrating = false
 		m.errMsg = ""
-		cmds = append(cmds, fetchContextUsage(m.agent, m.convID), fetchSessionProfileCmd(m.agent, m.convID), fetchRecap(m.agent, m.convID))
+		cmds = append(cmds, fetchContextUsage(m.agent, m.convID), fetchSessionProfileCmd(m.agent, m.convID), sessionModelCmd(m.agent, m.convID, m.effectiveWorkDir(), "status", "", "", true), fetchRecap(m.agent, m.convID))
 	}
 	if !m.bannerTickActive {
 		m.bannerTickActive = true
@@ -4033,7 +4049,7 @@ func (m Model) applyResume(conversationID string) (Model, tea.Cmd) {
 		fetchContextUsage(m.agent, m.convID),
 		// Seed the footer mode chip: a resumed conversation may already be in
 		// planning mode, and no broadcast will fire until the next flip.
-		fetchSessionProfileCmd(m.agent, m.convID),
+		fetchSessionProfileCmd(m.agent, m.convID), sessionModelCmd(m.agent, m.convID, m.effectiveWorkDir(), "status", "", "", true),
 	}
 	if !m.bannerTickActive {
 		// The tick chain died before this resume (e.g. launching straight

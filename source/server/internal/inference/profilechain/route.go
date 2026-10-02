@@ -76,3 +76,9 @@ func (s *routeStream) Next() (llm.StreamEvent, bool, error) {
 func (p *routeProvider) RuntimeContext(ctx context.Context, model string, prepare bool) (llm.RuntimeContext, error) {
 	return llm.ResolveRuntimeContext(ctx, p.Provider, model, prepare)
 }
+
+// BindAccount attaches the saved account identity and per-model evidence to a
+// single provider. Unlike Build, it installs no backup chain or model remapping.
+func BindAccount(provider inference.Provider, profile, destination string) inference.Provider {
+	return &routeProvider{Provider: provider, profile: profile, destination: destination}
+}

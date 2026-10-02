@@ -354,7 +354,7 @@ func TestWorkerCompactionSecondaryDefault(t *testing.T) {
 	secondary := &scriptedSummaryProvider{name: "secondary"}
 	open := &scriptedSummaryProvider{name: "local"}
 	resolver := &workerResolver{cfgSvc: cfgsvc.New("", cfg, nil), cloudProv: primary, secondaryProv: secondary, openProv: open}
-	deps := workerLoopCompactDeps(cfg, primary, open, resolver.Candidates)
+	deps := workerLoopCompactDeps(cfg, primary, open, resolver.Candidates, nil)
 	summarize := loopcompact.BuildSummarizer(deps)
 	if _, err := summarize(t.Context(), bigDispatchHistory(2, 2)); err != nil {
 		t.Fatal(err)
@@ -365,7 +365,7 @@ func TestWorkerCompactionSecondaryDefault(t *testing.T) {
 	if primary.chats != 0 || open.chats != 0 {
 		t.Fatal("compaction used an unselected route")
 	}
-	svc := buildWorkerToolSvcWithDiagnostic(nil, nil, projectctx.NewLoader(), primary, open, cfg, nil, nil, nil, nil, nil, nil, resolver.Candidates).(*toolssvc.Service)
+	svc := buildWorkerToolSvcWithDiagnostic(nil, nil, projectctx.NewLoader(), primary, open, cfg, nil, nil, nil, nil, nil, nil, resolver.Candidates, nil).(*toolssvc.Service)
 	hist := bigDispatchHistory(40, 30)
 	reduced, _, err := svc.LoopCompactorFactory()().CompactLoopHistory(t.Context(), hist)
 	if err != nil {

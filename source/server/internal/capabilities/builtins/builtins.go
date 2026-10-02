@@ -74,6 +74,7 @@ func Register(reg *capabilities.Registry) {
 	reg.MustRegister(GitResetHard())
 	reg.MustRegister(GitRecover())
 	reg.MustRegister(GitLand())
+	reg.MustRegister(SessionModel())
 	reg.MustRegister(RestartAgent())
 	reg.MustRegister(RestartRuntime())
 	reg.MustRegister(ReasoningDiagnostic())

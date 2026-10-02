@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"cercano/source/server/internal/chatroute"
 	"context"
 	"encoding/json"
 	"errors"
@@ -273,7 +274,22 @@ func (c *Core) RunTurn(
 	}
 
 	// 1. Resolve the provider per the active Locus Mode.
-	provider, isCloud, fellBack, err := c.d.Providers.Main()
+	var provider inference.Provider
+	var isCloud, fellBack bool
+	var err error
+	if req.ChatRoute != nil {
+		resolver, ok := c.d.Providers.(chatroute.Resolver)
+		if !ok {
+			return Result{}, fmt.Errorf("session chat overrides unavailable")
+		}
+		provider, err = resolver.ResolveChatRoute(ctx, *req.ChatRoute)
+		isCloud = true
+		if err != nil {
+			return Result{}, err
+		}
+	} else {
+		provider, isCloud, fellBack, err = c.d.Providers.Main()
+	}
 	if err != nil {
 		c.logRoute("turn.select_error", routinglog.Event{
 			"conversation_id": req.ConversationID,
@@ -314,6 +330,10 @@ func (c *Core) RunTurn(
 		})
 	}
 
+	if req.ChatRoute != nil {
+		sink.Emit(Event{Kind: EventProgress, Text: fmt.Sprintf("Session chat override: %s / %s (no fallback)", req.ChatRoute.Profile, req.ChatRoute.Model)})
+	}
+
 	// Announce the route so the client shows the correct engine badge.
 	sink.Emit(Event{
 		Kind:    EventRouteSelected,
@@ -347,7 +367,7 @@ func (c *Core) RunTurn(
 	if effective, ok := inference.TaskDestination(provider); ok {
 		destination = effective
 	}
-	if destination != config.DestinationPrimary {
+	if req.ChatRoute != nil || destination != config.DestinationPrimary {
 		fbProv = nil
 	}
 	fallbackModel := c.d.Providers.MainModel(fbCloud)
@@ -374,7 +394,7 @@ func (c *Core) RunTurn(
 		// store (c.d.Agent == nil); the host ensures the row up front, so skip.
 		if c.d.Agent != nil && c.d.Agent.PersistentStore() != nil {
 			if err := c.d.Agent.PersistentStore().EnsureConversation(
-				ctx, req.ConversationID, req.WorkDir, c.d.Providers.MainModel(isCloud),
+				ctx, req.ConversationID, req.WorkDir, selectedModel,
 			); err != nil {
 				fmt.Fprintf(os.Stderr, "[tool-loop] EnsureConversation(%s) failed: %v\n", req.ConversationID, err)
 				persistEnabled = false
@@ -479,7 +499,7 @@ func (c *Core) RunTurn(
 		"model":           selectedModel,
 		"is_cloud":        isCloud,
 	})
-	if req.AuthRecovery != nil && isCloud && !fellBack && res.CrossAllowed && fbProv != nil {
+	if req.AuthRecovery != nil && isCloud && req.ChatRoute == nil && !fellBack && res.CrossAllowed && fbProv != nil {
 		window, known := c.knownContextWindowFor(fbCloud, fallbackModel)
 		provider = &authenticationFallback{primary: provider, fallback: fbProv, model: fallbackModel, window: window, windowKnown: known, onSelect: func() {
 			fellBack = true
@@ -544,7 +564,7 @@ func (c *Core) RunTurn(
 	var fallbackNotice string
 	if loopErr != nil && !replayUnsafe.Load() && ctx.Err() == nil && !errors.Is(loopErr, context.Canceled) {
 		failedProvider := failedProviderName(provider, loopErr)
-		if !fellBack && res.CrossAllowed && fbProv != nil && fbProv.Name() == "llama_server" {
+		if req.ChatRoute == nil && !fellBack && res.CrossAllowed && fbProv != nil && fbProv.Name() == "llama_server" {
 			if _, err := llm.ResolveRuntimeContext(ctx, fbProv, fallbackModel, true); err == nil {
 				fallbackHistory, fallbackAccounting = c.assembleAttemptHistory(ctx, req, "cross_tier_fallback", fbProv, fallbackModel, assignment.Quality.CapabilityTier(), false, true)
 				fallbackPrepared = true
@@ -573,7 +593,7 @@ func (c *Core) RunTurn(
 			"trigger_error_class":     errClassString(loopErr),
 			"trigger_error":           errorString(loopErr),
 		})
-		if !fellBack && res.CrossAllowed && fbProv != nil && fallbackPrepared && llm.FailoverableToWindow(llm.ClassOf(loopErr), loopErr, fromWindow, fallbackWindow, fallbackWindowKnown) {
+		if req.ChatRoute == nil && !fellBack && res.CrossAllowed && fbProv != nil && fallbackPrepared && llm.FailoverableToWindow(llm.ClassOf(loopErr), loopErr, fromWindow, fallbackWindow, fallbackWindowKnown) {
 			// The local fallback generally has a much smaller context window than
 			// the cloud provider. Keep its tool catalog compact for every
 			// cross-tier fallback, including transient cloud failures whose error

@@ -297,3 +297,12 @@ older agent returns a query error rather than fabricated zero totals.
 Full inference-path coverage certification and final cutover acceptance remain
 separate work in the token-accounting plan. The page discloses these limitations
 and SDK counter-presence limitations; it is not a billing-grade report.
+
+## Session model overrides
+
+Main chat can now use a conversation-scoped saved account/model selection via
+natural language (`session_model`) or `/model`. The selection applies on the
+next message, persists across resume, and has no silent fallback. Delegation,
+background routes, and global defaults stay unchanged. `/model clear` works even
+when the selected chat model is unavailable. See [session model overrides](session-model.md)
+for commands, boundaries, and implementation details.

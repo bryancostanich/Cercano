@@ -9,6 +9,7 @@
 package providers
 
 import (
+	"cercano/source/server/internal/chatroute"
 	"cercano/source/server/internal/modelmetadata"
 	"cercano/source/server/internal/reasoningexperiment"
 	"context"
@@ -564,4 +565,9 @@ func (p *service) chainEvents(c cfg.Config, d cfg.Destination) func(resilience.E
 // RunReasoningDiagnostic deliberately bypasses destination retry/fallback chains.
 func (p *service) RunReasoningDiagnostic(ctx context.Context, spec reasoningexperiment.Spec) (reasoningexperiment.Report, error) {
 	return reasoningexperiment.Run(ctx, p.cfgSvc.Get(), spec, p.buildProfile)
+}
+
+// ResolveChatRoute bypasses destination backup chains for an explicit session pin.
+func (p *service) ResolveChatRoute(ctx context.Context, route chatroute.Route) (inference.Provider, error) {
+	return chatroute.Build(p.cfgSvc.Get(), route, p.buildProfile)
 }

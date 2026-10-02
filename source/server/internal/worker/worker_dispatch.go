@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"cercano/source/server/internal/chatroute"
 	"cercano/source/server/internal/reasoningexperiment"
 	"context"
 	"fmt"
@@ -63,14 +64,14 @@ func buildWorkerToolSvc(
 	autonomy conversation.AutonomyLedger,
 	restart ...runtimeRestartFunc,
 ) runner.ToolSvc {
-	return buildWorkerToolSvcWithDiagnostic(permBroker, engine, ctxLoader, cloud, open, cfg, subPersist, enterProfile, vision, failures, nil, autonomy, nil, restart...)
+	return buildWorkerToolSvcWithDiagnostic(permBroker, engine, ctxLoader, cloud, open, cfg, subPersist, enterProfile, vision, failures, nil, autonomy, nil, nil, restart...)
 }
 
 func buildWorkerToolSvcWithDiagnostic(
 	permBroker permissions.Broker, engine *dispatch.Engine, ctxLoader *projectctx.Loader,
 	cloud, open inference.Provider, cfg pkgcfg.Config, subPersist *streamSubagentPersist,
 	enterProfile func(context.Context, string) error, vision capabilities.VisionService,
-	failures *failurelog.Writer, diagnostic reasoningexperiment.Service, autonomy conversation.AutonomyLedger, candidates func() inference.Tiers, restart ...runtimeRestartFunc,
+	failures *failurelog.Writer, diagnostic reasoningexperiment.Service, autonomy conversation.AutonomyLedger, candidates func() inference.Tiers, sessionModel chatroute.Control, restart ...runtimeRestartFunc,
 ) runner.ToolSvc {
 	var runDiagnostic func(context.Context, reasoningexperiment.Spec) (reasoningexperiment.Report, error)
 	if diagnostic != nil {
@@ -103,6 +104,7 @@ func buildWorkerToolSvcWithDiagnostic(
 		svc.SetEnsureSubagent(subPersist.ensure) // worker creates sub-agent conversation rows on the host
 	}
 	toolstack.InstallCapabilities(svc, toolstack.CapDeps{
+		SessionModel:        sessionModel,
 		RestartRuntime:      restartRuntime,
 		ReasoningDiagnostic: runDiagnostic,
 		Cloud:               cloud,

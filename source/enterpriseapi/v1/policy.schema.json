@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cercano.dev/schemas/enterprise/v1/policy",
+  "title": "Cercano enterprise effective policy payload (draft)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "scope", "revision", "issued_at", "expires_at", "minimum_client_version", "allowed_routes", "task_defaults", "skills"],
+  "properties": {
+    "schema_version": {"const": "1"},
+    "scope": {"$ref": "#/$defs/scope"},
+    "revision": {"type": "integer", "minimum": 1},
+    "issued_at": {"type": "string", "format": "date-time"},
+    "expires_at": {"type": "string", "format": "date-time"},
+    "minimum_client_version": {"type": "string", "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"},
+    "allowed_routes": {"type": "array", "items": {"$ref": "#/$defs/route"}},
+    "task_defaults": {"type": "array", "items": {"$ref": "#/$defs/task_default"}},
+    "skills": {"type": "array", "items": {"$ref": "#/$defs/skill_assignment"}}
+  },
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,127}$"},
+    "scope": {
+      "type": "object", "additionalProperties": false,
+      "required": ["organization_id", "user_id", "host_id"],
+      "properties": {"organization_id": {"$ref": "#/$defs/id"}, "user_id": {"$ref": "#/$defs/id"}, "host_id": {"$ref": "#/$defs/id"}}
+    },
+    "route": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "provider", "endpoint", "model", "placement"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"}, "provider": {"$ref": "#/$defs/id"},
+        "endpoint": {"type": "string", "format": "uri"}, "model": {"type": "string", "minLength": 1, "maxLength": 256},
+        "placement": {"enum": ["local", "external"]}
+      }
+    },
+    "task_default": {
+      "type": "object", "additionalProperties": false,
+      "required": ["task", "destination", "quality", "route_id", "fallback_route_ids", "allow_developer_override"],
+      "properties": {
+        "task": {"enum": ["chat", "compaction", "dispatch", "reconnaissance", "mechanical_development", "investigation", "implementation", "review", "research", "git_land", "watchdog"]},
+        "destination": {"enum": ["primary", "secondary", "local"]}, "quality": {"enum": ["economy", "standard", "premium"]},
+        "route_id": {"$ref": "#/$defs/id"}, "fallback_route_ids": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/id"}},
+        "allow_developer_override": {"type": "boolean"}
+      }
+    },
+    "skill_assignment": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "version", "sha256", "size_bytes"],
+      "properties": {
+        "id": {"allOf": [{"$ref": "#/$defs/id"}, {"pattern": "/"}]}, "version": {"$ref": "#/$defs/id"},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "size_bytes": {"type": "integer", "minimum": 1, "maximum": 262144}
+      }
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "schema_version": "1",
+  "scope": {"organization_id": "org-a", "user_id": "member-a", "host_id": "host-a"},
+  "revision": 7,
+  "issued_at": "2026-10-03T12:00:00Z",
+  "expires_at": "2026-10-03T12:15:00Z",
+  "minimum_client_version": "0.20.3",
+  "allowed_routes": [{"id": "primary", "provider": "example", "endpoint": "https://models.example.com/v1", "model": "approved-model", "placement": "external"}],
+  "task_defaults": [{"task": "chat", "destination": "primary", "quality": "standard", "route_id": "primary", "fallback_route_ids": [], "allow_developer_override": false}],
+  "skills": [{"id": "org-a/review", "version": "1", "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "size_bytes": 32}]
+}

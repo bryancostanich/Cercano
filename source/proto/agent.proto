@@ -2416,4 +2416,3 @@ message EnterpriseStatus {
   string error = 9;
   bool changing = 10;
 }
-

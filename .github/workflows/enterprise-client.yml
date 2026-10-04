@@ -1,0 +1,39 @@
+name: Enterprise client
+
+on:
+  pull_request:
+    paths:
+      - 'source/server/internal/enterprise/**'
+      - 'source/server/cmd/cercano/**'
+      - 'source/server/go.mod'
+      - 'source/server/go.sum'
+      - '.github/workflows/enterprise-client.yml'
+  push:
+    paths:
+      - 'source/server/internal/enterprise/**'
+      - 'source/server/cmd/cercano/**'
+      - 'source/server/go.mod'
+      - 'source/server/go.sum'
+      - '.github/workflows/enterprise-client.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  connection:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: source/server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: source/server/go.mod
+          cache-dependency-path: source/server/go.sum
+      - run: go test -race ./internal/enterprise ./cmd/cercano
+      - run: go vet ./internal/enterprise ./cmd/cercano
+      - run: go build ./cmd/cercano

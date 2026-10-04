@@ -10,7 +10,7 @@ The enterprise service has Google sign-in, manual membership and team APIs,
 customer isolation in PostgreSQL, versioned policies and text-only skills,
 signed policy leases, publication and rollback, audit events, and native client
 login with PKCE and rotating credentials. Each developer has at most one team
-per organization. Enterprise service PRs 1 through 10 are merged, including the
+per organization. Enterprise service PRs 1 through 11 are merged, including the
 five-area administration console, reproducible workflow, recovery checks, and
 shared organization request limits.
 
@@ -69,6 +69,12 @@ retention, rollback and privacy. Local operational tests restore a real PostgreS
 backup into a fresh database, recheck isolation, invalidate restored credentials,
 and load overlapping signing-key rotation stages. The two-company workflow has
 also passed with a real 15-minute authorization expiry and subsequent renewal.
+
+Client synchronization failures now send a bounded code and version through a
+separate best-effort endpoint. They never acknowledge an incomplete bundle. The
+console retains the previous applied revision and skills, shows recovery guidance,
+and clears the error after successful application. The two-company workflow also
+interrupts skill downloads and checks failure reporting and recovery.
 
 ## Remaining work, in order
 

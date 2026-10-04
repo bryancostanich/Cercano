@@ -230,6 +230,7 @@ func (m *Manager) Sync(ctx context.Context) error {
 	if !m.lastClock.IsZero() && now.Before(m.lastClock) {
 		m.blocked = true
 		m.lastError = "clock_changed"
+		m.reportSyncFailure(ctx)
 		return ErrInvalidBundle
 	}
 	m.lastClock = now
@@ -243,11 +244,30 @@ func (m *Manager) Sync(ctx context.Context) error {
 		if errors.Is(err, ErrDenied) {
 			m.lastError = "authorization_denied"
 		}
+		if errors.Is(err, ErrCredentialStore) {
+			m.lastError = "credential_store_unavailable"
+		}
+		m.reportSyncFailure(ctx)
 		return err
 	}
 	m.lastError = ""
 	return nil
 }
+
+// Reporting is optional and best effort. It cannot change enforcement or turn
+// a failed synchronization into an acknowledgement. Bound the additional wait,
+// respect cancellation, and send no raw error text or local information.
+func (m *Manager) reportSyncFailure(ctx context.Context) {
+	if ctx.Err() != nil || m.credentials == nil || m.credentials.HostID == "" || !v1.ValidSyncErrorCode(m.lastError) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	c := m.credentials
+	_ = m.request(ctx, c.Server, "PUT", "/v1/organizations/"+c.OrganizationID+"/hosts/"+c.HostID+"/sync-error", c.Access,
+		v1.SyncFailure{Code: m.lastError, ClientVersion: m.options.ClientVersion}, nil, 0)
+}
+
 func (m *Manager) sync(ctx context.Context) error {
 	if e := m.refresh(ctx); e != nil {
 		return e

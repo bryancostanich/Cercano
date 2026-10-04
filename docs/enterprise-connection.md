@@ -64,6 +64,13 @@ Use `cercano enterprise status --json` for these machine-readable host fields:
 - `revision` and `valid_until` identify the accepted policy and its deadline.
 - `changing` means a connection change, such as browser sign-in, is in progress.
 
+When synchronization fails, the host sends a best-effort report containing only
+a fixed error code and client version. It never sends raw error text, local paths,
+prompts, source code, or provider credentials. Reporting has a two-second deadline
+and cannot change whether the cached policy is usable. Older servers may ignore
+it; offline and revoked clients may be unable to report. The administrator sees
+the last successful acknowledgement until a complete bundle is applied again.
+
 The host refreshes about once a minute, with bounded backoff after failures. To
 request synchronization immediately:
 

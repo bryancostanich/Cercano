@@ -28,6 +28,8 @@ const testMember = "10000000-0000-0000-0000-000000000001"
 const testHost = "20000000-0000-0000-0000-000000000001"
 
 type fixture struct {
+	failures                 []v1.SyncFailure
+	reportStatus             int
 	membership               *v1.Membership
 	routes                   []v1.Route
 	skills                   []v1.SkillContentResponse
@@ -134,6 +136,21 @@ func newFixture(t *testing.T, loggedIn bool) *fixture {
 				skill.Content = "Tampered"
 			}
 			_ = json.NewEncoder(w).Encode(skill)
+		case strings.HasSuffix(r.URL.Path, "/sync-error"):
+			var failure v1.SyncFailure
+			if r.Header.Get("Authorization") != "Bearer "+f.access {
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
+			if err := json.NewDecoder(r.Body).Decode(&failure); err != nil {
+				t.Error(err)
+			}
+			f.failures = append(f.failures, failure)
+			if f.reportStatus != 0 {
+				w.WriteHeader(f.reportStatus)
+			} else {
+				w.WriteHeader(204)
+			}
 		case strings.HasSuffix(r.URL.Path, "/applied"):
 			f.acks++
 			var ack v1.SyncAcknowledgement
@@ -428,6 +445,47 @@ func TestMembershipMetadataMustMatchVerifiedScope(t *testing.T) {
 		}
 		if f.manager.Status().MembershipKnown || f.manager.Status().Usable {
 			t.Fatal("invalid metadata applied")
+		}
+	}
+}
+
+func TestSyncFailureReportingDoesNotChangeEnforcement(t *testing.T) {
+	for _, reportStatus := range []int{204, 404, 403, 503} {
+		f := newFixture(t, true)
+		ctx := context.Background()
+		if err := f.manager.Sync(ctx); err != nil {
+			t.Fatal(err)
+		}
+		f.mu.Lock()
+		f.mode = "unavailable"
+		f.reportStatus = reportStatus
+		f.mu.Unlock()
+		if err := f.manager.Sync(ctx); !errors.Is(err, ErrUnavailable) {
+			t.Fatal(err)
+		}
+		if !f.manager.Status().Usable {
+			t.Fatal("optional report blocked cached lease")
+		}
+		f.mu.Lock()
+		f.mode = "bad_signature"
+		f.mu.Unlock()
+		if err := f.manager.Sync(ctx); !errors.Is(err, ErrInvalidBundle) {
+			t.Fatal(err)
+		}
+		if f.manager.Status().Usable {
+			t.Fatal("report allowed failed verification")
+		}
+		f.mu.Lock()
+		if len(f.failures) != 2 || f.failures[0].Code != "unavailable" || f.failures[1].Code != "verification_failed" || f.failures[1].ClientVersion != "1.0.0" || f.acks != 1 {
+			t.Fatalf("bad failure reports: %+v", f.failures)
+		}
+		f.mode = ""
+		f.mu.Unlock()
+		if err := f.manager.Sync(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if state := f.manager.Status(); !state.Usable || state.Error != "" {
+			t.Fatal(state)
 		}
 	}
 }

@@ -398,9 +398,27 @@ func TestEnterpriseServiceWorkflow(t *testing.T) {
 		}
 		admin.api("PUT", "/policy/draft", map[string]any{"expected_version": 1, "configuration": policy}, 200)
 		admin.api("POST", "/policy/publish", map[string]any{"expected_version": 2}, 201)
+		control(map[string]any{"skills_unavailable": true})
+		if _, e = enterpriseRPC.Synchronize(ctx, &proto.EnterpriseControlRequest{}); e == nil {
+			t.Fatal("incomplete skill bundle was accepted")
+		}
+		device := admin.api("GET", "/hosts", nil, 200)["hosts"].([]any)[0].(map[string]any)
+		if device["sync_error_code"] != "unavailable" || device["applied_revision"] != float64(1) || device["sync_error_at"] == nil {
+			t.Fatalf("admin cannot distinguish failed sync from application: %+v", device)
+		}
+		appliedSkills := device["applied_skills"].([]any)
+		if len(appliedSkills) != 1 || appliedSkills[0].(map[string]any)["version"] != "1" {
+			t.Fatal("failed sync replaced previously applied skills")
+		}
+		control(map[string]any{"skills_unavailable": false})
 		status, e = enterpriseRPC.Synchronize(ctx, &proto.EnterpriseControlRequest{})
 		if e != nil || status.GetRevision() != 2 {
 			t.Fatal("new publication not applied", e)
+		}
+		device = admin.api("GET", "/hosts", nil, 200)["hosts"].([]any)[0].(map[string]any)
+		appliedSkills = device["applied_skills"].([]any)
+		if device["sync_error_code"] != nil || device["sync_error_at"] != nil || device["applied_revision"] != float64(2) || len(appliedSkills) != 1 || appliedSkills[0].(map[string]any)["version"] != "2" {
+			t.Fatal("successful sync did not clear error and acknowledge new skills")
 		}
 		control(map[string]any{"skill_id": "enterprise/" + company.ID + "/review", "skill_content": newContent})
 		output, e = infer("")

@@ -21,6 +21,7 @@ and current membership. They never establish authority by themselves.
 | GET /v1/organizations/{org}/hosts/{host}/policy | optional prior revision | EffectivePolicyResponse |
 | GET /v1/organizations/{org}/skills/{skill}/versions/{version} | assigned skill ID | SkillContentResponse |
 | PUT /v1/organizations/{org}/hosts/{host}/applied | SyncAcknowledgement | empty (204) |
+| PUT /v1/organizations/{org}/hosts/{host}/sync-error | SyncFailure | empty (204) |
 
 These routes are implemented by the separate enterprise service. The reserved
 `MembershipsResponse` type does not imply a discovery endpoint: V1 developers
@@ -91,3 +92,17 @@ These details are authenticated by the HTTPS connection but are outside the
 signed policy payload. Clients check the organization and user against the
 verified policy scope and use these details only for display. Model and skill
 permissions continue to come exclusively from the signed policy.
+
+### Synchronization failures
+
+A host can report one of the fixed `ValidSyncErrorCode` codes with its client
+version. The service records receipt time and preserves the last successful
+acknowledgement. Error reports never renew a policy lease or mark a bundle as
+applied. A successful acknowledgement clears the previous error.
+
+Reporting is best effort: an offline or revoked host may be unable to send an
+error. The console must still distinguish stale/offline devices from recent
+reports and cannot infer immediate revocation of a disconnected host. Clients
+ignore failures of this optional reporting endpoint for compatibility with older
+servers. Raw error text, local paths, prompts, provider keys and tool output are
+not accepted in this payload.

@@ -134,3 +134,20 @@ type ErrorResponse struct {
 	Message   string `json:"message"`
 	RequestID string `json:"request_id"`
 }
+
+// SyncFailure reports a bounded diagnostic, never a raw error or request body.
+// It does not acknowledge a policy or renew authorization. The service records
+// its own receipt time; a later successful acknowledgement clears the failure.
+type SyncFailure struct {
+	Code          string `json:"code"`
+	ClientVersion string `json:"client_version"`
+}
+
+func ValidSyncErrorCode(code string) bool {
+	switch code {
+	case "unavailable", "verification_failed", "authorization_denied", "clock_changed", "credential_store_unavailable":
+		return true
+	default:
+		return false
+	}
+}

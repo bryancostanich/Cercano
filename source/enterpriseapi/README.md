@@ -28,8 +28,12 @@ These routes are implemented by the separate enterprise service. The reserved
 select an organization using the administrator-provided UUID during login.
 Skill IDs are
 namespaced opaque identifiers and must be URL-encoded as one path segment.
-Policy refresh returns a newly signed lease even when its revision is unchanged;
-a 304 response alone cannot renew authorization. Repeated identical applied
+Policy GET returns an ETag for the current configuration, scope, membership
+labels and signing keys. An authenticated matching If-None-Match may return an
+empty 304; this reuses the verified bundle without extending its signed expiry
+or monotonic deadline. Omit the validator to obtain a fresh signed lease even
+when the revision is unchanged. The client does this at sign-in, after restart
+or a failed sync, and when fewer than two minutes remain. Repeated identical applied
 acknowledgements are idempotent. The server supplies receipt timestamps.
 
 Error bodies use ErrorResponse with bounded codes: unauthenticated (401),

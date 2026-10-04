@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sync"
 
+	"cercano/source/server/internal/managedsettings"
 	"cercano/source/server/internal/modelpolicy"
 )
 
@@ -396,6 +397,7 @@ func (h *Host) Begin(ctx context.Context) (context.Context, func(), error) {
 		}
 		finish = release
 		ctx = context.WithValue(ctx, bundleContextKey{}, bundle)
+		ctx = managedsettings.WithSnapshot(ctx, managedsettings.Snapshot{Policy: bundle.Policy, Skills: bundle.Skills})
 	}
 	h.active++
 	var once sync.Once

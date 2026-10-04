@@ -20,6 +20,7 @@ import (
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/locus"
+	"cercano/source/server/internal/managedsettings"
 	"cercano/source/server/internal/modelwindow"
 	"cercano/source/server/internal/protocols"
 	"cercano/source/server/internal/requestassembly"
@@ -697,7 +698,7 @@ func (c *Core) runLoop(
 		Images:               req.Images,
 		Model:                model,
 		Tier:                 tier,
-		System:               BuildSystemPrompt(c.d, req.WorkDir, profile),
+		System:               BuildSystemPrompt(c.d, req.WorkDir, profile) + managedsettings.SkillPrompt(ctx),
 		WorkDir:              req.WorkDir,
 		ConversationID:       req.ConversationID,
 		VisionStore:          c.d.VisionStore,

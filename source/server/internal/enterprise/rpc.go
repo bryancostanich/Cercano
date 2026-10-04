@@ -95,11 +95,11 @@ func (s *RPCServer) UseStandalone(ctx context.Context, _ *proto.EnterpriseContro
 	return s.result(), nil
 }
 
-// Scopes pin the policy/default/skill bundle for user-triggered inference work.
-// Metadata and repair controls remain accessible when managed work is blocked.
+// Scopes pin the policy/default/skill bundle for inference and skill discovery.
+// Connection status and repair controls remain accessible when work is blocked.
 func inferenceRPC(method string) bool {
 	switch method {
-	case proto.Agent_ProcessRequest_FullMethodName, proto.Agent_StreamProcessRequest_FullMethodName, proto.Agent_InvokeTool_FullMethodName, proto.Agent_InvokeCapability_FullMethodName, proto.Agent_RegenerateContext_FullMethodName, proto.Agent_SuggestNextPrompt_FullMethodName, proto.Agent_ElideContext_FullMethodName:
+	case proto.Agent_ListSkills_FullMethodName, proto.Agent_GetSkill_FullMethodName, proto.Agent_ProcessRequest_FullMethodName, proto.Agent_StreamProcessRequest_FullMethodName, proto.Agent_InvokeTool_FullMethodName, proto.Agent_InvokeCapability_FullMethodName, proto.Agent_RegenerateContext_FullMethodName, proto.Agent_SuggestNextPrompt_FullMethodName, proto.Agent_ElideContext_FullMethodName:
 		return true
 	default:
 		return false

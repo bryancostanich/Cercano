@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"cercano/source/server/internal/managedsettings"
 	"cercano/source/server/internal/reasoningexperiment"
 	"cercano/source/server/internal/visioninspect"
 	"context"
@@ -111,6 +112,15 @@ func (w *WorkerServer) runTurn(stream proto.Worker_RunTurnServer, authRecovery, 
 
 	// Build execution context: cancel when host sends Cancel.
 	parent := stream.Context()
+	if managed {
+		snapshot, err := managedsettings.Decode(start.GetEnterpriseSettingsJson())
+		if err != nil {
+			return status.Error(codes.FailedPrecondition, err.Error())
+		}
+		parent = managedsettings.WithSnapshot(parent, snapshot)
+	} else if len(start.GetEnterpriseSettingsJson()) != 0 {
+		return status.Error(codes.FailedPrecondition, "standalone turn cannot contain managed settings")
+	}
 	if start.Accounting != nil {
 		scoped, release, scopeErr := w.beginAccountingTurn(parent, start.Accounting, start.GetConversationId())
 		if scopeErr != nil {

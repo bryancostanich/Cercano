@@ -28,6 +28,7 @@ import (
 	"cercano/source/server/internal/hostsvc/permissions"
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
+	"cercano/source/server/internal/managedsettings"
 )
 
 // Catalog is the interface the front door (Server) depends on for tool,
@@ -520,6 +521,18 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 		emitDispatchProgress(spec.Emit, agenttools.ProgressEvent{Kind: "error", Text: fmt.Sprintf("sub-agent grant failed: %v", err), IsError: true})
 		return dispatch.Result{}, err
 	}
+	// Preserve both the normal default R-tier catalog and invalid-grant errors.
+	// Only after that grant succeeds do we add this turn's assigned text reader.
+	if managedsettings.HasSkills(ctx) {
+		if _, present := reg.Get("get_shared_skill"); !present {
+			reader, ok := x.toolRegistry.Get("get_shared_skill")
+			if !ok {
+				return dispatch.Result{}, fmt.Errorf("dispatch: managed shared-skill reader is not installed")
+			}
+			reg.MustRegister(reader)
+			granted = registryToolNames(reg)
+		}
+	}
 	// Grant + ignored-tool details ride on the "started" event below, which
 	// carries GrantedTools/IgnoredTools for the sub-agent tab to render. A
 	// separate pre-start emit here had no SubAgentID yet, so it leaked into
@@ -545,7 +558,7 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 	// intended for the top-level agent, and local models have been observed to
 	// ignore tools and emit unrelated text under that prompt. A dispatch worker
 	// needs bounded task/tool instructions, not full-frontier agency.
-	system := buildSubagentSystemPrompt(spec.WorkDir, granted)
+	system := buildSubagentSystemPrompt(spec.WorkDir, granted) + managedsettings.SkillPrompt(ctx)
 
 	// 3. Sub-agent identity + persistence. The sub-agent's conversation id is
 	// minted unconditionally: it is the

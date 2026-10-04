@@ -1,6 +1,8 @@
 package worker_test
 
 import (
+	"cercano/source/server/internal/managedsettings"
+	"cercano/source/server/internal/managedsettings/settingstest"
 	"context"
 	"fmt"
 	"net/http"
@@ -63,6 +65,7 @@ func TestManagedWorkerAuthorizesEachPhysicalAttempt(t *testing.T) {
 			host := worker.NewWorkerRunnerForTest(&fakeHistory{}, cfgsvc.New("", config.Defaults(), store), newTestBroker(), store, worker.BufconnDial(listener))
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
+			ctx = managedsettings.WithSnapshot(ctx, settingstest.Snapshot("test-org", "1", "Review carefully."))
 			ctx = modelpolicy.WithAuthority(ctx, modelpolicy.AuthorizeFunc(func(_ context.Context, a modelpolicy.Attempt) error {
 				checks.Add(1)
 				if a.Provider != "openai" || a.Endpoint != provider.URL+"/v1" || a.Placement != "external" || a.Model != "fake-model" {
@@ -104,6 +107,7 @@ func TestManagedHostDoesNotDowngradeToLegacyWorker(t *testing.T) {
 	host := worker.NewWorkerRunnerForTest(&fakeHistory{}, cfgsvc.New("", config.Defaults(), store), newTestBroker(), store, worker.BufconnDial(listener))
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
+	ctx = managedsettings.WithSnapshot(ctx, settingstest.Snapshot("test-org", "1", "Review carefully."))
 	ctx = modelpolicy.WithAuthority(ctx, modelpolicy.AuthorizeFunc(func(context.Context, modelpolicy.Attempt) error { return nil }))
 	_, err := host.RunTurn(ctx, runner.Request{ConversationID: "old-worker", Input: "hello"}, nil, nil, nil)
 	if err == nil || !strings.Contains(err.Error(), "does not support enterprise") || old.legacyCalls.Load() != 0 {

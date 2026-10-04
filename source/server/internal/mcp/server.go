@@ -576,7 +576,11 @@ func (s *Server) handleSkills(ctx context.Context, request *gomcp.CallToolReques
 
 		var output string
 		for _, skill := range resp.Skills {
-			output += fmt.Sprintf("**%s** — %s\n\n", skill.Name, skill.Description)
+			output += fmt.Sprintf("**%s** — %s\n", skill.Name, skill.Description)
+			if skill.Source != "" {
+				output += fmt.Sprintf("Source: %s; version: %s\n", skill.Source, skill.Version)
+			}
+			output += "\n"
 		}
 		if output == "" {
 			output = "No skills available."
@@ -594,9 +598,13 @@ func (s *Server) handleSkills(ctx context.Context, request *gomcp.CallToolReques
 			return nil, nil, formatGRPCError(err, "cercano_skills")
 		}
 
+		content := resp.Content
+		if resp.Source == "enterprise" {
+			content = fmt.Sprintf("Skill: %s\nSource: %s; version: %s\n\n%s", resp.Name, resp.Source, resp.Version, resp.Content)
+		}
 		return &gomcp.CallToolResult{
 			Content: []gomcp.Content{
-				&gomcp.TextContent{Text: resp.Content},
+				&gomcp.TextContent{Text: content},
 			},
 		}, nil, nil
 

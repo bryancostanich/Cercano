@@ -3593,6 +3593,7 @@ const (
 	Enterprise_Login_FullMethodName         = "/agent.Enterprise/Login"
 	Enterprise_GetStatus_FullMethodName     = "/agent.Enterprise/GetStatus"
 	Enterprise_Synchronize_FullMethodName   = "/agent.Enterprise/Synchronize"
+	Enterprise_GetPolicy_FullMethodName     = "/agent.Enterprise/GetPolicy"
 	Enterprise_Logout_FullMethodName        = "/agent.Enterprise/Logout"
 	Enterprise_UseStandalone_FullMethodName = "/agent.Enterprise/UseStandalone"
 )
@@ -3607,6 +3608,7 @@ type EnterpriseClient interface {
 	Login(ctx context.Context, in *EnterpriseLoginRequest, opts ...grpc.CallOption) (*EnterpriseStatus, error)
 	GetStatus(ctx context.Context, in *EnterpriseControlRequest, opts ...grpc.CallOption) (*EnterpriseStatus, error)
 	Synchronize(ctx context.Context, in *EnterpriseControlRequest, opts ...grpc.CallOption) (*EnterpriseStatus, error)
+	GetPolicy(ctx context.Context, in *EnterpriseControlRequest, opts ...grpc.CallOption) (*EnterprisePolicy, error)
 	Logout(ctx context.Context, in *EnterpriseControlRequest, opts ...grpc.CallOption) (*EnterpriseStatus, error)
 	UseStandalone(ctx context.Context, in *EnterpriseControlRequest, opts ...grpc.CallOption) (*EnterpriseStatus, error)
 }
@@ -3649,6 +3651,16 @@ func (c *enterpriseClient) Synchronize(ctx context.Context, in *EnterpriseContro
 	return out, nil
 }
 
+func (c *enterpriseClient) GetPolicy(ctx context.Context, in *EnterpriseControlRequest, opts ...grpc.CallOption) (*EnterprisePolicy, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(EnterprisePolicy)
+	err := c.cc.Invoke(ctx, Enterprise_GetPolicy_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *enterpriseClient) Logout(ctx context.Context, in *EnterpriseControlRequest, opts ...grpc.CallOption) (*EnterpriseStatus, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(EnterpriseStatus)
@@ -3679,6 +3691,7 @@ type EnterpriseServer interface {
 	Login(context.Context, *EnterpriseLoginRequest) (*EnterpriseStatus, error)
 	GetStatus(context.Context, *EnterpriseControlRequest) (*EnterpriseStatus, error)
 	Synchronize(context.Context, *EnterpriseControlRequest) (*EnterpriseStatus, error)
+	GetPolicy(context.Context, *EnterpriseControlRequest) (*EnterprisePolicy, error)
 	Logout(context.Context, *EnterpriseControlRequest) (*EnterpriseStatus, error)
 	UseStandalone(context.Context, *EnterpriseControlRequest) (*EnterpriseStatus, error)
 	mustEmbedUnimplementedEnterpriseServer()
@@ -3699,6 +3712,9 @@ func (UnimplementedEnterpriseServer) GetStatus(context.Context, *EnterpriseContr
 }
 func (UnimplementedEnterpriseServer) Synchronize(context.Context, *EnterpriseControlRequest) (*EnterpriseStatus, error) {
 	return nil, status.Error(codes.Unimplemented, "method Synchronize not implemented")
+}
+func (UnimplementedEnterpriseServer) GetPolicy(context.Context, *EnterpriseControlRequest) (*EnterprisePolicy, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetPolicy not implemented")
 }
 func (UnimplementedEnterpriseServer) Logout(context.Context, *EnterpriseControlRequest) (*EnterpriseStatus, error) {
 	return nil, status.Error(codes.Unimplemented, "method Logout not implemented")
@@ -3781,6 +3797,24 @@ func _Enterprise_Synchronize_Handler(srv interface{}, ctx context.Context, dec f
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Enterprise_GetPolicy_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(EnterpriseControlRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(EnterpriseServer).GetPolicy(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Enterprise_GetPolicy_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(EnterpriseServer).GetPolicy(ctx, req.(*EnterpriseControlRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Enterprise_Logout_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(EnterpriseControlRequest)
 	if err := dec(in); err != nil {
@@ -3835,6 +3869,10 @@ var Enterprise_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Synchronize",
 			Handler:    _Enterprise_Synchronize_Handler,
+		},
+		{
+			MethodName: "GetPolicy",
+			Handler:    _Enterprise_GetPolicy_Handler,
 		},
 		{
 			MethodName: "Logout",

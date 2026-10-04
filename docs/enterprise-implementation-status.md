@@ -10,7 +10,7 @@ The enterprise service has Google sign-in, manual membership and team APIs,
 customer isolation in PostgreSQL, versioned policies and text-only skills,
 signed policy leases, publication and rollback, audit events, and native client
 login with PKCE and rotating credentials. Each developer has at most one team
-per organization. Enterprise service PRs 1 through 11 are merged, including the
+per organization. Enterprise service PRs 1 through 12 are merged, including the
 five-area administration console, reproducible workflow, recovery checks, and
 shared organization request limits.
 
@@ -55,6 +55,11 @@ explicit streaming-RPC model choice was not forwarded to the runner, and the
 initiator could send its final response before the broker's lossless queue had
 finished forwarding tokens. Worker capability negotiation now also rejects an
 older worker that cannot preserve explicit managed model choices.
+
+The macOS CLI now exposes `enterprise policy`, `enterprise skills`, and
+`enterprise skills --skill ID`, with readable output and optional JSON. They
+read verified host settings and assigned text without exposing credentials or
+starting inference. Blocked connections cannot inspect cached assignments.
 
 The developer's status now includes the organization name and assigned team from
 its last applied policy response. `cercano enterprise status` prints a readable

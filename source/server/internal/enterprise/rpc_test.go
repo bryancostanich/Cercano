@@ -94,6 +94,17 @@ func TestRunningHostLoginActuallyControlsInference(t *testing.T) {
 	if err != nil || !state.GetUsable() || !state.GetEnforcementActive() {
 		t.Fatalf("login failed: %v", err)
 	}
+	inspection, err := client.GetPolicy(ctx, &proto.EnterpriseControlRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := v1.DecodePolicy(inspection.PolicyJson)
+	if err != nil || p.Revision != 1 || p.Scope.OrganizationID != testOrg || len(p.AllowedRoutes) != 1 || p.AllowedRoutes[0].Model != "approved" {
+		t.Fatalf("incorrect policy inspection: %+v %v", p, err)
+	}
+	if strings.Contains(string(inspection.PolicyJson), f.access) || strings.Contains(string(inspection.PolicyJson), f.refresh) {
+		t.Fatal("credentials leaked into policy inspection")
+	}
 	if _, err = modelClient.ProcessRequest(ctx, &proto.ProcessRequestRequest{Input: "hello"}); err != nil {
 		t.Fatal(err)
 	}
@@ -120,6 +131,9 @@ func TestRunningHostLoginActuallyControlsInference(t *testing.T) {
 	if _, err = modelClient.ProcessRequest(ctx, &proto.ProcessRequestRequest{}); status.Code(err) != codes.PermissionDenied {
 		t.Fatalf("logged-out work was not blocked: %v", err)
 	}
+	if _, err = client.GetPolicy(ctx, &proto.EnterpriseControlRequest{}); status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("logged out policy still available: %v", err)
+	}
 	state, err = client.UseStandalone(ctx, &proto.EnterpriseControlRequest{})
 	if err != nil || state.GetManaged() {
 		t.Fatalf("explicit standalone failed: %v", err)
@@ -136,5 +150,13 @@ func TestEnterpriseControlsRejectRemoteAndMissingPeers(t *testing.T) {
 		if status.Code(localControl(ctx)) != codes.PermissionDenied {
 			t.Fatal("remote enterprise control accepted")
 		}
+	}
+}
+
+func TestPolicyInspectionRejectsRemoteCaller(t *testing.T) {
+	s := NewRPCServer(nil, nil)
+	ctx := peer.NewContext(context.Background(), &peer.Peer{Addr: &net.TCPAddr{IP: net.ParseIP("192.0.2.10"), Port: 50000}})
+	if _, err := s.GetPolicy(ctx, &proto.EnterpriseControlRequest{}); status.Code(err) != codes.PermissionDenied {
+		t.Fatal(err)
 	}
 }

@@ -348,6 +348,17 @@ func TestEnterpriseServiceWorkflow(t *testing.T) {
 			!status.MembershipKnown || status.OrganizationName != company.Name || status.TeamId != teams[i] || status.TeamName != "Engineering" {
 			t.Fatal("running host did not activate the signed policy")
 		}
+		inspection, e := enterpriseRPC.GetPolicy(ctx, &proto.EnterpriseControlRequest{})
+		var inspected struct {
+			Scope struct {
+				OrganizationID string `json:"organization_id"`
+			} `json:"scope"`
+			Revision int64 `json:"revision"`
+		}
+		if e != nil || json.Unmarshal(inspection.GetPolicyJson(), &inspected) != nil || inspected.Scope.OrganizationID != company.ID || inspected.Revision != 1 {
+			t.Fatal("policy inspection did not match signed-in company", e)
+		}
+
 		content := fmt.Sprintf("Company %d review instructions version one.", i)
 		control(map[string]any{"skill_id": "enterprise/" + company.ID + "/review", "skill_content": content})
 		output, e := infer("")

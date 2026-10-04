@@ -29,6 +29,7 @@ const testHost = "20000000-0000-0000-0000-000000000001"
 
 type fixture struct {
 	routes                   []v1.Route
+	skills                   []v1.SkillContentResponse
 	mu                       sync.Mutex
 	mode                     string
 	revision                 int64
@@ -43,6 +44,7 @@ type fixture struct {
 func newFixture(t *testing.T, loggedIn bool) *fixture {
 	t.Helper()
 	f := &fixture{revision: 1, store: secrets.NewMemory(), access: testOrg + "." + randomToken(), refresh: testOrg + "." + randomToken()}
+	f.skills = []v1.SkillContentResponse{{SchemaVersion: v1.Version, ID: testOrg + "/review", Version: "1", Name: "Review", Content: "Review carefully."}}
 	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
 	f.server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
@@ -94,7 +96,10 @@ func newFixture(t *testing.T, loggedIn bool) *fixture {
 			if routes == nil {
 				routes = []v1.Route{}
 			}
-			p := v1.Policy{SchemaVersion: v1.Version, Scope: v1.Scope{OrganizationID: testOrg, UserID: testMember, HostID: testHost}, Revision: f.revision, IssuedAt: time.Now().Add(-time.Second), ExpiresAt: time.Now().Add(14 * time.Minute), MinimumClientVersion: "1.0.0", AllowedRoutes: routes, TaskDefaults: []v1.TaskDefault{}, Skills: []v1.SkillAssignment{{ID: testOrg + "/review", Version: "1", SHA256: fmt.Sprintf("%x", sha256.Sum256([]byte("Review carefully."))), SizeBytes: len("Review carefully.")}}}
+			p := v1.Policy{SchemaVersion: v1.Version, Scope: v1.Scope{OrganizationID: testOrg, UserID: testMember, HostID: testHost}, Revision: f.revision, IssuedAt: time.Now().Add(-time.Second), ExpiresAt: time.Now().Add(14 * time.Minute), MinimumClientVersion: "1.0.0", AllowedRoutes: routes, TaskDefaults: []v1.TaskDefault{}, Skills: []v1.SkillAssignment{}}
+			for _, sk := range f.skills {
+				p.Skills = append(p.Skills, v1.SkillAssignment{ID: sk.ID, Version: sk.Version, SHA256: fmt.Sprintf("%x", sha256.Sum256([]byte(sk.Content))), SizeBytes: len(sk.Content)})
+			}
 			if f.mode == "wrong_scope" {
 				p.Scope.OrganizationID = "other"
 			}
@@ -119,16 +124,20 @@ func newFixture(t *testing.T, loggedIn bool) *fixture {
 				w.WriteHeader(503)
 				return
 			}
-			content := "Review carefully."
-			if f.mode == "bad_digest" {
-				content = "Tampered"
+			if len(f.skills) == 0 {
+				w.WriteHeader(404)
+				return
 			}
-			_ = json.NewEncoder(w).Encode(v1.SkillContentResponse{SchemaVersion: v1.Version, ID: testOrg + "/review", Version: "1", Name: "Review", Content: content})
+			skill := f.skills[0]
+			if f.mode == "bad_digest" {
+				skill.Content = "Tampered"
+			}
+			_ = json.NewEncoder(w).Encode(skill)
 		case strings.HasSuffix(r.URL.Path, "/applied"):
 			f.acks++
 			var ack v1.SyncAcknowledgement
 			_ = json.NewDecoder(r.Body).Decode(&ack)
-			if ack.PolicyRevision != f.revision || len(ack.Skills) != 1 {
+			if ack.PolicyRevision != f.revision || len(ack.Skills) != len(f.skills) {
 				t.Error("bad acknowledgement")
 			}
 			w.WriteHeader(204)

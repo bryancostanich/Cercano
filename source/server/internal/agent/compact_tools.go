@@ -29,7 +29,7 @@ var compactFallbackTools = map[string]bool{
 	// Native agent workflow and local model helpers.
 	"dispatch": true, "workflow": true, "local": true, "classify": true,
 	"explain": true, "extract": true, "summarize": true, "review": true,
-	"get_protocol": true, "restart_runtime": true, "reasoning_diagnostic": true,
+	"get_protocol": true, "get_shared_skill": true, "restart_runtime": true, "reasoning_diagnostic": true,
 	// Planning/autonomous handoff and status tools that the active profile may
 	// require even in a narrowed catalog.
 	"suggest_plan": true, "request_plan_approval": true, "plan_exit": true,

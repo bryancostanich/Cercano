@@ -12,6 +12,8 @@ package worker_test
 //   - a different conversation gets its own worker (spawn increments).
 
 import (
+	"cercano/source/server/internal/managedsettings"
+	"cercano/source/server/internal/managedsettings/settingstest"
 	"context"
 	"encoding/json"
 	"net"
@@ -217,6 +219,7 @@ func TestPoolReplacesWorkerWhenEnterpriseModeChanges(t *testing.T) {
 	for i, managed := range []bool{false, false, true, true, false, false} {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		if managed {
+			ctx = managedsettings.WithSnapshot(ctx, settingstest.Snapshot("test-org", "1", "Review carefully."))
 			ctx = modelpolicy.WithAuthority(ctx, modelpolicy.AuthorizeFunc(func(context.Context, modelpolicy.Attempt) error { return nil }))
 		}
 		_, err := r.RunTurn(ctx, runner.Request{ConversationID: "same-conversation", Gen: uint64(i + 1), Input: "hello"}, nil, nil, nil)

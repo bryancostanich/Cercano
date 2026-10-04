@@ -1182,6 +1182,9 @@ message ListSkillsRequest {}
 message SkillInfo {
   string name = 1;          // Skill name (matches directory name)
   string description = 2;   // What the skill does and when to use it
+  string source = 3;        // builtin or enterprise
+  string version = 4;       // assigned version, or bundled
+  string display_name = 5;  // human-readable title; name remains the lookup ID
 }
 
 // Response containing available skills.
@@ -1198,6 +1201,8 @@ message GetSkillRequest {
 message GetSkillResponse {
   string name = 1;        // Skill name
   string content = 2;     // Full SKILL.md file content
+  string source = 3;
+  string version = 4;
 }
 
 // Permission-mode RPCs let the CLI's slash commands (/strict, /permissive,
@@ -1623,6 +1628,9 @@ service Worker {
   rpc RunTurnWithAuthentication (stream HostToWorker) returns (stream WorkerToHost) {}
   // Managed turns require this RPC; hosts never downgrade to an older protocol.
   rpc RunManagedTurn (stream HostToWorker) returns (stream WorkerToHost) {}
+  // Settings-aware hosts require this method; older workers must not silently
+  // ignore pinned defaults or skills carried in StartTurn.
+  rpc RunManagedTurnWithSettings (stream HostToWorker) returns (stream WorkerToHost) {}
 }
 
 // HostToWorker is the host→worker envelope.
@@ -1701,6 +1709,7 @@ message StartTurn {
   repeated McpToolDescriptor mcp_tools = 12;
   repeated string            mcp_allow = 13;
   bool enterprise_managed = 14; // must agree with RunManagedTurn
+  bytes enterprise_settings_json = 15; // pinned policy/defaults and complete skills, never credentials
 }
 
 // Only physical route metadata crosses this authorization boundary. No prompt,

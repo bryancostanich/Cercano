@@ -64,3 +64,7 @@ func (s *streamModelAuthority) deliver(response *proto.WorkerModelAuthorizationR
 func (w *WorkerServer) RunManagedTurn(stream proto.Worker_RunManagedTurnServer) error {
 	return w.runTurn(stream, true, true)
 }
+
+func (w *WorkerServer) RunManagedTurnWithSettings(stream proto.Worker_RunManagedTurnWithSettingsServer) error {
+	return w.runTurn(stream, true, true)
+}

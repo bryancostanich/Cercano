@@ -4,10 +4,11 @@ Enterprise commands now control the running Cercano host. The host owns sign-in,
 Keychain credentials, policy refresh and model authorization. The command-line
 client does not hold a second copy of the connection or rotate its credentials.
 
-This increment activates **model restrictions**. Applying administrator routing
-defaults and exposing shared skills to the agent remain the next steps. Downloaded
-skills are verified and pinned with the policy, but are not yet installed in the
-agent's skill catalog. See the [implementation status](enterprise-implementation-status.md).
+This increment activates **model restrictions and shared skills**. Main and
+delegated agents discover assigned skills and read the pinned versions through
+a read-only tool. See [shared skills](enterprise-shared-skills.md). Applying
+administrator routing defaults remains unfinished; see the
+[implementation status](enterprise-implementation-status.md).
 
 ## Start and connect the host
 

@@ -26,15 +26,23 @@ synchronization and the credential lock, and exposes login, status, sync, logout
 and explicit standalone selection through local RPC. A durable profile blocks
 work after credential loss or logout. Each user inference request pins a verified
 bundle. Warm workers are replaced when the profile changes between managed and
-standalone execution. The implementation still needs managed defaults, skill discovery, and the full
+standalone execution. Shared skills now appear in the agent and MCP catalogs with namespaced IDs,
+source and version. Main and delegated agents retrieve the pinned text through a
+read-only tool. Settings-aware workers reject missing or incomplete bundles and
+never receive enterprise credentials. Signed update/removal/rollback tests and
+real worker tool-loop tests cover these paths. See [shared skills](enterprise-shared-skills.md).
+
+The implementation still needs managed routing defaults and the full
 administration-to-developer demonstration below.
 
 ## Remaining work, in order
 
-1. **Apply managed defaults and shared skills.** Pin a complete bundle for each
-   turn, use its approved defaults and ordered fallbacks, and expose namespaced
-   skill IDs with source and version. Apply the latest restrictions before each
-   physical call. Keep administrator settings separate from personal settings.
+1. **Apply managed routing defaults.** Use the pinned policy
+   to select approved task defaults and ordered fallbacks, including the rules
+   for unlocked developer overrides. The snapshot and shared-skill integration
+   are complete; routing does not yet consume the managed choices. Continue
+   applying the latest restrictions before each physical call and keep
+   administrator settings separate from personal settings.
 2. **Finish the administration interface.** Provide People & teams, Model policy,
    Shared skills, Devices & sync, and Audit. Make publication, affected teams,
    version rollback, and synchronization status understandable. Add any missing

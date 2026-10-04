@@ -47,6 +47,7 @@ import (
 	"cercano/source/server/internal/hostsvc/permissions"
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
+	"cercano/source/server/internal/managedsettings"
 	"cercano/source/server/internal/modelmetadata"
 	"cercano/source/server/internal/modelpolicy"
 	"cercano/source/server/internal/runner"
@@ -534,6 +535,14 @@ func (w *workerRunner) RunTurn(
 	// ── 3. Build ConfigSnapshot + permission mode ──────────────────────────
 	cfg := w.cfg.Get()
 	managed := modelpolicy.Managed(ctx)
+	var settings []byte
+	if managed {
+		var err error
+		settings, err = managedsettings.Encode(ctx)
+		if err != nil {
+			return runner.Result{}, modelpolicy.Deny(modelpolicy.Attempt{}, err.Error())
+		}
+	}
 	needsAuthProtocol := req.AuthRecovery != nil
 	for _, profile := range cfg.CloudProfiles {
 		if (profile.Name == cfg.ActiveCloudProfile || profile.Name == cfg.BackupCloudProfile) && cloudfactory.IsSubscription(profile) {
@@ -566,19 +575,20 @@ func (w *workerRunner) RunTurn(
 	}
 
 	startTurn := &proto.StartTurn{
-		EnterpriseManaged: managed,
-		ConversationId:    req.ConversationID,
-		Input:             req.Input,
-		Images:            protoImages,
-		WorkDir:           req.WorkDir,
-		DebugMode:         req.DebugMode,
-		Gen:               req.Gen,
-		Config:            snap,
-		History:           historyProto,
-		ProjectContext:    projectCtx,
-		PermissionMode:    permMode,
-		McpTools:          w.advertiseMCPTools(),
-		McpAllow:          w.mcpAllowPatterns(),
+		EnterpriseManaged:      managed,
+		EnterpriseSettingsJson: settings,
+		ConversationId:         req.ConversationID,
+		Input:                  req.Input,
+		Images:                 protoImages,
+		WorkDir:                req.WorkDir,
+		DebugMode:              req.DebugMode,
+		Gen:                    req.Gen,
+		Config:                 snap,
+		History:                historyProto,
+		ProjectContext:         projectCtx,
+		PermissionMode:         permMode,
+		McpTools:               w.advertiseMCPTools(),
+		McpAllow:               w.mcpAllowPatterns(),
 	}
 
 	// ── 5. Acquire a warm worker (pool) or use injected dial ──────────────
@@ -644,7 +654,7 @@ func (w *workerRunner) RunTurn(
 	var err error
 	var stream proto.Worker_RunTurnClient
 	if managed {
-		stream, err = client.RunManagedTurn(ctx)
+		stream, err = client.RunManagedTurnWithSettings(ctx)
 	} else if needsAuthProtocol {
 		stream, err = client.RunTurnWithAuthentication(ctx)
 	} else {

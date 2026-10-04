@@ -28,6 +28,7 @@ type Membership struct {
 	UserID           string `json:"user_id"`
 	Role             string `json:"role"`
 	TeamID           string `json:"team_id,omitempty"`
+	TeamName         string `json:"team_name,omitempty"`
 }
 
 type MembershipsResponse struct {
@@ -104,6 +105,10 @@ type SignedPolicy struct {
 type EffectivePolicyResponse struct {
 	SchemaVersion string       `json:"schema_version"`
 	Policy        SignedPolicy `json:"policy"`
+	// Membership describes the membership used to compose this policy. It is
+	// authenticated by the HTTPS response, not the policy signature, and must
+	// never be used to grant inference permissions. Older servers may omit it.
+	Membership *Membership `json:"membership,omitempty"`
 }
 
 type SkillContentResponse struct {

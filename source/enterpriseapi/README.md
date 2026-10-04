@@ -74,3 +74,16 @@ Skills are text only, have organization-namespaced IDs and exact versions, and
 include SHA-256 digests of the UTF-8 content bytes. Maximum sizes are 256 KiB per
 skill, 2 MiB per assigned bundle, and 256 KiB per policy. Download integrity,
 atomic activation, signed trust, and runtime skill discovery follow later.
+
+### Membership shown with a policy
+
+`EffectivePolicyResponse.membership` optionally describes the organization and
+team used to compose the policy. New servers include the organization name,
+membership ID, role, and (when assigned) team ID and name. An absent membership
+means the server has not supplied display details; an empty team ID in a present
+membership means the developer has no team.
+
+These details are authenticated by the HTTPS connection but are outside the
+signed policy payload. Clients check the organization and user against the
+verified policy scope and use these details only for display. Model and skill
+permissions continue to come exclusively from the signed policy.

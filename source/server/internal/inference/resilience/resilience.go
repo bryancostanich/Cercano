@@ -35,6 +35,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -51,16 +52,52 @@ const (
 	ActionSurface  Action = "surface"  // give up; the error goes to the caller
 )
 
+// SkipReason* name the exact gate that blocked a recovery step, for the
+// structured retry-decision log. Instrumentation only: the gates themselves
+// read their own state; these strings record what the gates saw so a surfaced
+// failure can be read back without re-deriving the decision. When several
+// gates apply they are joined with "," in Event.Reason (retry gate first).
+const (
+	ReasonContentEmitted      = "content_emitted"           // request-level: content had already flowed (recovery is off the table)
+	ReasonRetryLimit          = "retry_limit_reached"       // the single same-provider retry was already spent
+	ReasonCancellation        = "context_cancelled"         // caller's context cancelled: never recover
+	ReasonNonretryable        = "nonretryable_class"        // error class is not Retryable
+	ReasonNoBackup            = "no_backup"                 // no backup provider is configured
+	ReasonNotFailoverable     = "not_failoverable"          // class could not plausibly be served elsewhere
+	ReasonAlreadyFailedOver   = "already_failed_over"       // never cascade: the backup's failure is final
+	ReasonAuthFallbackBlocked = "auth_fallback_unavailable" // selected auth fallback cannot serve this request
+	ReasonAuthRecoveryFailed  = "auth_recovery_failed"      // interactive login was attempted and failed
+)
+
 // Event describes one engine decision, for logging and telemetry. The Notice
 // text (the user-facing line) is derived from the same data via Notice().
 type Event struct {
 	Action Action
-	Stage  string // "chat" | "stream_dial" | "stream_first"
+	Stage  string // "chat" | "stream_dial" | "stream_first" | "stream_live" | "stream_auth"
 	Class  llm.ErrorClass
 	From   string        // provider that failed
 	To     string        // provider serving next ("" on surface)
 	Wait   time.Duration // retry only: how long the engine waits first
 	Err    error         // the failure that triggered the decision
+	// Reason carries the comma-joined skip-reason gates for a surfaced (or
+	// failover-after-skip) decision; "" when a retry/failover is attempted with
+	// no gate blocking the prior step. Diagnostic only — never consulted by
+	// the gates themselves.
+	Reason string
+	// ConversationID / RequestID identify the failed request. ConversationID
+	// falls back to the ctx session id when the request envelope carries none;
+	// RequestID is the loop's "conversation:iteration" correlation id where
+	// the caller set one. Both may be empty for ad-hoc callers.
+	ConversationID string
+	RequestID      string
+	// Emitted reports the engine's live gate at decision time: content had
+	// already flowed to the caller on this request (stream only; always false
+	// for non-streaming chat).
+	Emitted bool
+	// Emitted* break down what had already flowed, by kind.
+	EmittedText      bool // any text delta was delivered
+	EmittedReasoning bool // any reasoning item was delivered
+	EmittedToolCall  bool // any tool-call event was delivered
 }
 
 // Notice renders the user-facing status line for an event, in the fixed
@@ -221,6 +258,27 @@ func (p *Provider) emit(ev Event) {
 	}
 }
 
+// correlate attaches the failed request's diagnostic identity — never its
+// message contents: Event already forbids payloads; these ids only let a
+// gate decision in the log be read back against the tool loop's conversation
+// and iteration context (llm.WithSessionID carries the conversation when the
+// request itself does not).
+func (ev Event) correlate(ctx context.Context, req inference.Call) Event {
+	ev.ConversationID = req.ConversationID
+	if ev.ConversationID == "" {
+		ev.ConversationID = llm.SessionIDFromContext(ctx)
+	}
+	ev.RequestID = req.RequestID
+	return ev
+}
+
+// gateLogChat records a closed recovery gate on the non-streaming (Chat) path
+// with its precise reason. Log-only, never message contents.
+func (p *Provider) gateLogChat(ctx context.Context, req inference.Call, reason string, class llm.ErrorClass, err error) {
+	p.emit(Event{Action: ActionSurface, Stage: "chat", Class: class, Reason: reason,
+		From: p.eventFrom(err), Err: err}.correlate(ctx, req))
+}
+
 func eventFrom(fallback string, err error) string {
 	if name := llm.ProviderOf(err); name != "" {
 		return name
@@ -330,12 +388,15 @@ func (p *Provider) Chat(ctx context.Context, req inference.Call) (inference.Resu
 		return resp, err
 	}
 	if err == nil || ctx.Err() != nil {
+		if err != nil {
+			p.gateLogChat(ctx, req, ReasonCancellation, llm.ClassOf(err), err)
+		}
 		return resp, err
 	}
 	if llm.Retryable(llm.ClassOf(err)) {
 		ev := Event{Action: ActionRetry, Stage: "chat", Class: llm.ClassOf(err),
 			From: p.eventFrom(err), To: p.primary.Name(), Wait: p.waitFor(err), Err: err}
-		p.emit(ev)
+		p.emit(ev.correlate(ctx, req))
 		if !p.sleep(ctx, ev.Wait) {
 			return resp, err
 		}
@@ -344,6 +405,9 @@ func (p *Provider) Chat(ctx context.Context, req inference.Call) (inference.Resu
 			return resp, err
 		}
 		if err == nil || ctx.Err() != nil {
+			if err != nil {
+				p.gateLogChat(ctx, req, ReasonCancellation, llm.ClassOf(err), err)
+			}
 			return resp, err
 		}
 	}
@@ -351,16 +415,29 @@ func (p *Provider) Chat(ctx context.Context, req inference.Call) (inference.Resu
 	if class == llm.ErrQuota && p.onQuota != nil {
 		p.onQuota(ctx)
 	}
+	// The retry gate closed; name why for the failover/surface decision that
+	// follows (retry gate first, then the failover gate, when both closed).
+	// A retryable class here implies the one same-provider retry was already
+	// spent — an untried retryable failure returned early above.
+	retrySkip := ReasonRetryLimit
+	if !llm.Retryable(class) {
+		retrySkip = ReasonNonretryable
+	}
 	if p.backup == nil || !llm.Failoverable(class, err) {
-		p.emit(Event{Action: ActionSurface, Stage: "chat", Class: class,
-			From: p.eventFrom(err), Err: err})
+		skip := []string{retrySkip}
+		if p.backup == nil {
+			skip = append(skip, ReasonNoBackup)
+		} else {
+			skip = append(skip, ReasonNotFailoverable)
+		}
+		p.gateLogChat(ctx, req, strings.Join(skip, ","), class, err)
 		return inference.Result{}, err
 	}
 	if class == llm.ErrQuota {
 		p.markQuotaCooldown(err)
 	}
-	p.emit(Event{Action: ActionFailover, Stage: "chat", Class: class,
-		From: p.eventFrom(err), To: p.backup.Name(), Err: err})
+	p.emit((Event{Action: ActionFailover, Stage: "chat", Class: class,
+		Reason: retrySkip, From: p.eventFrom(err), To: p.backup.Name(), Err: err}).correlate(ctx, req))
 	r, e, _ := p.chatAuth(ctx, p.backup, p.backupRequest(req), false, attempts)
 	return r, e
 }
@@ -416,12 +493,51 @@ type reader struct {
 	framing []llm.StreamEvent
 
 	emitted       bool // content was delivered; recovery is off the table
+	emittedText   bool // a text delta was already delivered to the caller
+	emittedReason bool // a reasoning delta was already delivered to the caller
+	emittedTool   bool // a tool-call block was already delivered to the caller
+	// failureLogged guards the post-commit (stream_live) gate log: a failure
+	// on a committed stream is logged once, not once per remaining frame.
+	failureLogged bool
 	retried       bool // the one busy retry has been used
 	failedOver    bool // already on the backup; never cascade
 	authAttempts  map[string]bool
 	terminalErr   error
 	authFallback  bool
 	quotaObserved bool
+}
+
+// gateFields completes a retry-gate decision event for emission: the failed
+// request's identity plus the pre-content gate snapshot. Instrumentation
+// only — never message contents.
+func (r *reader) gateFields(ev Event) Event {
+	ev = ev.correlate(r.ctx, r.req)
+	ev.Emitted = r.emitted
+	ev.EmittedText = r.emittedText
+	ev.EmittedReasoning = r.emittedReason
+	ev.EmittedToolCall = r.emittedTool
+	return ev
+}
+
+// trackEmittedKind records WHICH kinds of content were already delivered —
+// booleans only, never the contents themselves.
+func (r *reader) trackEmittedKind(ev llm.StreamEvent) {
+	switch ev.Type {
+	case llm.EventTextDelta:
+		r.emittedText = true
+	case llm.EventReasoning:
+		r.emittedReason = true
+	case llm.EventToolUseStart:
+		r.emittedTool = true
+	}
+}
+
+// gateLog records a skipped recovery gate (or the committed-stream failure
+// gate) as a surface event with its precise reason. Log-only: it never
+// touches the retry/failover policy or the user-visible stream.
+func (r *reader) gateLog(stage, reason string, class llm.ErrorClass, err error) {
+	r.p.emit(r.gateFields(Event{Action: ActionSurface, Stage: stage, Class: class,
+		Reason: reason, From: r.p.eventFrom(err), Err: err}))
 }
 
 func (r *reader) Next() (llm.StreamEvent, bool, error) {
@@ -459,8 +575,26 @@ func (r *reader) Next() (llm.StreamEvent, bool, error) {
 			return llm.StreamEvent{}, false, r.failure(authErr)
 		}
 		if r.emitted || r.failedOver {
+			// Committed frames still count toward the emitted-kind record
+			// (only the first live event went through the switch below).
+			r.trackEmittedKind(ev)
 			if !r.failedOver {
 				r.observeQuota(authErr)
+			}
+			if authErr != nil && !r.failureLogged {
+				// stream_live gate: the stream already committed — content
+				// was delivered and/or the backup was already used — so no
+				// recovery step remains. Log the precise gates that closed;
+				// never the contents that were delivered. Log-only.
+				r.failureLogged = true
+				skip := make([]string, 0, 2)
+				if r.emitted {
+					skip = append(skip, ReasonContentEmitted)
+				}
+				if r.failedOver {
+					skip = append(skip, ReasonAlreadyFailedOver)
+				}
+				r.gateLog("stream_live", strings.Join(skip, ","), llm.ClassOf(authErr), authErr)
 			}
 			if r.authFallback {
 				if err != nil {
@@ -502,6 +636,7 @@ func (r *reader) Next() (llm.StreamEvent, bool, error) {
 			// First live event (or a clean immediate end): the stream is
 			// committed — deliver any held framing ahead of it, in order.
 			r.emitted = true
+			r.trackEmittedKind(ev)
 			if len(r.framing) > 0 {
 				if ok {
 					r.framing = append(r.framing, ev)
@@ -524,9 +659,12 @@ func (r *reader) observeQuota(err error) {
 
 // decide runs the per-class policy for a pre-content failure. It returns true
 // when it scheduled a recovery (notice queued + attempt set) and false when
-// the error must surface.
+// the error must surface. Every gate — open or closed — is recorded through
+// OnEvent with the exact reason it closed (instrumentation only; the policy
+// reads its own state).
 func (r *reader) decide(stage string, err error) bool {
 	if r.ctx.Err() != nil {
+		r.gateLog(stage, ReasonCancellation, llm.ClassOf(err), err)
 		return false
 	}
 	if r.inner != nil {
@@ -548,12 +686,14 @@ func (r *reader) decide(stage string, err error) bool {
 		choice, recoveryErr := requestAuth(r.ctx, err, fallback, !r.emitted, r.authAttempts)
 		if recoveryErr != nil {
 			r.terminalErr = recoveryErr
+			r.gateLog(stage, ReasonAuthRecoveryFailed, class, err)
 			return false
 		}
 		switch choice {
 		case llm.AuthLogin:
 			if r.emitted {
 				r.terminalErr = &llm.CredentialError{Class: llm.ErrCredential, Reason: "login completed; partial response requires an explicit fresh request"}
+				r.gateLog(stage, ReasonContentEmitted, class, err)
 				return false
 			}
 			r.attempt = r.open
@@ -568,18 +708,24 @@ func (r *reader) decide(stage string, err error) bool {
 				return true
 			}
 			r.terminalErr = &llm.AuthFallbackRequest{Cause: err}
+			reason := ReasonAuthFallbackBlocked
+			if r.failedOver {
+				reason = ReasonAlreadyFailedOver
+			}
+			r.gateLog(stage, reason, class, err)
 			return false
 		}
 		return false
 	}
 	if r.failedOver {
+		r.gateLog(stage, ReasonAlreadyFailedOver, class, err)
 		return false
 	}
 	if llm.Retryable(class) && !r.retried {
 		r.retried = true
 		ev := Event{Action: ActionRetry, Stage: stage, Class: class,
 			From: p.eventFrom(err), To: p.primary.Name(), Wait: p.waitFor(err), Err: err}
-		p.emit(ev)
+		p.emit(r.gateFields(ev))
 		r.queue = append(r.queue, llm.StreamEvent{Type: llm.EventNotice, Notice: ev.Notice()})
 		r.attempt = func() (llm.StreamReader, error) {
 			if !p.sleep(r.ctx, ev.Wait) {
@@ -589,22 +735,33 @@ func (r *reader) decide(stage string, err error) bool {
 		}
 		return true
 	}
+	// The retry gate closed; name why for the failover/surface decision that
+	// follows (retry gate first, then the failover gate, when both closed).
+	retrySkip := ReasonRetryLimit
+	if !llm.Retryable(class) {
+		retrySkip = ReasonNonretryable
+	}
 	if p.backup != nil && llm.Failoverable(class, err) && !r.failedOver {
 		r.failedOver = true
 		if class == llm.ErrQuota {
 			p.markQuotaCooldown(err)
 		}
 		ev := Event{Action: ActionFailover, Stage: stage, Class: class,
-			From: p.eventFrom(err), To: p.backup.Name(), Err: err}
-		p.emit(ev)
+			Reason: retrySkip, From: p.eventFrom(err), To: p.backup.Name(), Err: err}
+		p.emit(r.gateFields(ev))
 		r.queue = append(r.queue, llm.StreamEvent{Type: llm.EventNotice, Notice: ev.Notice()})
 		r.attempt = func() (llm.StreamReader, error) {
 			return p.backupStream(r.ctx, r.req)
 		}
 		return true
 	}
-	p.emit(Event{Action: ActionSurface, Stage: stage, Class: class,
-		From: p.eventFrom(err), Err: err})
+	skip := []string{retrySkip}
+	if p.backup == nil {
+		skip = append(skip, ReasonNoBackup)
+	} else {
+		skip = append(skip, ReasonNotFailoverable)
+	}
+	r.gateLog(stage, strings.Join(skip, ","), class, err)
 	return false
 }
 

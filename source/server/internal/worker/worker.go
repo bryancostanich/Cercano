@@ -750,7 +750,12 @@ func (r *workerResolver) SetProfileModelEvidence(func(pkgcfg.CloudProfile, strin
 
 func workerChainEvents(d pkgcfg.Destination) func(resilience.Event) {
 	return func(ev resilience.Event) {
-		log.Printf("[worker] %s resilience %s (%s, %s): %s: %v", d, ev.Action, ev.Stage, ev.Class, ev.Notice(), ev.Err)
+		// The worker child has no routing-log writer; the printf log is its
+		// existing decision-log mechanism. Reason/conversation identify the
+		// gate decision; emitted kinds stay out (booleans only, and the
+		// child's log line stays compact).
+		log.Printf("[worker] %s resilience %s (%s, %s) reason=%s conv=%s: %s: %v",
+			d, ev.Action, ev.Stage, ev.Class, ev.Reason, ev.ConversationID, ev.Notice(), ev.Err)
 	}
 }
 

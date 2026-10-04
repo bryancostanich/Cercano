@@ -423,9 +423,12 @@ func (c *Core) RunTurn(
 	// Once output or tool execution begins, replaying the whole turn is unsafe.
 	// Tool execution events may arrive from concurrent read-only tool workers.
 	var replayUnsafe atomic.Bool
+	var replayUnsafeText atomic.Bool // a visible token delta was already emitted
+	var replayUnsafeTool atomic.Bool // a tool already executed
 	onTextDelta := func(t string) {
 		if t != "" {
 			replayUnsafe.Store(true)
+			replayUnsafeText.Store(true)
 		}
 		sink.Emit(Event{Kind: EventToken, Text: t})
 	}
@@ -480,6 +483,7 @@ func (c *Core) RunTurn(
 	loopSink := func(event agent.LoopEvent) {
 		if event.Kind == agent.LoopToolExecStart {
 			replayUnsafe.Store(true)
+			replayUnsafeTool.Store(true)
 		}
 		forwardLoopEvent(event)
 	}
@@ -524,6 +528,36 @@ func (c *Core) RunTurn(
 		"output_tokens":   result.OutputTokens,
 	})
 
+	// 6.1. Whole-turn replay gate: a failed turn can only be re-served
+	// (same-provider retry below, or cross-tier fallback) before visible
+	// output or tool execution — re-running would duplicate tokens the user
+	// already saw and repeat side effects. When the gate is closed, record
+	// which side closed it. Instrumentation only: never the emitted text or
+	// the tool arguments themselves, and the retry policy is unchanged.
+	logReplayBlocked := func(attempt string) {
+		if loopErr == nil || !replayUnsafe.Load() {
+			return
+		}
+		blockedBy := make([]string, 0, 2)
+		if replayUnsafeText.Load() {
+			blockedBy = append(blockedBy, "visible_text")
+		}
+		if replayUnsafeTool.Load() {
+			blockedBy = append(blockedBy, "tool_execution")
+		}
+		c.logRoute("loop.replay_blocked", routinglog.Event{
+			"conversation_id": req.ConversationID,
+			"attempt":         attempt,
+			"provider":        providerName(provider),
+			"route_provider":  providerName(provider),
+			"model":           selectedModel,
+			"is_cloud":        isCloud,
+			"blocked_by":      strings.Join(blockedBy, ","),
+			"error_class":     errClassString(loopErr),
+		})
+	}
+	logReplayBlocked("primary")
+
 	// 6.5. Retry the whole turn only before visible output or tool execution.
 	// Unpersisted partial text can still be visible; tools can have external effects.
 	// llm.Retryable retains the existing failure classification policy.
@@ -558,6 +592,7 @@ func (c *Core) RunTurn(
 			"input_tokens":    result.InputTokens,
 			"output_tokens":   result.OutputTokens,
 		})
+		logReplayBlocked("same_provider_retry")
 	}
 
 	// 7. Cross-tier fallback: on error, attempt the other tier if locus allows.

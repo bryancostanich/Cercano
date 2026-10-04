@@ -1,3 +1,5 @@
+//go:build darwin || linux
+
 package enterprise
 
 import (
@@ -22,7 +24,7 @@ func LockConnection(path string) (func(), error) {
 	}
 	if err = unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
 		f.Close()
-		return nil, errors.New("another Cercano enterprise command is running")
+		return nil, errors.New("another Cercano host owns the enterprise connection")
 	}
 	var once sync.Once
 	return func() { once.Do(func() { _ = f.Close() }) }, nil

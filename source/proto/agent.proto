@@ -2389,3 +2389,31 @@ message GetTokenMetricsResponse {
   bool breakdowns_truncated = 11;
   string generated_at = 12;
 }
+
+// Enterprise controls belong to the running host. They never expose credentials
+// to a client or worker. This service is available only over a local connection.
+service Enterprise {
+  rpc Login(EnterpriseLoginRequest) returns (EnterpriseStatus);
+  rpc GetStatus(EnterpriseControlRequest) returns (EnterpriseStatus);
+  rpc Synchronize(EnterpriseControlRequest) returns (EnterpriseStatus);
+  rpc Logout(EnterpriseControlRequest) returns (EnterpriseStatus);
+  rpc UseStandalone(EnterpriseControlRequest) returns (EnterpriseStatus);
+}
+message EnterpriseLoginRequest {
+  string server = 1;
+  string organization_id = 2;
+}
+message EnterpriseControlRequest {}
+message EnterpriseStatus {
+  bool managed = 1;
+  bool enforcement_active = 2;
+  bool connected = 3;
+  bool usable = 4;
+  string organization_id = 5;
+  string host_id = 6;
+  int64 revision = 7;
+  string valid_until = 8;
+  string error = 9;
+  bool changing = 10;
+}
+

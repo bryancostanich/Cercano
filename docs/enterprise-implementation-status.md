@@ -17,32 +17,33 @@ Keychain, verifies signed policies and complete skill bundles, and handles
 revocation, lease expiry, restart and logout. Contract PR 38 and connection
 preview PR 39 remain open for Bryan.
 
-The next client increment adds physical-request authorization to model adapters
-and direct engines, plus a managed worker protocol that asks the host before
-every attempt. See [runtime enforcement](enterprise-runtime-enforcement.md) for
-its coverage and limits. This boundary is not yet installed by the host's
-enterprise lifecycle, so login still reports enforcement as inactive.
+[PR 40](https://github.com/bryancostanich/Cercano/pull/40) adds physical-request
+authorization to model adapters and direct engines, plus a managed worker protocol
+that asks the host before every attempt. See [runtime enforcement](enterprise-runtime-enforcement.md).
+
+The host integration now installs that boundary at startup, owns background
+synchronization and the credential lock, and exposes login, status, sync, logout
+and explicit standalone selection through local RPC. A durable profile blocks
+work after credential loss or logout. Each user inference request pins a verified
+bundle. Warm workers are replaced when the profile changes between managed and
+standalone execution. The implementation still needs managed defaults, skill discovery, and the full
+administration-to-developer demonstration below.
 
 ## Remaining work, in order
 
-1. **Connect enterprise sign-in to the running host.** The host must own the
-   connection, credential lock and background refresh for its lifetime. Route
-   login, status, synchronization and logout through that owner. A saved managed
-   profile must remain blocked when verification fails or credentials disappear;
-   it must never silently become standalone.
-2. **Apply managed defaults and shared skills.** Pin a complete bundle for each
+1. **Apply managed defaults and shared skills.** Pin a complete bundle for each
    turn, use its approved defaults and ordered fallbacks, and expose namespaced
    skill IDs with source and version. Apply the latest restrictions before each
    physical call. Keep administrator settings separate from personal settings.
-3. **Finish the administration interface.** Provide People & teams, Model policy,
+2. **Finish the administration interface.** Provide People & teams, Model policy,
    Shared skills, Devices & sync, and Audit. Make publication, affected teams,
    version rollback, and synchronization status understandable. Add any missing
    service endpoints needed for those flows.
-4. **Demonstrate the complete workflow locally.** Use two disposable customer
+3. **Demonstrate the complete workflow locally.** Use two disposable customer
    organizations. Demonstrate allowed and blocked calls, forbidden fallback,
    policy and skill updates, rollback, outage and expiry, reconnect, membership
    deactivation, and customer separation. Capture administration screenshots.
-5. **Finish operational documentation and acceptance checks.** Document setup,
+4. **Finish operational documentation and acceptance checks.** Document setup,
    migrations, backup and restore, signing-key rotation, health checks, request
    limits, audit retention and log privacy. Run the relevant tests and CI and
    distinguish local evidence from checks needing live Google or Keychain access.

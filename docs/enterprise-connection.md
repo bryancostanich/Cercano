@@ -1,117 +1,128 @@
-# Enterprise connection preview
+# Using an enterprise account
 
-The macOS CLI can sign into a Cercano Enterprise account, enroll this client,
-and download a verified policy and its assigned skills. Credentials are kept in
-a separate macOS Keychain service called `cercano-enterprise`. Provider API keys
-stay in their existing store.
+Enterprise commands now control the running Cercano host. The host owns sign-in,
+Keychain credentials, policy refresh and model authorization. The command-line
+client does not hold a second copy of the connection or rotate its credentials.
 
-**This is a connection preview. It does not enforce model restrictions or install
-skills into the running agent.** The commands print `enforcement_active: false`.
-Normal Cercano inference behavior is unchanged. Runtime enforcement and the
-managed-profile interface are the next implementation steps.
+This increment activates **model restrictions**. Applying administrator routing
+defaults and exposing shared skills to the agent remain the next steps. Downloaded
+skills are verified and pinned with the policy, but are not yet installed in the
+agent's skill catalog. See the [implementation status](enterprise-implementation-status.md).
 
-## Try the preview
+## Start and connect the host
 
-Your administrator must provide a trusted HTTPS service origin and organization
-UUID. First accept your organization's invitation in the browser. The service
-must have Google OAuth and policy signing configured and a policy published.
+The V1 account-management pilot supports macOS. Your administrator provides a
+trusted HTTPS service origin and organization UUID. Accept the organization's
+invitation in the browser before connecting Cercano. The service needs Google
+OAuth, a signing key and a published policy.
 
-Use a build with a numeric release version that satisfies the policy's minimum
-client version. For a local development check, set it explicitly:
+Use a build with a numeric version accepted by the policy. For local development:
 
 ```sh
 cd source/server
 go build -ldflags '-X main.version=1.0.0' -o bin/cercano ./cmd/cercano
-bin/cercano enterprise login --server https://enterprise.example --organization YOUR_ORGANIZATION_UUID
+bin/cercano agent
 ```
 
-Replace the example origin and organization UUID with your administrator's
-values. The ordinary `dev` version intentionally does not satisfy a published
-minimum version. No development option bypasses signature or policy validation.
-
-Login opens the system browser. Once Google verifies your account, the browser
-returns a short-lived code to a temporary loopback listener. The client exchanges
-that code over HTTPS using PKCE, enrolls its host and saves its credentials in
-Keychain. The callback never carries an access or refresh credential.
-
-The login command then fetches the policy and skills. If synchronization fails
-after login, the connection may already be saved; run `status` and then `sync`
-when the server is available. A successful connection is not evidence that
-runtime model enforcement is active.
+In another terminal, using the same build:
 
 ```sh
+bin/cercano enterprise login --server https://enterprise.example --organization YOUR_ORGANIZATION_UUID
 bin/cercano enterprise status
+```
+
+Replace the example origin and organization UUID with the administrator's values.
+For a non-default local host, append `--address 127.0.0.1:PORT` to each enterprise
+command. Commands do not start or upgrade a host automatically. An older host
+returns an update-required error instead of creating an unenforced connection.
+The ordinary `dev` version does not satisfy a numeric minimum version.
+
+Login opens the system browser from the host. Google sign-in returns a one-use
+code to a temporary loopback listener. The host exchanges it using PKCE, enrolls
+this device, saves credentials in the separate `cercano-enterprise` Keychain
+service, and verifies the policy and skills. Provider API keys remain in their
+existing store.
+
+## Understand status and synchronization
+
+`status` reports the running host's state:
+
+- `managed` means the host is using an enterprise profile.
+- `enforcement_active` means the model-request gate is installed for that profile.
+  It remains active when work is blocked.
+- `connected` means the host has saved connection credentials.
+- `usable` means a verified policy is currently within its authorization lease.
+- `revision` and `valid_until` identify the accepted policy and its deadline.
+- `changing` means a connection change, such as browser sign-in, is in progress.
+
+The host refreshes about once a minute, with bounded backoff after failures. To
+request synchronization immediately:
+
+```sh
 bin/cercano enterprise sync
+```
+
+For an account saved by the earlier connection preview, `sync` explicitly
+activates that account in the running host. A synchronization error can leave the
+host managed and blocked; use `status` to inspect it and retry when service or
+Keychain access is restored.
+
+A temporary outage retains an already verified bundle only until its original
+lease deadline. A denial or failed verification blocks work immediately. A
+restart always requires fresh online verification; the disk cache cannot grant
+permission to run work. A restriction published during a turn applies before
+the next physical model request, including a retry or fallback.
+
+## Sign out or return to personal settings
+
+```sh
 bin/cercano enterprise logout
 ```
 
-`status` reports whether credentials are saved. `sync` performs a fresh online
-verification and reports the accepted revision and lease expiry. Each command
-runs in a new process, so a later `status` reports `usable: false` until that
-process verifies a bundle online. The preview does not read a disk cache as
-permission to run work. The `usable` field refers only to the verified bundle
-inside the current process, not to the running agent's enforcement status.
+Logout removes local credentials and attempts server revocation. It leaves the
+host in a managed, blocked state, including after restart. If remote revocation
+fails, the command reports that failure even when local removal succeeded. A
+locked Keychain must be unlocked before removal can complete.
 
-Only one enterprise connection is saved per local OS account. Log out before
-signing into another organization. Concurrent enterprise commands are rejected
-to prevent credential rotation and connection changes from racing. A new login
-after logout enrolls a new host; host-list cleanup is not part of this preview.
+To deliberately return to personal settings after logout:
 
-Logout blocks local use, attempts server revocation, and removes saved
-credentials and the cache. If the server cannot be reached, local credentials
-are still removed and the command reports the failed remote revocation. A
-locked Keychain can prevent removal; unlock it and retry.
+```sh
+bin/cercano enterprise standalone
+```
 
-## What synchronization verifies
+This is a separate, explicit mode change. It is rejected while credentials remain
+connected or work is active. Login and logout also require active work to finish.
+Personal model settings are preserved. A new login after logout enrolls a new
+host record.
 
-The client obtains Ed25519 public keys from the configured HTTPS origin. It
-rejects redirects, invalid signatures, unknown policy schemas, wrong customer,
-member or host scope, expired policies, older revisions and unsupported minimum
-client versions. The service origin is the trust anchor; the client does not
-accept a key URL supplied by a policy.
+## One connection owner
 
-Every assigned skill must match the ID, version, byte count and SHA-256 digest
-in the signed policy. The client accepts the new bundle only after every download
-has passed validation, a complete cache file has been written atomically, and
-the highest accepted revision has been saved in Keychain. An incomplete download
-cannot mix a new policy with old skills.
+The host holds the enterprise connection lock for its lifetime. Another process
+cannot rotate the same refresh credential or clear its managed profile. A host
+that was already running standalone notices another host's activation and blocks
+its own model requests rather than silently bypassing that profile.
 
-The cache is `~/.cercano/enterprise/active-bundle.json`, written with owner-only
-file permissions. It contains policy and skill content, not credentials. It is
-never treated as trusted authorization after a restart. Restarting requires
-online revalidation, even if the previous lease would otherwise still be valid.
+Use the normal host connection for managed MCP access. An independently embedded
+MCP host cannot become a second enterprise connection owner. Its model requests
+remain blocked while the main host owns the connection. Restart a secondary host
+or explicitly select standalone there after the owner has logged out and released
+the connection.
 
-In a long-running Manager, a temporary network outage retains an already
-verified bundle only until its original deadline. Authorization denials and
-verification failures block it immediately. The library supports background
-refresh about once a minute, with bounded backoff, but these preview commands
-do not start a background service or attach the Manager to the normal host.
+## Verification and local state
 
-Once a bundle has been accepted, the client reports its revision and exact skill
-manifest to the service. That report means the bundle was verified and accepted;
-it does not assert that model enforcement is active. A publication race can
-reject the report; another sync obtains the latest policy.
+The trusted service origin supplies Ed25519 verification keys. The host rejects
+redirects, bad signatures, unknown policy schemas, wrong organization/member/host
+scope, older revisions, expired policies and unsupported client versions. Every
+skill must match the signed ID, version, length and SHA-256 digest. The bundle is
+accepted only after all downloads and persistence succeed.
 
-## Remaining integration work
+`~/.cercano/enterprise/active-bundle.json` stores policy and skill content with
+owner-only permissions. It contains no credentials and is not trusted after a
+restart. The `managed` marker in that directory preserves the mode even when
+Keychain credentials disappear. Only an explicit standalone command clears it.
 
-The [runtime authorization boundary](enterprise-runtime-enforcement.md) now covers
-model transports and managed worker requests, but is not yet installed by the
-host. The host still needs to own this connection for its lifetime, expose connection
-status through its normal interfaces, and apply policy before every inference
-attempt, including retries and fallbacks. Turn execution must use a consistent
-skill snapshot while also checking the latest model restrictions. Local managed
-profile settings must not override administrator restrictions.
-
-The library already offers `Begin` to hold a turn's bundle, `Current` to obtain
-currently valid policy, and `Run` for periodic refresh. A future host integration
-must hold the connection lock for the host's lifetime and route connection
-changes through that owner. These APIs alone do not provide model enforcement.
-
-## Validation
-
-The tests use a local HTTPS server, real signatures, and an in-memory credential
-store. They exercise PKCE, incorrect scope and signatures, interrupted skill
-downloads, credential persistence failure, revision rollback, lease expiry,
-restart behavior, logout, redirects and concurrent connection ownership. Tests
-do not write to your Keychain or sign into a real Google Workspace organization.
-A live Google and Keychain acceptance check remains outstanding.
+Tests use disposable TLS servers, real signatures, an in-memory credential store
+and local gRPC. They cover browser callback and PKCE exchange, policy enforcement,
+updates, logout, restart, credential loss, lock ownership and explicit standalone
+mode. They do not sign into a real Google organization or modify your Keychain.
+Live Google and Keychain acceptance testing remains outstanding.

@@ -32,6 +32,7 @@ import (
 	"syscall"
 	"time"
 
+	"cercano/source/server/internal/modelpolicy"
 	"google.golang.org/grpc/connectivity"
 )
 
@@ -42,8 +43,9 @@ type spawnFunc func(ctx context.Context, convID string, gen uint64) (*workerHand
 
 // pooledEntry is one conversation's cached worker.
 type pooledEntry struct {
-	handle *workerHandle
-	inUse  bool
+	managed bool
+	handle  *workerHandle
+	inUse   bool
 	// lastUsed records when this worker was last active for its conversation —
 	// set on spawn/Acquire (a turn starts) and on Release (a turn ends and the
 	// worker returns warm). The idle-reaper compares now()-lastUsed against the
@@ -87,12 +89,13 @@ func newWorkerPool(spawn spawnFunc) *workerPool {
 // spawning a fresh one. The returned handle is marked in-use; the caller MUST
 // call Release(convID, ...) when the turn ends.
 func (p *workerPool) Acquire(ctx context.Context, convID string, gen uint64) (*workerHandle, error) {
+	managed := modelpolicy.Managed(ctx)
 	p.mu.Lock()
 	if e, ok := p.byConv[convID]; ok {
 		// A cached entry exists. Reuse it only if it's healthy and not already
 		// held by a concurrent turn (shouldn't happen under turn-exclusivity,
 		// but guard it anyway).
-		if !e.inUse && workerHealthy(e.handle) {
+		if !e.inUse && e.managed == managed && workerHealthy(e.handle) {
 			e.inUse = true
 			e.lastUsed = p.now() // reuse bumps the idle clock.
 			h := e.handle
@@ -105,7 +108,12 @@ func (p *workerPool) Acquire(ctx context.Context, convID string, gen uint64) (*w
 		if !e.inUse {
 			delete(p.byConv, convID)
 			stale := e.handle
+			beforeKill := p.beforeIdleKill
+			modeChanged := e.managed != managed
 			p.mu.Unlock()
+			if modeChanged && beforeKill != nil {
+				beforeKill(stale)
+			}
 			stale.Kill()
 			p.mu.Lock()
 		}
@@ -126,7 +134,7 @@ func (p *workerPool) Acquire(ctx context.Context, convID string, gen uint64) (*w
 	// can race the old (superseded) turn's Release. Resolve this DETERMINISTICALLY
 	// and BOUNDED — no recursion, no spin, no process thrash:
 	if e, ok := p.byConv[convID]; ok && e.handle != nil {
-		if !e.inUse && workerHealthy(e.handle) {
+		if !e.inUse && e.managed == managed && workerHealthy(e.handle) {
 			// A reusable warm entry raced in. Prefer it and discard our spawn
 			// (bounded: exactly one extra spawn+kill, no loop).
 			e.inUse = true
@@ -136,19 +144,20 @@ func (p *workerPool) Acquire(ctx context.Context, convID string, gen uint64) (*w
 			h.Kill()
 			return reuse, nil
 		}
-		// The racing entry is in-use (the old superseded turn still holds it) or
-		// unhealthy. Do NOT kill it blindly (its owner will Release it, and our
-		// Release-by-handle guard makes that a no-op once we replace the entry)
-		// and do NOT spin. REPLACE the entry with OUR fresh worker; the displaced
-		// handle is now unreferenced by the pool, so the stale turn's
-		// Release(convID, displaced, …) will compare-and-find-mismatch → no-op,
-		// and that turn's own cleanup path Kills its handle. Our fresh worker is
-		// the pool's live entry for the next turn.
-		p.byConv[convID] = &pooledEntry{handle: h, inUse: true, lastUsed: p.now()}
+		// An active displaced turn releases its own handle. An idle entry has no
+		// remaining owner, so a mode mismatch or unhealthy entry must be killed here.
+		p.byConv[convID] = &pooledEntry{handle: h, inUse: true, managed: managed, lastUsed: p.now()}
+		stale, inUse, modeChanged, beforeKill := e.handle, e.inUse, e.managed != managed, p.beforeIdleKill
 		p.mu.Unlock()
+		if !inUse {
+			if modeChanged && beforeKill != nil {
+				beforeKill(stale)
+			}
+			stale.Kill()
+		}
 		return h, nil
 	}
-	p.byConv[convID] = &pooledEntry{handle: h, inUse: true, lastUsed: p.now()}
+	p.byConv[convID] = &pooledEntry{handle: h, inUse: true, managed: managed, lastUsed: p.now()}
 	p.mu.Unlock()
 	return h, nil
 }

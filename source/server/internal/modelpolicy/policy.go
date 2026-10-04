@@ -62,7 +62,9 @@ func WithAuthority(ctx context.Context, a Authority) context.Context {
 }
 func authority(ctx context.Context) (Authority, bool) {
 	if p := process.Load(); p != nil {
-		return p.authority, true
+		if state, ok := p.authority.(interface{ PolicyManaged() bool }); !ok || state.PolicyManaged() {
+			return p.authority, true
+		}
 	}
 	if p, ok := ctx.Value(authorityKey{}).(*authoritySlot); ok {
 		return p.authority, true

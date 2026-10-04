@@ -48,6 +48,7 @@ import (
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/modelmetadata"
+	"cercano/source/server/internal/modelpolicy"
 	"cercano/source/server/internal/runner"
 	"cercano/source/server/internal/usage"
 	pkgcfg "cercano/source/server/pkg/config"
@@ -532,6 +533,7 @@ func (w *workerRunner) RunTurn(
 
 	// ── 3. Build ConfigSnapshot + permission mode ──────────────────────────
 	cfg := w.cfg.Get()
+	managed := modelpolicy.Managed(ctx)
 	needsAuthProtocol := req.AuthRecovery != nil
 	for _, profile := range cfg.CloudProfiles {
 		if (profile.Name == cfg.ActiveCloudProfile || profile.Name == cfg.BackupCloudProfile) && cloudfactory.IsSubscription(profile) {
@@ -564,18 +566,19 @@ func (w *workerRunner) RunTurn(
 	}
 
 	startTurn := &proto.StartTurn{
-		ConversationId: req.ConversationID,
-		Input:          req.Input,
-		Images:         protoImages,
-		WorkDir:        req.WorkDir,
-		DebugMode:      req.DebugMode,
-		Gen:            req.Gen,
-		Config:         snap,
-		History:        historyProto,
-		ProjectContext: projectCtx,
-		PermissionMode: permMode,
-		McpTools:       w.advertiseMCPTools(),
-		McpAllow:       w.mcpAllowPatterns(),
+		EnterpriseManaged: managed,
+		ConversationId:    req.ConversationID,
+		Input:             req.Input,
+		Images:            protoImages,
+		WorkDir:           req.WorkDir,
+		DebugMode:         req.DebugMode,
+		Gen:               req.Gen,
+		Config:            snap,
+		History:           historyProto,
+		ProjectContext:    projectCtx,
+		PermissionMode:    permMode,
+		McpTools:          w.advertiseMCPTools(),
+		McpAllow:          w.mcpAllowPatterns(),
 	}
 
 	// ── 5. Acquire a warm worker (pool) or use injected dial ──────────────
@@ -640,7 +643,9 @@ func (w *workerRunner) RunTurn(
 	client := proto.NewWorkerClient(conn)
 	var err error
 	var stream proto.Worker_RunTurnClient
-	if needsAuthProtocol {
+	if managed {
+		stream, err = client.RunManagedTurn(ctx)
+	} else if needsAuthProtocol {
 		stream, err = client.RunTurnWithAuthentication(ctx)
 	} else {
 		stream, err = client.RunTurn(ctx)
@@ -692,6 +697,9 @@ func (w *workerRunner) RunTurn(
 				turnHealthy = true
 				return result, nil
 			}
+			if managed && status.Code(recvErr) == codes.Unimplemented {
+				return runner.Result{}, status.Error(codes.FailedPrecondition, "worker does not support enterprise policy enforcement; update the worker")
+			}
 			if needsAuthProtocol && status.Code(recvErr) == codes.Unimplemented {
 				return runner.Result{}, status.Error(codes.FailedPrecondition, "worker does not support authentication recovery; update the worker")
 			}
@@ -704,6 +712,14 @@ func (w *workerRunner) RunTurn(
 		}
 
 		switch m := msg.Msg.(type) {
+		case *proto.WorkerToHost_ModelAuthorizationRequest:
+			request := m.ModelAuthorizationRequest
+			attempt := modelpolicy.Attempt{Provider: request.GetProvider(), Endpoint: request.GetEndpoint(), Model: request.GetModel(), Placement: request.GetPlacement()}
+			// Re-read the host authority for every attempt, including SDK retries.
+			allowed := managed && modelpolicy.Managed(ctx) && modelpolicy.Check(ctx, attempt) == nil
+			if err := safeSend(&proto.HostToWorker{Msg: &proto.HostToWorker_ModelAuthorizationResponse{ModelAuthorizationResponse: &proto.WorkerModelAuthorizationResponse{Id: request.GetId(), Allowed: allowed}}}); err != nil {
+				return runner.Result{}, fmt.Errorf("workerRunner: send model authorization: %w", err)
+			}
 		case *proto.WorkerToHost_Event:
 			// Forward to the host's event sink.
 			if sink != nil && m.Event != nil {
@@ -925,6 +941,9 @@ func (w *workerRunner) RunTurn(
 			turnDone = true
 
 		case *proto.WorkerToHost_Error:
+			if m.Error.GetEnterprisePolicyDenied() {
+				return runner.Result{}, modelpolicy.Deny(modelpolicy.Attempt{}, "worker did not authorize this model request")
+			}
 			msg := "worker turn error"
 			if m.Error != nil {
 				msg = m.Error.GetMessage()
@@ -1074,7 +1093,7 @@ func (w *workerRunner) serveOpenInference(ctx context.Context, req *proto.OpenIn
 		}
 	}
 	fail := func(err error) {
-		emit(&proto.OpenInferenceEvent{Kind: &proto.OpenInferenceEvent_Error{Error: err.Error()}})
+		emit(&proto.OpenInferenceEvent{EnterprisePolicyDenied: modelpolicy.IsDenial(err), Kind: &proto.OpenInferenceEvent_Error{Error: err.Error()}})
 	}
 
 	if w.openProvider == nil {

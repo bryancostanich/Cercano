@@ -8,6 +8,7 @@ import (
 
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
+	"cercano/source/server/internal/modelpolicy"
 	proto "cercano/source/server/pkg/proto"
 )
 
@@ -100,6 +101,10 @@ func (p *streamOpenProvider) deliver(ev *proto.OpenInferenceEvent) {
 	case *proto.OpenInferenceEvent_Event:
 		r.push(UnmarshalStreamEvent(ev.GetEvent()))
 	case *proto.OpenInferenceEvent_Error:
+		if ev.GetEnterprisePolicyDenied() {
+			r.finish(modelpolicy.Deny(modelpolicy.Attempt{}, "host did not authorize this model request"))
+			return
+		}
 		r.finish(fmt.Errorf("%s", ev.GetError()))
 	case *proto.OpenInferenceEvent_Done:
 		r.finish(nil)

@@ -28,6 +28,7 @@ import (
 	ollamallm "cercano/source/server/internal/llm/ollama"
 	"cercano/source/server/internal/locus"
 	"cercano/source/server/internal/modelmetadata"
+	"cercano/source/server/internal/modelpolicy"
 	"cercano/source/server/internal/ollamacatalog"
 	"cercano/source/server/internal/routinglog"
 	"cercano/source/server/internal/runner"
@@ -45,6 +46,9 @@ import (
 
 // WorkerServer implements the gRPC Worker service (worker-side).
 type WorkerServer struct {
+	managed             atomic.Bool
+	processGuard        bool
+	guardOnce           sync.Once
 	accountingCollector *telemetry.AccountingCollector
 	accountingClosing   bool
 	accountingTurns     map[string]context.CancelFunc
@@ -66,8 +70,9 @@ type WorkerServer struct {
 	toolsFactory func(*proto.StartTurn) (runner.ToolSvc, error)
 }
 
-// New creates a WorkerServer for production use.
-func New() *WorkerServer { return &WorkerServer{} }
+// New creates the server for a dedicated worker process. Its first managed turn
+// also installs a process guard, so losing turn context cannot bypass policy.
+func New() *WorkerServer { return &WorkerServer{processGuard: true} }
 
 // NewWithFactories creates a WorkerServer with injected factories for testing.
 func NewWithFactories(
@@ -79,9 +84,9 @@ func NewWithFactories(
 
 // RunTurn is the bidi RPC handler.
 func (w *WorkerServer) RunTurn(stream proto.Worker_RunTurnServer) error {
-	return w.runTurn(stream, false)
+	return w.runTurn(stream, false, false)
 }
-func (w *WorkerServer) runTurn(stream proto.Worker_RunTurnServer, authRecovery bool) error {
+func (w *WorkerServer) runTurn(stream proto.Worker_RunTurnServer, authRecovery, managed bool) error {
 	// First message must be StartTurn.
 	firstMsg, err := stream.Recv()
 	if err != nil {
@@ -90,6 +95,18 @@ func (w *WorkerServer) runTurn(stream proto.Worker_RunTurnServer, authRecovery b
 	start := firstMsg.GetStart()
 	if start == nil {
 		return status.Errorf(codes.InvalidArgument, "worker: first message must be StartTurn")
+	}
+
+	if start.GetEnterpriseManaged() != managed {
+		return status.Error(codes.FailedPrecondition, "managed turn requires the enterprise worker protocol")
+	}
+	if managed {
+		w.managed.Store(true)
+		if w.processGuard {
+			w.guardOnce.Do(func() { modelpolicy.InstallWorkerGuard() })
+		}
+	} else if w.managed.Load() {
+		return status.Error(codes.FailedPrecondition, "managed worker cannot switch to standalone execution")
 	}
 
 	// Build execution context: cancel when host sends Cancel.
@@ -134,6 +151,10 @@ func (w *WorkerServer) runTurn(stream proto.Worker_RunTurnServer, authRecovery b
 	profileCtl := newStreamSessionProfileController(sndr, start.GetConversationId())
 	authRequest := newStreamAuthentication(sndr)
 	runtimeControl := newStreamRuntimeControl(sndr)
+	modelAuthority := newStreamModelAuthority(sndr)
+	if managed {
+		ctx = modelpolicy.WithAuthority(ctx, modelAuthority)
+	}
 
 	// Autonomy ledger proxy: autonomous-mode session-control capabilities
 	// (suggest_autonomous / request_autonomous_execution, capture_decision,
@@ -159,6 +180,9 @@ func (w *WorkerServer) runTurn(stream proto.Worker_RunTurnServer, authRecovery b
 	recvDone := make(chan struct{})
 	go func() {
 		defer close(recvDone)
+		if managed {
+			defer cancel() // no host replies can arrive after its send stream closes
+		}
 		for {
 			msg, err := stream.Recv()
 			if err != nil {
@@ -194,6 +218,8 @@ func (w *WorkerServer) runTurn(stream proto.Worker_RunTurnServer, authRecovery b
 					}
 					store.ApplyRuntimeUpdate(m, u.GetMcpAllow())
 				}
+			case msg.GetModelAuthorizationResponse() != nil:
+				modelAuthority.deliver(msg.GetModelAuthorizationResponse())
 			case msg.GetAuthResponse() != nil:
 				authRequest.deliver(msg.GetAuthResponse())
 			case msg.GetPermResponse() != nil:
@@ -306,7 +332,8 @@ func (w *WorkerServer) runTurn(stream proto.Worker_RunTurnServer, authRecovery b
 	// Send final outcome directly on stream (sender goroutine is gone).
 	if runErr != nil {
 		_ = stream.Send(&proto.WorkerToHost{Msg: &proto.WorkerToHost_Error{Error: &proto.TurnError{
-			Message: runErr.Error(),
+			Message:                runErr.Error(),
+			EnterprisePolicyDenied: modelpolicy.IsDenial(runErr),
 		}}})
 		return nil
 	}

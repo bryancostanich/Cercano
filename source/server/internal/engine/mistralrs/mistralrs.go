@@ -14,6 +14,7 @@ import (
 
 	"cercano/source/server/internal/engine"
 	"cercano/source/server/internal/localruntime"
+	"cercano/source/server/internal/modelpolicy"
 )
 
 const runtimeName = "mistralrs"
@@ -153,7 +154,9 @@ func (e *Engine) chat(ctx context.Context, model string, messages []openAIMessag
 	if stream {
 		req.Header.Set("Accept", "text/event-stream")
 	}
-	resp, err := e.httpClient().Do(req)
+	resp, err := modelpolicy.Client(e.httpClient(), "mistralrs", "local", modelpolicy.OpenAI, func(ctx context.Context, endpoint, wireModel string) (string, error) {
+		return localruntime.ModelAtEndpoint(ctx, e.Manager, runtimeName, endpoint)
+	}).Do(req)
 	if err != nil {
 		return chatResult{}, err
 	}

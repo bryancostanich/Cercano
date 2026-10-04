@@ -10,6 +10,7 @@ import (
 
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
+	"cercano/source/server/internal/modelpolicy"
 	"cercano/source/server/internal/usage"
 )
 
@@ -28,7 +29,7 @@ type ChatResponse = llm.ChatResponse
 
 func NewClient(cfg Config) *Client {
 	u, _ := url.Parse(cfg.BaseURL)
-	cli := api.NewClient(u, http.DefaultClient)
+	cli := api.NewClient(u, modelpolicy.Client(http.DefaultClient, "ollama", modelpolicy.Placement(u), modelpolicy.Ollama))
 	return &Client{cfg: cfg, api: cli}
 }
 

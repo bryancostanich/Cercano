@@ -20,6 +20,7 @@ import (
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/locus"
+	"cercano/source/server/internal/managedrouting"
 	"cercano/source/server/internal/managedsettings"
 	"cercano/source/server/internal/modelwindow"
 	"cercano/source/server/internal/protocols"
@@ -274,7 +275,20 @@ func (c *Core) RunTurn(
 	}
 
 	// 1. Resolve the provider per the active Locus Mode.
-	provider, isCloud, fellBack, err := c.d.Providers.Main()
+	candidates := c.d.Providers.Candidates()
+	ctx = managedrouting.PinCandidates(ctx, candidates)
+	selected, managedAssignment, managedModel, managed, err := managedrouting.Select(ctx, config.TaskChat, candidates, managedrouting.Request{})
+	var provider inference.Provider
+	var isCloud, fellBack bool
+	if managed {
+		provider, isCloud, fellBack = selected.Provider, selected.IsCloud, selected.FellBack
+		assignment = managedAssignment
+		if err == nil && candidates.WrapManagedMain != nil {
+			provider = candidates.WrapManagedMain(provider, isCloud)
+		}
+	} else {
+		provider, isCloud, fellBack, err = c.d.Providers.Main()
+	}
 	if err != nil {
 		c.logRoute("turn.select_error", routinglog.Event{
 			"conversation_id": req.ConversationID,
@@ -286,6 +300,9 @@ func (c *Core) RunTurn(
 			"error_class":     errClassString(err),
 			"message":         failurelog.SanitizeMessage(errorString(err)),
 		})
+		if managed {
+			return Result{}, err
+		}
 		// *_only mode with its required tier unavailable — return a synthetic
 		// result so the host can send a terminal FinalResponse.
 		return Result{FinalText: "Locus: " + err.Error()}, nil
@@ -293,7 +310,10 @@ func (c *Core) RunTurn(
 	if chosen, ok := inference.TaskAssignmentFor(provider, config.TaskChat); ok {
 		assignment = chosen
 	}
-	selectedModel := c.d.Providers.MainModel(isCloud)
+	selectedModel := managedModel
+	if !managed {
+		selectedModel = c.d.Providers.MainModel(isCloud)
+	}
 	if bound, ok := inference.TaskModelFor(provider); ok {
 		selectedModel = bound
 	}
@@ -348,7 +368,7 @@ func (c *Core) RunTurn(
 	if effective, ok := inference.TaskDestination(provider); ok {
 		destination = effective
 	}
-	if destination != config.DestinationPrimary {
+	if managed || destination != config.DestinationPrimary {
 		fbProv = nil
 	}
 	fallbackModel := c.d.Providers.MainModel(fbCloud)
@@ -639,6 +659,9 @@ func (c *Core) RunTurn(
 	reportedProvider := provider.Name()
 	if result.Route != nil {
 		reportedProvider = result.Route.Provider
+		if managed && result.Route.Destination != "" {
+			isCloud = result.Route.Destination != "local"
+		}
 	}
 	return Result{
 		FinalText:    result.FinalText,

@@ -190,3 +190,37 @@ func TestWrapRecordsStreamDuration(t *testing.T) {
 		t.Fatalf("DurationMs = %d, want >= 10 for a 15ms stream", got[0].DurationMs)
 	}
 }
+
+func TestUsageTracksPhysicalFallbackPlacement(t *testing.T) {
+	for _, destination := range []string{"local", "primary"} {
+		route := &llm.ServingRoute{Provider: "fallback", Model: "approved", Destination: destination}
+		inner := fakeProvider{resp: llm.ChatResponse{Route: route}, stream: []llm.StreamEvent{{Type: llm.EventMessageStart, Route: route}, {Type: llm.EventMessageStop}}}
+		var got []Usage
+		p := Wrap(inner, "main", destination == "local", func(u Usage) { got = append(got, u) })
+		if _, err := p.Chat(t.Context(), llm.ChatRequest{}); err != nil {
+			t.Fatal(err)
+		}
+		stream, err := p.StreamChat(t.Context(), llm.ChatRequest{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for {
+			_, ok, err := stream.Next()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !ok {
+				break
+			}
+		}
+		stream.Close()
+		if len(got) != 2 {
+			t.Fatalf("usage=%+v", got)
+		}
+		for _, u := range got {
+			if u.IsCloud != (destination != "local") || u.Model != "approved" || u.Provider != "fallback" {
+				t.Fatalf("incorrect fallback attribution: %+v", u)
+			}
+		}
+	}
+}

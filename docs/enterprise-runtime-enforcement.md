@@ -4,7 +4,8 @@ The running host owns the enterprise connection and installs this authorization
 boundary before creating model providers. The [enterprise CLI](enterprise-connection.md)
 controls that owner. Standalone hosts retain personal settings; managed hosts
 require current authorization before every model request. Shared-skill discovery and retrieval
-now use a pinned turn snapshot. Managed routing defaults remain unfinished.
+now use a pinned turn snapshot. [Managed routing](enterprise-managed-routing.md)
+selects administrator task defaults and their explicit fallback order.
 
 ## What the boundary checks
 
@@ -54,9 +55,9 @@ HTTP request covers those paths and verifies the endpoint and model actually
 being used. The cost is a protocol-specific request decoder and additional
 adapter integration tests. No new dependency is needed.
 
-Routing still needs to choose the administrator's defaults and explicit fallback
-order. The transport boundary is the final check, not a replacement for that
-remaining integration work.
+Routing selects from the turn's pinned administrator defaults and explicit
+fallback order. The transport independently checks current restrictions, so an
+old default cannot authorize work after an administrator removes that route.
 
 ## Verification
 
@@ -70,5 +71,5 @@ tests cover expiry, revocation, restart and outages.
 These tests do not contact a real model provider, Google Workspace or Keychain.
 They establish the boundary's behavior. The host integration also has a local RPC
 test from browser login through actual HTTP model authorization and logout. The
-full V1 acceptance test still needs managed defaults, the administration
-interface, and the reproducible two-customer demonstration.
+full V1 acceptance test still needs the administration interface and the
+reproducible two-customer demonstration.

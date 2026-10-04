@@ -71,8 +71,11 @@ and cannot change whether the cached policy is usable. Older servers may ignore
 it; offline and revoked clients may be unable to report. The administrator sees
 the last successful acknowledgement until a complete bundle is applied again.
 
-The host refreshes about once a minute, with bounded backoff after failures. To
-request synchronization immediately:
+The host checks about once a minute, with bounded backoff after failures.
+Unchanged responses reuse the verified bundle without extending its lease.
+When fewer than two minutes remain, the host requests a fresh signed policy.
+Sign-in, restart and recovery after a failed check also require a full response.
+To request synchronization immediately:
 
 ```sh
 bin/cercano enterprise sync

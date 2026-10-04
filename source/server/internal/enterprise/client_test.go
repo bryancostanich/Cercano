@@ -28,6 +28,9 @@ const testMember = "10000000-0000-0000-0000-000000000001"
 const testHost = "20000000-0000-0000-0000-000000000001"
 
 type fixture struct {
+	conditional              bool
+	validators               []string
+	unchanged                int
 	failures                 []v1.SyncFailure
 	reportStatus             int
 	membership               *v1.Membership
@@ -55,7 +58,11 @@ func newFixture(t *testing.T, loggedIn bool) *fixture {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.URL.Path == "/.well-known/cercano-policy-keys":
-			_ = json.NewEncoder(w).Encode(map[string]any{"keys": []map[string]string{{"kty": "OKP", "crv": "Ed25519", "use": "sig", "alg": "EdDSA", "kid": "pilot", "x": base64.RawURLEncoding.EncodeToString(pub)}}})
+			key := pub
+			if f.mode == "replaced_key" {
+				key, _, _ = ed25519.GenerateKey(rand.Reader)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"keys": []map[string]string{{"kty": "OKP", "crv": "Ed25519", "use": "sig", "alg": "EdDSA", "kid": "pilot", "x": base64.RawURLEncoding.EncodeToString(key)}}})
 		case r.URL.Path == "/auth/native/token":
 			var in map[string]string
 			_ = json.NewDecoder(r.Body).Decode(&in)
@@ -94,6 +101,19 @@ func newFixture(t *testing.T, loggedIn bool) *fixture {
 			if f.mode == "denied" {
 				w.WriteHeader(403)
 				return
+			}
+			if f.conditional {
+				etag := fmt.Sprintf("\"%d\"", f.revision)
+				w.Header().Set("ETag", etag)
+				f.validators = append(f.validators, r.Header.Get("If-None-Match"))
+				if r.Header.Get("If-None-Match") == etag || f.mode == "unrequested_304" {
+					f.unchanged++
+					if f.mode == "mismatched_304" {
+						w.Header().Set("ETag", "\"wrong\"")
+					}
+					w.WriteHeader(http.StatusNotModified)
+					return
+				}
 			}
 			routes := f.routes
 			if routes == nil {
@@ -487,5 +507,114 @@ func TestSyncFailureReportingDoesNotChangeEnforcement(t *testing.T) {
 		if state := f.manager.Status(); !state.Usable || state.Error != "" {
 			t.Fatal(state)
 		}
+	}
+}
+
+func TestConditionalPolicyNeverExtendsCachedAuthorization(t *testing.T) {
+	f := newFixture(t, true)
+	f.mu.Lock()
+	f.conditional = true
+	f.mu.Unlock()
+	ctx := context.Background()
+	if err := f.manager.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	original := f.manager.Status().ValidUntil
+	deadline := f.manager.deadline
+	if err := f.manager.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if !f.manager.Status().ValidUntil.Equal(original) || !f.manager.deadline.Equal(deadline) {
+		t.Fatal("304 extended authorization")
+	}
+	f.mu.Lock()
+	if f.unchanged != 1 || f.validators[0] != "" || f.validators[1] != "\"1\"" || f.acks != 2 {
+		t.Fatalf("incorrect conditional flow: %v", f.validators)
+	}
+	f.revision++
+	f.mu.Unlock()
+	if err := f.manager.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if f.manager.Status().Revision != 2 {
+		t.Fatal("new configuration not applied")
+	}
+	// A near-expiry lease requests a full signed response, even if nothing changed.
+	f.manager.deadline = time.Now().Add(time.Minute)
+	if err := f.manager.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	validator := f.validators[len(f.validators)-1]
+	f.mode = "unavailable"
+	f.mu.Unlock()
+	if validator != "" || time.Until(f.manager.deadline) < 10*time.Minute {
+		t.Fatal("near-expiry lease did not renew")
+	}
+	if err := f.manager.Sync(ctx); !errors.Is(err, ErrUnavailable) {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	f.mode = ""
+	f.mu.Unlock()
+	if err := f.manager.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	validator = f.validators[len(f.validators)-1]
+	f.mu.Unlock()
+	if validator != "" {
+		t.Fatal("reconnect reused old lease instead of renewing")
+	}
+	// Even an erroneous server response cannot turn an expired cache into permission.
+	f.manager.deadline = time.Now().Add(-time.Second)
+	f.mu.Lock()
+	f.mode = "unrequested_304"
+	f.mu.Unlock()
+	if err := f.manager.Sync(ctx); !errors.Is(err, ErrInvalidBundle) {
+		t.Fatal(err)
+	}
+	if f.manager.Status().Usable {
+		t.Fatal("304 revived expired authorization")
+	}
+}
+
+func TestConditionalPolicyRejectsInvalidResponsesAndRequiresOnlineRestart(t *testing.T) {
+	for _, mode := range []string{"mismatched_304", "replaced_key", "denied"} {
+		t.Run(mode, func(t *testing.T) {
+			f := newFixture(t, true)
+			f.conditional = true
+			ctx := context.Background()
+			if err := f.manager.Sync(ctx); err != nil {
+				t.Fatal(err)
+			}
+			f.mu.Lock()
+			f.mode = mode
+			f.mu.Unlock()
+			if err := f.manager.Sync(ctx); err == nil || f.manager.Status().Usable {
+				t.Fatal("invalid conditional response retained authorization", err)
+			}
+		})
+	}
+	f := newFixture(t, true)
+	f.conditional = true
+	ctx := context.Background()
+	if err := f.manager.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	restarted, err := New(f.store, f.manager.options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restarted.Status().Usable {
+		t.Fatal("restart trusted cache")
+	}
+	if err := restarted.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.unchanged != 0 || f.validators[len(f.validators)-1] != "" {
+		t.Fatal("restart skipped online verification")
 	}
 }

@@ -348,6 +348,11 @@ func TestEnterpriseServiceWorkflow(t *testing.T) {
 			!status.MembershipKnown || status.OrganizationName != company.Name || status.TeamId != teams[i] || status.TeamName != "Engineering" {
 			t.Fatal("running host did not activate the signed policy")
 		}
+		initialExpiry := status.ValidUntil
+		status, e = enterpriseRPC.Synchronize(ctx, &proto.EnterpriseControlRequest{})
+		if e != nil || !status.Usable || status.ValidUntil != initialExpiry {
+			t.Fatal("unchanged conditional poll extended or invalidated the signed lease", e)
+		}
 		inspection, e := enterpriseRPC.GetPolicy(ctx, &proto.EnterpriseControlRequest{})
 		var inspected struct {
 			Scope struct {

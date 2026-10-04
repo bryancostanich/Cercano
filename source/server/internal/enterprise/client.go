@@ -87,6 +87,7 @@ type Manager struct {
 	blocked             bool
 	active              int
 	lastError           string
+	policyETag          string
 }
 
 func New(store CredentialStore, options Options) (*Manager, error) {
@@ -148,7 +149,17 @@ func (m *Manager) validOrigin(raw string) error {
 	}
 	return errors.New("enterprise server requires HTTPS")
 }
+
+type conditionalPolicy struct {
+	validator         string
+	responseValidator string
+	notModified       bool
+}
+
 func (m *Manager) request(ctx context.Context, server, method, path, token string, in, out any, limit int64) error {
+	return m.requestConditional(ctx, server, method, path, token, in, out, limit, nil)
+}
+func (m *Manager) requestConditional(ctx context.Context, server, method, path, token string, in, out any, limit int64, cache *conditionalPolicy) error {
 	var body io.Reader
 	if in != nil {
 		raw, e := json.Marshal(in)
@@ -167,6 +178,9 @@ func (m *Manager) request(ctx context.Context, server, method, path, token strin
 	if token != "" {
 		r.Header.Set("Authorization", "Bearer "+token)
 	}
+	if cache != nil && cache.validator != "" {
+		r.Header.Set("If-None-Match", cache.validator)
+	}
 	resp, e := m.client.Do(r)
 	if e != nil {
 		return ErrUnavailable
@@ -177,6 +191,19 @@ func (m *Manager) request(ctx context.Context, server, method, path, token strin
 	}
 	if resp.StatusCode >= 500 || resp.StatusCode == 429 {
 		return ErrUnavailable
+	}
+	if cache != nil {
+		etag := resp.Header.Get("ETag")
+		if len(etag) <= 256 {
+			cache.responseValidator = etag
+		}
+		if resp.StatusCode == http.StatusNotModified {
+			if cache.validator == "" || cache.responseValidator != cache.validator {
+				return ErrInvalidBundle
+			}
+			cache.notModified = true
+			return nil
+		}
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return ErrInvalidBundle
@@ -289,8 +316,30 @@ func (m *Manager) sync(ctx context.Context) error {
 	}
 	var response v1.EffectivePolicyResponse
 	base := "/v1/organizations/" + c.OrganizationID
-	if e := m.request(ctx, c.Server, "GET", base+"/hosts/"+c.HostID+"/policy", c.Access, nil, &response, 2*v1.MaxPolicyBytes); e != nil {
+	cache := &conditionalPolicy{}
+	// Only a usable in-memory bundle may skip a download. Near expiry, after
+	// any failed sync, and after restart, request a fresh signed lease instead.
+	if m.usable() && m.lastError == "" && time.Until(m.deadline) > 2*time.Minute && public[m.bundle.Envelope.KeyID] != nil {
+		cache.validator = m.policyETag
+	}
+	if e := m.requestConditional(ctx, c.Server, "GET", base+"/hosts/"+c.HostID+"/policy", c.Access, nil, &response, 2*v1.MaxPolicyBytes, cache); e != nil {
 		return e
+	}
+	if cache.notModified {
+		// Discovery may withdraw or replace a key without changing its ID.
+		// Recheck the cached signature against the current verification key.
+		payload, payloadErr := base64.RawURLEncoding.DecodeString(m.bundle.Envelope.Payload)
+		signature, signatureErr := base64.RawURLEncoding.DecodeString(m.bundle.Envelope.Signature)
+		key := public[m.bundle.Envelope.KeyID]
+		if payloadErr != nil || signatureErr != nil || len(key) != ed25519.PublicKeySize || !ed25519.Verify(key, append([]byte("cercano-enterprise-policy-v1\n"), payload...), signature) {
+			return ErrInvalidBundle
+		}
+		if !m.usable() || m.bundle.Policy.Validate(v1.Scope{OrganizationID: c.OrganizationID, UserID: c.MemberID, HostID: c.HostID}, time.Now()) != nil || m.bundle.Policy.Revision < c.HighestRevision {
+			return ErrInvalidBundle
+		}
+		// Preserve the original signed expiry AND monotonic deadline. A 304 is
+		// an authenticated check-in, never an extension of offline permission.
+		return m.acknowledge(ctx, m.bundle.Policy)
 	}
 	if response.SchemaVersion != v1.Version {
 		return ErrInvalidBundle
@@ -359,7 +408,12 @@ func (m *Manager) sync(ctx context.Context) error {
 	m.bundle = &b
 	m.deadline = now.Add(p.ExpiresAt.Sub(now))
 	m.blocked = false
-	return m.request(ctx, c.Server, "PUT", base+"/hosts/"+c.HostID+"/applied", c.Access, v1.SyncAcknowledgement{PolicyRevision: p.Revision, ClientVersion: m.options.ClientVersion, Skills: p.Skills}, nil, 0)
+	m.policyETag = cache.responseValidator
+	return m.acknowledge(ctx, p)
+}
+func (m *Manager) acknowledge(ctx context.Context, p v1.Policy) error {
+	c := m.credentials
+	return m.request(ctx, c.Server, "PUT", "/v1/organizations/"+c.OrganizationID+"/hosts/"+c.HostID+"/applied", c.Access, v1.SyncAcknowledgement{PolicyRevision: p.Revision, ClientVersion: m.options.ClientVersion, Skills: p.Skills}, nil, 0)
 }
 func skillMatches(s v1.SkillContentResponse, a v1.SkillAssignment) bool {
 	return s.SchemaVersion == v1.Version && s.ID == a.ID && s.Version == a.Version && len(s.Content) == a.SizeBytes && fmt.Sprintf("%x", sha256.Sum256([]byte(s.Content))) == a.SHA256

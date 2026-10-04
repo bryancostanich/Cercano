@@ -42,3 +42,16 @@ func TestEffectivePolicyMembershipCompatibility(t *testing.T) {
 		}
 	}
 }
+
+func TestSyncFailureCodesAreBounded(t *testing.T) {
+	for _, code := range []string{"unavailable", "verification_failed", "authorization_denied", "clock_changed", "credential_store_unavailable"} {
+		if !ValidSyncErrorCode(code) {
+			t.Fatal(code)
+		}
+	}
+	for _, code := range []string{"", "provider-key-secret", "arbitrary error body", "Unavailable"} {
+		if ValidSyncErrorCode(code) {
+			t.Fatal("unbounded diagnostic accepted")
+		}
+	}
+}

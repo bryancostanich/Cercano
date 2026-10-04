@@ -844,6 +844,14 @@ func main() {
 	// Handle subcommands before flag parsing.
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
+		case "enterprise":
+			ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+			defer cancel()
+			if err := enterpriseCommand(ctx, os.Args[2:], os.Stdout); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+			return
 		case "restart-after-upgrade":
 			// Homebrew post-install entrypoint. No normal startup, model probing,
 			// or automatic agent launch occurs before ownership verification.

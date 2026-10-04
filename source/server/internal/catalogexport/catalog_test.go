@@ -43,6 +43,20 @@ func TestSnapshotAndSubscriptionIdentity(t *testing.T) {
 	if providers["anthropic-subscription"].Authentication != "subscription" || providers["anthropic"].Authentication != "api_key" {
 		t.Fatal("lost Claude access methods")
 	}
+	if len(providers["gemini"].Models) == 0 || len(providers["groq"].Models) == 0 {
+		t.Fatal("lost setup-wizard candidates")
+	}
+	for _, m := range config.ClaudeModelChoices() {
+		found := false
+		for _, choice := range providers["anthropic"].Models {
+			if choice.ID == m.ID && choice.Label == m.DisplayName {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("missing CLI model choice %s", m.ID)
+		}
+	}
 	if providers["bedrock"].Status != "coming_soon" {
 		t.Fatal("lost client availability annotation")
 	}

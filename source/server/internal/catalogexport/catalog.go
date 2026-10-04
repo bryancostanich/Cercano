@@ -53,6 +53,10 @@ type Document struct {
 func Build(serverDir string) ([]byte, error) {
 	d := Document{Version: 1}
 	defaults := config.Defaults()
+	recommendations, err := config.LoadTierRecommendations()
+	if err != nil {
+		return nil, err
+	}
 	for _, dest := range []config.Destination{config.DestinationPrimary, config.DestinationSecondary, config.DestinationLocal} {
 		d.Destinations = append(d.Destinations, Choice{string(dest), dest.Label()})
 	}
@@ -99,6 +103,23 @@ func Build(serverDir string) ([]byte, error) {
 				}
 			}
 		}
+		// Setup-wizard candidates add vendor-specific alternatives. Never use
+		// direct-API recommendations for ChatGPT's narrower subscription route.
+		key := p.ID
+		if key == "anthropic-subscription" {
+			key = "anthropic"
+		}
+		for _, q := range []config.CostTier{config.CostEconomy, config.CostStandard, config.CostPremium} {
+			for _, id := range recommendations.Candidates(config.ProviderCloud, key, q.CapabilityTier()) {
+				addModel(&out, Model{ID: id, Label: id, Qualities: []string{string(q)}})
+			}
+		}
+		if p.Flavor == cloudfactory.FlavorMessages {
+			for _, m := range config.ClaudeModelChoices() {
+				addModel(&out, Model{ID: m.ID, Label: m.DisplayName})
+			}
+		}
+
 		d.Providers = append(d.Providers, out)
 	}
 	// Ollama's model tags come from the configured server, not the GGUF/UQFF
@@ -141,4 +162,28 @@ func Build(serverDir string) ([]byte, error) {
 	}
 	raw, err := json.MarshalIndent(d, "", "  ")
 	return append(raw, '\n'), err
+}
+
+func addModel(p *Provider, model Model) {
+	for i := range p.Models {
+		if p.Models[i].ID != model.ID {
+			continue
+		}
+		if model.Label != model.ID {
+			p.Models[i].Label = model.Label
+		}
+		for _, q := range model.Qualities {
+			found := false
+			for _, old := range p.Models[i].Qualities {
+				if old == q {
+					found = true
+				}
+			}
+			if !found {
+				p.Models[i].Qualities = append(p.Models[i].Qualities, q)
+			}
+		}
+		return
+	}
+	p.Models = append(p.Models, model)
 }

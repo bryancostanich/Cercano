@@ -19,17 +19,34 @@
         },
         {
           "id": "claude-opus-5",
-          "label": "claude-opus-5",
+          "label": "Claude Opus 5 (latest)",
           "qualities": [
-            "standard"
+            "standard",
+            "premium"
           ]
         },
         {
           "id": "claude-fable-5",
-          "label": "claude-fable-5",
+          "label": "Claude Fable 5 (most capable)",
           "qualities": [
             "premium"
           ]
+        },
+        {
+          "id": "claude-opus-4-7",
+          "label": "Claude Opus 4.7"
+        },
+        {
+          "id": "claude-sonnet-4-6",
+          "label": "Claude Sonnet 4.6 (balanced)"
+        },
+        {
+          "id": "claude-sonnet-4-5",
+          "label": "Claude Sonnet 4.5"
+        },
+        {
+          "id": "claude-haiku-4-5-20251001",
+          "label": "Claude Haiku 4.5 (fastest)"
         }
       ]
     },
@@ -51,17 +68,34 @@
         },
         {
           "id": "claude-opus-5",
-          "label": "claude-opus-5",
+          "label": "Claude Opus 5 (latest)",
           "qualities": [
-            "standard"
+            "standard",
+            "premium"
           ]
         },
         {
           "id": "claude-fable-5",
-          "label": "claude-fable-5",
+          "label": "Claude Fable 5 (most capable)",
           "qualities": [
             "premium"
           ]
+        },
+        {
+          "id": "claude-opus-4-7",
+          "label": "Claude Opus 4.7"
+        },
+        {
+          "id": "claude-sonnet-4-6",
+          "label": "Claude Sonnet 4.6 (balanced)"
+        },
+        {
+          "id": "claude-sonnet-4-5",
+          "label": "Claude Sonnet 4.5"
+        },
+        {
+          "id": "claude-haiku-4-5-20251001",
+          "label": "Claude Haiku 4.5 (fastest)"
         }
       ]
     },
@@ -108,6 +142,20 @@
             "standard",
             "premium"
           ]
+        },
+        {
+          "id": "gpt-5.4-mini",
+          "label": "gpt-5.4-mini",
+          "qualities": [
+            "economy"
+          ]
+        },
+        {
+          "id": "gpt-5.3-codex",
+          "label": "gpt-5.3-codex",
+          "qualities": [
+            "premium"
+          ]
         }
       ]
     },
@@ -119,7 +167,29 @@
       "placement": "external",
       "authentication": "api_key",
       "status": "verified",
-      "models": []
+      "models": [
+        {
+          "id": "gemini-2.5-flash-lite",
+          "label": "gemini-2.5-flash-lite",
+          "qualities": [
+            "economy"
+          ]
+        },
+        {
+          "id": "gemini-2.5-flash",
+          "label": "gemini-2.5-flash",
+          "qualities": [
+            "standard"
+          ]
+        },
+        {
+          "id": "gemini-2.5-pro",
+          "label": "gemini-2.5-pro",
+          "qualities": [
+            "premium"
+          ]
+        }
+      ]
     },
     {
       "id": "groq",
@@ -129,7 +199,23 @@
       "placement": "external",
       "authentication": "api_key",
       "status": "untested",
-      "models": []
+      "models": [
+        {
+          "id": "llama-3.1-8b-instant",
+          "label": "llama-3.1-8b-instant",
+          "qualities": [
+            "economy"
+          ]
+        },
+        {
+          "id": "llama-3.3-70b-versatile",
+          "label": "llama-3.3-70b-versatile",
+          "qualities": [
+            "standard",
+            "premium"
+          ]
+        }
+      ]
     },
     {
       "id": "deepinfra",

@@ -10,6 +10,7 @@ on:
       - 'source/server/cmd/export-enterprise-catalog/**'
       - 'source/enterpriseapi/catalog/**'
       - 'source/clients/cli/internal/ui/routing_page*'
+      - 'source/clients/cli/internal/ui/cloud_models*'
       - '.github/workflows/enterprise-catalog.yml'
   push:
     paths:
@@ -21,6 +22,7 @@ on:
       - 'source/server/cmd/export-enterprise-catalog/**'
       - 'source/enterpriseapi/catalog/**'
       - 'source/clients/cli/internal/ui/routing_page*'
+      - 'source/clients/cli/internal/ui/cloud_models*'
       - '.github/workflows/enterprise-catalog.yml'
 permissions:
   contents: read
@@ -37,5 +39,5 @@ jobs:
         working-directory: source/server
       - run: go run ./cmd/export-enterprise-catalog --check
         working-directory: source/server
-      - run: go test ./internal/ui -run 'Routing|ConfigTab|CompactionRouting' -count=1
+      - run: go test ./internal/ui -run 'Routing|ConfigTab|CompactionRouting|CloudModel|FallbackClaude' -count=1
         working-directory: source/clients/cli

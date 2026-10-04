@@ -28,6 +28,7 @@ const testMember = "10000000-0000-0000-0000-000000000001"
 const testHost = "20000000-0000-0000-0000-000000000001"
 
 type fixture struct {
+	membership               *v1.Membership
 	routes                   []v1.Route
 	skills                   []v1.SkillContentResponse
 	mu                       sync.Mutex
@@ -117,7 +118,7 @@ func newFixture(t *testing.T, loggedIn bool) *fixture {
 			if f.mode == "bad_signature" {
 				sig[0] ^= 1
 			}
-			_ = json.NewEncoder(w).Encode(v1.EffectivePolicyResponse{SchemaVersion: v1.Version, Policy: v1.SignedPolicy{KeyID: "pilot", Payload: base64.RawURLEncoding.EncodeToString(raw), Signature: base64.RawURLEncoding.EncodeToString(sig)}})
+			_ = json.NewEncoder(w).Encode(v1.EffectivePolicyResponse{SchemaVersion: v1.Version, Membership: f.membership, Policy: v1.SignedPolicy{KeyID: "pilot", Payload: base64.RawURLEncoding.EncodeToString(raw), Signature: base64.RawURLEncoding.EncodeToString(sig)}})
 		case strings.Contains(r.URL.Path, "/skills/"):
 			f.downloads++
 			if f.mode == "skill_unavailable" {
@@ -355,5 +356,78 @@ func TestCredentialPersistenceFailure(t *testing.T) {
 				t.Fatal("unpersisted refresh credential was not revoked")
 			}
 		})
+	}
+}
+
+func TestMembershipStatus(t *testing.T) {
+	f := newFixture(t, true)
+	ctx := context.Background()
+	if err := f.manager.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if f.manager.Status().MembershipKnown {
+		t.Fatal("old server mistaken for no team")
+	}
+	membership := v1.Membership{OrganizationID: testOrg, OrganizationName: "Example", UserID: testMember, Role: "developer", TeamID: testHost, TeamName: "Engineering"}
+	f.mu.Lock()
+	f.membership = &membership
+	f.mu.Unlock()
+	if err := f.manager.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	state := f.manager.Status()
+	if !state.MembershipKnown || state.OrganizationName != "Example" || state.TeamID != testHost || state.TeamName != "Engineering" || !state.Usable {
+		t.Fatalf("missing applied membership: %+v", state)
+	}
+	f.mu.Lock()
+	f.mode = "unavailable"
+	f.mu.Unlock()
+	if err := f.manager.Sync(ctx); !errors.Is(err, ErrUnavailable) {
+		t.Fatal(err)
+	}
+	state = f.manager.Status()
+	if !state.Usable || state.TeamName != "Engineering" || state.Error == "" {
+		t.Fatalf("lost cached status: %+v", state)
+	}
+	membership.TeamID, membership.TeamName = "", ""
+	f.mu.Lock()
+	f.mode = ""
+	f.membership = &membership
+	f.mu.Unlock()
+	if err := f.manager.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if state = f.manager.Status(); !state.MembershipKnown || state.TeamID != "" || state.TeamName != "" {
+		t.Fatalf("old team survived: %+v", state)
+	}
+	restarted, err := New(f.store, f.manager.options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state = restarted.Status(); state.MembershipKnown || state.Usable {
+		t.Fatal("restart trusted cached metadata")
+	}
+}
+
+func TestMembershipMetadataMustMatchVerifiedScope(t *testing.T) {
+	for _, mutate := range []func(*v1.Membership){
+		func(m *v1.Membership) { m.OrganizationID = testHost },
+		func(m *v1.Membership) { m.UserID = testHost },
+		func(m *v1.Membership) { m.Role = "owner" },
+		func(m *v1.Membership) { m.TeamID = "invalid" },
+		func(m *v1.Membership) { m.TeamName = "Team without ID" },
+	} {
+		f := newFixture(t, true)
+		m := v1.Membership{OrganizationID: testOrg, UserID: testMember, Role: "developer"}
+		mutate(&m)
+		f.mu.Lock()
+		f.membership = &m
+		f.mu.Unlock()
+		if err := f.manager.Sync(context.Background()); !errors.Is(err, ErrInvalidBundle) {
+			t.Fatal(err)
+		}
+		if f.manager.Status().MembershipKnown || f.manager.Status().Usable {
+			t.Fatal("invalid metadata applied")
+		}
 	}
 }

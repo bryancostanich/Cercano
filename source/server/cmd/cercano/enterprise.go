@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"cercano/source/server/internal/enterprise"
@@ -41,7 +42,7 @@ func openEnterpriseBrowser(ctx context.Context, target string) error {
 // refresh token, or treats a downloaded bundle as proof of host enforcement.
 func enterpriseCommand(ctx context.Context, args []string, out io.Writer) error {
 	if len(args) == 0 || args[0] == "--help" || args[0] == "help" {
-		fmt.Fprintln(out, "Usage: cercano enterprise login --server https://enterprise.example --organization UUID | sync | status | logout | standalone\nConnects to the running local Cercano host. Use --address 127.0.0.1:PORT for a non-default host. Logout keeps managed work blocked; standalone explicitly returns to personal settings.")
+		fmt.Fprintln(out, "Usage: cercano enterprise login --server https://enterprise.example --organization UUID | sync | status | logout | standalone\nConnects to the running local Cercano host. Use --address 127.0.0.1:PORT for a non-default host. Add --json for machine-readable output. Logout keeps managed work blocked; standalone explicitly returns to personal settings.")
 		return nil
 	}
 	switch args[0] {
@@ -58,6 +59,7 @@ func enterpriseCommand(ctx context.Context, args []string, out io.Writer) error 
 	}
 	flags := flag.NewFlagSet("enterprise", flag.ContinueOnError)
 	flags.SetOutput(out)
+	asJSON := flags.Bool("json", false, "print machine-readable status")
 	server := flags.String("server", "", "trusted enterprise HTTPS origin")
 	org := flags.String("organization", "", "organization ID from your administrator")
 	address := flags.String("address", net.JoinHostPort("127.0.0.1", cfg.Port), "running local Cercano host")
@@ -109,10 +111,67 @@ func enterpriseCommand(ctx context.Context, args []string, out io.Writer) error 
 	if err != nil {
 		return err
 	}
+	return writeEnterpriseStatus(out, result, *asJSON)
+}
+
+func writeEnterpriseStatus(out io.Writer, result *proto.EnterpriseStatus, asJSON bool) error {
+	if !asJSON {
+		_, err := io.WriteString(out, enterpriseStatusText(result))
+		return err
+	}
 	encoded, err := (protojson.MarshalOptions{UseProtoNames: true, EmitUnpopulated: true, Indent: "  "}).Marshal(result)
 	if err != nil {
 		return err
 	}
 	_, err = fmt.Fprintln(out, string(encoded))
 	return err
+}
+
+// Quote externally supplied strings so names cannot inject terminal controls.
+func enterpriseStatusText(s *proto.EnterpriseStatus) string {
+	var out strings.Builder
+	mode := "Personal settings"
+	if s.Managed {
+		mode = "Enterprise managed"
+	}
+	fmt.Fprintf(&out, "Mode: %s\n", mode)
+	if !s.Connected {
+		if s.Managed {
+			out.WriteString("Not signed in. Managed work is blocked. Run 'cercano enterprise login' to reconnect, or 'cercano enterprise standalone' to return to personal settings.\n")
+		}
+		return out.String()
+	}
+	if s.MembershipKnown {
+		fmt.Fprintf(&out, "Organization: %q (%q)\n", s.OrganizationName, s.OrganizationId)
+		if s.TeamId == "" {
+			out.WriteString("Team: None assigned (organization policy applies)\n")
+		} else {
+			fmt.Fprintf(&out, "Team: %q (%q)\n", s.TeamName, s.TeamId)
+		}
+	} else {
+		fmt.Fprintf(&out, "Organization: %q\nTeam: Details unavailable until a supporting server supplies them\n", s.OrganizationId)
+	}
+	fmt.Fprintf(&out, "Host: %q\n", s.HostId)
+	if s.Revision > 0 {
+		fmt.Fprintf(&out, "Applied policy revision: %d\nAuthorization valid until: %q\n", s.Revision, s.ValidUntil)
+	} else {
+		out.WriteString("Policy: Awaiting verified synchronization\n")
+	}
+	switch {
+	case s.Changing:
+		out.WriteString("Status: Updating enterprise connection\n")
+	case !s.Usable:
+		out.WriteString("Status: Managed work is blocked. Run 'cercano enterprise sync'; if access was revoked, contact your administrator.\n")
+	case s.Error != "":
+		out.WriteString("Status: Using the last verified policy while synchronization recovers\n")
+	default:
+		out.WriteString("Status: Ready; the running host has applied the policy\n")
+	}
+	if s.Error != "" {
+		fmt.Fprintf(&out, "Last synchronization error: %q\n", s.Error)
+	}
+	if s.Revision > 0 && (s.Error != "" || !s.Usable) {
+		out.WriteString("Organization and team details describe the last applied policy.\n")
+	}
+	return out.String()
 }

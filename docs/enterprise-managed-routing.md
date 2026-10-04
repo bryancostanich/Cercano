@@ -78,6 +78,7 @@ fixture credentials to prove that personal models and backup profiles receive
 no requests when managed routes are selected.
 
 These tests complement the signed-policy and host authorization tests described
-in [runtime enforcement](enterprise-runtime-enforcement.md). They do not replace
-the remaining administration UI, two-organization demonstration, or live Google
-and macOS Keychain acceptance checks.
+in [runtime enforcement](enterprise-runtime-enforcement.md). The administration UI and
+two-organization workflow are now implemented. The workflow checks real streamed
+requests, explicit model denials, retries and approved fallback against a local
+model fixture. Live Google and macOS Keychain acceptance remain separate checks.

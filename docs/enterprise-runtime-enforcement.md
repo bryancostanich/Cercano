@@ -71,5 +71,7 @@ tests cover expiry, revocation, restart and outages.
 These tests do not contact a real model provider, Google Workspace or Keychain.
 They establish the boundary's behavior. The host integration also has a local RPC
 test from browser login through actual HTTP model authorization and logout. The
-full V1 acceptance test still needs the administration interface and the
-reproducible two-customer demonstration.
+administration interface and reproducible two-company workflow are implemented.
+The workflow covers retries, fallback, policy updates, rollback, temporary outage,
+actual lease expiry and renewal, host recreation, and member revocation. Live
+Google and Keychain acceptance remain separate checks.

@@ -7,7 +7,7 @@ client does not hold a second copy of the connection or rotate its credentials.
 This increment activates **model restrictions and shared skills**. Main and
 delegated agents discover assigned skills and read the pinned versions through
 a read-only tool. See [shared skills](enterprise-shared-skills.md). Applying
-administrator routing defaults remains unfinished; see the
+administrator routing defaults and ordered fallbacks is also implemented; see the
 [implementation status](enterprise-implementation-status.md).
 
 ## Start and connect the host
@@ -46,13 +46,21 @@ existing store.
 
 ## Understand status and synchronization
 
-`status` reports the running host's state:
+`status` prints the organization and team, applied policy revision, authorization
+deadline, and synchronization state. It distinguishes an unassigned team from
+missing membership details. During an outage or blocked connection, displayed
+membership describes the last applied policy, not proof of current access.
+
+Use `cercano enterprise status --json` for these machine-readable host fields:
 
 - `managed` means the host is using an enterprise profile.
 - `enforcement_active` means the model-request gate is installed for that profile.
   It remains active when work is blocked.
 - `connected` means the host has saved connection credentials.
 - `usable` means a verified policy is currently within its authorization lease.
+- `membership_known`, `organization_name`, `team_id`, and `team_name` describe
+  the last applied policy response. An absent team with known membership means
+  organization policy applies without additional team restrictions.
 - `revision` and `valid_until` identify the accepted policy and its deadline.
 - `changing` means a connection change, such as browser sign-in, is in progress.
 

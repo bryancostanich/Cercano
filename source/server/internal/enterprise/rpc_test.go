@@ -2,6 +2,7 @@ package enterprise
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -158,5 +159,52 @@ func TestPolicyInspectionRejectsRemoteCaller(t *testing.T) {
 	ctx := peer.NewContext(context.Background(), &peer.Peer{Addr: &net.TCPAddr{IP: net.ParseIP("192.0.2.10"), Port: 50000}})
 	if _, err := s.GetPolicy(ctx, &proto.EnterpriseControlRequest{}); status.Code(err) != codes.PermissionDenied {
 		t.Fatal(err)
+	}
+}
+
+func TestContextEditRPCPinsPolicyAndBlocksAfterLogout(t *testing.T) {
+	f := newFixture(t, true)
+	h := fixtureHost(t, f, t.TempDir())
+	if err := h.Sync(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	intercept := h.UnaryInterceptor()
+	info := &grpc.UnaryServerInfo{FullMethod: proto.Agent_ProposeContextEdit_FullMethodName}
+	proposalError := errors.New("invalid proposal")
+	for _, resultErr := range []error{nil, proposalError} {
+		_, err := intercept(t.Context(), &proto.ProposeContextEditRequest{}, info, func(ctx context.Context, _ any) (any, error) {
+			bundle, ok := BundleFromContext(ctx)
+			if !ok || bundle.Policy.Revision != 1 {
+				t.Fatal("context edit did not acquire the verified policy snapshot")
+			}
+			if err := h.Logout(ctx); !errors.Is(err, ErrBusy) {
+				t.Fatalf("context edit did not hold an active managed work scope: %v", err)
+			}
+			return &proto.ProposeContextEditResponse{}, resultErr
+		})
+		if !errors.Is(err, resultErr) {
+			t.Fatalf("handler error changed: %v", err)
+		}
+	}
+	if err := h.Logout(t.Context()); err != nil {
+		t.Fatalf("context edit leaked its work scope: %v", err)
+	}
+	called := false
+	handler := func(ctx context.Context, _ any) (any, error) {
+		called = true
+		if _, managed := BundleFromContext(ctx); managed {
+			t.Fatal("standalone context edit retained managed bundle")
+		}
+		return &proto.ProposeContextEditResponse{}, nil
+	}
+	_, err := intercept(t.Context(), &proto.ProposeContextEditRequest{}, info, handler)
+	if status.Code(err) != codes.PermissionDenied || called {
+		t.Fatalf("logged out managed context edit reached handler: %v called=%v", err, called)
+	}
+	if err := h.UseStandalone(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := intercept(t.Context(), &proto.ProposeContextEditRequest{}, info, handler); err != nil || !called {
+		t.Fatalf("explicit standalone context editing blocked: %v", err)
 	}
 }

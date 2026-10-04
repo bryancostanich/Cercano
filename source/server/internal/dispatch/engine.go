@@ -52,6 +52,8 @@ type Spec struct {
 	ModelOverride       string // advisory model name within locus bounds
 	// DisableThinking is a one-shot generation policy, not a global setting.
 	DisableThinking bool
+	// MaxTokens bounds a one-shot response; zero retains the provider default.
+	MaxTokens int
 
 	// Tier names the model-taxonomy tier this dispatch runs on. Empty
 	// defaults by role: RoleMain → everyday, RoleCoproc → fast_light_text.
@@ -297,6 +299,7 @@ func (e *Engine) Dispatch(ctx context.Context, spec Spec) (Result, error) {
 	// 4. Build chat request.
 	req := llm.ChatRequest{
 		Model:           model,
+		MaxTokens:       spec.MaxTokens,
 		Tier:            string(spec.Tier),
 		FallbackTier:    string(spec.FallbackTier),
 		System:          spec.System,

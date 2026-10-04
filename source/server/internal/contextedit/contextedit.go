@@ -9,6 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"cercano/source/server/internal/modelpolicy"
 )
 
 type TurnSummary struct{ ID, Role, Kind, Preview string }
@@ -34,6 +36,9 @@ func Propose(ctx context.Context, instruction string, turns []TurnSummary, local
 		}
 		raw, err := fn(ctx, prompt)
 		if err != nil {
+			if modelpolicy.IsDenial(err) {
+				return Proposal{}, err
+			}
 			lastErr = err
 			continue
 		}

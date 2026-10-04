@@ -10,6 +10,8 @@ on:
       - 'source/server/internal/managedrouting/**'
       - 'source/server/internal/cloudfactory/**'
       - 'source/server/internal/hostsvc/providers/**'
+      - 'source/server/internal/hostsvc/persistence/**'
+      - 'source/server/internal/contextedit/**'
       - 'source/server/internal/dispatch/**'
       - 'source/server/internal/loopcompact/**'
       - 'source/server/internal/loop/**'
@@ -41,6 +43,8 @@ on:
       - 'source/server/internal/managedrouting/**'
       - 'source/server/internal/cloudfactory/**'
       - 'source/server/internal/hostsvc/providers/**'
+      - 'source/server/internal/hostsvc/persistence/**'
+      - 'source/server/internal/contextedit/**'
       - 'source/server/internal/dispatch/**'
       - 'source/server/internal/loopcompact/**'
       - 'source/server/internal/loop/**'
@@ -86,8 +90,8 @@ jobs:
         run: go test -tags=enterprise_demo ./internal/server -run '^$'
       - name: Verify lossless stream delivery
         run: go test -race ./internal/broker
-      - run: go test -race ./internal/enterprise ./internal/modelpolicy ./internal/managedsettings/... ./internal/managedrouting ./internal/cloudfactory ./internal/hostsvc/providers ./internal/dispatch ./internal/loopcompact ./internal/loop/... ./internal/usage ./internal/capabilities/builtins ./internal/hostsvc/tools ./internal/runner ./internal/server ./internal/mcp ./internal/agent ./internal/llm/... ./internal/engine/... ./internal/localruntime/... ./internal/worker ./internal/inference/... ./cmd/cercano
-      - run: go vet ./internal/enterprise ./internal/modelpolicy ./internal/managedsettings/... ./internal/managedrouting ./internal/cloudfactory ./internal/hostsvc/providers ./internal/dispatch ./internal/loopcompact ./internal/loop/... ./internal/usage ./internal/capabilities/builtins ./internal/hostsvc/tools ./internal/runner ./internal/server ./internal/mcp ./internal/agent ./internal/llm/... ./internal/engine/... ./internal/localruntime/... ./internal/worker ./cmd/cercano
+      - run: go test -race ./internal/enterprise ./internal/modelpolicy ./internal/managedsettings/... ./internal/managedrouting ./internal/cloudfactory ./internal/hostsvc/providers ./internal/hostsvc/persistence ./internal/contextedit ./internal/dispatch ./internal/loopcompact ./internal/loop/... ./internal/usage ./internal/capabilities/builtins ./internal/hostsvc/tools ./internal/runner ./internal/server ./internal/mcp ./internal/agent ./internal/llm/... ./internal/engine/... ./internal/localruntime/... ./internal/worker ./internal/inference/... ./cmd/cercano
+      - run: go vet ./internal/enterprise ./internal/modelpolicy ./internal/managedsettings/... ./internal/managedrouting ./internal/cloudfactory ./internal/hostsvc/providers ./internal/hostsvc/persistence ./internal/contextedit ./internal/dispatch ./internal/loopcompact ./internal/loop/... ./internal/usage ./internal/capabilities/builtins ./internal/hostsvc/tools ./internal/runner ./internal/server ./internal/mcp ./internal/agent ./internal/llm/... ./internal/engine/... ./internal/localruntime/... ./internal/worker ./cmd/cercano
       - name: Verify the complete client suite
         run: go test ./... -count=1
       - run: go build ./cmd/cercano

@@ -10,6 +10,7 @@ import (
 	"cercano/source/server/internal/contextmeter"
 	"cercano/source/server/internal/conversation"
 	"cercano/source/server/internal/dispatch"
+	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/locus"
 	"cercano/source/server/pkg/config"
 )
@@ -78,13 +79,14 @@ type Agent struct {
 	meter        *contextmeter.Registry
 	// contextWindow resolves a model's provider-published context capacity for
 	// the meter denominator. nil keeps the conventional per-family window.
-	contextWindow func(model string) (int, bool)
-	meterModel    string // active local model name, used as Max() baseline
-	contextLoader ContextLoader
-	recap         RecapScheduler
-	compaction    CompactionScheduler
-	locusMode     func() string // live getter for the configured Locus Mode
-	engine        *dispatch.Engine
+	contextWindow     func(model string) (int, bool)
+	meterModel        string // active local model name, used as Max() baseline
+	contextLoader     ContextLoader
+	recap             RecapScheduler
+	compaction        CompactionScheduler
+	locusMode         func() string // live getter for the configured Locus Mode
+	engine            *dispatch.Engine
+	managedCandidates func() inference.Tiers
 }
 
 // RecapScheduler requests a (debounced) recap regeneration for a conversation.
@@ -432,13 +434,20 @@ func (a *Agent) ProcessRequest(ctx context.Context, req *Request) (*Response, er
 		return a.processOneShot(ctx, req)
 	}
 
+	ctx, provider, intent, managed, err := a.selectManaged(ctx, req)
+	if err != nil {
+		return nil, err
+	}
 	// Load conversation history
 	augmentedInput, originalInput := a.loadHistory(ctx, req)
 
 	// Direct local bypass — skip SmartRouter for co-processor tools
 	if req.DirectOpen {
 		fmt.Println("Agent: DirectOpen — bypassing SmartRouter, using local provider.")
-		local := a.router.Tiers().Open
+		local := provider
+		if !managed {
+			local = a.router.Tiers().Open
+		}
 		augReq := &Request{Input: augmentedInput, DirectOpen: true, ModelOverride: req.ModelOverride}
 		res, err := local.Process(ctx, augReq)
 		if err != nil {
@@ -454,19 +463,23 @@ func (a *Agent) ProcessRequest(ctx context.Context, req *Request) (*Response, er
 	}
 
 	// 1. Classify Intent (uses original input — no history pollution)
-	intent, err := a.router.ClassifyIntent(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to classify intent: %w", err)
+	if !managed {
+		intent, err = a.router.ClassifyIntent(req)
+		if err != nil {
+			return nil, fmt.Errorf("failed to classify intent: %w", err)
+		}
 	}
 
 	// 2. Select Provider
-	provider, err := a.router.SelectProvider(req, intent)
-	if err != nil {
-		return nil, fmt.Errorf("failed to select provider: %w", err)
+	if !managed {
+		provider, err = a.router.SelectProvider(req, intent)
+		if err != nil {
+			return nil, fmt.Errorf("failed to select provider: %w", err)
+		}
 	}
 
 	// Explicit override: If user says "use cloud", force CloudModel
-	if strings.Contains(strings.ToLower(req.Input), "use cloud") {
+	if !managed && strings.Contains(strings.ToLower(req.Input), "use cloud") {
 		fmt.Println("Agent: Explicit 'use cloud' detected. Overriding routing to CloudModel.")
 		if cloud := a.router.Tiers().Cloud; cloud != nil {
 			provider = cloud
@@ -574,25 +587,33 @@ func (a *Agent) ProcessRequestStream(ctx context.Context, req *Request, progress
 		progress = func(string) {}
 	}
 
+	ctx, provider, intent, managed, err := a.selectManaged(ctx, req)
+	if err != nil {
+		return nil, err
+	}
 	// Load conversation history
 	augmentedInput, originalInput := a.loadHistory(ctx, req)
 
 	// 1. Classify Intent (uses original input — no history pollution)
-	intent, err := a.router.ClassifyIntent(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to classify intent: %w", err)
+	if !managed {
+		intent, err = a.router.ClassifyIntent(req)
+		if err != nil {
+			return nil, fmt.Errorf("failed to classify intent: %w", err)
+		}
 	}
 	progress(fmt.Sprintf("Classifying Intent... %s", intent))
 
 	// 2. Select Provider
-	provider, err := a.router.SelectProvider(req, intent)
-	if err != nil {
-		return nil, fmt.Errorf("failed to select provider: %w", err)
+	if !managed {
+		provider, err = a.router.SelectProvider(req, intent)
+		if err != nil {
+			return nil, fmt.Errorf("failed to select provider: %w", err)
+		}
 	}
 	progress(fmt.Sprintf("Selecting Provider... %s", provider.Name()))
 
 	// Explicit override: If user says "use cloud", force CloudModel
-	if strings.Contains(strings.ToLower(req.Input), "use cloud") {
+	if !managed && strings.Contains(strings.ToLower(req.Input), "use cloud") {
 		fmt.Println("Agent: Explicit 'use cloud' detected. Overriding routing to CloudModel.")
 		if cloud := a.router.Tiers().Cloud; cloud != nil {
 			provider = cloud

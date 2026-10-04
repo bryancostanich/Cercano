@@ -364,6 +364,15 @@ func TestEnterpriseServiceWorkflow(t *testing.T) {
 			t.Fatal("policy inspection did not match signed-in company", e)
 		}
 
+		control(map[string]any{"skill_id": ""})
+		unary, e := agentRPC.ProcessRequest(ctx, &proto.ProcessRequestRequest{Input: "Return a short response using the company default."})
+		if e != nil || !strings.Contains(unary.GetOutput(), model) {
+			t.Fatal("unary RPC did not use the company default", e)
+		}
+		unaryBefore := len(control(map[string]any{}))
+		if _, e = agentRPC.ProcessRequest(ctx, &proto.ProcessRequestRequest{Input: "Return a response.", ModelOverride: "forbidden-model"}); e == nil || len(control(map[string]any{})) != unaryBefore {
+			t.Fatal("unary RPC model override bypassed locked policy", e)
+		}
 		content := fmt.Sprintf("Company %d review instructions version one.", i)
 		control(map[string]any{"skill_id": "enterprise/" + company.ID + "/review", "skill_content": content})
 		output, e := infer("")

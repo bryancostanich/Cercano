@@ -1072,6 +1072,7 @@ func newServerWithLogs(a *agent.Agent, router RouterCloudUpdater, coordinator *l
 	s.providerSvc.SetProfileModelEvidence(s.profileModelEvidence)
 	// The live meter denominator must track the same capacity the turn used.
 	s.agent.SetContextWindowResolver(s.cloudContextWindow)
+	s.agent.SetManagedCandidates(s.DispatchCandidates)
 	// Build the shared vision-as-tool store and service. Cloud vision is preferred
 	// whenever the current locus permits cloud; open_only remains a hard no-cloud
 	// boundary. The local/open vision lane remains wired as fallback so images can

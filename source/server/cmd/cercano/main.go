@@ -315,6 +315,12 @@ func startGRPCServer(cfg config.Config, bindAddr string, events *crashlog.Writer
 			recapModel = id
 		}
 		recapComplete := func(ctx context.Context, prompt string) (string, error) {
+			scoped, finish, err := enterpriseHost.Begin(ctx)
+			if err != nil {
+				return "", err
+			}
+			defer finish()
+			ctx = scoped
 			req := &agent.Request{Input: prompt}
 			if recapModel != "" {
 				req.ModelOverride = recapModel
@@ -342,6 +348,7 @@ func startGRPCServer(cfg config.Config, bindAddr string, events *crashlog.Writer
 		// store-backed generator for main turns and the inline compactor for
 		// sub-agent dispatches below share the resulting seams.
 		loopDeps := loopcompact.WiringDeps{
+			BeginWork: enterpriseHost.Begin,
 			Cfg:       cfg,
 			ChatModel: openChatModel(cfg),
 			Candidates: func() inference.Tiers {

@@ -11,6 +11,7 @@ on:
       - 'source/server/internal/hostsvc/providers/**'
       - 'source/server/internal/dispatch/**'
       - 'source/server/internal/loopcompact/**'
+      - 'source/server/internal/loop/**'
       - 'source/server/internal/usage/**'
       - 'source/server/internal/capabilities/**'
       - 'source/server/internal/hostsvc/tools/**'
@@ -40,6 +41,7 @@ on:
       - 'source/server/internal/hostsvc/providers/**'
       - 'source/server/internal/dispatch/**'
       - 'source/server/internal/loopcompact/**'
+      - 'source/server/internal/loop/**'
       - 'source/server/internal/usage/**'
       - 'source/server/internal/capabilities/**'
       - 'source/server/internal/hostsvc/tools/**'
@@ -82,6 +84,6 @@ jobs:
         run: go test -tags=enterprise_demo ./internal/server -run '^$'
       - name: Verify lossless stream delivery
         run: go test -race ./internal/broker
-      - run: go test -race ./internal/enterprise ./internal/modelpolicy ./internal/managedsettings/... ./internal/managedrouting ./internal/cloudfactory ./internal/hostsvc/providers ./internal/dispatch ./internal/loopcompact ./internal/usage ./internal/capabilities/builtins ./internal/hostsvc/tools ./internal/runner ./internal/server ./internal/mcp ./internal/agent ./internal/llm/... ./internal/engine/... ./internal/localruntime/... ./internal/worker ./internal/inference/... ./cmd/cercano
-      - run: go vet ./internal/enterprise ./internal/modelpolicy ./internal/managedsettings/... ./internal/managedrouting ./internal/cloudfactory ./internal/hostsvc/providers ./internal/dispatch ./internal/loopcompact ./internal/usage ./internal/capabilities/builtins ./internal/hostsvc/tools ./internal/runner ./internal/server ./internal/mcp ./internal/agent ./internal/llm/... ./internal/engine/... ./internal/localruntime/... ./internal/worker ./cmd/cercano
+      - run: go test -race ./internal/enterprise ./internal/modelpolicy ./internal/managedsettings/... ./internal/managedrouting ./internal/cloudfactory ./internal/hostsvc/providers ./internal/dispatch ./internal/loopcompact ./internal/loop/... ./internal/usage ./internal/capabilities/builtins ./internal/hostsvc/tools ./internal/runner ./internal/server ./internal/mcp ./internal/agent ./internal/llm/... ./internal/engine/... ./internal/localruntime/... ./internal/worker ./internal/inference/... ./cmd/cercano
+      - run: go vet ./internal/enterprise ./internal/modelpolicy ./internal/managedsettings/... ./internal/managedrouting ./internal/cloudfactory ./internal/hostsvc/providers ./internal/dispatch ./internal/loopcompact ./internal/loop/... ./internal/usage ./internal/capabilities/builtins ./internal/hostsvc/tools ./internal/runner ./internal/server ./internal/mcp ./internal/agent ./internal/llm/... ./internal/engine/... ./internal/localruntime/... ./internal/worker ./cmd/cercano
       - run: go build ./cmd/cercano

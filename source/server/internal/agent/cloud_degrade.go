@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"cercano/source/server/internal/modelpolicy"
 	"context"
 	"fmt"
 )
@@ -18,7 +19,7 @@ import (
 // (the per-token channel belongs to the original call); the response Output
 // field is filled by the local retry's blocking Process call.
 func (a *Agent) degradeIfCloudFailure(ctx context.Context, provider TurnRunner, req *Request, originalErr error, progress ProgressFunc) (*Response, bool) {
-	if originalErr == nil {
+	if originalErr == nil || managedRequest(ctx) || modelpolicy.IsDenial(originalErr) {
 		return nil, false
 	}
 	local := a.router.Tiers().Open

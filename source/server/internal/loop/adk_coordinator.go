@@ -17,6 +17,8 @@ import (
 
 	agentmod "cercano/source/server/internal/agent"
 	"cercano/source/server/internal/loop/adapters"
+	"cercano/source/server/internal/managedsettings"
+	"cercano/source/server/internal/modelpolicy"
 	"cercano/source/server/internal/tools"
 )
 
@@ -65,17 +67,27 @@ func (c *ADKCoordinator) SetCloudProvider(p agentmod.TurnRunner) {
 func (c *ADKCoordinator) CoordinateStream(ctx context.Context, instruction, inputCode, workDir, fileName string) (
 	iter.Seq2[*session.Event, error], func() (*agentmod.Response, error), error,
 ) {
+	// The legacy loop keeps its validation and file restoration, but all
+	// managed inference uses the already selected administrator route chain.
+	openProvider, cloudProvider := c.openProvider, c.cloudProvider
+	if provider, ok := agentmod.ManagedTurnProvider(ctx); ok {
+		openProvider, cloudProvider = provider, provider
+	} else if _, pinned := managedsettings.FromContext(ctx); pinned || modelpolicy.Managed(ctx) {
+		return nil, nil, modelpolicy.Deny(modelpolicy.Attempt{}, "managed coordinator has no selected provider")
+	}
 	// 1. Filename inference — ask the local model which file to target.
 	inferPrompt := fmt.Sprintf(
 		"Based on the instruction '%s' and the current file '%s', what is the single filename that should be modified or created? Return ONLY the filename.",
 		instruction, fileName,
 	)
-	if resp, err := c.openProvider.Process(ctx, &agentmod.Request{Input: inferPrompt}); err == nil {
+	if resp, err := openProvider.Process(ctx, &agentmod.Request{Input: inferPrompt}); err == nil {
 		name := strings.TrimSpace(resp.Output)
 		if name != "" && !strings.Contains(name, " ") && strings.Contains(name, ".") && name != fileName {
 			fmt.Printf(">> ADKCoordinator: Inferred target file '%s' (was '%s')\n", name, fileName)
 			fileName = name
 		}
+	} else if modelpolicy.IsDenial(err) {
+		return nil, nil, err
 	}
 
 	targetPath := filepath.Join(workDir, fileName)
@@ -100,7 +112,7 @@ func (c *ADKCoordinator) CoordinateStream(ctx context.Context, instruction, inpu
 	}
 
 	// 3. Create agents.
-	genAgent, err := adapters.NewGeneratorAgent(c.openProvider, c.cloudProvider)
+	genAgent, err := adapters.NewGeneratorAgent(openProvider, cloudProvider)
 	if err != nil {
 		restore()
 		return nil, nil, fmt.Errorf("failed to create generator agent: %w", err)

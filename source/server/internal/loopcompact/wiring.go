@@ -15,6 +15,7 @@ import (
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/locus"
 	"cercano/source/server/internal/managedrouting"
+	"cercano/source/server/internal/managedsettings"
 	"cercano/source/server/internal/modelwindow"
 	"cercano/source/server/pkg/config"
 )
@@ -39,6 +40,9 @@ const (
 // the worker reaches its open/cloud providers through host-streamed proxies
 // while the host holds them directly.
 type WiringDeps struct {
+	// BeginWork pins host settings for background compaction that has no turn
+	// snapshot. Existing turns retain their original defaults and skills.
+	BeginWork func(context.Context) (context.Context, func(), error)
 	// Cfg is the effective config (host: live config; worker: host snapshot).
 	Cfg config.Config
 	// ChatModel is the everyday open chat model — the budget denominator.
@@ -69,6 +73,14 @@ func BuildSummarizer(deps WiringDeps) Summarize {
 		return nil
 	}
 	return func(ctx context.Context, msgs []llm.Message) (compaction.StructuredSummary, error) {
+		if _, pinned := managedsettings.FromContext(ctx); !pinned && deps.BeginWork != nil {
+			scoped, finish, err := deps.BeginWork(ctx)
+			if err != nil {
+				return compaction.StructuredSummary{}, err
+			}
+			defer finish()
+			ctx = scoped
+		}
 		// Explicitly account for routing/cancellation failures before any call.
 		compaction.RecordSummaryUsage(ctx, compaction.SummaryUsage{})
 		ctx, cancel := compaction.WithExecutionBudget(ctx)

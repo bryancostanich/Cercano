@@ -82,3 +82,19 @@ in [runtime enforcement](enterprise-runtime-enforcement.md). The administration 
 two-organization workflow are now implemented. The workflow checks real streamed
 requests, explicit model denials, retries and approved fallback against a local
 model fixture. Live Google and macOS Keychain acceptance remain separate checks.
+
+## Legacy unary and generation requests
+
+The older unary request API and its streaming fallback use the same managed
+provider binding as the main agent loop. A request with a work directory and
+target filename retains the existing generation, validation and file-restoration
+loop. Its filename inference, generation and repair calls use the selected
+administrator chain. Personal intent routing, the “use cloud” shortcut and
+implicit local degradation cannot replace that chain. Explicit local-only
+requests require an approved local default. Standalone routing stays unchanged.
+
+Background compaction opens its own host work scope when it has no active-turn
+snapshot. Nested compaction keeps its parent's settings. Local-only recap calls
+also hold a host scope and pass the physical authorization check; they do not
+automatically move local conversation summaries to a cloud provider. Account
+switching waits for these active calls, and a blocked host cannot start them.

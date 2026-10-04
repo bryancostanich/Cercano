@@ -105,6 +105,9 @@ func TestStart_SpawnWritesDurableEventWithModelSize(t *testing.T) {
 	// spawn event is written after cmd.Start succeeds, so an exec-format
 	// failure would not exercise it.
 	p := NewProvider(config.LlamaServerConfig{ContextSize: contextOverridePtr(8192), ModelDirs: []string{dir}, Binary: "/usr/bin/false"})
+	// This test verifies spawn logging, independently of the CI machine's RAM.
+	p.totalRAM = func() int64 { return 64 << 30 }
+	p.nonEvictable = func() (int64, bool) { return 1 << 30, true }
 	log, read := newTestEventLog(t)
 	p.SetEventLog(log)
 

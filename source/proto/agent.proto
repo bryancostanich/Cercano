@@ -1621,6 +1621,8 @@ service Worker {
   // PersistTurn, TurnDone, TurnError).
   rpc RunTurn (stream HostToWorker) returns (stream WorkerToHost) {}
   rpc RunTurnWithAuthentication (stream HostToWorker) returns (stream WorkerToHost) {}
+  // Managed turns require this RPC; hosts never downgrade to an older protocol.
+  rpc RunManagedTurn (stream HostToWorker) returns (stream WorkerToHost) {}
 }
 
 // HostToWorker is the host→worker envelope.
@@ -1638,6 +1640,7 @@ message HostToWorker {
     PermissionUpdate       perm_update      = 10;
     AutonomyLedgerResponse autonomy_response = 11;
     DispatchEventResponse  dispatch_event_response = 12;
+    WorkerModelAuthorizationResponse model_authorization_response = 13;
   }
 }
 
@@ -1670,6 +1673,7 @@ message WorkerToHost {
     McpCallRequest           mcp_request     = 13;
     AutonomyLedgerRequest    autonomy_request = 14;
     DispatchEventRequest     dispatch_event  = 15;
+    WorkerModelAuthorizationRequest model_authorization_request = 16;
   }
 }
 
@@ -1696,6 +1700,21 @@ message StartTurn {
   // worker gating MUST match the host rather than defaulting.
   repeated McpToolDescriptor mcp_tools = 12;
   repeated string            mcp_allow = 13;
+  bool enterprise_managed = 14; // must agree with RunManagedTurn
+}
+
+// Only physical route metadata crosses this authorization boundary. No prompt,
+// model output, provider credentials, or enterprise credentials are included.
+message WorkerModelAuthorizationRequest {
+  uint64 id = 1;
+  string provider = 2;
+  string endpoint = 3;
+  string model = 4;
+  string placement = 5;
+}
+message WorkerModelAuthorizationResponse {
+  uint64 id = 1;
+  bool allowed = 2; // absent, unmatched, timed-out, or disconnected means denied
 }
 
 // LLMMessage is the wire form of llm.Message. Serialization uses the same
@@ -1835,6 +1854,7 @@ message TurnDone {
 // TurnError signals a failed turn.
 message TurnError {
   string message = 1;
+  bool enterprise_policy_denied = 2;
 }
 
 // Cancel asks the worker to abort the current turn.
@@ -2005,6 +2025,7 @@ message OpenInferenceEvent {
   uint64 id = 1;
   int64 context_tokens = 5;
   string context_instance_id = 6;
+  bool enterprise_policy_denied = 7;
   oneof kind {
     LLMStreamEvent event = 2;
     string         error = 3;

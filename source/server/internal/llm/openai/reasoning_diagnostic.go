@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"cercano/source/server/internal/modelpolicy"
 	goopenai "github.com/sashabaranov/go-openai"
 )
 
@@ -294,6 +295,10 @@ func (s *ReasoningDiagnostic) do(req *http.Request, next goopenai.HTTPDoer) (res
 	if err != nil {
 		if resp != nil && resp.Body != nil {
 			resp.Body.Close()
+		}
+		// Policy errors contain only route metadata and must remain terminal.
+		if modelpolicy.IsDenial(err) {
+			return nil, err
 		}
 		return nil, errors.New("reasoning diagnostic: transport failed")
 	}

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"cercano/source/server/internal/llm"
+	"cercano/source/server/internal/modelpolicy"
 )
 
 func hookSession(t *testing.T, base string, mode ReasoningDiagnosticMode) *ReasoningDiagnostic {
@@ -298,5 +299,22 @@ func TestReasoningDiagnosticConcurrentAndRedirect(t *testing.T) {
 	s = hookSession(t, redirect.URL+"/v1", ReasoningDrop)
 	if _, err := hookWireRequest(t, s, hookFirstWire); err == nil || targetHits.Load() != 0 {
 		t.Fatal("redirect followed")
+	}
+}
+
+func TestReasoningDiagnosticPreservesPolicyDenial(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("denied diagnostic reached provider")
+		w.WriteHeader(500)
+	}))
+	defer server.Close()
+	session := hookSession(t, server.URL+"/v1", ReasoningDrop)
+	defer session.Close()
+	ctx := modelpolicy.WithAuthority(context.Background(), modelpolicy.AuthorizeFunc(func(_ context.Context, a modelpolicy.Attempt) error { return modelpolicy.Deny(a, "not approved") }))
+	ctx = WithReasoningDiagnostic(ctx, session)
+	client := NewClient(Config{BaseURL: server.URL + "/v1", Model: "diagnostic"})
+	_, err := client.StreamChat(ctx, llm.ChatRequest{Model: "diagnostic", Messages: hookInitial(), MaxTokens: 128})
+	if !modelpolicy.IsDenial(err) || llm.ClassOf(err) != llm.ErrPermission {
+		t.Fatalf("lost terminal policy failure: %v", err)
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/llm/httpx"
+	"cercano/source/server/internal/modelpolicy"
 	accounting "cercano/source/server/internal/usage"
 )
 
@@ -113,7 +114,7 @@ func NewClient(cfg Config) *Client {
 	if base == "" {
 		base = defaultBaseURL
 	}
-	return &Client{http: &http.Client{}, baseURL: base, accountingProfile: cfg.AccountingProfile, apiKey: cfg.APIKey, model: cfg.Model, route: cfg.Route, tokens: cfg.TokenSource, supportsVision: cfg.SupportsVision}
+	return &Client{http: modelpolicy.Client(&http.Client{}, "openai", "external", modelpolicy.Responses), baseURL: base, accountingProfile: cfg.AccountingProfile, apiKey: cfg.APIKey, model: cfg.Model, route: cfg.Route, tokens: cfg.TokenSource, supportsVision: cfg.SupportsVision}
 }
 
 func (c *Client) Name() string { return "openai-responses" }

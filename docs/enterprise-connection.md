@@ -94,7 +94,9 @@ reject the report; another sync obtains the latest policy.
 
 ## Remaining integration work
 
-The host still needs to own this connection for its lifetime, expose connection
+The [runtime authorization boundary](enterprise-runtime-enforcement.md) now covers
+model transports and managed worker requests, but is not yet installed by the
+host. The host still needs to own this connection for its lifetime, expose connection
 status through its normal interfaces, and apply policy before every inference
 attempt, including retries and fallbacks. Turn execution must use a consistent
 skill snapshot while also checking the latest model restrictions. Local managed

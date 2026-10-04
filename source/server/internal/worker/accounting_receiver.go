@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"sync"
 	"time"
 
@@ -145,8 +146,11 @@ func receiveAccountingControlled(ctx context.Context, client wire.WorkerClient, 
 			}
 			timer.Stop()
 		}
-		if err = send(ack); err != nil {
+		if err = send(ack); err != nil && !errors.Is(err, io.EOF) {
 			return err
 		}
+		// The worker can receive the final receipt, send its drain result and close
+		// before Send returns. gRPC then reports EOF here even though the terminal
+		// result is still queued for Recv. Read it instead of losing drain status.
 	}
 }

@@ -28,6 +28,7 @@ const testMember = "10000000-0000-0000-0000-000000000001"
 const testHost = "20000000-0000-0000-0000-000000000001"
 
 type fixture struct {
+	routes                   []v1.Route
 	mu                       sync.Mutex
 	mode                     string
 	revision                 int64
@@ -89,7 +90,11 @@ func newFixture(t *testing.T, loggedIn bool) *fixture {
 				w.WriteHeader(403)
 				return
 			}
-			p := v1.Policy{SchemaVersion: v1.Version, Scope: v1.Scope{OrganizationID: testOrg, UserID: testMember, HostID: testHost}, Revision: f.revision, IssuedAt: time.Now().Add(-time.Second), ExpiresAt: time.Now().Add(14 * time.Minute), MinimumClientVersion: "1.0.0", AllowedRoutes: []v1.Route{}, TaskDefaults: []v1.TaskDefault{}, Skills: []v1.SkillAssignment{{ID: testOrg + "/review", Version: "1", SHA256: fmt.Sprintf("%x", sha256.Sum256([]byte("Review carefully."))), SizeBytes: len("Review carefully.")}}}
+			routes := f.routes
+			if routes == nil {
+				routes = []v1.Route{}
+			}
+			p := v1.Policy{SchemaVersion: v1.Version, Scope: v1.Scope{OrganizationID: testOrg, UserID: testMember, HostID: testHost}, Revision: f.revision, IssuedAt: time.Now().Add(-time.Second), ExpiresAt: time.Now().Add(14 * time.Minute), MinimumClientVersion: "1.0.0", AllowedRoutes: routes, TaskDefaults: []v1.TaskDefault{}, Skills: []v1.SkillAssignment{{ID: testOrg + "/review", Version: "1", SHA256: fmt.Sprintf("%x", sha256.Sum256([]byte("Review carefully."))), SizeBytes: len("Review carefully.")}}}
 			if f.mode == "wrong_scope" {
 				p.Scope.OrganizationID = "other"
 			}

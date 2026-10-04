@@ -3313,6 +3313,7 @@ const (
 	Worker_Accounting_FullMethodName                = "/agent.Worker/Accounting"
 	Worker_RunTurn_FullMethodName                   = "/agent.Worker/RunTurn"
 	Worker_RunTurnWithAuthentication_FullMethodName = "/agent.Worker/RunTurnWithAuthentication"
+	Worker_RunManagedTurn_FullMethodName            = "/agent.Worker/RunManagedTurn"
 )
 
 // WorkerClient is the client API for Worker service.
@@ -3330,6 +3331,8 @@ type WorkerClient interface {
 	// PersistTurn, TurnDone, TurnError).
 	RunTurn(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[HostToWorker, WorkerToHost], error)
 	RunTurnWithAuthentication(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[HostToWorker, WorkerToHost], error)
+	// Managed turns require this RPC; hosts never downgrade to an older protocol.
+	RunManagedTurn(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[HostToWorker, WorkerToHost], error)
 }
 
 type workerClient struct {
@@ -3379,6 +3382,19 @@ func (c *workerClient) RunTurnWithAuthentication(ctx context.Context, opts ...gr
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Worker_RunTurnWithAuthenticationClient = grpc.BidiStreamingClient[HostToWorker, WorkerToHost]
 
+func (c *workerClient) RunManagedTurn(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[HostToWorker, WorkerToHost], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &Worker_ServiceDesc.Streams[3], Worker_RunManagedTurn_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[HostToWorker, WorkerToHost]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Worker_RunManagedTurnClient = grpc.BidiStreamingClient[HostToWorker, WorkerToHost]
+
 // WorkerServer is the server API for Worker service.
 // All implementations must embed UnimplementedWorkerServer
 // for forward compatibility.
@@ -3394,6 +3410,8 @@ type WorkerServer interface {
 	// PersistTurn, TurnDone, TurnError).
 	RunTurn(grpc.BidiStreamingServer[HostToWorker, WorkerToHost]) error
 	RunTurnWithAuthentication(grpc.BidiStreamingServer[HostToWorker, WorkerToHost]) error
+	// Managed turns require this RPC; hosts never downgrade to an older protocol.
+	RunManagedTurn(grpc.BidiStreamingServer[HostToWorker, WorkerToHost]) error
 	mustEmbedUnimplementedWorkerServer()
 }
 
@@ -3412,6 +3430,9 @@ func (UnimplementedWorkerServer) RunTurn(grpc.BidiStreamingServer[HostToWorker, 
 }
 func (UnimplementedWorkerServer) RunTurnWithAuthentication(grpc.BidiStreamingServer[HostToWorker, WorkerToHost]) error {
 	return status.Error(codes.Unimplemented, "method RunTurnWithAuthentication not implemented")
+}
+func (UnimplementedWorkerServer) RunManagedTurn(grpc.BidiStreamingServer[HostToWorker, WorkerToHost]) error {
+	return status.Error(codes.Unimplemented, "method RunManagedTurn not implemented")
 }
 func (UnimplementedWorkerServer) mustEmbedUnimplementedWorkerServer() {}
 func (UnimplementedWorkerServer) testEmbeddedByValue()                {}
@@ -3455,6 +3476,13 @@ func _Worker_RunTurnWithAuthentication_Handler(srv interface{}, stream grpc.Serv
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Worker_RunTurnWithAuthenticationServer = grpc.BidiStreamingServer[HostToWorker, WorkerToHost]
 
+func _Worker_RunManagedTurn_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(WorkerServer).RunManagedTurn(&grpc.GenericServerStream[HostToWorker, WorkerToHost]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Worker_RunManagedTurnServer = grpc.BidiStreamingServer[HostToWorker, WorkerToHost]
+
 // Worker_ServiceDesc is the grpc.ServiceDesc for Worker service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -3478,6 +3506,12 @@ var Worker_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "RunTurnWithAuthentication",
 			Handler:       _Worker_RunTurnWithAuthentication_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
+		{
+			StreamName:    "RunManagedTurn",
+			Handler:       _Worker_RunManagedTurn_Handler,
 			ServerStreams: true,
 			ClientStreams: true,
 		},

@@ -56,5 +56,5 @@ func (s *streamAuthentication) deliver(r *proto.WorkerAuthenticationResponse) {
 // A separate RPC is feature negotiation: an older worker must fail closed,
 // not ignore a capability flag and silently use its old fallback policy.
 func (w *WorkerServer) RunTurnWithAuthentication(stream proto.Worker_RunTurnWithAuthenticationServer) error {
-	return w.runTurn(stream, true)
+	return w.runTurn(stream, true, false)
 }

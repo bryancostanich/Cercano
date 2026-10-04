@@ -10,6 +10,7 @@ import (
 	"crypto/rand"
 	_ "embed"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -129,6 +130,30 @@ type AutonomyDecision struct {
 	StopReason       string                            `json:"stop_reason,omitempty"`
 }
 
+// AutonomyBlocker is the structured record written by the agent-invoked
+// report_autonomous_blocker capability: an explicit statement that the run
+// cannot proceed without the user (a needed approval, decision, credential, or
+// external input). The host's continuation gate treats it as an explicit stop;
+// the next explicit user message clears it and resumes the run.
+type AutonomyBlocker struct {
+	Reason     string    `json:"reason"`
+	RecordedAt time.Time `json:"recorded_at"`
+}
+
+// ActiveBlocker decodes the run's recorded blocker, if any. It reports false
+// when blocker_json is empty or undecodable, so a malformed record degrades to
+// "no explicit pause" rather than wedging the continuation gate.
+func (r AutonomyRun) ActiveBlocker() (AutonomyBlocker, bool) {
+	if r.BlockerJSON == "" {
+		return AutonomyBlocker{}, false
+	}
+	var b AutonomyBlocker
+	if err := json.Unmarshal([]byte(r.BlockerJSON), &b); err != nil || strings.TrimSpace(b.Reason) == "" {
+		return AutonomyBlocker{}, false
+	}
+	return b, true
+}
+
 // AutonomyRun is one durable append-only autonomous-mode run record. JSON fields
 // stay opaque to the store until richer review APIs need normalization.
 type AutonomyRun struct {
@@ -142,6 +167,7 @@ type AutonomyRun struct {
 	RevisionsJSON  string
 	DecisionsJSON  string
 	ReviewJSON     string
+	BlockerJSON    string
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 }
@@ -407,6 +433,7 @@ func Open(path string) (Store, error) {
 		`ALTER TABLE conversations ADD COLUMN granted_tools TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE conversations ADD COLUMN dismissed INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE conversations ADD COLUMN dev_work_dir TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE autonomy_runs ADD COLUMN blocker_json TEXT NOT NULL DEFAULT ''`,
 	} {
 		if _, err := db.Exec(alter); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			db.Close()

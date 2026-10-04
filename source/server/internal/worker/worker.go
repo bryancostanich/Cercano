@@ -264,9 +264,12 @@ func (w *WorkerServer) runTurn(stream proto.Worker_RunTurnServer, authRecovery b
 	req := runner.Request{
 		ConversationID: start.GetConversationId(),
 		Input:          start.GetInput(),
-		WorkDir:        start.GetWorkDir(),
-		DebugMode:      start.GetDebugMode(),
-		Gen:            start.GetGen(),
+		// Input author for persistence (host-generated continuations persist
+		// as system role). Empty means human input; the runner defaults it.
+		InputRole: start.GetInputRole(),
+		WorkDir:   start.GetWorkDir(),
+		DebugMode: start.GetDebugMode(),
+		Gen:       start.GetGen(),
 	}
 	if route := start.GetChatRoute(); route != nil {
 		req.ChatRoute = &chatroute.Route{Profile: route.GetProfile(), Model: route.GetModel()}

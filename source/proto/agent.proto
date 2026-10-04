@@ -1702,6 +1702,13 @@ message StartTurn {
   repeated McpToolDescriptor mcp_tools = 12;
   repeated string            mcp_allow = 13;
   SessionChatRoute chat_route = 14;
+  // Author of this turn's input for persistence: "" or "user" = human input,
+  // "system" = host-generated autonomous continuation. The worker child
+  // persists the input turn with this role so history never impersonates a
+  // human author. The provider-facing prompt is built user-role regardless
+  // (the content carries the host marker), so no provider sees a mid-history
+  // system message.
+  string input_role = 15;
 }
 
 // LLMMessage is the wire form of llm.Message. Serialization uses the same

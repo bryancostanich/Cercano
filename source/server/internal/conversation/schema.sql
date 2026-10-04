@@ -115,6 +115,9 @@ CREATE TABLE IF NOT EXISTS autonomy_runs (
     revisions_json    TEXT NOT NULL DEFAULT '',
     decisions_json    TEXT NOT NULL DEFAULT '',
     review_json       TEXT NOT NULL DEFAULT '',
+    -- blocker_json records an explicit report_autonomous_blocker stop: the run
+    -- is still "running" but waits for the user's next explicit message.
+    blocker_json      TEXT NOT NULL DEFAULT '',
     created_at        INTEGER NOT NULL,
     updated_at        INTEGER NOT NULL
 );

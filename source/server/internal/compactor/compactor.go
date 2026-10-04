@@ -446,7 +446,11 @@ func eligibleMessagesWithTurns(turns []conversation.Turn) ([]llm.Message, []int)
 		case string(llm.RoleAssistant):
 			role = llm.RoleAssistant
 		case string(llm.RoleSystem):
-			role = llm.RoleSystem
+			// Persisted system-role turns are host-authored source metadata
+			// (e.g. autonomous-continuation inputs). Providers reject or drop
+			// mid-history system messages, so the provider-facing send view
+			// maps them to user role; the content carries the host marker.
+			role = llm.RoleUser
 		}
 		var blocks []llm.Block
 		if t.BlocksJSON != "" {

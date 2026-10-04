@@ -57,9 +57,14 @@ type Request struct {
 	AuthRecovery   llm.AuthRequester
 	ConversationID string
 	Input          string
-	Images         []agent.InlineImage
-	WorkDir        string
-	Gen            uint64 // this turn's generation, for the host's persist fence
+	// InputRole records the input's author for persistence and history
+	// assembly: llm.RoleUser (default, human input) or llm.RoleSystem
+	// (host-generated autonomous continuation — host-authored, never
+	// impersonating a human turn).
+	InputRole string
+	Images    []agent.InlineImage
+	WorkDir   string
+	Gen       uint64 // this turn's generation, for the host's persist fence
 }
 
 // Result is the turn's outcome.

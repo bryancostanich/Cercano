@@ -13173,9 +13173,16 @@ type StartTurn struct {
 	// empty mcp_allow means "nothing allowlisted", identical to the host's answer
 	// for an empty file. Carrying the allowlist here mirrors permission_mode —
 	// worker gating MUST match the host rather than defaulting.
-	McpTools      []*McpToolDescriptor `protobuf:"bytes,12,rep,name=mcp_tools,json=mcpTools,proto3" json:"mcp_tools,omitempty"`
-	McpAllow      []string             `protobuf:"bytes,13,rep,name=mcp_allow,json=mcpAllow,proto3" json:"mcp_allow,omitempty"`
-	ChatRoute     *SessionChatRoute    `protobuf:"bytes,14,opt,name=chat_route,json=chatRoute,proto3" json:"chat_route,omitempty"`
+	McpTools  []*McpToolDescriptor `protobuf:"bytes,12,rep,name=mcp_tools,json=mcpTools,proto3" json:"mcp_tools,omitempty"`
+	McpAllow  []string             `protobuf:"bytes,13,rep,name=mcp_allow,json=mcpAllow,proto3" json:"mcp_allow,omitempty"`
+	ChatRoute *SessionChatRoute    `protobuf:"bytes,14,opt,name=chat_route,json=chatRoute,proto3" json:"chat_route,omitempty"`
+	// Author of this turn's input for persistence: "" or "user" = human input,
+	// "system" = host-generated autonomous continuation. The worker child
+	// persists the input turn with this role so history never impersonates a
+	// human author. The provider-facing prompt is built user-role regardless
+	// (the content carries the host marker), so no provider sees a mid-history
+	// system message.
+	InputRole     string `protobuf:"bytes,15,opt,name=input_role,json=inputRole,proto3" json:"input_role,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -13306,6 +13313,13 @@ func (x *StartTurn) GetChatRoute() *SessionChatRoute {
 		return x.ChatRoute
 	}
 	return nil
+}
+
+func (x *StartTurn) GetInputRole() string {
+	if x != nil {
+		return x.InputRole
+	}
+	return ""
 }
 
 // LLMMessage is the wire form of llm.Message. Serialization uses the same
@@ -19452,7 +19466,7 @@ const file_agent_proto_rawDesc = "" +
 	"\x10autonomy_request\x18\x0e \x01(\v2\x1c.agent.AutonomyLedgerRequestH\x00R\x0fautonomyRequest\x12D\n" +
 	"\x0edispatch_event\x18\x0f \x01(\v2\x1b.agent.DispatchEventRequestH\x00R\rdispatchEvent\x12P\n" +
 	"\x15session_model_request\x18\x10 \x01(\v2\x1a.agent.SessionModelRequestH\x00R\x13sessionModelRequestB\x05\n" +
-	"\x03msg\"\xb3\x04\n" +
+	"\x03msg\"\xd2\x04\n" +
 	"\tStartTurn\x125\n" +
 	"\n" +
 	"accounting\x18\v \x01(\v2\x15.agent.AccountingWorkR\n" +
@@ -19472,7 +19486,9 @@ const file_agent_proto_rawDesc = "" +
 	"\tmcp_tools\x18\f \x03(\v2\x18.agent.McpToolDescriptorR\bmcpTools\x12\x1b\n" +
 	"\tmcp_allow\x18\r \x03(\tR\bmcpAllow\x126\n" +
 	"\n" +
-	"chat_route\x18\x0e \x01(\v2\x17.agent.SessionChatRouteR\tchatRoute\"[\n" +
+	"chat_route\x18\x0e \x01(\v2\x17.agent.SessionChatRouteR\tchatRoute\x12\x1d\n" +
+	"\n" +
+	"input_role\x18\x0f \x01(\tR\tinputRole\"[\n" +
 	"\n" +
 	"LLMMessage\x12\x12\n" +
 	"\x04role\x18\x01 \x01(\tR\x04role\x12\x1f\n" +

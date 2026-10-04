@@ -139,6 +139,12 @@ func (m *mockAgentClient) ResumeConversation(ctx context.Context, in *proto.Resu
 	return &proto.ResumeConversationResponse{}, nil
 }
 
+// SessionModel stub: required by proto.AgentClient since the session
+// main-chat model override RPC was added (commit b567e0cb).
+func (m *mockAgentClient) SessionModel(ctx context.Context, in *proto.SessionModelRequest, opts ...grpc.CallOption) (*proto.SessionModelResponse, error) {
+	return &proto.SessionModelResponse{}, nil
+}
+
 func (m *mockAgentClient) StreamResumeConversation(ctx context.Context, in *proto.ResumeConversationRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[proto.ResumeConversationChunk], error) {
 	return nil, status.Error(codes.Unimplemented, "method StreamResumeConversation not implemented")
 }

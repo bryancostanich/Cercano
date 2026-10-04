@@ -10,7 +10,7 @@ func TestRegister_Count(t *testing.T) {
 	reg := capabilities.NewRegistry(capabilities.Services{})
 	Register(reg)
 	all := reg.All()
-	if len(all) != 50 {
+	if len(all) != 51 {
 		names := make([]string, len(all))
 		for i, c := range all {
 			names[i] = c.Name()

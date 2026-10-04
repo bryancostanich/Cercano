@@ -588,6 +588,7 @@ func (w *workerRunner) RunTurn(
 	startTurn := &proto.StartTurn{
 		ConversationId: req.ConversationID,
 		Input:          req.Input,
+		InputRole:      req.InputRole,
 		Images:         protoImages,
 		WorkDir:        req.WorkDir,
 		DebugMode:      req.DebugMode,

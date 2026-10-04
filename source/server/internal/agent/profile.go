@@ -116,7 +116,12 @@ func IsSessionControlTool(toolName string) bool {
 		"suggest_autonomous",
 		"request_autonomous_execution",
 		"request_autonomous_exit",
-		"auto_exit":
+		"auto_exit",
+		// An explicit blocker pause is a supervisory control boundary like
+		// the run entry/exit requests: it pauses the host's continuation
+		// chain, and a refused call must stop the turn rather than be fed
+		// back as steerable output.
+		"report_autonomous_blocker":
 		return true
 	default:
 		return false

@@ -61,6 +61,7 @@ func migrateAutonomyRunsToAppendOnly(db *sql.DB) error {
 			revisions_json    TEXT NOT NULL DEFAULT '',
 			decisions_json    TEXT NOT NULL DEFAULT '',
 			review_json       TEXT NOT NULL DEFAULT '',
+			blocker_json      TEXT NOT NULL DEFAULT '',
 			created_at        INTEGER NOT NULL,
 			updated_at        INTEGER NOT NULL
 		)`); err != nil {
@@ -69,10 +70,10 @@ func migrateAutonomyRunsToAppendOnly(db *sql.DB) error {
 	if _, err := tx.Exec(`
 		INSERT INTO autonomy_runs_new (
 			run_id, conversation_id, state, source_kind, source_plan_path, source_spec_path,
-			brief_json, revisions_json, decisions_json, review_json, created_at, updated_at
+			brief_json, revisions_json, decisions_json, review_json, blocker_json, created_at, updated_at
 		)
 		SELECT lower(hex(randomblob(12))), conversation_id, state, source_kind, source_plan_path, source_spec_path,
-		       brief_json, revisions_json, decisions_json, review_json, created_at, updated_at
+		       brief_json, revisions_json, decisions_json, review_json, '' AS blocker_json, created_at, updated_at
 		FROM autonomy_runs
 	`); err != nil {
 		return err
@@ -132,10 +133,10 @@ func (s *sqliteStore) CreateAutonomyRun(ctx context.Context, r AutonomyRun) (Aut
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO autonomy_runs (
 			run_id, conversation_id, state, source_kind, source_plan_path, source_spec_path,
-			brief_json, revisions_json, decisions_json, review_json, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			brief_json, revisions_json, decisions_json, review_json, blocker_json, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.RunID, r.ConversationID, r.State, r.SourceKind, r.SourcePlanPath, r.SourceSpecPath,
-		r.BriefJSON, r.RevisionsJSON, r.DecisionsJSON, r.ReviewJSON,
+		r.BriefJSON, r.RevisionsJSON, r.DecisionsJSON, r.ReviewJSON, r.BlockerJSON,
 		r.CreatedAt.Unix(), r.UpdatedAt.Unix())
 	if err != nil {
 		return AutonomyRun{}, err
@@ -164,11 +165,11 @@ func (s *sqliteStore) UpdateAutonomyRun(ctx context.Context, r AutonomyRun) erro
 	query := `
 		UPDATE autonomy_runs SET
 			state=?, source_kind=?, source_plan_path=?, source_spec_path=?,
-			brief_json=?, revisions_json=?, decisions_json=?, review_json=?, updated_at=?
+			brief_json=?, revisions_json=?, decisions_json=?, review_json=?, blocker_json=?, updated_at=?
 		WHERE run_id=?`
 	args := []any{
 		r.State, r.SourceKind, r.SourcePlanPath, r.SourceSpecPath,
-		r.BriefJSON, r.RevisionsJSON, r.DecisionsJSON, r.ReviewJSON, r.UpdatedAt.Unix(), r.RunID,
+		r.BriefJSON, r.RevisionsJSON, r.DecisionsJSON, r.ReviewJSON, r.BlockerJSON, r.UpdatedAt.Unix(), r.RunID,
 	}
 	if strings.TrimSpace(r.ConversationID) != "" {
 		query += ` AND conversation_id=?`
@@ -205,7 +206,7 @@ func normalizeAutonomyRunForCreate(r AutonomyRun) AutonomyRun {
 func (s *sqliteStore) GetActiveAutonomyRun(ctx context.Context, conversationID string) (AutonomyRun, error) {
 	return s.getAutonomyRun(ctx, `
 		SELECT run_id, conversation_id, state, source_kind, source_plan_path, source_spec_path,
-		       brief_json, revisions_json, decisions_json, review_json, created_at, updated_at
+		       brief_json, revisions_json, decisions_json, review_json, blocker_json, created_at, updated_at
 		FROM autonomy_runs
 		WHERE conversation_id = ? AND state IN ('running', 'review_pending')
 		ORDER BY updated_at DESC, created_at DESC, run_id DESC
@@ -216,7 +217,7 @@ func (s *sqliteStore) GetActiveAutonomyRun(ctx context.Context, conversationID s
 func (s *sqliteStore) GetLatestAutonomyRun(ctx context.Context, conversationID string) (AutonomyRun, error) {
 	return s.getAutonomyRun(ctx, `
 		SELECT run_id, conversation_id, state, source_kind, source_plan_path, source_spec_path,
-		       brief_json, revisions_json, decisions_json, review_json, created_at, updated_at
+		       brief_json, revisions_json, decisions_json, review_json, blocker_json, created_at, updated_at
 		FROM autonomy_runs
 		WHERE conversation_id = ?
 		ORDER BY updated_at DESC, created_at DESC, run_id DESC
@@ -230,7 +231,7 @@ func (s *sqliteStore) ListAutonomyRuns(ctx context.Context, conversationID strin
 
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT run_id, conversation_id, state, source_kind, source_plan_path, source_spec_path,
-		       brief_json, revisions_json, decisions_json, review_json, created_at, updated_at
+		       brief_json, revisions_json, decisions_json, review_json, blocker_json, created_at, updated_at
 		FROM autonomy_runs
 		WHERE conversation_id = ?
 		ORDER BY updated_at DESC, created_at DESC, run_id DESC`, conversationID)
@@ -264,7 +265,7 @@ func scanAutonomyRun(row autonomyRunScanner) (AutonomyRun, error) {
 	var created, updated int64
 	if err := row.Scan(
 		&r.RunID, &r.ConversationID, &r.State, &r.SourceKind, &r.SourcePlanPath, &r.SourceSpecPath,
-		&r.BriefJSON, &r.RevisionsJSON, &r.DecisionsJSON, &r.ReviewJSON, &created, &updated,
+		&r.BriefJSON, &r.RevisionsJSON, &r.DecisionsJSON, &r.ReviewJSON, &r.BlockerJSON, &created, &updated,
 	); err != nil {
 		return AutonomyRun{}, err
 	}

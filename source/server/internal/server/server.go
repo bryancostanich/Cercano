@@ -1030,6 +1030,12 @@ func (s *Server) SetCompactionGenerator(g *compactiongen.Generator) {
 
 // NewServer creates a new Agent gRPC server.
 func NewServer(a *agent.Agent, router RouterCloudUpdater, coordinator *loop.ADKCoordinator, cloudFactory agent.CloudFactory, registry *engine.EngineRegistry) *Server {
+	return newServerWithLogs(a, router, coordinator, cloudFactory, registry, "", "")
+}
+
+// Explicit paths let embedded hosts and integration tests isolate diagnostic
+// output without changing the user's home directory or normal server defaults.
+func newServerWithLogs(a *agent.Agent, router RouterCloudUpdater, coordinator *loop.ADKCoordinator, cloudFactory agent.CloudFactory, registry *engine.EngineRegistry, routingPath, failurePath string) *Server {
 	cfgService := cfgsvc.New("", config.Config{}, nil)
 	// The single effective-open-model resolver: overrides from config, defaults
 	// from the per-runtime catalog by RAM. Every collaborator that needs the
@@ -1037,11 +1043,11 @@ func NewServer(a *agent.Agent, router RouterCloudUpdater, coordinator *loop.ADKC
 	openModelsResolver := openmodels.New(cfgService, catalogdefaults.ForRuntime,
 		func() uint64 { return uint64(sysram.Total()) })
 	rtSvc := runtimessvc.New(cfgService, openModelsResolver)
-	routeLog, err := routinglog.NewWriter("")
+	routeLog, err := routinglog.NewWriter(routingPath)
 	if err != nil {
 		log.Printf("[routing] open log: %v", err)
 	}
-	failureLog, err := failurelog.NewWriter("")
+	failureLog, err := failurelog.NewWriter(failurePath)
 	if err != nil {
 		log.Printf("[failures] open log: %v", err)
 	}
@@ -3273,7 +3279,7 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 	// The initiator uses AttachLossless (not Attach) because its stream is the
 	// turn's authoritative output: every event must arrive, even if stream.Send
 	// is momentarily slow. Passive Task-4 attachers use Attach (drop-on-full).
-	replay, ch, detach := s.turnBroker.AttachLossless(convID)
+	replay, ch, finishDelivery, detach := s.turnBroker.AttachLosslessWithFinish(convID)
 	defer detach()
 
 	// requester gates a W/X permission prompt: blocks until the client responds
@@ -3331,6 +3337,7 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 	sink := &brokerSink{server: s, broker: s.turnBroker, conv: convID, gen: turnGen}
 
 	runReq := runnersvc.Request{
+		ModelOverride:  req.GetModelOverride(),
 		ConversationID: req.GetConversationId(),
 		Input:          req.GetInput(),
 		Images:         mapInlineImages(req.GetImages()),
@@ -3428,21 +3435,13 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 		}
 	}
 
-	// Drain any events still buffered in ch after the turn completed. This
-	// ensures trailing events (e.g. a final tool-exec-complete published just
-	// before RunTurn returned) are not dropped.
-drainLoop:
-	for {
-		select {
-		case ev, ok := <-ch:
-			if !ok {
-				break drainLoop
-			}
-			if err := sendRunnerEvent(stream, ev); err != nil {
-				return err
-			}
-		default:
-			break drainLoop
+	// The lossless broker has its own forwarding queue. An empty channel does
+	// not mean that queue is empty. Seal the subscription after RunTurn returns
+	// and wait for delivery to finish before sending FinalResponse.
+	finishDelivery()
+	for ev := range ch {
+		if err := sendRunnerEvent(stream, ev); err != nil {
+			return err
 		}
 	}
 

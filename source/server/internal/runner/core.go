@@ -277,7 +277,7 @@ func (c *Core) RunTurn(
 	// 1. Resolve the provider per the active Locus Mode.
 	candidates := c.d.Providers.Candidates()
 	ctx = managedrouting.PinCandidates(ctx, candidates)
-	selected, managedAssignment, managedModel, managed, err := managedrouting.Select(ctx, config.TaskChat, candidates, managedrouting.Request{})
+	selected, managedAssignment, managedModel, managed, err := managedrouting.Select(ctx, config.TaskChat, candidates, managedrouting.Request{Model: req.ModelOverride})
 	var provider inference.Provider
 	var isCloud, fellBack bool
 	if managed {

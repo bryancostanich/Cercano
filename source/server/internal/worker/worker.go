@@ -296,6 +296,7 @@ func (w *WorkerServer) runTurn(stream proto.Worker_RunTurnServer, authRecovery, 
 
 	// Build Request.
 	req := runner.Request{
+		ModelOverride:  start.GetModelOverride(),
 		ConversationID: start.GetConversationId(),
 		Input:          start.GetInput(),
 		WorkDir:        start.GetWorkDir(),

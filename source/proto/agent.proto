@@ -1631,6 +1631,8 @@ service Worker {
   // Settings-aware hosts require this method; older workers must not silently
   // ignore pinned defaults or skills carried in StartTurn.
   rpc RunManagedTurnWithSettings (stream HostToWorker) returns (stream WorkerToHost) {}
+  // Also preserves and validates explicit per-turn model selection.
+  rpc RunManagedTurnWithSelection (stream HostToWorker) returns (stream WorkerToHost) {}
 }
 
 // HostToWorker is the host→worker envelope.
@@ -1710,6 +1712,7 @@ message StartTurn {
   repeated string            mcp_allow = 13;
   bool enterprise_managed = 14; // must agree with RunManagedTurn
   bytes enterprise_settings_json = 15; // pinned policy/defaults and complete skills, never credentials
+  string model_override = 16; // explicit request intent, never permission to exceed policy
 }
 
 // Only physical route metadata crosses this authorization boundary. No prompt,

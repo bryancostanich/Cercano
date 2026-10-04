@@ -68,3 +68,9 @@ func (w *WorkerServer) RunManagedTurn(stream proto.Worker_RunManagedTurnServer) 
 func (w *WorkerServer) RunManagedTurnWithSettings(stream proto.Worker_RunManagedTurnWithSettingsServer) error {
 	return w.runTurn(stream, true, true)
 }
+
+// Explicit request choices require this capability. Older workers must fail
+// closed instead of silently dropping the choice and using the task default.
+func (w *WorkerServer) RunManagedTurnWithSelection(stream proto.Worker_RunManagedTurnWithSelectionServer) error {
+	return w.runTurn(stream, true, true)
+}

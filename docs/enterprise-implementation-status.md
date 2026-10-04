@@ -10,7 +10,8 @@ The enterprise service has Google sign-in, manual membership and team APIs,
 customer isolation in PostgreSQL, versioned policies and text-only skills,
 signed policy leases, publication and rollback, audit events, and native client
 login with PKCE and rotating credentials. Each developer has at most one team
-per organization. Enterprise service PRs 1 through 5 are merged.
+per organization. Enterprise service PRs 1 through 7 are merged, including the
+five-area administration console and its API support.
 
 The Cercano connection preview stores enterprise credentials separately in
 Keychain, verifies signed policies and complete skill bundles, and handles
@@ -40,20 +41,28 @@ settings ignore personal defaults; unlocked choices must still be approved.
 Nested work keeps the turn's selected settings, while physical requests always
 check current authorization. See [managed routing](enterprise-managed-routing.md).
 
-The implementation still needs the full administration-to-developer demonstration
-below.
+The cross-repository workflow harness now exercises administrator publication,
+native sign-in, the real host and streamed agent loop, shared-skill retrieval,
+physical fallback, model and skill updates, rollback, temporary outage, reconnect,
+host recreation and membership revocation for two disposable companies. Its
+optional long run waits for the actual signed lease to expire. Run it with the
+enterprise repository's `scripts/test-client-workflow.py`; see
+[the workflow guide](https://github.com/keithballinger/cercano-enterprise/blob/codex/enterprise-demo/docs/client-workflow-demo.md).
+
+The integrated workflow exposed two defects corrected in this branch: an
+explicit streaming-RPC model choice was not forwarded to the runner, and the
+initiator could send its final response before the broker's lossless queue had
+finished forwarding tokens. Worker capability negotiation now also rejects an
+older worker that cannot preserve explicit managed model choices.
 
 ## Remaining work, in order
 
-1. **Finish the administration interface.** Provide People & teams, Model policy,
-   Shared skills, Devices & sync, and Audit. Make publication, affected teams,
-   version rollback, and synchronization status understandable. Add any missing
-   service endpoints needed for those flows.
-2. **Demonstrate the complete workflow locally.** Use two disposable customer
-   organizations. Demonstrate allowed and blocked calls, forbidden fallback,
-   policy and skill updates, rollback, outage and expiry, reconnect, membership
-   deactivation, and customer separation. Capture administration screenshots.
-3. **Finish operational documentation and acceptance checks.** Document setup,
+1. **Complete live acceptance.** The reproducible fixture substitutes Google
+   identity, memory-backed credential storage and deterministic model generation.
+   Live Google consent, macOS Keychain prompts and a packaged-client process
+   restart still need a configured machine and user interaction. Administration
+   screenshots are saved in the enterprise repository's console demo guide.
+2. **Finish operational documentation and acceptance checks.** Document setup,
    migrations, backup and restore, signing-key rotation, health checks, request
    limits, audit retention and log privacy. Run the relevant tests and CI and
    distinguish local evidence from checks needing live Google or Keychain access.

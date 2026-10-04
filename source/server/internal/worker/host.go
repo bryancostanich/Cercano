@@ -575,6 +575,7 @@ func (w *workerRunner) RunTurn(
 	}
 
 	startTurn := &proto.StartTurn{
+		ModelOverride:          req.ModelOverride,
 		EnterpriseManaged:      managed,
 		EnterpriseSettingsJson: settings,
 		ConversationId:         req.ConversationID,
@@ -653,7 +654,9 @@ func (w *workerRunner) RunTurn(
 	client := proto.NewWorkerClient(conn)
 	var err error
 	var stream proto.Worker_RunTurnClient
-	if managed {
+	if managed && req.ModelOverride != "" {
+		stream, err = client.RunManagedTurnWithSelection(ctx)
+	} else if managed {
 		stream, err = client.RunManagedTurnWithSettings(ctx)
 	} else if needsAuthProtocol {
 		stream, err = client.RunTurnWithAuthentication(ctx)

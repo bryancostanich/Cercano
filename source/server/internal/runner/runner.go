@@ -50,6 +50,8 @@ type ToolSvc interface {
 // assembles history itself (so it works across a process boundary; see the
 // plan's load-bearing decision).
 type Request struct {
+	// ModelOverride is an explicit per-turn choice; managed routing validates it.
+	ModelOverride  string
 	DebugMode      bool
 	AuthRecovery   llm.AuthRequester
 	ConversationID string

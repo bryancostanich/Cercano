@@ -15,6 +15,7 @@ on:
       - 'source/server/internal/capabilities/**'
       - 'source/server/internal/hostsvc/tools/**'
       - 'source/server/internal/runner/**'
+      - 'source/server/internal/broker/**'
       - 'source/server/internal/server/**'
       - 'source/server/internal/mcp/**'
       - 'source/server/internal/agent/**'
@@ -43,6 +44,7 @@ on:
       - 'source/server/internal/capabilities/**'
       - 'source/server/internal/hostsvc/tools/**'
       - 'source/server/internal/runner/**'
+      - 'source/server/internal/broker/**'
       - 'source/server/internal/server/**'
       - 'source/server/internal/mcp/**'
       - 'source/server/internal/agent/**'
@@ -76,6 +78,10 @@ jobs:
         with:
           go-version-file: source/server/go.mod
           cache-dependency-path: source/server/go.sum
+      - name: Compile the cross-repository workflow harness
+        run: go test -tags=enterprise_demo ./internal/server -run '^$'
+      - name: Verify lossless stream delivery
+        run: go test -race ./internal/broker
       - run: go test -race ./internal/enterprise ./internal/modelpolicy ./internal/managedsettings/... ./internal/managedrouting ./internal/cloudfactory ./internal/hostsvc/providers ./internal/dispatch ./internal/loopcompact ./internal/usage ./internal/capabilities/builtins ./internal/hostsvc/tools ./internal/runner ./internal/server ./internal/mcp ./internal/agent ./internal/llm/... ./internal/engine/... ./internal/localruntime/... ./internal/worker ./internal/inference/... ./cmd/cercano
       - run: go vet ./internal/enterprise ./internal/modelpolicy ./internal/managedsettings/... ./internal/managedrouting ./internal/cloudfactory ./internal/hostsvc/providers ./internal/dispatch ./internal/loopcompact ./internal/usage ./internal/capabilities/builtins ./internal/hostsvc/tools ./internal/runner ./internal/server ./internal/mcp ./internal/agent ./internal/llm/... ./internal/engine/... ./internal/localruntime/... ./internal/worker ./cmd/cercano
       - run: go build ./cmd/cercano

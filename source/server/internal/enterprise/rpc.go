@@ -47,7 +47,7 @@ func (s *RPCServer) result() *proto.EnterpriseStatus {
 	if !state.ValidUntil.IsZero() {
 		expiry = state.ValidUntil.UTC().Format(time.RFC3339)
 	}
-	return &proto.EnterpriseStatus{Managed: state.Managed, EnforcementActive: state.EnforcementActive, Connected: state.Connected, Usable: state.Usable, OrganizationId: state.OrganizationID, HostId: state.HostID, Revision: state.Revision, ValidUntil: expiry, Error: state.Error, Changing: state.Changing}
+	return &proto.EnterpriseStatus{Managed: state.Managed, EnforcementActive: state.EnforcementActive, Connected: state.Connected, Usable: state.Usable, OrganizationId: state.OrganizationID, HostId: state.HostID, Revision: state.Revision, ValidUntil: expiry, Error: state.Error, Changing: state.Changing, MembershipKnown: state.MembershipKnown, OrganizationName: state.OrganizationName, TeamId: state.TeamID, TeamName: state.TeamName}
 }
 func (s *RPCServer) Login(ctx context.Context, req *proto.EnterpriseLoginRequest) (*proto.EnterpriseStatus, error) {
 	if err := localControl(ctx); err != nil {

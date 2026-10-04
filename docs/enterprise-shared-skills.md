@@ -57,7 +57,7 @@ main-worker tool execution, delegated-agent tool execution, malformed bundles,
 and rejection of workers that only support the earlier authorization protocol.
 All use disposable local data; they do not contact Google or real model services.
 
-Managed routing defaults and ordered fallback selection remain separate work.
-Carrying the policy in a turn snapshot does not yet make the routing layer apply
-those choices. The administration interface and complete two-customer demonstration
-are also still pending. See the [implementation status](enterprise-implementation-status.md).
+Managed routing now applies administrator defaults and ordered fallbacks. The
+administration interface and reproducible two-company workflow are implemented;
+the workflow exercises shared-skill retrieval through an actual agent tool loop.
+Live Google and Keychain acceptance remain pending. See the [implementation status](enterprise-implementation-status.md).

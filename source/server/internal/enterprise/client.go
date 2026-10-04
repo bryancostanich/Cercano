@@ -52,18 +52,23 @@ type Credentials struct {
 	HighestRevision int64     `json:"highest_revision"`
 }
 type Bundle struct {
-	Envelope v1.SignedPolicy           `json:"envelope"`
-	Policy   v1.Policy                 `json:"policy"`
-	Skills   []v1.SkillContentResponse `json:"skills"`
+	Membership *v1.Membership            `json:"membership,omitempty"`
+	Envelope   v1.SignedPolicy           `json:"envelope"`
+	Policy     v1.Policy                 `json:"policy"`
+	Skills     []v1.SkillContentResponse `json:"skills"`
 }
 type Status struct {
-	Connected      bool      `json:"connected"`
-	OrganizationID string    `json:"organization_id,omitempty"`
-	HostID         string    `json:"host_id,omitempty"`
-	Revision       int64     `json:"revision,omitempty"`
-	ValidUntil     time.Time `json:"valid_until,omitempty"`
-	Usable         bool      `json:"usable"`
-	Error          string    `json:"error,omitempty"`
+	MembershipKnown  bool      `json:"membership_known"`
+	OrganizationName string    `json:"organization_name,omitempty"`
+	TeamID           string    `json:"team_id,omitempty"`
+	TeamName         string    `json:"team_name,omitempty"`
+	Connected        bool      `json:"connected"`
+	OrganizationID   string    `json:"organization_id,omitempty"`
+	HostID           string    `json:"host_id,omitempty"`
+	Revision         int64     `json:"revision,omitempty"`
+	ValidUntil       time.Time `json:"valid_until,omitempty"`
+	Usable           bool      `json:"usable"`
+	Error            string    `json:"error,omitempty"`
 }
 type Options struct {
 	HTTPClient        *http.Client
@@ -286,7 +291,16 @@ func (m *Manager) sync(ctx context.Context) error {
 	if e != nil || p.Validate(scope, now) != nil || p.Revision < c.HighestRevision || !versionAtLeast(m.options.ClientVersion, p.MinimumClientVersion) {
 		return ErrInvalidBundle
 	}
-	b := Bundle{Envelope: envelope, Policy: p, Skills: []v1.SkillContentResponse{}}
+	// Membership is display-only HTTPS metadata, never an authorization input.
+	if membership := response.Membership; membership != nil {
+		if membership.OrganizationID != scope.OrganizationID || membership.UserID != scope.UserID ||
+			(membership.Role != "administrator" && membership.Role != "developer") ||
+			(membership.TeamID != "" && !validUUID(membership.TeamID)) ||
+			(membership.TeamID == "" && membership.TeamName != "") {
+			return ErrInvalidBundle
+		}
+	}
+	b := Bundle{Envelope: envelope, Policy: p, Membership: response.Membership, Skills: []v1.SkillContentResponse{}}
 	for _, assignment := range p.Skills {
 		var skill v1.SkillContentResponse
 		found := false
@@ -398,6 +412,12 @@ func (m *Manager) Status() Status {
 	if m.bundle != nil {
 		s.Revision = m.bundle.Policy.Revision
 		s.ValidUntil = m.bundle.Policy.ExpiresAt
+		if membership := m.bundle.Membership; membership != nil {
+			s.MembershipKnown = true
+			s.OrganizationName = membership.OrganizationName
+			s.TeamID = membership.TeamID
+			s.TeamName = membership.TeamName
+		}
 	}
 	s.Usable = m.usable()
 	return s

@@ -18545,8 +18545,13 @@ type EnterpriseStatus struct {
 	ValidUntil        string                 `protobuf:"bytes,8,opt,name=valid_until,json=validUntil,proto3" json:"valid_until,omitempty"`
 	Error             string                 `protobuf:"bytes,9,opt,name=error,proto3" json:"error,omitempty"`
 	Changing          bool                   `protobuf:"varint,10,opt,name=changing,proto3" json:"changing,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// Display metadata from the last applied policy response. Never grants access.
+	MembershipKnown  bool   `protobuf:"varint,11,opt,name=membership_known,json=membershipKnown,proto3" json:"membership_known,omitempty"`
+	OrganizationName string `protobuf:"bytes,12,opt,name=organization_name,json=organizationName,proto3" json:"organization_name,omitempty"`
+	TeamId           string `protobuf:"bytes,13,opt,name=team_id,json=teamId,proto3" json:"team_id,omitempty"`
+	TeamName         string `protobuf:"bytes,14,opt,name=team_name,json=teamName,proto3" json:"team_name,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *EnterpriseStatus) Reset() {
@@ -18647,6 +18652,34 @@ func (x *EnterpriseStatus) GetChanging() bool {
 		return x.Changing
 	}
 	return false
+}
+
+func (x *EnterpriseStatus) GetMembershipKnown() bool {
+	if x != nil {
+		return x.MembershipKnown
+	}
+	return false
+}
+
+func (x *EnterpriseStatus) GetOrganizationName() string {
+	if x != nil {
+		return x.OrganizationName
+	}
+	return ""
+}
+
+func (x *EnterpriseStatus) GetTeamId() string {
+	if x != nil {
+		return x.TeamId
+	}
+	return ""
+}
+
+func (x *EnterpriseStatus) GetTeamName() string {
+	if x != nil {
+		return x.TeamName
+	}
+	return ""
 }
 
 var File_agent_proto protoreflect.FileDescriptor
@@ -20181,7 +20214,7 @@ const file_agent_proto_rawDesc = "" +
 	"\x16EnterpriseLoginRequest\x12\x16\n" +
 	"\x06server\x18\x01 \x01(\tR\x06server\x12'\n" +
 	"\x0forganization_id\x18\x02 \x01(\tR\x0eorganizationId\"\x1a\n" +
-	"\x18EnterpriseControlRequest\"\xc2\x02\n" +
+	"\x18EnterpriseControlRequest\"\xd0\x03\n" +
 	"\x10EnterpriseStatus\x12\x18\n" +
 	"\amanaged\x18\x01 \x01(\bR\amanaged\x12-\n" +
 	"\x12enforcement_active\x18\x02 \x01(\bR\x11enforcementActive\x12\x1c\n" +
@@ -20194,7 +20227,11 @@ const file_agent_proto_rawDesc = "" +
 	"validUntil\x12\x14\n" +
 	"\x05error\x18\t \x01(\tR\x05error\x12\x1a\n" +
 	"\bchanging\x18\n" +
-	" \x01(\bR\bchanging*0\n" +
+	" \x01(\bR\bchanging\x12)\n" +
+	"\x10membership_known\x18\v \x01(\bR\x0fmembershipKnown\x12+\n" +
+	"\x11organization_name\x18\f \x01(\tR\x10organizationName\x12\x17\n" +
+	"\ateam_id\x18\r \x01(\tR\x06teamId\x12\x1b\n" +
+	"\tteam_name\x18\x0e \x01(\tR\bteamName*0\n" +
 	"\n" +
 	"FileAction\x12\n" +
 	"\n" +

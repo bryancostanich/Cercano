@@ -10,8 +10,9 @@ The enterprise service has Google sign-in, manual membership and team APIs,
 customer isolation in PostgreSQL, versioned policies and text-only skills,
 signed policy leases, publication and rollback, audit events, and native client
 login with PKCE and rotating credentials. Each developer has at most one team
-per organization. Enterprise service PRs 1 through 7 are merged, including the
-five-area administration console and its API support.
+per organization. Enterprise service PRs 1 through 10 are merged, including the
+five-area administration console, reproducible workflow, recovery checks, and
+shared organization request limits.
 
 The Cercano connection preview stores enterprise credentials separately in
 Keychain, verifies signed policies and complete skill bundles, and handles
@@ -47,13 +48,27 @@ physical fallback, model and skill updates, rollback, temporary outage, reconnec
 host recreation and membership revocation for two disposable companies. Its
 optional long run waits for the actual signed lease to expire. Run it with the
 enterprise repository's `scripts/test-client-workflow.py`; see
-[the workflow guide](https://github.com/keithballinger/cercano-enterprise/blob/codex/enterprise-demo/docs/client-workflow-demo.md).
+[the workflow guide](https://github.com/keithballinger/cercano-enterprise/blob/main/docs/client-workflow-demo.md).
 
 The integrated workflow exposed two defects corrected in this branch: an
 explicit streaming-RPC model choice was not forwarded to the runner, and the
 initiator could send its final response before the broker's lossless queue had
 finished forwarding tokens. Worker capability negotiation now also rejects an
 older worker that cannot preserve explicit managed model choices.
+
+The developer's status now includes the organization name and assigned team from
+its last applied policy response. `cercano enterprise status` prints a readable
+summary; `--json` preserves machine-readable output. Missing metadata is distinct
+from having no team. Expired or revoked access remains blocked regardless of the
+displayed membership. These display fields are authenticated by HTTPS, checked
+against the verified scope, and never used to grant inference permission.
+
+The enterprise [deployment guide](https://github.com/keithballinger/cercano-enterprise/blob/main/docs/deployment.md)
+covers configuration, migrations, proxy requirements, request limits, health,
+retention, rollback and privacy. Local operational tests restore a real PostgreSQL
+backup into a fresh database, recheck isolation, invalidate restored credentials,
+and load overlapping signing-key rotation stages. The two-company workflow has
+also passed with a real 15-minute authorization expiry and subsequent renewal.
 
 ## Remaining work, in order
 
@@ -62,10 +77,9 @@ older worker that cannot preserve explicit managed model choices.
    Live Google consent, macOS Keychain prompts and a packaged-client process
    restart still need a configured machine and user interaction. Administration
    screenshots are saved in the enterprise repository's console demo guide.
-2. **Finish operational documentation and acceptance checks.** Document setup,
-   migrations, backup and restore, signing-key rotation, health checks, request
-   limits, audit retention and log privacy. Run the relevant tests and CI and
-   distinguish local evidence from checks needing live Google or Keychain access.
+2. **Finish the V1 acceptance audit.** Check each agreed requirement against
+   current code, tests and artifacts, run final CI, and keep local evidence
+   distinct from checks needing live Google or Keychain access.
 
 ## Repository and deployment rules
 

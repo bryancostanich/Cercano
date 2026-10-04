@@ -193,10 +193,12 @@ func TestEnterpriseServiceWorkflow(t *testing.T) {
 	admins := []workflowBrowser{}
 	developers := []workflowBrowser{}
 	policies := []map[string]any{}
+	teams := []string{}
 	for i, company := range env.Organizations {
 		admin := browser(company.ID, "admin")
 		admin.login(company.Invitation)
 		team := admin.api("POST", "/teams", map[string]any{"name": "Engineering"}, 201)
+		teams = append(teams, team["id"].(string))
 		invite := admin.api("POST", "/invitations", map[string]any{"email": "developer@" + company.Domain, "role": "developer", "team_id": team["id"]}, 201)
 		developer := browser(company.ID, "developer")
 		invitationURL, err := url.Parse(invite["invitation_url"].(string))
@@ -342,7 +344,8 @@ func TestEnterpriseServiceWorkflow(t *testing.T) {
 		if e != nil {
 			t.Fatal(e)
 		}
-		if !status.Usable || !status.EnforcementActive || status.OrganizationId != company.ID {
+		if !status.Usable || !status.EnforcementActive || status.OrganizationId != company.ID ||
+			!status.MembershipKnown || status.OrganizationName != company.Name || status.TeamId != teams[i] || status.TeamName != "Engineering" {
 			t.Fatal("running host did not activate the signed policy")
 		}
 		content := fmt.Sprintf("Company %d review instructions version one.", i)

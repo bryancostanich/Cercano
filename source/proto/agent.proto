@@ -2427,4 +2427,9 @@ message EnterpriseStatus {
   string valid_until = 8;
   string error = 9;
   bool changing = 10;
+  // Display metadata from the last applied policy response. Never grants access.
+  bool membership_known = 11;
+  string organization_name = 12;
+  string team_id = 13;
+  string team_name = 14;
 }

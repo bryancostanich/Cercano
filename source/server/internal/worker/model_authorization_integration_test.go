@@ -68,7 +68,7 @@ func TestManagedWorkerAuthorizesEachPhysicalAttempt(t *testing.T) {
 			ctx = managedsettings.WithSnapshot(ctx, settingstest.Snapshot("test-org", "1", "Review carefully."))
 			ctx = modelpolicy.WithAuthority(ctx, modelpolicy.AuthorizeFunc(func(_ context.Context, a modelpolicy.Attempt) error {
 				checks.Add(1)
-				if a.Provider != "openai" || a.Endpoint != provider.URL+"/v1" || a.Placement != "external" || a.Model != "fake-model" {
+				if a.Provider != "openai" || a.Endpoint != provider.URL+"/v1" || a.Placement != "external" || a.Model != "approved" {
 					t.Errorf("wrong request identity: %+v", a)
 					return modelpolicy.Deny(a, "wrong route")
 				}

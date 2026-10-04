@@ -1,12 +1,14 @@
 package worker
 
 import (
+	"cercano/source/server/internal/managedrouting"
 	"cercano/source/server/internal/managedsettings"
 	"cercano/source/server/internal/reasoningexperiment"
 	"cercano/source/server/internal/visioninspect"
 	"context"
 	"errors"
 	"fmt"
+	v1 "github.com/bryancostanich/Cercano/source/enterpriseapi/v1"
 	"log"
 	"runtime/debug"
 	"sync"
@@ -713,7 +715,9 @@ func (r *workerResolver) Candidates() inference.Tiers {
 		}
 		return ""
 	}
-	return inference.Tiers{Mode: mode, ModelFor: modelFor, OpenReady: func(model string) bool { return dispatch.OpenModelReadyFor(c, model) }, Cloud: r.cloudProv, Open: r.openProv, TaskFor: c.TaskAssignment, ResolveDestination: c.ResolveDestination, Destinations: map[pkgcfg.Destination]inference.Candidate{
+	return inference.Tiers{DeveloperConfig: &c, ManagedRoute: func(ctx context.Context, route v1.Route, destination pkgcfg.Destination) (inference.Candidate, error) {
+		return managedrouting.BindRoute(ctx, c, route, destination, r.openProv, r.diagnosticBuild)
+	}, Mode: mode, ModelFor: modelFor, OpenReady: func(model string) bool { return dispatch.OpenModelReadyFor(c, model) }, Cloud: r.cloudProv, Open: r.openProv, TaskFor: c.TaskAssignment, ResolveDestination: c.ResolveDestination, Destinations: map[pkgcfg.Destination]inference.Candidate{
 		pkgcfg.DestinationPrimary:   {Provider: r.cloudProv, Profile: c.ActiveCloudProfile, IsCloud: true},
 		pkgcfg.DestinationSecondary: {Provider: r.secondaryProv, Profile: c.SecondaryCloudProfile, IsCloud: true},
 	}}

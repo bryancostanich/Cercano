@@ -32,26 +32,28 @@ read-only tool. Settings-aware workers reject missing or incomplete bundles and
 never receive enterprise credentials. Signed update/removal/rollback tests and
 real worker tool-loop tests cover these paths. See [shared skills](enterprise-shared-skills.md).
 
-The implementation still needs managed routing defaults and the full
-administration-to-developer demonstration below.
+Managed routing now applies administrator task defaults to the main conversation,
+delegation, local co-processor tools, watchdog calls, and compaction. It uses the
+existing provider adapters and retry engine, binds only matching provider
+credentials, and follows the explicit administrator fallback order. Locked
+settings ignore personal defaults; unlocked choices must still be approved.
+Nested work keeps the turn's selected settings, while physical requests always
+check current authorization. See [managed routing](enterprise-managed-routing.md).
+
+The implementation still needs the full administration-to-developer demonstration
+below.
 
 ## Remaining work, in order
 
-1. **Apply managed routing defaults.** Use the pinned policy
-   to select approved task defaults and ordered fallbacks, including the rules
-   for unlocked developer overrides. The snapshot and shared-skill integration
-   are complete; routing does not yet consume the managed choices. Continue
-   applying the latest restrictions before each physical call and keep
-   administrator settings separate from personal settings.
-2. **Finish the administration interface.** Provide People & teams, Model policy,
+1. **Finish the administration interface.** Provide People & teams, Model policy,
    Shared skills, Devices & sync, and Audit. Make publication, affected teams,
    version rollback, and synchronization status understandable. Add any missing
    service endpoints needed for those flows.
-3. **Demonstrate the complete workflow locally.** Use two disposable customer
+2. **Demonstrate the complete workflow locally.** Use two disposable customer
    organizations. Demonstrate allowed and blocked calls, forbidden fallback,
    policy and skill updates, rollback, outage and expiry, reconnect, membership
    deactivation, and customer separation. Capture administration screenshots.
-4. **Finish operational documentation and acceptance checks.** Document setup,
+3. **Finish operational documentation and acceptance checks.** Document setup,
    migrations, backup and restore, signing-key rotation, health checks, request
    limits, audit retention and log privacy. Run the relevant tests and CI and
    distinguish local evidence from checks needing live Google or Keychain access.

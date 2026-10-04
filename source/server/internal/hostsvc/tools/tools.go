@@ -727,6 +727,13 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 	if res.Route != nil {
 		model = res.Route.Model
 		provider = res.Route.Provider
+		if res.Route.Destination != "" {
+			sel.IsCloud = res.Route.Destination != "local"
+			location = "local"
+			if sel.IsCloud {
+				location = "cloud"
+			}
+		}
 	}
 
 	if err != nil {

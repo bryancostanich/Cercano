@@ -1,7 +1,9 @@
 package inference
 
 import (
+	"context"
 	"fmt"
+	v1 "github.com/bryancostanich/Cercano/source/enterpriseapi/v1"
 
 	"cercano/source/server/internal/locus"
 	"cercano/source/server/pkg/config"
@@ -17,6 +19,14 @@ const (
 
 // Tiers holds the candidate inference providers; either may be nil/absent.
 type Tiers struct {
+	// ManagedRoute binds one approved identity without inheriting personal fallbacks.
+	ManagedRoute func(context.Context, v1.Route, config.Destination) (Candidate, error)
+	// DeveloperConfig is the same immutable personal snapshot as this graph. Only
+	// administrator-unlocked preferences may be read from it by managed routing.
+	DeveloperConfig *config.Config
+	// WrapManagedMain preserves the host main-call usage recorder. Worker calls
+	// use their existing per-attempt accounting transport instead.
+	WrapManagedMain func(Provider, bool) Provider
 	// Mode and ModelFor are frozen with task assignments in the candidate graph.
 	Mode      locus.Mode
 	ModelFor  func(Selection, config.Tier) string

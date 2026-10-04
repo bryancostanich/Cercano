@@ -80,8 +80,12 @@ func (r *recordingProvider) report(model string, in, out int, d time.Duration, r
 		return
 	}
 	provider := r.inner.Name()
+	isCloud := r.isCloud
 	if route != nil {
 		provider = route.Provider
+		if route.Destination != "" {
+			isCloud = route.Destination != "local"
+		}
 		if route.Model != "" {
 			model = route.Model
 		}
@@ -90,7 +94,7 @@ func (r *recordingProvider) report(model string, in, out int, d time.Duration, r
 		Source:       r.source,
 		Model:        model,
 		Provider:     provider,
-		IsCloud:      r.isCloud,
+		IsCloud:      isCloud,
 		InputTokens:  in,
 		OutputTokens: out,
 		DurationMs:   d.Milliseconds(),

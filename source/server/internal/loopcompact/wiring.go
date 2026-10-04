@@ -14,6 +14,7 @@ import (
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/locus"
+	"cercano/source/server/internal/managedrouting"
 	"cercano/source/server/internal/modelwindow"
 	"cercano/source/server/pkg/config"
 )
@@ -76,42 +77,12 @@ func BuildSummarizer(deps WiringDeps) Summarize {
 			return compaction.StructuredSummary{}, err
 		}
 		tiers := deps.Candidates()
-		assignment := deps.Cfg.TaskAssignment(config.TaskCompaction)
-		if tiers.TaskFor != nil {
-			assignment = tiers.TaskFor(config.TaskCompaction)
+		ctx = managedrouting.PinCandidates(ctx, tiers)
+		selected, assignment, model, err := selectSummarizer(ctx, deps, tiers)
+		if err != nil {
+			return compaction.StructuredSummary{}, err
 		}
 		tier := assignment.Quality.CapabilityTier()
-		mode, err := locus.ParseMode(deps.Cfg.LocusMode)
-		if tiers.Mode != "" {
-			mode = tiers.Mode
-			err = nil
-		}
-		if err != nil {
-			return compaction.StructuredSummary{}, err
-		}
-		localModel := ""
-		if tiers.ModelFor != nil {
-			localModel = tiers.ModelFor(inference.Selection{}, tier)
-		}
-		// The legacy model override applies only to an explicitly selected Local
-		// task. It must never hijack Secondary or a redirected cloud destination.
-		if assignment.Destination == config.DestinationLocal && deps.Cfg.Compaction.SummarizerModel != "" {
-			localModel = deps.Cfg.Compaction.SummarizerModel
-		}
-		if tiers.OpenReady != nil && !tiers.OpenReady(localModel) {
-			tiers.Open = nil
-		}
-		selected, err := inference.SelectDestination(mode, assignment.Destination, tiers)
-		if err != nil {
-			return compaction.StructuredSummary{}, err
-		}
-		model := localModel
-		if selected.IsCloud {
-			model = ""
-			if tiers.ModelFor != nil {
-				model = tiers.ModelFor(selected, tier)
-			}
-		}
 		provider := inference.WithTaskRoute(selected.Provider, config.TaskCompaction, assignment, selected.PolicyDestination, model)
 		run := agent.InferenceTurnRunner(provider, model)
 		window := contextmeter.ModelMax(model)
@@ -264,4 +235,48 @@ func NewFactory(deps WiringDeps) func() agent.LoopCompactor {
 		}
 		return c
 	}
+}
+
+func selectSummarizer(ctx context.Context, deps WiringDeps, tiers inference.Tiers) (inference.Selection, config.TaskAssignment, string, error) {
+	selected, assignment, model, managed, err := managedrouting.Select(ctx, config.TaskCompaction, tiers, managedrouting.Request{})
+	if managed {
+		return selected, assignment, model, err
+	}
+	assignment = deps.Cfg.TaskAssignment(config.TaskCompaction)
+	if tiers.TaskFor != nil {
+		assignment = tiers.TaskFor(config.TaskCompaction)
+	}
+	tier := assignment.Quality.CapabilityTier()
+	mode, err := locus.ParseMode(deps.Cfg.LocusMode)
+	if tiers.Mode != "" {
+		mode = tiers.Mode
+		err = nil
+	}
+	if err != nil {
+		return inference.Selection{}, assignment, "", err
+	}
+	localModel := ""
+	if tiers.ModelFor != nil {
+		localModel = tiers.ModelFor(inference.Selection{}, tier)
+	}
+	// The legacy model override applies only to an explicitly selected Local
+	// task. It must never hijack Secondary or a redirected cloud destination.
+	if assignment.Destination == config.DestinationLocal && deps.Cfg.Compaction.SummarizerModel != "" {
+		localModel = deps.Cfg.Compaction.SummarizerModel
+	}
+	if tiers.OpenReady != nil && !tiers.OpenReady(localModel) {
+		tiers.Open = nil
+	}
+	selected, err = inference.SelectDestination(mode, assignment.Destination, tiers)
+	if err != nil {
+		return inference.Selection{}, assignment, "", err
+	}
+	model = localModel
+	if selected.IsCloud {
+		model = ""
+		if tiers.ModelFor != nil {
+			model = tiers.ModelFor(selected, tier)
+		}
+	}
+	return selected, assignment, model, nil
 }

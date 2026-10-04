@@ -14,6 +14,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	v1 "github.com/bryancostanich/Cercano/source/enterpriseapi/v1"
 	"net"
 	"sync/atomic"
 	"testing"
@@ -401,7 +402,11 @@ func TestWorkerRunner_ContextCancel(t *testing.T) {
 	}
 }
 
-func (f *echoResolver) Candidates() inference.Tiers { return inference.Tiers{} }
+func (f *echoResolver) Candidates() inference.Tiers {
+	return inference.Tiers{ManagedRoute: func(_ context.Context, route v1.Route, _ config.Destination) (inference.Candidate, error) {
+		return inference.Candidate{Provider: f.prov, IsCloud: route.Placement == "external"}, nil
+	}}
+}
 
 func (f *echoResolver) SetProfileModelEvidence(func(config.CloudProfile, string) modelmetadata.Evidence) {
 }

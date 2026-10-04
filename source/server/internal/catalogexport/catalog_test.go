@@ -46,7 +46,7 @@ func TestSnapshotAndSubscriptionIdentity(t *testing.T) {
 	if providers["bedrock"].Status != "coming_soon" {
 		t.Fatal("lost client availability annotation")
 	}
-	if len(providers["ollama"].Models) != 0 {
+	if len(providers["ollama"].Models) != 0 || providers["ollama"].Endpoint != "" {
 		t.Fatal("invented Ollama inventory")
 	}
 	if providers["llama_server"].Endpoint != "" || len(providers["llama_server"].Models) == 0 {

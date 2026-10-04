@@ -103,7 +103,9 @@ func Build(serverDir string) ([]byte, error) {
 	}
 	// Ollama's model tags come from the configured server, not the GGUF/UQFF
 	// catalogs. Never relabel those incompatible IDs as Ollama models.
-	d.Providers = append(d.Providers, Provider{ID: "ollama", Label: "Ollama", Provider: "ollama", Endpoint: defaults.OllamaURL, Placement: "local", Authentication: "none", Status: "runtime", Models: []Model{}})
+	// The default localhost hostname is not a signed-policy literal loopback
+	// address; require the operator to supply the matching configured endpoint.
+	d.Providers = append(d.Providers, Provider{ID: "ollama", Label: "Ollama", Provider: "ollama", Endpoint: "", Placement: "local", Authentication: "none", Status: "runtime", Models: []Model{}})
 	for _, runtime := range []struct{ id, dir, label string }{{"llama_server", "llamaserver", "llama-server"}, {"mistralrs", "mistralrs", "mistral.rs"}} {
 		raw, err := os.ReadFile(filepath.Join(serverDir, "internal", "localruntime", runtime.dir, "catalog.json"))
 		if err != nil {

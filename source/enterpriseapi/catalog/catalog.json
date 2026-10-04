@@ -207,7 +207,7 @@
       "id": "ollama",
       "label": "Ollama",
       "provider": "ollama",
-      "endpoint": "http://localhost:11434",
+      "endpoint": "",
       "placement": "local",
       "authentication": "none",
       "status": "runtime",

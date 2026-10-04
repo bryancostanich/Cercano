@@ -8,6 +8,64 @@ import (
 	"cercano/source/server/internal/runner"
 )
 
+func TestLosslessFinishDeliversBacklogBeforeClosing(t *testing.T) {
+	b := New()
+	_, gen, release := b.BeginTurn(context.Background(), "finish")
+	defer release()
+	_, ch, finish, detach := b.AttachLosslessWithFinish("finish")
+	defer detach()
+	const count = subChanCap * 4
+	for i := 0; i < count; i++ {
+		b.Publish("finish", gen, runner.Event{Kind: runner.EventToken, Text: string(rune(i))})
+	}
+	// Finish must not block even though the consumer has not started reading.
+	finish()
+	finish()
+	b.Publish("finish", gen, runner.Event{Kind: runner.EventToken, Text: "after boundary"})
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
+	for i := 0; ; i++ {
+		select {
+		case ev, ok := <-ch:
+			if !ok {
+				if i != count {
+					t.Fatalf("closed after %d of %d events", i, count)
+				}
+				return
+			}
+			if i >= count || ev.Text != string(rune(i)) {
+				t.Fatalf("wrong event %d: %q", i, ev.Text)
+			}
+		case <-timer.C:
+			t.Fatal("finished subscription never closed")
+		}
+	}
+}
+
+func TestLosslessFinishStillAllowsDisconnect(t *testing.T) {
+	b := New()
+	_, gen, release := b.BeginTurn(context.Background(), "disconnect")
+	defer release()
+	_, ch, finish, detach := b.AttachLosslessWithFinish("disconnect")
+	for i := 0; i < subChanCap*4; i++ {
+		b.Publish("disconnect", gen, runner.Event{Kind: runner.EventToken})
+	}
+	finish()
+	detach()
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
+	for {
+		select {
+		case _, ok := <-ch:
+			if !ok {
+				return
+			}
+		case <-timer.C:
+			t.Fatal("disconnect left a forwarding goroutine blocked")
+		}
+	}
+}
+
 // A second turn on the same conversation supersedes the first: it cancels the
 // first turn's context (so its in-flight provider call / tool loop unwinds) and
 // retires the first's generation, so the first turn's persistence and event

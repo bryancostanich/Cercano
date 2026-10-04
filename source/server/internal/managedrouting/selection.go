@@ -34,7 +34,11 @@ func Select(ctx context.Context, task config.Task, tiers inference.Tiers, reques
 		return sel, assignment, "", false, nil
 	}
 	deny := func(e error) (inference.Selection, config.TaskAssignment, string, bool, error) {
-		return sel, assignment, "", true, modelpolicy.Deny(modelpolicy.Attempt{}, e.Error())
+		reason := e.Error()
+		if request.Model != "" {
+			reason = fmt.Sprintf("requested model %q for task %q: %s", request.Model, task, reason)
+		}
+		return sel, assignment, "", true, modelpolicy.Deny(modelpolicy.Attempt{}, reason)
 	}
 	if err != nil {
 		return deny(err)

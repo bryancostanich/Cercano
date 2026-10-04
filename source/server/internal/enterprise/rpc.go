@@ -2,6 +2,7 @@ package enterprise
 
 import (
 	"context"
+	"encoding/json"
 	"net"
 	"time"
 
@@ -67,6 +68,26 @@ func (s *RPCServer) GetStatus(ctx context.Context, _ *proto.EnterpriseControlReq
 	}
 	return s.result(), nil
 }
+func (s *RPCServer) GetPolicy(ctx context.Context, _ *proto.EnterpriseControlRequest) (*proto.EnterprisePolicy, error) {
+	if err := localControl(ctx); err != nil {
+		return nil, err
+	}
+	scoped, finish, err := s.host.Begin(ctx)
+	if err != nil {
+		return nil, controlError(err)
+	}
+	defer finish()
+	bundle, ok := BundleFromContext(scoped)
+	if !ok {
+		return nil, controlError(ErrNotConnected)
+	}
+	raw, err := json.Marshal(bundle.Policy)
+	if err != nil {
+		return nil, status.Error(codes.Internal, "policy unavailable")
+	}
+	return &proto.EnterprisePolicy{PolicyJson: raw}, nil
+}
+
 func (s *RPCServer) Synchronize(ctx context.Context, _ *proto.EnterpriseControlRequest) (*proto.EnterpriseStatus, error) {
 	if err := localControl(ctx); err != nil {
 		return nil, err

@@ -2408,6 +2408,7 @@ service Enterprise {
   rpc Login(EnterpriseLoginRequest) returns (EnterpriseStatus);
   rpc GetStatus(EnterpriseControlRequest) returns (EnterpriseStatus);
   rpc Synchronize(EnterpriseControlRequest) returns (EnterpriseStatus);
+  rpc GetPolicy(EnterpriseControlRequest) returns (EnterprisePolicy);
   rpc Logout(EnterpriseControlRequest) returns (EnterpriseStatus);
   rpc UseStandalone(EnterpriseControlRequest) returns (EnterpriseStatus);
 }
@@ -2432,4 +2433,10 @@ message EnterpriseStatus {
   string organization_name = 12;
   string team_id = 13;
   string team_name = 14;
+}
+
+// A read-only snapshot from the host's currently usable, verified bundle.
+// Does not include credentials and does not authorize future model requests.
+message EnterprisePolicy {
+  bytes policy_json = 1;
 }

@@ -89,6 +89,27 @@ restart always requires fresh online verification; the disk cache cannot grant
 permission to run work. A restriction published during a turn applies before
 the next physical model request, including a retry or fallback.
 
+## Inspect the settings you can use
+
+```sh
+bin/cercano enterprise policy
+bin/cercano enterprise skills
+bin/cercano enterprise skills --skill enterprise/ORGANIZATION_UUID/SKILL_SLUG
+```
+
+`policy` lists the allowed provider, endpoint, model and placement for each route,
+then the task defaults, ordered fallbacks and whether each choice is locked.
+`skills` lists enterprise assignments with their source, namespaced IDs and exact
+versions. Pass one of those IDs with `--skill` to read its text. These commands
+read the running host's verified bundle; they do not fetch credentials or start
+model requests. Personal and repository skills remain available through the
+ordinary skill catalog.
+
+Append `--json` to get structured output. Policy and assigned skill inspection
+require a usable managed bundle. If access is blocked or expired, use `status`
+and `sync` to diagnose and recover. An inspection is a snapshot, not permission
+for future inference: each actual request still checks current authorization.
+
 ## Sign out or return to personal settings
 
 ```sh

@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"cercano/source/server/internal/inference"
@@ -46,6 +47,9 @@ func TestManagedMainTurnHonorsExplicitModelChoice(t *testing.T) {
 			if tc.denied {
 				if !modelpolicy.IsDenial(err) || len(provider.requests) != 0 {
 					t.Fatalf("choice reached provider: err=%v requests=%d", err, len(provider.requests))
+				}
+				if !strings.Contains(err.Error(), tc.model) || !strings.Contains(err.Error(), "contact your administrator") {
+					t.Fatalf("denial lacks the requested model or recovery guidance: %v", err)
 				}
 			} else if err != nil || len(provider.requests) != 1 || provider.requests[0].Model != tc.model {
 				t.Fatalf("explicit choice lost: err=%v requests=%+v", err, provider.requests)

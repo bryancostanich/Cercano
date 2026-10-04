@@ -82,7 +82,7 @@ type Denial struct {
 
 func (e *Denial) Error() string {
 	if e.Attempt.Model == "" {
-		return "enterprise policy blocked this request: " + e.Reason
+		return "enterprise policy blocked this request: " + e.Reason + "; choose an allowed route, reconnect, or contact your administrator"
 	}
 	return fmt.Sprintf("enterprise policy blocked %q via %s at %s (%s): %s; choose an allowed route, reconnect, or contact your administrator", e.Attempt.Model, e.Attempt.Provider, e.Attempt.Endpoint, e.Attempt.Placement, e.Reason)
 }

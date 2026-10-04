@@ -1,0 +1,387 @@
+{
+  "version": 1,
+  "providers": [
+    {
+      "id": "anthropic-subscription",
+      "label": "anthropic (subscription)",
+      "provider": "anthropic",
+      "endpoint": "https://api.anthropic.com",
+      "placement": "external",
+      "authentication": "subscription",
+      "status": "verified",
+      "models": [
+        {
+          "id": "claude-haiku-4-5",
+          "label": "claude-haiku-4-5",
+          "qualities": [
+            "economy"
+          ]
+        },
+        {
+          "id": "claude-opus-5",
+          "label": "claude-opus-5",
+          "qualities": [
+            "standard"
+          ]
+        },
+        {
+          "id": "claude-fable-5",
+          "label": "claude-fable-5",
+          "qualities": [
+            "premium"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "anthropic",
+      "label": "anthropic (API key)",
+      "provider": "anthropic",
+      "endpoint": "https://api.anthropic.com",
+      "placement": "external",
+      "authentication": "api_key",
+      "status": "verified",
+      "models": [
+        {
+          "id": "claude-haiku-4-5",
+          "label": "claude-haiku-4-5",
+          "qualities": [
+            "economy"
+          ]
+        },
+        {
+          "id": "claude-opus-5",
+          "label": "claude-opus-5",
+          "qualities": [
+            "standard"
+          ]
+        },
+        {
+          "id": "claude-fable-5",
+          "label": "claude-fable-5",
+          "qualities": [
+            "premium"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "openai-responses",
+      "label": "openai (ChatGPT subscription)",
+      "provider": "openai",
+      "endpoint": "https://chatgpt.com/backend-api/codex",
+      "placement": "external",
+      "authentication": "subscription",
+      "status": "untested",
+      "models": [
+        {
+          "id": "gpt-6-astra",
+          "label": "gpt-6-astra",
+          "qualities": [
+            "economy",
+            "standard",
+            "premium"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "openai",
+      "label": "openai (API key)",
+      "provider": "openai",
+      "endpoint": "https://api.openai.com/v1",
+      "placement": "external",
+      "authentication": "api_key",
+      "status": "untested",
+      "models": [
+        {
+          "id": "gpt-5-mini",
+          "label": "gpt-5-mini",
+          "qualities": [
+            "economy"
+          ]
+        },
+        {
+          "id": "gpt-6-astra",
+          "label": "gpt-6-astra",
+          "qualities": [
+            "standard",
+            "premium"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gemini",
+      "label": "gemini",
+      "provider": "openai",
+      "endpoint": "https://generativelanguage.googleapis.com/v1beta/openai",
+      "placement": "external",
+      "authentication": "api_key",
+      "status": "verified",
+      "models": []
+    },
+    {
+      "id": "groq",
+      "label": "groq",
+      "provider": "openai",
+      "endpoint": "https://api.groq.com/openai/v1",
+      "placement": "external",
+      "authentication": "api_key",
+      "status": "untested",
+      "models": []
+    },
+    {
+      "id": "deepinfra",
+      "label": "deepinfra",
+      "provider": "openai",
+      "endpoint": "https://api.deepinfra.com/v1/openai",
+      "placement": "external",
+      "authentication": "api_key",
+      "status": "verified",
+      "models": [
+        {
+          "id": "openai/gpt-oss-120b",
+          "label": "openai/gpt-oss-120b",
+          "qualities": [
+            "economy"
+          ]
+        },
+        {
+          "id": "zai-org/GLM-5.3-Flash",
+          "label": "zai-org/GLM-5.3-Flash",
+          "qualities": [
+            "standard"
+          ]
+        },
+        {
+          "id": "zai-org/GLM-5.3",
+          "label": "zai-org/GLM-5.3",
+          "qualities": [
+            "premium"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "together",
+      "label": "together",
+      "provider": "openai",
+      "endpoint": "https://api.together.xyz/v1",
+      "placement": "external",
+      "authentication": "api_key",
+      "status": "untested",
+      "models": []
+    },
+    {
+      "id": "openrouter",
+      "label": "openrouter",
+      "provider": "openai",
+      "endpoint": "https://openrouter.ai/api/v1",
+      "placement": "external",
+      "authentication": "api_key",
+      "status": "untested",
+      "models": []
+    },
+    {
+      "id": "deepseek",
+      "label": "deepseek",
+      "provider": "openai",
+      "endpoint": "https://api.deepseek.com",
+      "placement": "external",
+      "authentication": "api_key",
+      "status": "untested",
+      "models": []
+    },
+    {
+      "id": "bedrock",
+      "label": "bedrock",
+      "provider": "",
+      "endpoint": "",
+      "placement": "external",
+      "authentication": "aws",
+      "status": "coming_soon",
+      "models": []
+    },
+    {
+      "id": "ollama",
+      "label": "Ollama",
+      "provider": "ollama",
+      "endpoint": "http://localhost:11434",
+      "placement": "local",
+      "authentication": "none",
+      "status": "runtime",
+      "models": []
+    },
+    {
+      "id": "llama_server",
+      "label": "llama-server",
+      "provider": "llama_server",
+      "endpoint": "",
+      "placement": "local",
+      "authentication": "none",
+      "status": "runtime",
+      "models": [
+        {
+          "id": "glm-4.5-air-q4_k_m",
+          "label": "GLM-4.5-Air Q4_K_M"
+        },
+        {
+          "id": "glm-4.5v-q4_k_m",
+          "label": "GLM-4.5V Q4_K_M"
+        },
+        {
+          "id": "glm-4.7-flash-q5_k_m",
+          "label": "GLM-4.7-Flash Q5_K_M"
+        },
+        {
+          "id": "phi-4-mini-instruct-q4_k_m",
+          "label": "Phi-4-mini Instruct Q4_K_M"
+        },
+        {
+          "id": "qwen3-14b-q4_k_m",
+          "label": "Qwen3-14B Q4_K_M"
+        },
+        {
+          "id": "qwen3-30b-a3b-instruct-2507-q4_k_m",
+          "label": "Qwen3-30B-A3B Instruct 2507 Q4_K_M"
+        },
+        {
+          "id": "qwen3-30b-a3b-thinking-2507-q4_k_m",
+          "label": "Qwen3-30B-A3B Thinking 2507 Q4_K_M"
+        }
+      ]
+    },
+    {
+      "id": "mistralrs",
+      "label": "mistral.rs",
+      "provider": "mistralrs",
+      "endpoint": "",
+      "placement": "local",
+      "authentication": "none",
+      "status": "runtime",
+      "models": [
+        {
+          "id": "qwen3-1.7b",
+          "label": "Qwen3-1.7B (UQFF afq4)"
+        },
+        {
+          "id": "qwen3-14b",
+          "label": "Qwen3-14B (UQFF afq4)"
+        },
+        {
+          "id": "qwen3-30b-a3b-instruct-2507",
+          "label": "Qwen3-30B-A3B Instruct 2507 (UQFF afq4)"
+        },
+        {
+          "id": "qwen3-30b-a3b-thinking-2507",
+          "label": "Qwen3-30B-A3B Thinking 2507 (UQFF afq4)"
+        },
+        {
+          "id": "qwen3-32b",
+          "label": "Qwen3-32B (UQFF afq4)"
+        },
+        {
+          "id": "qwen3-4b",
+          "label": "Qwen3-4B (safetensors)"
+        }
+      ]
+    }
+  ],
+  "destinations": [
+    {
+      "id": "primary",
+      "label": "Primary"
+    },
+    {
+      "id": "secondary",
+      "label": "Secondary"
+    },
+    {
+      "id": "local",
+      "label": "Local"
+    }
+  ],
+  "qualities": [
+    {
+      "id": "economy",
+      "label": "Light"
+    },
+    {
+      "id": "standard",
+      "label": "Standard"
+    },
+    {
+      "id": "premium",
+      "label": "Premium"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "chat",
+      "label": "Chat",
+      "destination": "primary",
+      "quality": "standard"
+    },
+    {
+      "id": "compaction",
+      "label": "Compaction",
+      "destination": "secondary",
+      "quality": "economy"
+    },
+    {
+      "id": "dispatch",
+      "label": "Default dispatch",
+      "destination": "secondary",
+      "quality": "premium"
+    },
+    {
+      "id": "reconnaissance",
+      "label": "Reconnaissance",
+      "destination": "local",
+      "quality": "economy"
+    },
+    {
+      "id": "mechanical_development",
+      "label": "Mechanical development",
+      "destination": "local",
+      "quality": "standard"
+    },
+    {
+      "id": "investigation",
+      "label": "Investigation",
+      "destination": "secondary",
+      "quality": "premium"
+    },
+    {
+      "id": "implementation",
+      "label": "Implementation",
+      "destination": "secondary",
+      "quality": "premium"
+    },
+    {
+      "id": "review",
+      "label": "Review",
+      "destination": "secondary",
+      "quality": "premium"
+    },
+    {
+      "id": "research",
+      "label": "Research",
+      "destination": "secondary",
+      "quality": "premium"
+    },
+    {
+      "id": "git_land",
+      "label": "Git land",
+      "destination": "local",
+      "quality": "premium"
+    },
+    {
+      "id": "watchdog",
+      "label": "Watchdog",
+      "destination": "local",
+      "quality": "standard"
+    }
+  ]
+}

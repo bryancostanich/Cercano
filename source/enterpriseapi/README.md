@@ -110,3 +110,22 @@ reports and cannot infer immediate revocation of a disconnected host. Clients
 ignore failures of this optional reporting endpoint for compatibility with older
 servers. Raw error text, local paths, prompts, provider keys and tool output are
 not accepted in this payload.
+
+## Client editor catalog
+
+`catalog.JSON()` supplies a versioned, credential-free snapshot of the client’s
+provider presets, access methods, physical endpoints, built-in model suggestions,
+and task/destination/quality vocabulary. The enterprise editor consumes this
+public module rather than importing client internals or maintaining a second list.
+
+Regenerate from `source/server` with `go run ./cmd/export-enterprise-catalog`.
+CI checks that the snapshot matches the client sources. Suggestions are the
+client’s built-in choices, not a live provider inventory or a guarantee of account
+access. Local model installation and hardware suitability remain client concerns.
+Ollama tags must come from the configured runtime. Bedrock retains the client’s
+coming-soon annotation. The catalog grants no permissions and contains no tokens.
+
+The existing policy still approves physical provider/endpoint/model identities.
+Claude API-key and subscription profiles share that identity; it does not restrict
+which credential method is used. ChatGPT subscription has a different physical
+endpoint from the OpenAI API and is therefore a distinct approved route.

@@ -419,3 +419,29 @@ func (p CloudProfile) Equal(other CloudProfile) bool {
 	}
 	return reflect.DeepEqual(p, other)
 }
+
+// Label is the shared client/editor display name for a destination.
+func (d Destination) Label() string {
+	switch d {
+	case DestinationPrimary:
+		return "Primary"
+	case DestinationSecondary:
+		return "Secondary"
+	case DestinationLocal:
+		return "Local"
+	}
+	return string(d)
+}
+
+// Label retains the persisted economy value while displaying Light in the UI.
+func (q CostTier) Label() string {
+	switch q {
+	case CostEconomy:
+		return "Light"
+	case CostStandard:
+		return "Standard"
+	case CostPremium:
+		return "Premium"
+	}
+	return string(q)
+}

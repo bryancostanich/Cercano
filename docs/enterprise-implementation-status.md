@@ -2,7 +2,10 @@
 
 The target is a reproducible local V1 demonstration: an administrator manages
 members, teams, model policies and shared skills, and the running Cercano host
-applies those settings to a developer's work. The implementation is not complete.
+applies those settings to a developer's work. The local implementation is in the
+dependent review branches. See the enterprise repository's
+[acceptance record](https://github.com/keithballinger/cercano-enterprise/blob/main/docs/v1-acceptance.md)
+for tested revisions, CI evidence and checks still requiring a configured machine.
 
 ## Implemented foundations
 
@@ -10,7 +13,7 @@ The enterprise service has Google sign-in, manual membership and team APIs,
 customer isolation in PostgreSQL, versioned policies and text-only skills,
 signed policy leases, publication and rollback, audit events, and native client
 login with PKCE and rotating credentials. Each developer has at most one team
-per organization. Enterprise service PRs 1 through 12 are merged, including the
+per organization. Enterprise service PRs 1 through 12 provide the
 five-area administration console, reproducible workflow, recovery checks, and
 shared organization request limits.
 
@@ -81,16 +84,21 @@ console retains the previous applied revision and skills, shows recovery guidanc
 and clears the error after successful application. The two-company workflow also
 interrupts skill downloads and checks failure reporting and recovery.
 
-## Remaining work, in order
+Conditional polling reuses an unchanged verified bundle without extending its
+lease. Sign-in, restart, recovery and near-expiry checks require a fresh signed
+response. Legacy unary requests and their code-generation loop now use the
+managed chain. Background compaction and local recaps hold host work scopes.
+The final review increment also makes Git bisect parsing compatible with the
+newer Git output used on Linux CI and runs the full Go suite on both CI platforms.
 
-1. **Complete live acceptance.** The reproducible fixture substitutes Google
-   identity, memory-backed credential storage and deterministic model generation.
-   Live Google consent, macOS Keychain prompts and a packaged-client process
-   restart still need a configured machine and user interaction. Administration
-   screenshots are saved in the enterprise repository's console demo guide.
-2. **Finish the V1 acceptance audit.** Check each agreed requirement against
-   current code, tests and artifacts, run final CI, and keep local evidence
-   distinct from checks needing live Google or Keychain access.
+## Before a live pilot
+
+The reproducible fixture substitutes Google identity, memory-backed credential
+storage and deterministic model generation. Live Google consent, macOS Keychain
+prompts and a packaged-client process restart still need a configured machine
+and user interaction. Administration screenshots and reproducible commands are
+in the enterprise repository's console and client workflow guides. The Cercano
+changes await Bryan's review and merge; this is not a released product.
 
 ## Repository and deployment rules
 

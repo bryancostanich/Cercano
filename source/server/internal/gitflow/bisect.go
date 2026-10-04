@@ -6,7 +6,7 @@ import (
 	"regexp"
 )
 
-var firstBadRe = regexp.MustCompile(`(?m)^([0-9a-f]{7,40}) is the first bad commit`)
+var firstBadRe = regexp.MustCompile(`(?m)^([0-9a-f]{7,40}) is the first (?:bad|'bad') commit`)
 
 // BisectRun bisects good..bad running testCommand at each step (exit 0 = good).
 // It always resets the bisect state before returning.

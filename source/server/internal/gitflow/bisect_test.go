@@ -35,3 +35,19 @@ func TestBisectRunFindsBadCommit(t *testing.T) {
 		t.Fatalf("expected first-bad %s, got %s", bad, sha)
 	}
 }
+
+// Git versions differ in whether they quote the bisect term. These are the
+// two output forms observed on macOS and the Linux CI runner.
+func TestBisectOutputAcrossGitVersions(t *testing.T) {
+	const sha = "2d102457a3362010f62f53c9c7cb31c39aa16f8c"
+	for _, line := range []string{sha + " is the first bad commit", sha + " is the first 'bad' commit"} {
+		output := "running 'sh' '-c' 'test command'\n" + line + "\ncommit " + sha + "\n    break\n"
+		match := firstBadRe.FindStringSubmatch(output)
+		if len(match) != 2 || match[1] != sha {
+			t.Fatalf("did not recognize Git result: %q", line)
+		}
+	}
+	if firstBadRe.MatchString("There are only skipped commits left to test.") {
+		t.Fatal("ambiguous bisect treated as a result")
+	}
+}

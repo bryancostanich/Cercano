@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'source/server/internal/enterprise/**'
+      - 'source/server/internal/gitflow/**'
       - 'source/server/internal/modelpolicy/**'
       - 'source/server/internal/managedsettings/**'
       - 'source/server/internal/managedrouting/**'
@@ -34,6 +35,7 @@ on:
   push:
     paths:
       - 'source/server/internal/enterprise/**'
+      - 'source/server/internal/gitflow/**'
       - 'source/server/internal/modelpolicy/**'
       - 'source/server/internal/managedsettings/**'
       - 'source/server/internal/managedrouting/**'
@@ -86,4 +88,6 @@ jobs:
         run: go test -race ./internal/broker
       - run: go test -race ./internal/enterprise ./internal/modelpolicy ./internal/managedsettings/... ./internal/managedrouting ./internal/cloudfactory ./internal/hostsvc/providers ./internal/dispatch ./internal/loopcompact ./internal/loop/... ./internal/usage ./internal/capabilities/builtins ./internal/hostsvc/tools ./internal/runner ./internal/server ./internal/mcp ./internal/agent ./internal/llm/... ./internal/engine/... ./internal/localruntime/... ./internal/worker ./internal/inference/... ./cmd/cercano
       - run: go vet ./internal/enterprise ./internal/modelpolicy ./internal/managedsettings/... ./internal/managedrouting ./internal/cloudfactory ./internal/hostsvc/providers ./internal/dispatch ./internal/loopcompact ./internal/loop/... ./internal/usage ./internal/capabilities/builtins ./internal/hostsvc/tools ./internal/runner ./internal/server ./internal/mcp ./internal/agent ./internal/llm/... ./internal/engine/... ./internal/localruntime/... ./internal/worker ./cmd/cercano
+      - name: Verify the complete client suite
+        run: go test ./... -count=1
       - run: go build ./cmd/cercano

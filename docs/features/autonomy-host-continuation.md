@@ -28,7 +28,8 @@ Continuation is evaluated once per successful turn, in `streamProcessRequestWith
   - An error on the previous turn stops the chain — errors are surfaced, not
     retried by chaining.
   - An explicit `report_autonomous_blocker` record stops the chain (below);
-    the pause note carries the run ID and the recorded reason.
+    the stop is silent — the model's own final response is the user-facing
+    blocker notice, so the host adds no duplicate meta lines.
   - A permission prompt inside a chain turn blocks that turn at the
     permBroker barrier: while a prompt is pending the tool is not executed,
     the turn cannot complete, and no continuation is chained or announced.
@@ -77,7 +78,10 @@ user" signal, available in the autonomous profile:
 - **Pause without state mutation.** The run deliberately stays `running` —
   no exit, no `review_pending`, no approval-state change; brief and captured
   decisions survive byte-identical. The gate sees the record and stops the
-  chain with a structured pause note naming the run ID and the reason.
+  chain silently: the model's own final response already presents the blocker
+  (reason, verification, next steps), so the host emits no duplicate meta
+  notices. (Genuine turn errors and the idle-limit safeguard keep their
+  structured notes — those causes are host-side and not in the model's prose.)
 - **No automatic restart.** Nothing in the host resumes a blocked run by
   itself: the chain only resumes with the user's next explicit message.
   That request clears the recorded blocker at request start (only for runs

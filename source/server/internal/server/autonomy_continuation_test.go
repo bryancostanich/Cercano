@@ -698,10 +698,12 @@ func TestEvaluateAutonomyContinuation_Gates(t *testing.T) {
 		t.Error("review_pending must stop continuation")
 	}
 
-	// A recorded report_autonomous_blocker stops the chain with a structured
-	// notice carrying the reason. The run stays running (restored here after
-	// the review_pending probe above): the pause is the blocker record, not a
-	// state mutation.
+	// A recorded report_autonomous_blocker stops the chain silently: the
+	// model's own final response already presented the blocker, so the gate
+	// sets blocker and NO host meta notice (the reason-repeating "paused …"
+	// Progress line was the duplicated-notice bug). The run stays running
+	// (restored here after the review_pending probe above): the pause is the
+	// blocker record, not a state mutation.
 	blocked := run
 	blocked.State = "running"
 	blocked.BlockerJSON = blockerFixtureJSON(time.Now().UTC(), "need production credentials")
@@ -712,9 +714,11 @@ func TestEvaluateAutonomyContinuation_Gates(t *testing.T) {
 	if g.cont {
 		t.Fatal("a recorded blocker must stop continuation")
 	}
-	if !strings.Contains(g.notice, "paused") || !strings.Contains(g.notice, run.RunID) ||
-		!strings.Contains(g.notice, "need production credentials") {
-		t.Errorf("blocker pause notice must name the run and the reason, got %q", g.notice)
+	if !g.blocker {
+		t.Error("blocker stop must be flagged as an explicit report_autonomous_blocker stop")
+	}
+	if g.notice != "" {
+		t.Errorf("blocker stop must not emit a host meta notice duplicating the model's prose, got %q", g.notice)
 	}
 
 	// Clearing the blocker (the user's next explicit message does this at
@@ -937,8 +941,9 @@ func (u *turnSuperseder) Execute(ctx context.Context, args json.RawMessage) (*ag
 // end-to-end pause semantics: a running run whose turn records an explicit
 // report_autonomous_blocker does NOT chain another turn. The run stays
 // "running" (approvals and every other run field preserved), the blocker
-// reason is durable, and the user sees a structured pause notice naming the
-// reason — not silent spinning, not a run exit.
+// reason is durable, and the model's own final response is the user-facing
+// blocker notice — the host adds no duplicate meta lines (see
+// TestStreamToolLoop_AutonomousBlocker_NoHostMetaNotices).
 func TestStreamToolLoop_AutonomousBlocker_PausesChain_PreservesApprovals(t *testing.T) {
 	srv, store := newServerWithStore(t)
 	run := createAutonomyRun(t, store, "conv-blocker", "running")
@@ -978,17 +983,14 @@ func TestStreamToolLoop_AutonomousBlocker_PausesChain_PreservesApprovals(t *test
 		t.Fatal("a paused run must not persist a host continuation turn")
 	}
 
-	// The pause notice is structured progress, naming the reason and the run.
+	// No host meta at all: the model's own final response is the user-facing
+	// blocker notice; a host Progress line would only duplicate it.
 	notes := progressNotes(stream.sent)
-	found := false
 	for _, n := range notes {
-		if strings.Contains(n, "paused") && strings.Contains(n, run.RunID) &&
+		if strings.Contains(n, "autonomous continuation") || strings.Contains(n, run.RunID) ||
 			strings.Contains(n, "need production API credentials") {
-			found = true
+			t.Errorf("redundant host meta notice on explicit blocker stop: %q", n)
 		}
-	}
-	if !found {
-		t.Fatalf("expected structured pause notice, got %v", notes)
 	}
 
 	// Approvals and run identity fully preserved: still running, nothing exited.
@@ -1005,6 +1007,70 @@ func TestStreamToolLoop_AutonomousBlocker_PausesChain_PreservesApprovals(t *test
 	blk, ok := cur.ActiveBlocker()
 	if !ok || blk.Reason != "need production API credentials to finish the deploy" {
 		t.Fatalf("blocker must be durable with the reason, got %+v", blk)
+	}
+}
+
+// TestStreamToolLoop_AutonomousBlocker_NoHostMetaNotices is the regression for
+// the duplicated blocker UI notice: the model's own final response already
+// presents the blocker (verification, next steps, the reason), so the host must
+// NOT emit redundant unformatted meta lines on top of it. The chain still
+// stops, the reason still persists — but no "autonomous continuation ended/
+// paused …" Progress notices accompany an explicit report_autonomous_blocker
+// stop (unlike genuine errors and the idle-limit safeguard, which keep theirs).
+func TestStreamToolLoop_AutonomousBlocker_NoHostMetaNotices(t *testing.T) {
+	srv, store := newServerWithStore(t)
+	run := createAutonomyRun(t, store, "conv-blocker-quiet", "running")
+
+	reg := agenttools.NewRegistry()
+	reg.MustRegister(&blockerReporter{store: store, conv: "conv-blocker-quiet", reason: "need the user to rotate the deploy token"})
+	srv.SetToolRegistry(reg)
+	prov := &scriptedProvider{
+		scripts: [][]llm.Block{
+			{{Type: llm.BlockToolUse, ToolUseID: "t1", ToolName: "report_autonomous_blocker", ToolInput: []byte(`{}`)}},
+			{{Type: llm.BlockText, Text: "Blocked: I need the deploy token rotated. Verification: none run. Next steps: rotate the token, then send any message to resume."}},
+			{{Type: llm.BlockText, Text: "SHOULD NOT RUN"}}, // only consumed if the chain (wrongly) continues
+		},
+		caps: inferenceCapabilities(),
+	}
+	srv.SetCloudLLMProvider(prov)
+
+	stream := &fakeStream{ctx: context.Background()}
+	if err := srv.streamProcessRequestWithToolLoop(
+		&proto.ProcessRequestRequest{Input: "begin", ConversationId: "conv-blocker-quiet"}, stream); err != nil {
+		t.Fatalf("streamProcessRequestWithToolLoop: %v", err)
+	}
+
+	// The blocker still stops the chain: no continuation turn.
+	if prov.calls != 2 {
+		t.Fatalf("provider calls = %d, want 2 (blocker stops the chain)", prov.calls)
+	}
+	frs := finalResponses(stream.sent)
+	if len(frs) != 1 || frs[0].GetOutput() == "" {
+		t.Fatalf("the model's own blocker response must still reach the user, got %v", frs)
+	}
+
+	// No host meta at all: neither the generic "autonomous continuation ended:
+	// run … is running — waiting for human input" line nor a reason-repeating
+	// pause notice. The model's prose is the user-facing blocker notice.
+	for _, n := range progressNotes(stream.sent) {
+		if strings.Contains(n, "autonomous continuation") ||
+			strings.Contains(n, run.RunID) ||
+			strings.Contains(n, "need the user to rotate the deploy token") {
+			t.Errorf("redundant host meta notice on explicit blocker stop: %q", n)
+		}
+	}
+
+	// The reason persists durably for resume: the run stays running with the
+	// recorded blocker (unchanged pause/resume semantics).
+	cur, err := store.GetActiveAutonomyRun(context.Background(), "conv-blocker-quiet")
+	if err != nil {
+		t.Fatalf("GetActiveAutonomyRun: %v", err)
+	}
+	if cur.RunID != run.RunID || cur.State != "running" {
+		t.Fatalf("run must stay running with the same identity, got %q state=%q", cur.RunID, cur.State)
+	}
+	if blk, ok := cur.ActiveBlocker(); !ok || blk.Reason != "need the user to rotate the deploy token" {
+		t.Fatalf("blocker reason must persist for resume, got %+v", blk)
 	}
 }
 

@@ -3553,12 +3553,15 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 		// signal. Never parse model prose.
 		gate := s.evaluateAutonomyContinuation(ctx, convID, turnGen, turn+1, prevRun, havePrevRun, workMonitor, &noProgress)
 		if !gate.cont {
-			if turn >= 1 && (gate.run.RunID != "" || gate.notice == "") {
+			if turn >= 1 && !gate.blocker && (gate.run.RunID != "" || gate.notice == "") {
 				// A terminal stop after at least one chained turn: the user
 				// sees a distinct, structured note (not prose) that the
 				// autonomous chain ended and why. Plain first-turn stops are
 				// normal conversation and stay quiet; a superseded/canceled
-				// chain has a live user on the stream already.
+				// chain has a live user on the stream already. An explicit
+				// report_autonomous_blocker stop is also quiet: the model's
+				// own final response already presented the blocker, so host
+				// meta would only repeat it.
 				msg := "autonomous continuation ended — waiting for human input"
 				if gate.run.RunID != "" {
 					msg = fmt.Sprintf("autonomous continuation ended: run %s is %s — waiting for human input",

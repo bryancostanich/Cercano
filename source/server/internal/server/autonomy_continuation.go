@@ -28,9 +28,10 @@ import (
 //     only ever rides the client-initiated stream that started it, so a server
 //     restart never auto-launches work)
 //   - a turn that fails              → stop and propagate the error
-//   - an explicit report_autonomous_blocker record (blocker_json) → stop; the
-//     run stays "running" and the user's next explicit message clears the
-//     blocker and resumes the chain
+//   - an explicit report_autonomous_blocker record (blocker_json) → stop
+//     silently (the model's own final response is the user-facing blocker
+//     notice); the run stays "running" and the user's next explicit message
+//     clears the blocker and resumes the chain
 //   - autonomyNoProgressLimit consecutive turns that produce neither durable
 //     ledger progress (run identity or state changed) nor real tool work
 //     (successful non-bookkeeping tool executions, completed sub-agents) →
@@ -66,10 +67,17 @@ func autonomyContinuationInput(runID string, turn int) string {
 
 // autonomyGate is the host's algorithmic continuation decision after a turn.
 type autonomyGate struct {
-	cont   bool // whether the host chains another turn
-	run    conversation.AutonomyRun
-	input  string // structured continuation input for the next turn
-	notice string // ProgressUpdate text when the host pauses a still-active run
+	cont  bool // whether the host chains another turn
+	run   conversation.AutonomyRun
+	input string // structured continuation input for the next turn
+	// notice is a ProgressUpdate text when the host pauses a still-active run
+	// for host-side reasons the model's prose could not have announced (the
+	// idle-limit safeguard). An explicit report_autonomous_blocker stop sets
+	// blocker instead and stays silent: the model's own final response is the
+	// user-facing blocker notice (verification, next steps, reason), so host
+	// meta would only duplicate it.
+	notice  string
+	blocker bool // stop caused by an explicit report_autonomous_blocker record
 }
 
 // activeAutonomyRun returns the conversation's active ledger run ("running" or
@@ -175,11 +183,13 @@ func (s *Server) evaluateAutonomyContinuation(ctx context.Context, convID string
 	// the model's own "I need the user" signal: the run deliberately stays
 	// "running" (no state mutation, approvals untouched), the blocker carries
 	// the required reason, and the user's next explicit message clears it and
-	// resumes the chain — nothing auto-restarts it.
-	if blk, blocked := run.ActiveBlocker(); blocked {
-		return autonomyGate{run: run, notice: fmt.Sprintf(
-			"autonomous continuation paused: run %s reported a blocker — %s; the run stays running and resumes on the user's next message",
-			run.RunID, blk.Reason)}
+	// resumes the chain — nothing auto-restarts it. The stop is SILENT for the
+	// user: the model's final response already presented the blocker in its own
+	// prose (the blocker protocol requires it), so the host emits no duplicate
+	// meta notices — unlike the idle-limit safeguard below, whose host-side
+	// cause the model could not have announced.
+	if _, blocked := run.ActiveBlocker(); blocked {
+		return autonomyGate{run: run, blocker: true}
 	}
 	// Durable progress = the ledger's content advanced during the turn (the
 	// run identity or its state changed; a new run created during the turn

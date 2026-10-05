@@ -16,21 +16,21 @@ Objective: preserve the approved documents, audit current code, and establish a 
 - [x] Audit the successful Windows spike and extract reusable test fixtures without promoting prototype assumptions
 - [x] Record baseline test results and exact source paths for subsequent phases
 - [x] List unavailable native machines, credential stores, installer tools and publication resources as explicit blockers
-- [~] Checkpoint the baseline and approved effort documents
+- [x] Checkpoint the baseline and approved effort documents
 
 ## Phase 2 — Prove TUF integration and define security operations
 
 Objective: validate a maintained Go TUF implementation and the required recovery behavior before depending on a feed. Files: isolated test module/fixtures under efforts/cross-platform-updates/tuf-proof/ initially; prospective source/server/internal/updatecoord/trust/ once the gate passes; release/update-feed/ for test-only publisher tooling. Tests: local HTTP repositories, generated ephemeral keys, injected clocks, corrupt targets, metadata expiry, rollback, interrupted refresh and sequential root rotation. No production keys or hosted production repository.
 
-- [ ] Inspect and pin a maintained Go TUF implementation and record license/dependency constraints
-- [ ] Demonstrate bootstrap from bundled trusted root metadata and verified platform-specific target download
-- [ ] Test tampered metadata and targets, wrong platform/architecture, rollback and freeze attempts, expired metadata and invalid local time
-- [ ] Test offline clients, sequential root rotation, interruption at every metadata-refresh boundary and safe failure without damaging the installed application
-- [ ] Demonstrate publication ordering and concurrent-publisher protection in an isolated test repository
-- [ ] Present the concrete key roles, thresholds, offline root custody, online signer permissions, expiry/renewal schedule and recovery procedure for operator approval
+- [x] Inspect and pin a maintained Go TUF implementation and record license/dependency constraints
+- [x] Demonstrate bootstrap from bundled trusted root metadata and verified platform-specific target download
+- [x] Test tampered metadata and targets, wrong platform/architecture, rollback and freeze attempts, expired metadata and invalid local time
+- [x] Test offline clients, sequential root rotation, interruption at every metadata-refresh boundary and safe failure without damaging the installed application
+- [x] Demonstrate publication ordering and concurrent-publisher protection in an isolated test repository
+- [-] Present the concrete key roles, thresholds, offline root custody, online signer permissions, expiry/renewal schedule and recovery procedure for operator approval
 - [ ] Present repository hosting and authentication choices for approval before provisioning anything external
-- [ ] Record the feasibility verdict and stop for review if library behavior contradicts the approved trust model
-- [ ] Checkpoint verified test tooling and security decisions without private keys
+- [x] Record the feasibility verdict and stop for review if library behavior contradicts the approved trust model
+- [~] Checkpoint verified test tooling and security decisions without private keys
 
 ## Phase 3 — Define installation ownership and operation state
 

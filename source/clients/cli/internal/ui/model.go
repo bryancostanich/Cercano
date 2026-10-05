@@ -4316,6 +4316,25 @@ func (m Model) renderPlanApprovalConfirmDetails(p *pendingToolCall) []string {
 	addTextSection("Effort", stringArg(obj, "effort"))
 	addTextSection("Spec", stringArg(obj, "spec_path"))
 	addTextSection("Plan file", stringArg(obj, "plan_path"))
+	// Tell the user what approval actually does on the git side, truthfully and
+	// conditionally: in a git repo the two planning docs are committed to the
+	// current branch (and nothing else) before plan mode is left, and a failed
+	// commit keeps planning mode; outside git approval just leaves plan mode
+	// with no commit. Each sentence wraps on its own so the commitments stay
+	// legible instead of straddling wrap points.
+	notes := []string{
+		"In a Git repository, approval commits the effort's spec.md and plan.md to the current branch before leaving plan mode (only those files).",
+		"A failed commit keeps planning mode.",
+		"Outside a Git repository, approval leaves plan mode without committing.",
+	}
+	lines = append(lines, "")
+	for _, note := range notes {
+		for _, line := range strings.Split(ansi.Wrap(note, bodyWidth, ""), "\n") {
+			if strings.TrimSpace(line) != "" {
+				lines = append(lines, "    "+m.styles.Muted.Render(line))
+			}
+		}
+	}
 	return lines
 }
 

@@ -316,6 +316,31 @@ func TestPlanningModeNamesRequestPlanApprovalForHandoff(t *testing.T) {
 	}
 }
 
+func TestPlanningModePlanApprovalCheckpointsDocs(t *testing.T) {
+	p, _ := Get("planning-mode")
+	// The plan->execution handoff must checkpoint the two planning docs to git
+	// BEFORE the fence drops, only those files, and keep planning mode when the
+	// checkpoint fails; the execution worktree created later then inherits the
+	// commit, so landing flows are never blocked by untracked planning docs.
+	for _, want := range []string{
+		"commits only the declared",
+		"on the current branch",
+		"only then leaves the read-only planning profile",
+		"stays in planning mode",
+		"execution worktree",
+		"inherits the planning-doc commit",
+	} {
+		if !strings.Contains(p.Body, want) {
+			t.Fatalf("planning-mode body must document the approval checkpoint; missing %q", want)
+		}
+	}
+	// The checkpoint is narrowly scoped: anything else staged or untracked is
+	// never swept into the approval commit.
+	if !strings.Contains(p.Body, "left untouched") {
+		t.Fatal("planning-mode body must state other local changes are left untouched by the approval commit")
+	}
+}
+
 func TestExecutingPlansNamesSemanticStatusTool(t *testing.T) {
 	p, ok := Get("executing-plans")
 	if !ok {

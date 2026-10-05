@@ -30,7 +30,7 @@ Objective: validate a maintained Go TUF implementation and the required recovery
 - [-] Present the concrete key roles, thresholds, offline root custody, online signer permissions, expiry/renewal schedule and recovery procedure for operator approval
 - [ ] Present repository hosting and authentication choices for approval before provisioning anything external
 - [x] Record the feasibility verdict and stop for review if library behavior contradicts the approved trust model
-- [~] Checkpoint verified test tooling and security decisions without private keys
+- [x] Checkpoint verified test tooling and security decisions without private keys
 
 ## Phase 3 — Define installation ownership and operation state
 

@@ -116,6 +116,16 @@ func TestStreamToolLoop_AutonomousContinuation_ChainsTurnsWhileRunning(t *testin
 	if !announced {
 		t.Errorf("no continuation announcement in progress notes: %v", notes)
 	}
+	// Verify no unwanted generic "autonomous continuation ended — waiting for human input" message
+	var foundGenericMessage bool
+	for _, n := range notes {
+		if strings.Contains(n, "autonomous continuation ended") && strings.Contains(n, "waiting for human input") {
+			foundGenericMessage = true
+		}
+	}
+	if foundGenericMessage {
+		t.Errorf("found unwanted generic 'autonomous continuation ended — waiting for human input' message in progress notes: %v", notes)
+	}
 	// Turn-start ledger rehydration: the running run restored the profile
 	// before the first turn even without a GetSessionProfile call.
 	if got := srv.profileBroker.ActiveName("conv-cont"); got != "autonomous" {

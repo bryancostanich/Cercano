@@ -270,7 +270,7 @@ export default function Home() {
         </section>
       </main>
 
-      <footer><span>Cercano - 100% Free + Open</span></footer>
+      <footer><a href={projectUrl}>Cercano - 100% Free + Open</a></footer>
     </div>
   );
 }

@@ -35,6 +35,7 @@ test("renders the Cercano landing page", async () => {
   assert.match(html, /Homebrew/);
   assert.match(html, /Linux · coming soon/);
   assert.match(html, /Windows · coming soon/);
+  assert.match(html, /href="https:\/\/github\.com\/bryancostanich\/Cercano"[^>]*>Cercano - 100% Free \+ Open<\/a>/);
   assert.match(html, /Switch to (daylight|night) theme/);
   assert.doesNotMatch(html, /codex-preview|Building your site|react-loading-skeleton/);
 });

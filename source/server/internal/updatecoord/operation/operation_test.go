@@ -838,11 +838,8 @@ func TestRecordSchemaJSONRoundTrip(t *testing.T) {
 	mustApply(t, s, installA, Input{Event: EventHealthSuccess})
 	snap := mustApply(t, s, installA, Input{Event: EventCleanupPending})
 
-	// json.Marshal drops the monotonic clock reading; normalize both sides
-	// before comparing.
+	// JSON preserves instants, not monotonic readings or Location pointer identity.
 	want := snap.Record()
-	want.CreatedAt = want.CreatedAt.Round(0)
-	want.UpdatedAt = want.UpdatedAt.Round(0)
 	blob, err := json.Marshal(want)
 	if err != nil {
 		t.Fatalf("marshal record: %v", err)
@@ -851,8 +848,13 @@ func TestRecordSchemaJSONRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(blob, &back); err != nil {
 		t.Fatalf("unmarshal record: %v", err)
 	}
+	if !back.CreatedAt.Equal(want.CreatedAt) || !back.UpdatedAt.Equal(want.UpdatedAt) {
+		t.Fatalf("record timestamps changed: got %v/%v want %v/%v", back.CreatedAt, back.UpdatedAt, want.CreatedAt, want.UpdatedAt)
+	}
+	// Having checked both instants, compare every remaining field exactly.
+	want.CreatedAt, want.UpdatedAt = back.CreatedAt, back.UpdatedAt
 	if back != want {
-		t.Fatalf("record round trip mismatch:\n got %+v\nwant %+v", back, snap.Record())
+		t.Fatalf("record round trip mismatch:\n got %+v\nwant %+v", back, want)
 	}
 	if back.SchemaVersion != RecordSchemaVersion || back.State != StateComplete ||
 		!back.SuccessWithPendingCleanup || !back.HealthVerified ||

@@ -1,0 +1,41 @@
+name: Update coordinator fixture tests
+on:
+  push:
+    branches: [feat/cross-platform-updates]
+    paths:
+      - 'source/server/internal/updatecoord/**'
+      - 'source/server/pkg/update/**'
+      - 'source/server/go.mod'
+      - 'source/server/go.sum'
+      - '.github/workflows/updatecoord-tests.yml'
+permissions:
+  contents: read
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: source/server/go.mod
+          cache-dependency-path: source/server/go.sum
+      - name: Record native platform
+        working-directory: source/server
+        run: go env GOOS GOARCH
+      - name: Native temporary-state and subprocess tests
+        working-directory: source/server
+        run: go test -count=1 -timeout=2m ./internal/updatecoord/... ./pkg/update
+      - name: Race tests
+        if: runner.os != 'Windows'
+        working-directory: source/server
+        run: go test -race -count=1 -timeout=2m ./internal/updatecoord/... ./pkg/update
+      - name: Static checks
+        working-directory: source/server
+        run: go vet ./internal/updatecoord/...

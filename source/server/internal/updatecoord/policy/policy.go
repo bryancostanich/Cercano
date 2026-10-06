@@ -470,7 +470,7 @@ func ReconcilePackageVersion(installedVersion, packageRecordVersion string) Reco
 
 // validStableVersion reports whether v is the exact shape the release
 // pipeline currently publishes: three all-numeric components X.Y.Z with an
-// optional "v" prefix, each component within a 64-bit unsigned integer.
+// optional "v" prefix, each component within the native signed integer used by CompareVersions.
 // Prereleases, build metadata, truncated forms, junk, and overflowing
 // components are rejected until the release pipeline explicitly supports
 // them. This deliberately does not introduce a semver dependency.
@@ -484,7 +484,7 @@ func validStableVersion(v string) bool {
 		return false
 	}
 	for _, p := range parts {
-		if p == "" {
+		if p == "" || (len(p) > 1 && p[0] == '0') {
 			return false
 		}
 		for _, c := range p {
@@ -494,7 +494,7 @@ func validStableVersion(v string) bool {
 		}
 		// Reject overflowing components instead of letting them silently
 		// compare as zeros.
-		if _, err := strconv.ParseUint(p, 10, 64); err != nil {
+		if _, err := strconv.ParseInt(p, 10, strconv.IntSize); err != nil {
 			return false
 		}
 	}

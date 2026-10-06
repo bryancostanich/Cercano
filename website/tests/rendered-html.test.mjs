@@ -30,6 +30,7 @@ test("renders the Cercano landing page", async () => {
     assert.match(html, new RegExp(`/videos/${video}\\.jpg`));
   }
   assert.match(html, /Install Cercano/);
+  assert.match(html, /Install in one line/);
   assert.match(html, /brew install bryancostanich\/tap\/cercano/);
   assert.match(html, /Homebrew/);
   assert.match(html, /Linux · coming soon/);

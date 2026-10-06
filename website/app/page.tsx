@@ -225,7 +225,7 @@ export default function Home() {
         <section className="install" id="install" aria-labelledby="install-title">
           <div className="install-copy">
             <p className="section-label">Install Cercano</p>
-            <h2 id="install-title">One command.<br />Then you&apos;re in.</h2>
+            <h2 id="install-title">Install in one line.</h2>
             <p>Homebrew installation is available now for macOS. Package-manager releases for Linux and Windows are next.</p>
           </div>
 

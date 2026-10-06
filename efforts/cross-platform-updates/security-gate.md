@@ -46,27 +46,41 @@ CI compromise impact; its per-release ceremony was not chosen. This decision
 is settled. It authorizes the architecture, not production secret provisioning
 or an unreviewed expansion of repository permissions.
 
+## Approved expiry and renewal policy
+
+The user approved the following after clarifying that ordinary renewal is
+automatic, not a weekly manual task:
+
+- Timestamp validity: seven days.
+- Snapshot validity: thirty days.
+- Targets validity: ninety days.
+- Root validity: one year; offline renewal reminders begin ninety days before expiry.
+- Online metadata renewal/checking: daily automation, even without new app releases.
+- Alert on failed/missed renewal and monitor freshness independently of whether
+  a scheduled Actions run starts. Scheduling alone does not guarantee execution.
+
+Renewal must verify retained metadata and authorized target contents before
+signing. It must not authorize arbitrary replaced remote content or change root
+trust. Expiration blocks new updates, never ordinary use of the installed app;
+there is no ignore-expiry switch. A faster one-day/six-hourly freshness policy
+was considered but not selected because it gives less operational recovery time.
+Offline root renewal is an occasional manual operation and does not inherently
+require generating a new root identity.
+
 ## Remaining decision queue, one at a time
 
-- Specific role permissions, expiry/renewal periods and emergency recovery.
 - Metadata hosting, publication preconditions and retained historical metadata.
+- Concrete signing-job permissions and emergency-recovery review before provisioning.
 
-Next proposed expiry policy (not yet approved): timestamp valid for seven days,
-snapshot for thirty days, targets for ninety days, root for one year. Scheduled
-automation runs daily to renew online metadata as needed, without changing
-approved target contents or root trust. Notify early for offline root renewal
-(starting ninety days before expiry), alert on missed renewal/failure, and
-verify metadata freshness independently of whether a scheduled run starts.
-GitHub scheduling alone is not a guarantee of timely renewal.
-
-The tighter alternative is a one-day timestamp with renewal every six hours,
-retaining the same longer-lived roles. It narrows stale-update-information
-exposure but gives less grace for scheduler, signing or hosting outages. In
-both cases, expiration blocks new updates rather than installed application
-use, and there is no ignore-expiry switch. Routine renewal must verify current
-metadata and targets and must not blindly re-sign arbitrary remote content.
+Read-only GitHub inspection confirmed the existing Cercano repository is public
+and has no Pages site enabled. Proposed next choice: host signed metadata on
+GitHub Pages in this same repository, retaining application archives in its
+existing GitHub Releases. Alternative: a separately provisioned object-storage
+endpoint/CDN for metadata. No separate public release repository is proposed.
+Pages would require explicitly enabling a site and tightly scoped deployment
+permissions; this inspection did not change those settings. Hosting selection
+is still pending.
 
 Short fixture lifetimes, one-key test role thresholds and test storage
-preconditions are not production defaults. Native runner access, production
-provisioning/publication, concrete signing-job scopes and emergency recovery
-remain explicit gates.
+preconditions are not production defaults. Native runner access and production
+provisioning/publication remain explicit authorization gates.

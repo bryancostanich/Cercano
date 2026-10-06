@@ -147,6 +147,7 @@ h1 {
   transition: color 160ms ease;
 }
 .command-link:hover { color: var(--primary); }
+.command-link code { overflow-wrap: anywhere; }
 .command-link code::before { content: "$ "; color: var(--accent); }
 .command-link span { color: var(--muted); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; }
 
@@ -173,7 +174,7 @@ h1 {
   gap: 64px;
   padding-bottom: 54px;
 }
-.features-heading h2, .start h2, .closing h2 {
+.features-heading h2, .install h2, .closing h2 {
   margin: 0;
   font: 400 clamp(42px, 4.2vw, 64px)/1.03 var(--font-serif);
   letter-spacing: -.045em;
@@ -275,24 +276,57 @@ h1 {
 .flow-core { background: var(--surface); border-color: var(--primary); }
 .flow-arrow { color: var(--primary); font-family: var(--font-mono); }
 
-.start {
+.install {
   display: grid;
-  grid-template-columns: 1fr 1.25fr;
+  grid-template-columns: .8fr 1.2fr;
   gap: 76px;
-  padding: 96px 0 90px;
+  padding: 104px 0 96px;
   border-bottom: 1px solid var(--line);
 }
-.start h2 { margin-top: 22px; }
-.start-copy > p:last-child { max-width: 540px; margin: 24px 0 0; color: var(--muted); font-size: 17px; }
-.commands { align-self: end; border-top: 1px solid var(--line); }
-.command-row { display: flex; justify-content: space-between; gap: 24px; padding: 19px 0; border-bottom: 1px solid var(--line); }
-.command-row code, .command-row small, .start-links a { font-family: var(--font-mono); }
-.command-row code { font-size: 13px; overflow-wrap: anywhere; }
-.command-row code span { color: var(--accent); }
-.command-row small { color: var(--muted); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; text-align: right; }
-.start-links { display: flex; gap: 24px; padding-top: 22px; }
-.start-links a { color: var(--primary); font-size: 12px; border-bottom: 1px solid var(--line); }
-.platform-note { margin: 18px 0 0; color: var(--muted); font-size: 14px; }
+.install h2 { margin-top: 22px; }
+.install-copy > p:last-child { max-width: 500px; margin: 24px 0 0; color: var(--muted); font-size: 17px; }
+.install-panel { align-self: end; padding: 28px 0 0; border-top: 2px solid var(--primary); }
+.installer-heading { display: flex; align-items: center; justify-content: space-between; gap: 24px; font: 600 14px/1.2 var(--font-mono); }
+.availability { color: var(--accent); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; }
+.install-command {
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 24px;
+  margin-top: 22px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+.install-command code {
+  align-self: center;
+  min-width: 0;
+  padding: 24px;
+  font: 500 16px/1.45 var(--font-mono);
+  overflow-wrap: anywhere;
+}
+.install-command code span { color: var(--accent); }
+.install-command button {
+  min-width: 104px;
+  border: 0;
+  border-left: 1px solid var(--line);
+  padding: 0 22px;
+  color: var(--bg);
+  background: var(--primary);
+  font: 600 14px/1 var(--font-mono);
+  cursor: pointer;
+  transition: filter 160ms ease;
+}
+.install-command button:hover { filter: brightness(1.12); }
+.after-install { margin: 18px 0 0; color: var(--muted); font-size: 15px; }
+.after-install code { color: var(--ink); font-family: var(--font-mono); }
+.package-roadmap { display: grid; grid-template-columns: 1fr 1fr; margin-top: 34px; border-top: 1px solid var(--line); }
+.package-roadmap > div { display: flex; justify-content: space-between; gap: 20px; padding: 18px 0; border-bottom: 1px solid var(--line); }
+.package-roadmap > div + div { padding-left: 24px; border-left: 1px solid var(--soft-line); }
+.package-roadmap span { font: 600 14px/1.3 var(--font-mono); }
+.package-roadmap small { color: var(--muted); font: 500 12px/1.3 var(--font-mono); text-transform: uppercase; text-align: right; }
+.install-links { display: flex; gap: 28px; padding-top: 22px; }
+.install-links a { color: var(--primary); border-bottom: 1px solid var(--line); font: 500 12px/1.4 var(--font-mono); }
+.install-links a:hover { color: var(--ink); border-color: var(--ink); }
 
 .closing { display: grid; grid-template-columns: 1.4fr .6fr; gap: 80px; padding: 82px 0 62px; }
 .closing h2 { margin-top: 22px; font-size: 58px; }
@@ -332,7 +366,7 @@ footer {
   .feature-story--visual:nth-child(odd) .feature-copy,
   .feature-story--visual:nth-child(odd) .feature-demo,
   .feature-story--visual:nth-child(odd) .flow { order: initial; }
-  .start, .closing { grid-template-columns: 1fr; gap: 48px; }
+  .install, .closing { grid-template-columns: 1fr; gap: 48px; }
 }
 
 @media (max-width: 620px) {
@@ -350,9 +384,12 @@ footer {
   .flow { grid-template-columns: 1fr; gap: 8px; }
   .flow-column { min-height: 0; }
   .flow-arrow { width: 12px; transform: rotate(90deg); }
-  .command-row, .start-links { flex-direction: column; gap: 8px; }
-  .command-row small { text-align: left; }
-  .start h2 { font-size: 40px; }
+  .install-command { flex-direction: column; gap: 0; }
+  .install-command button { min-height: 50px; border-left: 0; border-top: 1px solid var(--line); }
+  .package-roadmap { grid-template-columns: 1fr; }
+  .package-roadmap > div + div { padding-left: 0; border-left: 0; }
+  .install-links { flex-direction: column; align-items: flex-start; gap: 12px; }
+  .install h2 { font-size: 40px; }
   .closing h2 { font-size: 46px; }
 }
 

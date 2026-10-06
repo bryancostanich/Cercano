@@ -112,6 +112,7 @@ const features = [
 
 export default function Home() {
   const [theme, setTheme] = useState<"day" | "night">("day");
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     const active = document.documentElement.dataset.theme === "night" ? "night" : "day";
@@ -125,6 +126,12 @@ export default function Home() {
     setTheme(next);
   };
 
+  const copyInstallCommand = async () => {
+    await navigator.clipboard.writeText("brew install bryancostanich/tap/cercano");
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1800);
+  };
+
   return (
     <div className="page-shell">
       <header className="site-header">
@@ -134,7 +141,7 @@ export default function Home() {
         </a>
         <nav className="primary-nav" aria-label="Primary navigation">
           <a href="#features">Features</a>
-          <a href="#start">Get started</a>
+          <a href="#install">Install</a>
           <a href={`${projectUrl}/tree/main/docs/agent/features`}>Docs</a>
           <a href={projectUrl}>GitHub ↗</a>
           <button
@@ -158,9 +165,9 @@ export default function Home() {
           </div>
           <div className="hero-aside">
             <p className="lede">Cercano is a premium agent harness for working with frontier and open-weight models—separately or together.</p>
-            <a className="command-link" href="#start">
-              <code>cercano</code>
-              <span>Get started ↓</span>
+            <a className="command-link" href="#install">
+              <code>brew install bryancostanich/tap/cercano</code>
+              <span>Install now</span>
             </a>
           </div>
         </section>
@@ -215,20 +222,35 @@ export default function Home() {
           </div>
         </section>
 
-        <section className="start" id="start" aria-labelledby="start-title">
-          <div className="start-copy">
-            <p className="section-label">Get started</p>
-            <h2 id="start-title">One command.<br />Deliberate by default.</h2>
-            <p>Download a release or build from source, then configure providers, local models, routing, and permissions from inside the TUI.</p>
+        <section className="install" id="install" aria-labelledby="install-title">
+          <div className="install-copy">
+            <p className="section-label">Install Cercano</p>
+            <h2 id="install-title">One command.<br />Then you&apos;re in.</h2>
+            <p>Homebrew installation is available now for macOS. Package-manager releases for Linux and Windows are next.</p>
           </div>
-          <div className="commands" aria-label="Cercano commands and install notes">
-            <div className="command-row"><code><span>$</span> cercano</code><small>Interactive terminal</small></div>
-            <div className="command-row"><code><span>$</span> cercano run &quot;Explain this repository&quot;</code><small>Scripts + automation</small></div>
-            <div className="start-links">
-              <a href={`${projectUrl}/releases`}>Download a release ↗</a>
-              <a href={`${projectUrl}#building-from-source`}>Build from source ↗</a>
+
+          <div className="install-panel" aria-label="Cercano installation options">
+            <div className="installer-heading">
+              <span>Homebrew</span>
+              <span className="availability">Available now</span>
             </div>
-            <p className="platform-note">macOS is supported today. Linux x86_64 is available as an experimental, unsigned build.</p>
+            <div className="install-command">
+              <code><span>$</span> brew install bryancostanich/tap/cercano</code>
+              <button type="button" onClick={copyInstallCommand} aria-label="Copy Homebrew install command">
+                {copied ? "Copied" : "Copy"}
+              </button>
+            </div>
+            <p className="after-install">Then run <code>cercano</code>. Configure providers, local models, routing, and permissions from inside the TUI.</p>
+
+            <div className="package-roadmap" aria-label="Upcoming package managers">
+              <div><span>apt</span><small>Linux · coming soon</small></div>
+              <div><span>Chocolatey</span><small>Windows · coming soon</small></div>
+            </div>
+
+            <div className="install-links">
+              <a href={`${projectUrl}/releases`}>Releases</a>
+              <a href={`${projectUrl}/blob/main/docs/agent/self-dev.md`}>Build from source</a>
+            </div>
           </div>
         </section>
 

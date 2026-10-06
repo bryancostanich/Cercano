@@ -1,8 +1,9 @@
-# Updater-state persistence choice — pending
+# Updater-state persistence — SQLite and stable shared location approved
 
 The pure ownership, operation and policy records are implemented and tested.
-There is deliberately no durable store or runtime integration. Next is a real
-choice about recovery/preferences persistence:
+The user selected the SQLite option below. An isolated storage primitive is now
+implemented and tested against temporary databases; see state-verification.md.
+There is no runtime integration. The alternatives considered were:
 
 - Recommended: separate per-user SQLite database using the project's existing
   pure-Go `modernc.org/sqlite` dependency, not the conversation database. Use
@@ -17,7 +18,17 @@ choice about recovery/preferences persistence:
   update/launch exclusion and separately tested file activation recovery.
 
 Both require the same native-platform interruption and concurrency acceptance.
-Neither modifies existing conversation data. The plan leaves this storage
-choice open; no durable writes or new database have been implemented pending
-operator selection. In-memory concurrency tests already pass; persistence and
-migration portions of the Phase3 task remain blocked by this choice.
+Neither modifies existing conversation data. The user explicitly selected a
+separate SQLite store after confirming it must be shared across versions.
+Use per-user, per-installation state directories outside removable versions:
+Windows LocalAppData/Cercano/updater/<installation-id>, Linux
+XDG_STATE_HOME/cercano/updater/<installation-id> (fallback ~/.local/state), and
+macOS ~/Library/Application Support/Cercano/updater/<installation-id>.
+Installation IDs must be stable across versions and safe directory components.
+No database may live inside a keg, extracted archive or version directory.
+
+Implement against temporary test directories first. This approves storage design,
+not migration of the developer's live installation or conversation data. Older
+helpers must refuse unsupported schemas without changing the database. Stored
+user consent is not authority for privileged package operations. Actual process
+coordination and binary activation still need their own recovery protocol.

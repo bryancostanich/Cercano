@@ -1,11 +1,12 @@
-# Chocolatey self-update opt-in — ownership contract pending
+# Chocolatey self-update opt-in — ownership contract approved
 
 The approved spec allows explicit per-user opt-in to self-updates while package
-management remains the default. It does not yet choose the ownership transition,
-uninstall behavior or version-record semantics. The Phase3 plan explicitly calls
-for approval of that contract before implementation.
+management remains the default. The user explicitly approved retaining Chocolatey
+registration with a cooperating installer/shared coordinator. This resolves the
+Phase3 ownership-contract design gate, not authorization to migrate any live
+installation or edit Chocolatey's database.
 
-Recommended: keep Chocolatey registration and package-based uninstall, but have
+Approved: keep Chocolatey registration and package-based uninstall, but have
 a cooperating Cercano installer/package and the self-updater use the same Go
 coordinator. Record explicit delegated update ownership for the exact enrolled
 installation. A future Chocolatey action must honor that record, inspect actual
@@ -25,8 +26,9 @@ long-term ownership but is a real user-visible migration: Chocolatey would no
 longer upgrade or uninstall Cercano. Migration failure/recovery needs a separate
 safe sequence and cannot be hidden behind a checkbox.
 
-No option is adopted yet. The new pure classifier intentionally rejects
-simultaneous manager ownership and enrollment evidence rather than silently
-choosing an updater. Persisted enrollment/delegation records must follow the
-operator-approved contract, and platform probes must corroborate that contract
-before any real files are writable through a self-update operation.
+Registration retention is adopted; conversion/removal was not selected. The
+classifier must continue rejecting simultaneous ownership claims unless a
+complete, identity-bound, explicitly consented delegation and supporting
+installer contract are corroborated. A global enrollment flag is insufficient.
+Policy records follow this approved contract, and platform probes must establish
+the actual contract before any real files are writable through self-update.

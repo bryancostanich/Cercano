@@ -56,5 +56,36 @@ replay semantics, storage migration and actual idle/process probes remain work.
 - Delegated whole-server `go build ./...` — reported pass; no Windows/native
   installation acceptance is inferred from that compilation.
 
+## Consent, dismissal and Chocolatey delegation records
+
+The approved registration-retention contract is represented as explicit delegated
+update ownership; the uninstall owner remains Chocolatey. Current manager-file
+ownership, canonical root/executable containment, user scope, observed admin
+policy, supported installer contract, install identity, channel and stable feed
+identity must corroborate the record. Merely loading consent JSON is not runtime
+authority. Machine-wide, unmanaged-unknown, stale, revoked, unsupported or
+conflicting evidence remains refused. Package record drift is informational:
+no function edits Chocolatey's database or authorizes file replacement from
+version comparison alone.
+
+Per-version dismissal is bound to installation/source/channel/version, not a
+global notification suppression switch. Records validate schemas, canonical JSON
+field names, duplicate keys, bounded size, valid UTF-8 and strict fields. Unknown
+nonzero schemas cannot be silently re-encoded as the current schema. Stable
+version comparisons reject invalid or overflowing versions; prereleases remain
+outside the current stable release pipeline contract rather than being guessed.
+
+Regression probes caught and fixed previously accepted unknown schemas,
+unobserved admin policy, absent channel/feed binding, out-of-root executables,
+invalid version comparisons, case-insensitive JSON key aliases, invalid UTF-8
+replacement and oversized records. Targeted race tests for all three updatecoord
+packages plus pkg/update, and updatecoord vet, pass. Serialization is memory-only;
+no preference or enrollment file is actually persisted yet.
+
+A delegate also ran an unrequested wider server race suite and reported a race
+in internal/engine/ollama. It has not been reproduced against the base commit;
+therefore it is not classified here as pre-existing, fixed or caused by this
+change. The appropriately scoped suites above pass. No unrelated fix was made.
+
 No runtime update behavior, configuration format, package installation or
 release feed was changed. No code pushed or merged into main.

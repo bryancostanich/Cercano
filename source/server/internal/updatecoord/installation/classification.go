@@ -141,6 +141,17 @@ type Classification struct {
 	// Conflicting lists the owners that each held proof in an ambiguous
 	// conflict, in evidence order. Empty otherwise.
 	Conflicting []Owner
+	// SelfUpdateRole reports whether a fully validated delegation grants
+	// this updater's coordinator the self-update ROLE for the
+	// installation while its package manager retains file ownership. It
+	// is SelfUpdateRoleNone unless ClassifyWithDelegation corroborated an
+	// explicit, identity-bound, consented delegation against actual
+	// current manager ownership. It never changes Owner, Status, or
+	// AutoEditable, and never overrides an ambiguous or unknown result.
+	SelfUpdateRole SelfUpdateRole
+	// Delegation is the corroborated delegation evidence when
+	// SelfUpdateRole is SelfUpdateRoleDelegate; the zero value otherwise.
+	Delegation DelegationEvidence
 }
 
 // Classify determines installation ownership from caller-supplied evidence.
@@ -161,6 +172,16 @@ type Classification struct {
 //     no preference fallback.
 //   - Otherwise ownership is unknown and the result is non-actionable.
 func Classify(exe ExecutableEvidence, managers []ManagerEvidence, self SelfManagedEvidence) Classification {
+	c := classify(exe, managers, self)
+	// Every classification states its self-update role explicitly; the
+	// zero value is never a valid role.
+	c.SelfUpdateRole = SelfUpdateRoleNone
+	return c
+}
+
+// classify computes the ownership classification; see Classify for the
+// rules. It leaves SelfUpdateRole unset for the exported wrapper to fill in.
+func classify(exe ExecutableEvidence, managers []ManagerEvidence, self SelfManagedEvidence) Classification {
 	identity := Identity{
 		Owner:      OwnerUnknown,
 		Scope:      ScopeUnknown,

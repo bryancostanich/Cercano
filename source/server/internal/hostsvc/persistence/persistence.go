@@ -599,6 +599,7 @@ func (x *svc) ListConversations(ctx context.Context, req *proto.ListConversation
 			Id:             i.ID,
 			Title:          i.Title,
 			ProjectDir:     i.ProjectDir,
+			DevWorkDir:     i.DevWorkDir,
 			Model:          i.Model,
 			StartedAt:      i.StartedAt.Unix(),
 			LastTurnAt:     i.LastTurnAt.Unix(),
@@ -624,6 +625,7 @@ func (x *svc) GetConversation(ctx context.Context, req *proto.GetConversationReq
 		Id:             i.ID,
 		Title:          i.Title,
 		ProjectDir:     i.ProjectDir,
+		DevWorkDir:     i.DevWorkDir,
 		Model:          i.Model,
 		StartedAt:      i.StartedAt.Unix(),
 		LastTurnAt:     i.LastTurnAt.Unix(),
@@ -696,7 +698,13 @@ func (x *svc) StreamResumeConversationViewportFirst(req *proto.ResumeConversatio
 	if err != nil {
 		return err
 	}
-	if err := stream.Send(resumeViewportEvent(proto.ResumeConversationViewportFirstEvent_TAIL, convID, tail, tailStart, total)); err != nil {
+	info, err := store.Get(ctx, convID)
+	if err != nil {
+		return err
+	}
+	tailEvent := resumeViewportEvent(proto.ResumeConversationViewportFirstEvent_TAIL, convID, tail, tailStart, total)
+	tailEvent.DevWorkDir = info.DevWorkDir
+	if err := stream.Send(tailEvent); err != nil {
 		return err
 	}
 

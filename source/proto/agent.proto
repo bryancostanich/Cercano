@@ -6,6 +6,9 @@ option go_package = "cercano/source/server/pkg/proto";
 
 // The Agent service definition.
 service Agent {
+  // Direct, session-only main-chat routing control. No inference required.
+  rpc SessionModel (SessionModelRequest) returns (SessionModelResponse) {}
+
   // ProcessRequest handles AI requests (Unary).
   rpc ProcessRequest (ProcessRequestRequest) returns (ProcessRequestResponse) {}
 
@@ -859,6 +862,7 @@ message Conversation {
   int32  turn_count = 7;
   string recap = 8;
   int64  recap_updated_at = 9;
+  string dev_work_dir = 10; // explicit persisted development-mode repository
 }
 
 // PersistedTurn is one stored role-emission returned by Resume.
@@ -909,6 +913,7 @@ message ResumeConversationViewportFirstEvent {
   int32 start_index = 4;
   int32 total_turns = 5;
   string error = 6;
+  string dev_work_dir = 7; // supplied with TAIL, before hydration enables input
 }
 
 message DeleteConversationRequest  { string conversation_id = 1; }
@@ -1636,6 +1641,7 @@ message HostToWorker {
     PermissionUpdate       perm_update      = 10;
     AutonomyLedgerResponse autonomy_response = 11;
     DispatchEventResponse  dispatch_event_response = 12;
+    SessionModelResponse session_model_response = 13;
   }
 }
 
@@ -1668,6 +1674,7 @@ message WorkerToHost {
     McpCallRequest           mcp_request     = 13;
     AutonomyLedgerRequest    autonomy_request = 14;
     DispatchEventRequest     dispatch_event  = 15;
+    SessionModelRequest session_model_request = 16;
   }
 }
 
@@ -1694,6 +1701,14 @@ message StartTurn {
   // worker gating MUST match the host rather than defaulting.
   repeated McpToolDescriptor mcp_tools = 12;
   repeated string            mcp_allow = 13;
+  SessionChatRoute chat_route = 14;
+  // Author of this turn's input for persistence: "" or "user" = human input,
+  // "system" = host-generated autonomous continuation. The worker child
+  // persists the input turn with this role so history never impersonates a
+  // human author. The provider-facing prompt is built user-role regardless
+  // (the content carries the host marker), so no provider sees a mid-history
+  // system message.
+  string input_role = 15;
 }
 
 // LLMMessage is the wire form of llm.Message. Serialization uses the same
@@ -2366,3 +2381,14 @@ message GetTokenMetricsResponse {
   bool breakdowns_truncated = 11;
   string generated_at = 12;
 }
+
+message SessionChatRoute { string profile = 1; string model = 2; }
+message SessionModelRequest {
+ string id = 1;
+ string conversation_id = 2;
+ string action = 3;
+ string profile = 4;
+ string model = 5;
+ string work_dir = 6;
+}
+message SessionModelResponse { string id = 1; bytes result_json = 2; string error = 3; }

@@ -9,6 +9,7 @@
 package providers
 
 import (
+	"cercano/source/server/internal/chatroute"
 	"cercano/source/server/internal/modelmetadata"
 	"cercano/source/server/internal/reasoningexperiment"
 	"context"
@@ -556,7 +557,18 @@ func (p *service) chainEvents(c cfg.Config, d cfg.Destination) func(resilience.E
 	return func(ev resilience.Event) {
 		log.Printf("[cloud] %s resilience %s (%s, %s): %s: %v", d, ev.Action, ev.Stage, ev.Class, ev.Notice(), ev.Err)
 		if p.routingLog != nil {
-			p.routingLog.Log("cloud.resilience", routinglog.Event{"destination": string(d), "primary_profile": preferred, "backup_profile": backup, "action": string(ev.Action), "stage": ev.Stage, "error_class": string(ev.Class), "from_provider": ev.From, "to_provider": ev.To, "from_account": ev.From, "to_account": ev.To, "wait_ms": ev.Wait.Milliseconds(), "notice": ev.Notice(), "error": errorString(ev.Err)})
+			p.routingLog.Log("cloud.resilience", routinglog.Event{"destination": string(d), "primary_profile": preferred, "backup_profile": backup, "action": string(ev.Action), "stage": ev.Stage, "error_class": string(ev.Class), "from_provider": ev.From, "to_provider": ev.To, "from_account": ev.From, "to_account": ev.To, "wait_ms": ev.Wait.Milliseconds(), "notice": ev.Notice(), "error": errorString(ev.Err),
+				// Retry-gate decision record: the precise reason a recovery
+				// step was skipped, and the conversation/iteration the failed
+				// request belongs to. Emitted kinds are booleans only —
+				// never message contents or arguments.
+				"reason":            ev.Reason,
+				"conversation_id":   ev.ConversationID,
+				"request_id":        ev.RequestID,
+				"emitted":           ev.Emitted,
+				"emitted_text":      ev.EmittedText,
+				"emitted_reasoning": ev.EmittedReasoning,
+				"emitted_tool_call": ev.EmittedToolCall})
 		}
 	}
 }
@@ -564,4 +576,9 @@ func (p *service) chainEvents(c cfg.Config, d cfg.Destination) func(resilience.E
 // RunReasoningDiagnostic deliberately bypasses destination retry/fallback chains.
 func (p *service) RunReasoningDiagnostic(ctx context.Context, spec reasoningexperiment.Spec) (reasoningexperiment.Report, error) {
 	return reasoningexperiment.Run(ctx, p.cfgSvc.Get(), spec, p.buildProfile)
+}
+
+// ResolveChatRoute bypasses destination backup chains for an explicit session pin.
+func (p *service) ResolveChatRoute(ctx context.Context, route chatroute.Route) (inference.Provider, error) {
+	return chatroute.Build(p.cfgSvc.Get(), route, p.buildProfile)
 }

@@ -334,7 +334,9 @@ func (p *tokenMetricsPage) lines() []string {
 			body = nil
 			return
 		}
-		lines = append(lines, "")
+		if len(lines) > 0 {
+			lines = append(lines, "")
+		}
 		if totalW >= 16 {
 			if controlIndex >= 0 {
 				p.controlRow = len(lines) + 2 + controlIndex
@@ -351,8 +353,6 @@ func (p *tokenMetricsPage) lines() []string {
 		controlIndex = -1
 	}
 	section := func(label string) { flush(); title = label }
-	add(p.styles.Accent.Bold(true).Render("◈ Token Metrics") + p.styles.Muted.Render("  /  reported consumption"))
-	add(p.styles.Muted.Render("↑↓ select · Enter edit · ←→ options · r refresh · PgUp/PgDn scroll · Shift+Tab tabs"))
 	section("Filters")
 	controls, focus := p.filterRows(w)
 	for i, row := range controls {

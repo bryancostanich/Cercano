@@ -99,6 +99,12 @@ func TestRenderConfirmPrompt_RequestPlanApproval_AsksToLeavePlanMode(t *testing.
 	if strings.Contains(s, "executing") {
 		t.Errorf("request_plan_approval prompt should not imply execution, got: %q", s)
 	}
+	if !strings.Contains(s, "In a Git repository, approval commits") || !strings.Contains(s, "(only those files)") {
+		t.Errorf("request_plan_approval prompt must state the git commit truthfully and conditionally, got: %q", s)
+	}
+	if !strings.Contains(s, "failed commit keeps planning mode") || !strings.Contains(s, "Outside a Git repository, approval leaves plan mode without committing") {
+		t.Errorf("request_plan_approval prompt must cover the non-git case honestly, got: %q", s)
+	}
 	if strings.Contains(s, "DESTRUCTIVE") || strings.Contains(s, "⚠") {
 		t.Errorf("request_plan_approval must not be DESTRUCTIVE/⚠: %q", s)
 	}

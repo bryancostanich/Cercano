@@ -421,7 +421,7 @@ func flattenToolResultsForModel(calls, results []llm.Block) string {
 // is already in planning mode and what to do next (FU-1a).
 func fenceDenialMessage(profileName, toolName string, tier llm.Permission) string {
 	if profileName == "plan" && toolName == "suggest_plan" {
-		return "already in planning mode — no need to call suggest_plan again. You are in the read-only planning fence now: investigate the codebase and author the effort's spec.md and plan.md. When the plan is ready call request_plan_approval; to abandon planning call plan_exit."
+		return "already in planning mode — no need to call suggest_plan again. You are in the read-only planning fence now: investigate the codebase and author the effort's spec.md and plan.md. When the plan is ready call request_plan_approval with the effort — in a Git repository, approval commits the effort's spec.md and plan.md to git on the current branch (only those files) before leaving planning mode, and a failed commit keeps the session in planning mode; outside a Git repository approval simply leaves planning mode. To abandon planning call plan_exit."
 	}
 	return fmt.Sprintf("blocked: the %q profile is read-only — the tool %q (%s) is unavailable. Only read and plan actions are permitted while planning.", profileName, toolName, tier)
 }

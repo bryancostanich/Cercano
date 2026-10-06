@@ -643,7 +643,7 @@ Do not rewrite the spec yourself.
 		Name:        "planning-mode",
 		Description: "Explore read-only, then author an effort's spec and phased plan before touching anything.",
 		Domain:      DomainCore,
-		Trigger:     "Default to direct execution for clear, bounded requests: routine bug fixes, text/UI tweaks, straightforward features, mechanical edits, and their tests, even across multiple files. File count, step count, or the number of subsystems touched never justify planning mode on their own. Once an approach has been agreed in conversation, implementing it is execution, however many subsystems it spans — do not then propose planning for the thing that was just settled. Treat a direct instruction to build, fix, do, or try something as an instruction to execute: investigate and implement it, asking a focused question if one specific detail blocks you. A request for `a plan`, `the shape`, or `the approach` asks for prose in your reply, not planning mode; only an explicit request for a spec or plan file counts. While iterating on a bug or a failed fix, keep debugging and fixing rather than proposing a reviewed design. Suggest planning only when the design itself is still open and a written, reviewed design would prevent significant rework, such as consequential architecture tradeoffs or migrations with compatibility and rollout decisions. If a formal spec or plan is warranted and you are not already in planning mode, you MUST call `suggest_plan` first. Do NOT author `spec.md`/`plan.md` outside planning mode or bypass its approval gate. Once in planning mode, pull the `planning-mode` protocol and follow it.",
+		Trigger:     "Default to direct execution for clear, bounded requests: routine bug fixes, text/UI tweaks, straightforward features, mechanical edits, and their tests, even across multiple files. File count, step count, or the number of subsystems touched never justify planning mode on their own. Once an approach has been agreed in conversation, implementing it is execution, however many subsystems it spans — do not then propose planning for the thing that was just settled. Treat a direct instruction to build, fix, do, or try something as an instruction to execute: investigate and implement it, asking a focused question if one specific detail blocks you. An explicit request to plan (e.g., 'put a plan together', 'let's plan this out', 'make a plan', similar) MUST call `suggest_plan` regardless of task simplicity or agreed approach. For requests asking about 'the shape', 'the approach', or explanation without explicit planning intent, provide prose-only responses. While iterating on a bug or a failed fix, keep debugging and fixing rather than proposing a reviewed design. Absent an explicit planning request, suggest planning only when the design itself is still open and a written, reviewed design would prevent significant rework, such as consequential architecture tradeoffs or migrations with compatibility and rollout decisions. If a formal spec or plan is warranted and you are not already in planning mode, you MUST call `suggest_plan` first. Do NOT author `spec.md`/`plan.md` outside planning mode or bypass its approval gate. Once in planning mode, pull the `planning-mode` protocol and follow it.",
 		Body: `# Planning Mode Protocol
 
 ## When This Applies
@@ -709,8 +709,16 @@ Pick a short kebab-case slug for the effort (e.g. ` + "`migrate-config-loader`" 
 
 Once the spec is approved, write **` + "`efforts/<slug>/plan.md`" + `** in the format
 below. Then call ` + "`request_plan_approval`" + ` with the effort path and a concise
-summary of the plan. That W-tier capability raises the standard ` + "`y/n/d/c`" + `
-gate; approval leaves the read-only planning profile so execution can begin.
+summary of the plan. That X-tier capability raises the standard ` + "`y/n/d/c`" + `
+gate. On approval, the capability first commits only the declared ` + "`spec.md`" + `
+and ` + "`plan.md`" + ` to git on the current branch — anything else staged or untracked
+is left untouched — and only then leaves the read-only planning profile so
+execution can begin. If that checkpoint commit fails (for example the docs are
+git-ignored, or a pre-commit hook rejects), the session stays in planning mode
+with an error naming what to fix; fix it and call ` + "`request_plan_approval`" + `
+again. Because the docs are committed before the fence drops, the execution worktree
+created for the effort inherits the planning-doc commit, so worktree
+and landing flows are never blocked by untracked planning docs.
 After that approval, draft a lightweight autonomous run brief from ` + "`spec.md`" + ` /
 ` + "`plan.md`" + ` and call ` + "`request_autonomous_execution`" + ` to ask: "Plan approved. Execute
 it autonomously with this run brief?" If the user says yes, that single approval
@@ -790,7 +798,9 @@ Example:
   machine-structured data in the spec.
 - Get sign-off on the spec before writing the plan, and route the finished plan
   through ` + "`request_plan_approval`" + ` before any execution begins. That capability
-  supplies the ` + "`y/n/d/c`" + ` handoff and drops the read-only fence only on approval.
+  supplies the ` + "`y/n/d/c`" + ` handoff; on approval it commits only the declared
+  ` + "`spec.md`" + `/` + "`plan.md`" + ` to the current branch before dropping the read-only fence,
+  and a failed commit keeps the session in planning mode.
 - Never leave planning mode by just starting to edit code. There are exactly two
   exits, and you must call one of them: ` + "`request_plan_approval`" + ` when a plan is
   written and you want execution to begin (asks the human), or ` + "`plan_exit`" + `

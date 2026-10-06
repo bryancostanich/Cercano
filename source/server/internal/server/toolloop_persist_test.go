@@ -118,9 +118,13 @@ func blocksToEvents(blocks []llm.Block) []llm.StreamEvent {
 	return events
 }
 
-func newServerWithStore(t *testing.T) (*Server, conversation.Store) {
+func newServerWithStore(t *testing.T, paths ...string) (*Server, conversation.Store) {
 	t.Helper()
-	store, err := conversation.Open(":memory:")
+	path := ":memory:"
+	if len(paths) > 0 {
+		path = paths[0]
+	}
+	store, err := conversation.Open(path)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

@@ -21,7 +21,13 @@ func BuildLLMHistory(turns []conversation.Turn) []llm.Message {
 		case string(llm.RoleAssistant):
 			role = llm.RoleAssistant
 		case string(llm.RoleSystem):
-			role = llm.RoleSystem
+			// Persisted system-role turns are host-authored source metadata
+			// (e.g. autonomous-continuation inputs). Providers reject or drop
+			// mid-history system messages, so the provider-facing internal
+			// prompt maps them to user role; the content itself carries the
+			// host marker that distinguishes them from human input. No
+			// provider adapter is rewritten for this.
+			role = llm.RoleUser
 		}
 		var blocks []llm.Block
 		if t.BlocksJSON != "" {

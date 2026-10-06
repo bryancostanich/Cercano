@@ -639,6 +639,14 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 		ContextWindow:      contextWindow,
 		ContextWindowKnown: contextWindowKnown,
 	})
+	// Captured by the deferred epilogue below: the terminal "done" emission
+	// carries the loop's final accounting (iterations) and the suspicion flag
+	// resolved after the loop finishes. Previously "done" was emitted right
+	// after the loop, before noop classification and the persistence warning,
+	// which closed the UI tab before those warnings arrived.
+	terminalDone := false
+	var doneRes agent.ToolLoopResult
+	doneSuspicious := false
 	defer func() {
 		tr.Close()
 		if n := tr.Failures(); n > 0 {
@@ -646,6 +654,20 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 			out.Text += "\n\n[" + warning + "]"
 			emitDispatchProgress(spec.Emit, agenttools.ProgressEvent{SubAgentID: subConvID, Kind: "error", Text: warning, IsError: true})
 			x.logDispatchFailure("dispatch.degraded", spec, subConvID, provider, model, sel.IsCloud, granted, ignored, nil, failurelog.Event{"error_class": "dispatch_persistence_failed", "failed_writes": n})
+		}
+		if terminalDone {
+			// "done" is the TERMINAL sub-agent event: emitted here, after the
+			// suspicious-noop error and the persistence-degradation warning
+			// above, so the parent/UI closes the tab on the true final state
+			// instead of before the warnings land. doneSuspicious records the
+			// suspicion outcome in the terminal text; failure paths (loop
+			// error, grant refusal) emit their own "error" event and never
+			// emitted "done", so they stay done-free here too.
+			text := fmt.Sprintf("sub-agent done: conv=%s iterations=%d", subConvID, doneRes.Iterations)
+			if doneSuspicious {
+				text += " (flagged: suspicious no-op)"
+			}
+			emitDispatchProgress(spec.Emit, agenttools.ProgressEvent{SubAgentID: subConvID, SubAgentParentID: spec.ConversationID, SubAgentTitle: subTitle, Kind: "done", Text: text, GrantedTools: granted, IgnoredTools: ignored})
 		}
 	}()
 	// Per-dispatch compactor: state is per-conversation, never shared.
@@ -750,7 +772,10 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 	}
 	log.Printf("[dispatch] subagent done: conv=%s route=%s provider=%s model=%s tier=%s iterations=%d tokens_in=%d tokens_out=%d",
 		subConvID, location, provider, model, spec.Tier, res.Iterations, res.InputTokens, res.OutputTokens)
-	emitDispatchProgress(spec.Emit, agenttools.ProgressEvent{SubAgentID: subConvID, SubAgentParentID: spec.ConversationID, SubAgentTitle: subTitle, Kind: "done", Text: fmt.Sprintf("sub-agent done: conv=%s iterations=%d", subConvID, res.Iterations), GrantedTools: granted, IgnoredTools: ignored})
+	// The "done" event is emitted by the deferred epilogue above, as the last
+	// event, after noop classification and any persistence warning.
+	terminalDone = true
+	doneRes = res
 
 	// 5. Assemble result. Prefer ToolLoopResult.FinalText (the last assistant
 	// text block from the loop); fall back to the streamed buf if it's empty
@@ -786,6 +811,7 @@ func (x *Service) RunAgenticDispatch(ctx context.Context, spec dispatch.Spec, se
 	if suspicious {
 		log.Printf("[dispatch] subagent SUSPICIOUS no-op: conv=%s granted_write=%v called=%v reason=%q",
 			subConvID, sortedKeys(mutating), sortedKeys(called), reason)
+		doneSuspicious = true
 		tr.DispatchDone(dispatchhistory.DispatchDoneEvent{Err: "suspicious_noop", Iterations: res.Iterations, InputTokens: res.InputTokens, OutputTokens: res.OutputTokens, CalledTools: res.CalledTools})
 		x.logDispatchFailure("dispatch.degraded", spec, subConvID, provider, model, sel.IsCloud, granted, ignored, nil, failurelog.Event{
 			"error_class":        "suspicious_noop",

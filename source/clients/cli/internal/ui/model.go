@@ -445,6 +445,7 @@ func New(ag *agentclient.Client, openHistoryOnStart bool) Model {
 	slash.RegisterLocus(reg, ag)
 	slash.RegisterContextView(reg)
 	slash.RegisterDev(reg)
+	slash.RegisterModel(reg)
 	slash.RegisterRestartAgent(reg)
 	slash.RegisterSettings(reg)
 	slash.RegisterSetup(reg)
@@ -2097,6 +2098,19 @@ func (m Model) Update(msg tea.Msg) (nextModel tea.Model, nextCmd tea.Cmd) {
 		}
 		return m, msg.next
 
+	case sessionModelMsg:
+		if msg.convID != m.convID {
+			return m, nil
+		}
+		if msg.err != nil {
+			if !msg.quiet {
+				m.mainChat().AppendNotice(&Entry{Role: RoleSystem, Content: "Session model: " + msg.err.Error()})
+			}
+		} else if !msg.quiet || msg.status.Override != nil {
+			m.mainChat().AppendNotice(&Entry{Role: RoleSystem, Content: sessionModelText(msg.status, !msg.quiet)})
+		}
+		m.refreshViewport()
+		return m, nil
 	case sessionProfileFetchedMsg:
 		// Startup/resume seed for the footer chip. Apply only if it's still the
 		// active conversation (the user may have switched during the fetch).
@@ -2984,6 +2998,13 @@ func (m *Model) cancelCurrentStreamWithNotice(showNotice bool) {
 	// Compacting=false, so clear it here — a latched compacting flag keeps the
 	// 50ms animation tick alive forever and pins a CPU core until restart.
 	m.clearTurnAnimationState()
+	// Child finalization must run before any new turn starts (steering's
+	// DrainNext path submits immediately after this returns): canceling retires
+	// the turn's generation, so every still-running child tab's done/error
+	// event is now a ghost and its tab would stream/spin forever. This clears
+	// each stale child's streaming state and in-progress tools, leaving
+	// restored tabs and the main view untouched.
+	m.finishStaleSubAgentTabs("sub-agent stopped without a terminal event")
 	if showNotice {
 		m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: "⊘ canceled"})
 	}
@@ -3184,6 +3205,8 @@ func (m Model) runSlash(line string) (tea.Model, tea.Cmd) {
 		tc := &pendingToolCall{Name: res.ToolName, Args: res.ToolArgs, Permission: perm}
 		m.enqueueConfirmation(toolConfirm(tc))
 		m.refreshViewport()
+	case slash.ResultSessionModel:
+		return m, sessionModelCmd(m.agent, m.convID, m.effectiveWorkDir(), res.ModelAction, res.ModelProfile, res.ModelID, false)
 	case slash.ResultDevMode:
 		kickoff := m.applyDevMode(res.WorkDir)
 		m.refreshViewport()
@@ -3939,6 +3962,7 @@ func (m Model) applyProgressiveResumeEvent(msg resumeViewportStreamMsg) (Model, 
 	}
 	switch msg.event.Kind {
 	case agentclient.ResumeViewportEventTail:
+		m.restoreDevMode(msg.event.DevWorkDir)
 		m.resumeTurns = append([]agentclient.PersistedTurn(nil), msg.event.Turns...)
 		m.mainChat().BeginProgressiveLoad(resumeEntries(msg.event.Turns, 0), msg.event.StartIndex > 0)
 		m.mainChat().PrependBanner(m.splash.Meta, m.splash.Started())
@@ -3957,7 +3981,7 @@ func (m Model) applyProgressiveResumeEvent(msg resumeViewportStreamMsg) (Model, 
 	case agentclient.ResumeViewportEventHydrationComplete:
 		m.resumeHydrating = false
 		m.errMsg = ""
-		cmds = append(cmds, fetchContextUsage(m.agent, m.convID), fetchSessionProfileCmd(m.agent, m.convID), fetchRecap(m.agent, m.convID))
+		cmds = append(cmds, fetchContextUsage(m.agent, m.convID), fetchSessionProfileCmd(m.agent, m.convID), sessionModelCmd(m.agent, m.convID, m.effectiveWorkDir(), "status", "", "", true), fetchRecap(m.agent, m.convID))
 	}
 	if !m.bannerTickActive {
 		m.bannerTickActive = true
@@ -4020,6 +4044,7 @@ func (m Model) applyResume(conversationID string) (Model, tea.Cmd) {
 	// silently failing (e.g. local runtime misconfigured). Don't push into
 	// scrollback — that showed the recap twice on resume.
 	if info, err := m.agent.GetConversation(ctx, conversationID); err == nil {
+		m.restoreDevMode(info.DevWorkDir)
 		m.recap = recapDisplay(info)
 	}
 	// Reopen the conversation's sub-agent tabs from their persisted
@@ -4031,7 +4056,7 @@ func (m Model) applyResume(conversationID string) (Model, tea.Cmd) {
 		fetchContextUsage(m.agent, m.convID),
 		// Seed the footer mode chip: a resumed conversation may already be in
 		// planning mode, and no broadcast will fire until the next flip.
-		fetchSessionProfileCmd(m.agent, m.convID),
+		fetchSessionProfileCmd(m.agent, m.convID), sessionModelCmd(m.agent, m.convID, m.effectiveWorkDir(), "status", "", "", true),
 	}
 	if !m.bannerTickActive {
 		// The tick chain died before this resume (e.g. launching straight
@@ -4298,6 +4323,25 @@ func (m Model) renderPlanApprovalConfirmDetails(p *pendingToolCall) []string {
 	addTextSection("Effort", stringArg(obj, "effort"))
 	addTextSection("Spec", stringArg(obj, "spec_path"))
 	addTextSection("Plan file", stringArg(obj, "plan_path"))
+	// Tell the user what approval actually does on the git side, truthfully and
+	// conditionally: in a git repo the two planning docs are committed to the
+	// current branch (and nothing else) before plan mode is left, and a failed
+	// commit keeps planning mode; outside git approval just leaves plan mode
+	// with no commit. Each sentence wraps on its own so the commitments stay
+	// legible instead of straddling wrap points.
+	notes := []string{
+		"In a Git repository, approval commits the effort's spec.md and plan.md to the current branch before leaving plan mode (only those files).",
+		"A failed commit keeps planning mode.",
+		"Outside a Git repository, approval leaves plan mode without committing.",
+	}
+	lines = append(lines, "")
+	for _, note := range notes {
+		for _, line := range strings.Split(ansi.Wrap(note, bodyWidth, ""), "\n") {
+			if strings.TrimSpace(line) != "" {
+				lines = append(lines, "    "+m.styles.Muted.Render(line))
+			}
+		}
+	}
 	return lines
 }
 

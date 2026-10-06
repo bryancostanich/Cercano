@@ -1,0 +1,544 @@
+name: Release (signed macOS, unsigned experimental Windows and Linux)
+
+# Signed, notarized Apple Silicon release, plus an explicitly unsigned,
+# experimental Windows x64 artifact (docs/windows-artifact.md) and an
+# explicitly unsigned, experimental Linux x86_64 artifact
+# (docs/linux-artifact.md).
+#
+# Deliberately manual: there is no push, tag or pull_request trigger, so
+# untrusted code can never reach the signing credentials. An operator starts
+# each run explicitly, and publication requires a second explicit opt-in.
+#
+# Signing and notarization secrets live in the protected `release` environment.
+# Configure that environment with required reviewers so a run cannot reach
+# Apple credentials without human approval. See docs/macos-release-build.md.
+#
+# The `build-windows` and `build-linux` jobs are deliberately OUTSIDE that
+# environment: they hold no secrets of any kind and produce explicitly
+# unsigned, experimental artifacts (docs/windows-artifact.md,
+# docs/linux-artifact.md). They must never gain signing secrets or the
+# release environment.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Stable version to build, without a leading v (e.g. 1.2.3)"
+        required: true
+        type: string
+      publish:
+        description: "Publish to GitHub Releases. Leave unchecked for a rehearsal."
+        required: true
+        default: false
+        type: boolean
+
+# Least privilege by default; the publish job raises this for itself alone.
+permissions:
+  contents: read
+
+concurrency:
+  # Never let two runs build or publish the same version at once.
+  group: release-macos-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build, sign, notarize and verify
+    runs-on: macos-14  # Apple Silicon
+    environment: release
+    timeout-minutes: 60
+    outputs:
+      archive: ${{ steps.build.outputs.archive }}
+      sha256: ${{ steps.build.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # build script requires the version tag to exist
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: source/server/go.mod
+          cache-dependency-path: source/server/go.sum
+
+      - name: Validate inputs
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] \
+            || { echo "::error::Version must be stable X.Y.Z without a leading v: $VERSION"; exit 1; }
+          TAG_COMMIT="$(git rev-parse --verify "refs/tags/v$VERSION^{commit}")" \
+            || { echo "::error::No commit tag v$VERSION in this repository."; exit 1; }
+          [[ "$TAG_COMMIT" == "$(git rev-parse --verify 'HEAD^{commit}')" ]] \
+            || { echo "::error::Selected workflow ref does not match v$VERSION; refusing to label different source as this release."; exit 1; }
+
+      - name: Run release test gate
+        run: |
+          set -euo pipefail
+          ( cd source/server && go test ./internal/brewrestart/... ./pkg/agentclient/... ./cmd/cercano/... )
+          python3 scripts/test-macos-release-build.py
+          python3 scripts/test-macos-release-verify.py
+          ( cd release/homebrew && python3 -m unittest test_render_formula )
+
+      # The keychain is created here and destroyed unconditionally below, so a
+      # failed run never leaves signing material on the runner.
+      - name: Import signing identity
+        env:
+          CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          [[ -n "$CERTIFICATE_P12" ]] \
+            || { echo "::error::MACOS_CERTIFICATE_P12 is not configured in the release environment."; exit 1; }
+          [[ -z "$CERTIFICATE_PASSWORD" ]] && echo "::notice::Using passwordless certificate import"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 32)"
+          KEYCHAIN_PATH="$RUNNER_TEMP/cercano-signing.keychain-db"
+          CERT_PATH="$RUNNER_TEMP/certificate.p12"
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 3600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          printf '%s' "$CERTIFICATE_P12" | base64 --decode > "$CERT_PATH"
+          security import "$CERT_PATH" -k "$KEYCHAIN_PATH" -P "$CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/security
+          rm -f "$CERT_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | tr -d '"')
+          # Resolve the identity from the keychain rather than trusting a
+          # configured string, and fail if it is absent or ambiguous.
+          IDENTITIES="$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | grep 'Developer ID Application:' || true)"
+          COUNT="$(printf '%s' "$IDENTITIES" | grep -c . || true)"
+          [[ "$COUNT" == 1 ]] \
+            || { echo "::error::Expected exactly one Developer ID Application identity, found $COUNT."; exit 1; }
+          FINGERPRINT="$(printf '%s' "$IDENTITIES" | awk '{print $2}')"
+          echo "::add-mask::$FINGERPRINT"
+          echo "CERCANO_CODESIGN_ID=$FINGERPRINT" >> "$GITHUB_ENV"
+          echo "CERCANO_CODESIGN_KEYCHAIN=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+
+      - name: Build and sign release archive
+        id: build
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          bash scripts/build-macos-release.sh "$VERSION" dist
+          ARCHIVE="dist/cercano-$VERSION-darwin-arm64.tar.gz"
+          echo "archive=$ARCHIVE" >> "$GITHUB_OUTPUT"
+          echo "sha256=$(shasum -a 256 "$ARCHIVE" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+
+      - name: Notarize
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          [[ -n "$APPLE_ID" && -n "$APPLE_TEAM_ID" && -n "$APPLE_APP_SPECIFIC_PASSWORD" ]] \
+            || { echo "::error::Notarization secrets are not configured in the release environment."; exit 1; }
+          # Store credentials in the same temporary keychain so cleanup removes them.
+          xcrun notarytool store-credentials cercano-notary \
+            --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+            --keychain "$KEYCHAIN_PATH" >/dev/null
+          # Stage the exact signed binaries that were archived.
+          STAGE="$RUNNER_TEMP/notarize-stage"
+          mkdir -p "$STAGE"
+          tar -xzf "dist/cercano-$VERSION-darwin-arm64.tar.gz" -C "$RUNNER_TEMP"
+          cp "$RUNNER_TEMP/cercano-$VERSION-darwin-arm64/bin/cercano" \
+             "$RUNNER_TEMP/cercano-$VERSION-darwin-arm64/bin/cercano-cli" "$STAGE/"
+          python3 scripts/notarize-macos-local.py "$STAGE" "$RUNNER_TEMP/notarization" \
+            --keychain-profile cercano-notary --keychain "$KEYCHAIN_PATH"
+
+      # Failure-only diagnostics: exactly the script-generated sanitized JSON
+      # report (well-known notarytool id/status/message/error plus return
+      # codes and timeout flags, credential-like values redacted). Raw
+      # stdout/stderr captures, the submission ZIP, submission-id.txt, the
+      # keychain, certificates and auth parameters never leave the runner.
+      # `if: failure()` (not `always()`) so it cannot block the unconditional
+      # keychain cleanup below, and it is separate from the success artifacts.
+      - name: Upload notarization diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cercano-${{ inputs.version }}-notarization-diagnostics
+          path: ${{ runner.temp }}/notarization/diagnostic-report.json
+          if-no-files-found: warn
+          retention-days: 3
+
+      - name: Verify finished archive
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          # Notarization is confirmed by matching each binary's code directory
+          # hash against Apple's Accepted ticket, not assumed from submission.
+          python3 scripts/verify-macos-release.py "${{ steps.build.outputs.archive }}" \
+            --version "$VERSION" \
+            --sha256 "${{ steps.build.outputs.sha256 }}" \
+            --notarization-evidence "$RUNNER_TEMP/notarization"
+
+      - name: Render Homebrew formula
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          python3 release/homebrew/render_formula.py \
+            --version "$VERSION" \
+            --archive "${{ steps.build.outputs.archive }}" \
+            --sha256 "${{ steps.build.outputs.sha256 }}" \
+            --output dist/cercano.rb
+          echo "Formula rendered. Publication-enabled runs update the tap after release publication."
+
+      - name: Destroy signing keychain
+        if: always()
+        run: |
+          set -uo pipefail
+          # Runs even on failure or cancellation so credentials never persist.
+          security delete-keychain "$RUNNER_TEMP/cercano-signing.keychain-db" 2>/dev/null || true
+          rm -f "$RUNNER_TEMP/certificate.p12"
+
+      - name: Upload artifacts for review
+        uses: actions/upload-artifact@v4
+        with:
+          name: cercano-${{ inputs.version }}-darwin-arm64
+          path: |
+            dist/cercano-${{ inputs.version }}-darwin-arm64.tar.gz
+            dist/cercano-${{ inputs.version }}-darwin-arm64.tar.gz.sha256
+            dist/cercano.rb
+          if-no-files-found: error
+          retention-days: 14
+
+  # Experimental, UNSIGNED Windows x64 artifact. This job is intentionally
+  # NOT in the protected `release` environment and references no secrets:
+  # there is no Windows signing infrastructure yet, and the artifact must
+  # be built even when no signing credentials are configured. See
+  # docs/windows-artifact.md. Native Windows work happens here — cross
+  # compilation is used for the packaging probes, but the binaries are built
+  # and smoke-tested on the Windows host itself.
+  build-windows:
+    name: Build unsigned experimental Windows x64 archive
+    runs-on: windows-latest
+    timeout-minutes: 60
+    outputs:
+      archive: ${{ steps.build.outputs.archive }}
+      sha256: ${{ steps.build.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # the build script requires the version tag to exist
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: source/server/go.mod
+          cache-dependency-path: source/server/go.sum
+
+      - name: Validate inputs
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] \
+            || { echo "::error::Version must be stable X.Y.Z without a leading v: $VERSION"; exit 1; }
+          TAG_COMMIT="$(git rev-parse --verify "refs/tags/v$VERSION^{commit}")" \
+            || { echo "::error::No commit tag v$VERSION in this repository."; exit 1; }
+          [[ "$TAG_COMMIT" == "$(git rev-parse --verify 'HEAD^{commit}')" ]] \
+            || { echo "::error::Selected workflow ref does not match v$VERSION; refusing to label different source as this release."; exit 1; }
+
+      - name: Run release test gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The workflow tests need PyYAML (Windows runners do not ship Ruby,
+          # which is the suite's fallback parser).
+          python -m pip install --disable-pip-version-check --quiet pyyaml
+          python scripts/test-windows-release-build.py
+          python scripts/test-release-workflow.py
+
+      - name: Build unsigned Windows archive
+        id: build
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          python scripts/build-windows-release.py "$VERSION" dist
+          ARCHIVE="dist/cercano-$VERSION-windows-x64.zip"
+          echo "archive=$ARCHIVE" >> "$GITHUB_OUTPUT"
+          echo "sha256=$(sha256sum "$ARCHIVE" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+
+      # Smoke test the exact archive contents (extracted to a directory
+      # outside the repository), with every user directory pointed at
+      # throwaway paths so the binaries cannot read or write real user
+      # state. Only versions are exercised: no agent launch, credentials,
+      # models or downloads.
+      - name: Smoke test binaries with isolated user directories
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          ISOLATED="$RUNNER_TEMP/cercano-smoke"
+          rm -rf "$ISOLATED"
+          mkdir -p "$ISOLATED/home" "$ISOLATED/appdata" "$ISOLATED/localappdata" "$ISOLATED/temp" "$ISOLATED/run"
+          export HOME="$ISOLATED/home"
+          export USERPROFILE="$ISOLATED/home"
+          export APPDATA="$ISOLATED/appdata"
+          export LOCALAPPDATA="$ISOLATED/localappdata"
+          export TEMP="$ISOLATED/temp"
+          export TMP="$ISOLATED/temp"
+          cd "$ISOLATED/run"
+          python -m zipfile -e "$GITHUB_WORKSPACE/dist/cercano-$VERSION-windows-x64.zip" .
+          AGENT="$ISOLATED/run/cercano-$VERSION-windows-x64/bin/cercano.exe"
+          CLI="$ISOLATED/run/cercano-$VERSION-windows-x64/bin/cercano-cli.exe"
+          got="$("$AGENT" --version | tr -d '\r')"
+          [[ "$got" == "cercano v$VERSION" ]] \
+            || { echo "::error::cercano.exe reports '$got', expected 'cercano v$VERSION'."; exit 1; }
+          got="$("$CLI" --version | tr -d '\r')"
+          [[ "$got" == "cercano-cli v$VERSION" ]] \
+            || { echo "::error::cercano-cli.exe reports '$got', expected 'cercano-cli v$VERSION'."; exit 1; }
+          # The isolated directories must stay free of agent state.
+          [[ -z "$(find "$ISOLATED/home" "$ISOLATED/appdata" "$ISOLATED/localappdata" -type f -print -quit)" ]] \
+            || { echo "::error::Version smoke test wrote outside TEMP; refusing."; exit 1; }
+          echo "Smoke test passed: both binaries report v$VERSION from an isolated environment."
+
+      # The only Windows-native unit tests that are hermetic today: the
+      # registry/PATH helpers in localruntime/llamaserver (build-tagged
+      # `windows`). Full Windows test coverage is still pending — see
+      # docs/windows-artifact.md.
+      - name: Run Windows-native helper tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          ( cd source/server && go test -count=1 \
+              -run 'TestMergePathValues|TestReadRegistryPath' \
+              ./internal/localruntime/llamaserver/... )
+
+      - name: Upload artifacts for review
+        uses: actions/upload-artifact@v4
+        with:
+          name: cercano-${{ inputs.version }}-windows-x64
+          path: |
+            dist/cercano-${{ inputs.version }}-windows-x64.zip
+            dist/cercano-${{ inputs.version }}-windows-x64.zip.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+  # Experimental, UNSIGNED Linux x86_64 artifact. This job is intentionally
+  # NOT in the protected `release` environment and references no secrets:
+  # there is no Linux signing infrastructure yet, and the artifact must be
+  # built even when no signing credentials are configured. See
+  # docs/linux-artifact.md. Linux is NOT a supported platform yet — this
+  # job produces a reviewable experimental artifact, never an implied
+  # support commitment, and the publish flag below still gates distribution.
+  build-linux:
+    name: Build unsigned experimental Linux x86_64 archive
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    outputs:
+      archive: ${{ steps.build.outputs.archive }}
+      sha256: ${{ steps.build.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # the build script requires the version tag to exist
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: source/server/go.mod
+          cache-dependency-path: source/server/go.sum
+
+      - name: Validate inputs
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] \
+            || { echo "::error::Version must be stable X.Y.Z without a leading v: $VERSION"; exit 1; }
+          TAG_COMMIT="$(git rev-parse --verify "refs/tags/v$VERSION^{commit}")" \
+            || { echo "::error::No commit tag v$VERSION in this repository."; exit 1; }
+          [[ "$TAG_COMMIT" == "$(git rev-parse --verify 'HEAD^{commit}')" ]] \
+            || { echo "::error::Selected workflow ref does not match v$VERSION; refusing to label different source as this release."; exit 1; }
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run release test gate
+        run: |
+          set -euo pipefail
+          # Use setup-python rather than modifying Ubuntu's managed Python.
+          # Match the Windows gate: exercise the builder's refusal paths and
+          # this workflow's own structure before anything is packaged.
+          python3 -m pip install --disable-pip-version-check --quiet pyyaml
+          python3 scripts/test-linux-release-build.py
+          python3 scripts/test-release-workflow.py
+
+      - name: Build unsigned Linux archive
+        id: build
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          python3 scripts/build-linux-release.py "$VERSION" dist
+          ARCHIVE="dist/cercano-$VERSION-linux-x64.tar.gz"
+          echo "archive=$ARCHIVE" >> "$GITHUB_OUTPUT"
+          echo "sha256=$(sha256sum "$ARCHIVE" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+
+      # Smoke test the exact archive contents (extracted to a directory
+      # outside the repository), with every user directory pointed at
+      # throwaway paths so the binaries cannot read or write real user
+      # state. Only versions are exercised: no agent launch, credentials,
+      # models or downloads.
+      - name: Smoke test binaries with isolated user directories
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          ISOLATED="$RUNNER_TEMP/cercano-smoke"
+          rm -rf "$ISOLATED"
+          mkdir -p "$ISOLATED/home" "$ISOLATED/config" "$ISOLATED/cache" \
+                   "$ISOLATED/data" "$ISOLATED/state" "$ISOLATED/runtime" \
+                   "$ISOLATED/temp" "$ISOLATED/run"
+          chmod 700 "$ISOLATED/runtime"  # XDG_RUNTIME_DIR must be 0700
+          export HOME="$ISOLATED/home"
+          export XDG_CONFIG_HOME="$ISOLATED/config"
+          export XDG_CACHE_HOME="$ISOLATED/cache"
+          export XDG_DATA_HOME="$ISOLATED/data"
+          export XDG_STATE_HOME="$ISOLATED/state"
+          export XDG_RUNTIME_DIR="$ISOLATED/runtime"
+          export TMPDIR="$ISOLATED/temp"
+          export TEMP="$ISOLATED/temp"
+          export TMP="$ISOLATED/temp"
+          cd "$ISOLATED/run"
+          tar -xzf "$GITHUB_WORKSPACE/dist/cercano-$VERSION-linux-x64.tar.gz"
+          AGENT="$ISOLATED/run/cercano-$VERSION-linux-x64/bin/cercano"
+          CLI="$ISOLATED/run/cercano-$VERSION-linux-x64/bin/cercano-cli"
+          got="$("$AGENT" --version)"
+          [[ "$got" == "cercano v$VERSION" ]] \
+            || { echo "::error::cercano reports '$got', expected 'cercano v$VERSION'."; exit 1; }
+          got="$("$CLI" --version)"
+          [[ "$got" == "cercano-cli v$VERSION" ]] \
+            || { echo "::error::cercano-cli reports '$got', expected 'cercano-cli v$VERSION'."; exit 1; }
+          # The isolated directories must stay free of agent state.
+          [[ -z "$(find "$ISOLATED/home" "$ISOLATED/config" "$ISOLATED/cache" "$ISOLATED/data" "$ISOLATED/state" -type f -print -quit)" ]] \
+            || { echo "::error::Version smoke test wrote outside the isolated directories; refusing."; exit 1; }
+          echo "Smoke test passed: both binaries report v$VERSION from an isolated environment."
+
+      # The only Linux-safe hermetic native unit tests today: procx's
+      # unix build-tagged process-group tests (they spawn and reap throwaway
+      # /bin/sh children only). Broader Linux test coverage is still pending
+      # — see docs/linux-artifact.md.
+      - name: Run Linux-native helper tests
+        run: |
+          set -euo pipefail
+          ( cd source/server && go test -count=1 ./internal/procx/... )
+
+      - name: Upload artifacts for review
+        uses: actions/upload-artifact@v4
+        with:
+          name: cercano-${{ inputs.version }}-linux-x64
+          path: |
+            dist/cercano-${{ inputs.version }}-linux-x64.tar.gz
+            dist/cercano-${{ inputs.version }}-linux-x64.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Publish to GitHub Releases
+    needs: [build, build-windows, build-linux]
+    # Rehearsals stop at reviewable artifacts; publication is a separate opt-in.
+    if: inputs.publish
+    runs-on: ubuntu-latest
+    environment: release
+    timeout-minutes: 15
+    permissions:
+      contents: write  # raised only for this job
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: cercano-${{ inputs.version }}-darwin-arm64
+          path: dist
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: cercano-${{ inputs.version }}-windows-x64
+          path: dist
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: cercano-${{ inputs.version }}-linux-x64
+          path: dist
+
+      - name: Refuse to replace an existing published artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          for ASSET in "cercano-$VERSION-darwin-arm64.tar.gz" \
+                       "cercano-$VERSION-darwin-arm64.tar.gz.sha256" \
+                       "cercano-$VERSION-windows-x64.zip" \
+                       "cercano-$VERSION-windows-x64.zip.sha256" \
+                       "cercano-$VERSION-linux-x64.tar.gz" \
+                       "cercano-$VERSION-linux-x64.tar.gz.sha256"; do
+            if gh release view "v$VERSION" --json assets \
+                 --jq '.assets[].name' 2>/dev/null | grep -qx "$ASSET"; then
+              echo "::error::$ASSET is already published on v$VERSION. Publish a new version instead of replacing it."
+              exit 1
+            fi
+          done
+          # Confirm the downloaded artifacts match the digests the builds recorded.
+          echo "${{ needs.build.outputs.sha256 }}  dist/cercano-$VERSION-darwin-arm64.tar.gz" | shasum -a 256 -c -
+          echo "${{ needs.build-windows.outputs.sha256 }}  dist/cercano-$VERSION-windows-x64.zip" | shasum -a 256 -c -
+          echo "${{ needs.build-linux.outputs.sha256 }}  dist/cercano-$VERSION-linux-x64.tar.gz" | shasum -a 256 -c -
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ inputs.version }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            dist/cercano-${{ inputs.version }}-darwin-arm64.tar.gz
+            dist/cercano-${{ inputs.version }}-darwin-arm64.tar.gz.sha256
+            dist/cercano-${{ inputs.version }}-windows-x64.zip
+            dist/cercano-${{ inputs.version }}-windows-x64.zip.sha256
+            dist/cercano-${{ inputs.version }}-linux-x64.tar.gz
+            dist/cercano-${{ inputs.version }}-linux-x64.tar.gz.sha256
+
+  update-homebrew:
+    name: Update Homebrew tap
+    needs: [build, publish]
+    if: inputs.publish
+    runs-on: ubuntu-24.04
+    environment: release
+    permissions:
+      contents: read
+    timeout-minutes: 15
+    concurrency:
+      group: cercano-homebrew-tap
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: cercano-${{ inputs.version }}-darwin-arm64
+          path: dist
+      - name: Test tap updater
+        run: python3 -m unittest discover -s release/homebrew -p 'test_update_tap.py'
+      - name: Publish verified formula to tap
+        env:
+          VERSION: ${{ inputs.version }}
+          EXPECTED_SHA256: ${{ needs.build.outputs.sha256 }}
+          GITHUB_TOKEN: ${{ github.token }}
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          python3 release/homebrew/update_tap.py \
+            --version "$VERSION" --sha256 "$EXPECTED_SHA256" \
+            --archive "dist/cercano-$VERSION-darwin-arm64.tar.gz" \
+            --formula dist/cercano.rb

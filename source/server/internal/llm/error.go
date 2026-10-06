@@ -187,12 +187,23 @@ func IsProviderModelUnavailable(err error) bool {
 // classify as ErrNetwork: a *url.Error from the initial request round-trip, a
 // *net.OpError from a mid-stream read/write (the SDK stream decoders surface
 // raw net errors, NOT url.Error, so those must be caught here), or a bare
-// syscall errno (ECONNRESET, EPIPE, ETIMEDOUT) underneath either. Adapters
-// call this before falling through to ErrUnknown so a dropped connection is
-// classified as the transient failure it is.
+// syscall errno (ECONNRESET, EPIPE, ETIMEDOUT) underneath either. HTTP/2
+// peer-level resets (RST_STREAM, GOAWAY, connection error) are also transport
+// failures, but both HTTP/2 implementations surface them as their own error
+// types — std net/http's bundled http2StreamError/http2ConnectionError are
+// unexported, so errors.As cannot reach them from here — and both render with
+// the same stable textual shape, which is what is matched. Adapters call this
+// before falling through to ErrUnknown so a dropped connection is classified
+// as the transient failure it is.
 func IsNetworkError(err error) bool {
 	if err == nil {
 		return false
+	}
+	msg := err.Error()
+	if strings.HasPrefix(msg, "stream error: stream ID ") ||
+		strings.HasPrefix(msg, "connection error: ") ||
+		strings.HasPrefix(msg, "http2: server sent GOAWAY") {
+		return true
 	}
 	var ue *url.Error
 	if errors.As(err, &ue) {

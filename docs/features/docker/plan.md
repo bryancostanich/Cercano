@@ -84,7 +84,7 @@ Objective: Multi-stage Dockerfile that builds Cercano and runs it in a minimal a
 
 Objective: Publish Docker images to GHCR on tagged releases.
 
-- [ ] Task: Add Docker build+push step to `.github/workflows/release.yml`.
+- [ ] Task: Add a Docker build+push workflow. Note: the tag-triggered `.github/workflows/release.yml` has been removed, and the current `release-macos.yml` is manually triggered and macOS-only. Docker publication needs its own workflow, and it must not publish automatically on tag push.
     - [ ] Build and push to `ghcr.io/bryancostanich/cercano`.
     - [ ] Tag with version and `latest`.
 - [ ] Task: Test with a release tag.

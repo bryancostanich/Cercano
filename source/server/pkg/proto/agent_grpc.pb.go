@@ -19,6 +19,7 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
+	Agent_SessionModel_FullMethodName                          = "/agent.Agent/SessionModel"
 	Agent_ProcessRequest_FullMethodName                        = "/agent.Agent/ProcessRequest"
 	Agent_StreamProcessRequest_FullMethodName                  = "/agent.Agent/StreamProcessRequest"
 	Agent_AttachConversation_FullMethodName                    = "/agent.Agent/AttachConversation"
@@ -103,6 +104,8 @@ const (
 //
 // The Agent service definition.
 type AgentClient interface {
+	// Direct, session-only main-chat routing control. No inference required.
+	SessionModel(ctx context.Context, in *SessionModelRequest, opts ...grpc.CallOption) (*SessionModelResponse, error)
 	// ProcessRequest handles AI requests (Unary).
 	ProcessRequest(ctx context.Context, in *ProcessRequestRequest, opts ...grpc.CallOption) (*ProcessRequestResponse, error)
 	// StreamProcessRequest handles AI requests with progress updates (Streaming).
@@ -336,6 +339,16 @@ type agentClient struct {
 
 func NewAgentClient(cc grpc.ClientConnInterface) AgentClient {
 	return &agentClient{cc}
+}
+
+func (c *agentClient) SessionModel(ctx context.Context, in *SessionModelRequest, opts ...grpc.CallOption) (*SessionModelResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SessionModelResponse)
+	err := c.cc.Invoke(ctx, Agent_SessionModel_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *agentClient) ProcessRequest(ctx context.Context, in *ProcessRequestRequest, opts ...grpc.CallOption) (*ProcessRequestResponse, error) {
@@ -1212,6 +1225,8 @@ func (c *agentClient) ExportImage(ctx context.Context, in *ExportImageRequest, o
 //
 // The Agent service definition.
 type AgentServer interface {
+	// Direct, session-only main-chat routing control. No inference required.
+	SessionModel(context.Context, *SessionModelRequest) (*SessionModelResponse, error)
 	// ProcessRequest handles AI requests (Unary).
 	ProcessRequest(context.Context, *ProcessRequestRequest) (*ProcessRequestResponse, error)
 	// StreamProcessRequest handles AI requests with progress updates (Streaming).
@@ -1447,6 +1462,9 @@ type AgentServer interface {
 // pointer dereference when methods are called.
 type UnimplementedAgentServer struct{}
 
+func (UnimplementedAgentServer) SessionModel(context.Context, *SessionModelRequest) (*SessionModelResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SessionModel not implemented")
+}
 func (UnimplementedAgentServer) ProcessRequest(context.Context, *ProcessRequestRequest) (*ProcessRequestResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ProcessRequest not implemented")
 }
@@ -1694,6 +1712,24 @@ func RegisterAgentServer(s grpc.ServiceRegistrar, srv AgentServer) {
 		t.testEmbeddedByValue()
 	}
 	s.RegisterService(&Agent_ServiceDesc, srv)
+}
+
+func _Agent_SessionModel_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SessionModelRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServer).SessionModel(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Agent_SessionModel_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServer).SessionModel(ctx, req.(*SessionModelRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _Agent_ProcessRequest_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -2987,6 +3023,10 @@ var Agent_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "agent.Agent",
 	HandlerType: (*AgentServer)(nil),
 	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "SessionModel",
+			Handler:    _Agent_SessionModel_Handler,
+		},
 		{
 			MethodName: "ProcessRequest",
 			Handler:    _Agent_ProcessRequest_Handler,

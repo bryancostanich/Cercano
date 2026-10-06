@@ -16,6 +16,7 @@
 package toolstack
 
 import (
+	"cercano/source/server/internal/chatroute"
 	"cercano/source/server/internal/reasoningexperiment"
 	"context"
 	"encoding/json"
@@ -96,6 +97,7 @@ type CapDeps struct {
 	// capability). Optional; nil means agent restart is unavailable and
 	// restart_agent errors clearly.
 	RestartAgent        func(reason string) error
+	SessionModel        chatroute.Control
 	RestartRuntime      func(context.Context, string) (json.RawMessage, error)
 	ReasoningDiagnostic func(context.Context, reasoningexperiment.Spec) (reasoningexperiment.Report, error)
 	// Vision backs the inspect_image capability: it resolves a per-conversation
@@ -152,6 +154,7 @@ func InstallCapabilities(svc tools.Catalog, d CapDeps) {
 		},
 		EnterProfile:        d.EnterProfile,
 		RestartAgent:        d.RestartAgent,
+		SessionModel:        d.SessionModel,
 		RestartRuntime:      d.RestartRuntime,
 		ReasoningDiagnostic: d.ReasoningDiagnostic,
 		Vision:              d.Vision,

@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"cercano/source/server/internal/chatroute"
 	"context"
 	"encoding/json"
 	"errors"
@@ -273,7 +274,22 @@ func (c *Core) RunTurn(
 	}
 
 	// 1. Resolve the provider per the active Locus Mode.
-	provider, isCloud, fellBack, err := c.d.Providers.Main()
+	var provider inference.Provider
+	var isCloud, fellBack bool
+	var err error
+	if req.ChatRoute != nil {
+		resolver, ok := c.d.Providers.(chatroute.Resolver)
+		if !ok {
+			return Result{}, fmt.Errorf("session chat overrides unavailable")
+		}
+		provider, err = resolver.ResolveChatRoute(ctx, *req.ChatRoute)
+		isCloud = true
+		if err != nil {
+			return Result{}, err
+		}
+	} else {
+		provider, isCloud, fellBack, err = c.d.Providers.Main()
+	}
 	if err != nil {
 		c.logRoute("turn.select_error", routinglog.Event{
 			"conversation_id": req.ConversationID,
@@ -314,6 +330,10 @@ func (c *Core) RunTurn(
 		})
 	}
 
+	if req.ChatRoute != nil {
+		sink.Emit(Event{Kind: EventProgress, Text: fmt.Sprintf("Session chat override: %s / %s (no fallback)", req.ChatRoute.Profile, req.ChatRoute.Model)})
+	}
+
 	// Announce the route so the client shows the correct engine badge.
 	sink.Emit(Event{
 		Kind:    EventRouteSelected,
@@ -347,7 +367,7 @@ func (c *Core) RunTurn(
 	if effective, ok := inference.TaskDestination(provider); ok {
 		destination = effective
 	}
-	if destination != config.DestinationPrimary {
+	if req.ChatRoute != nil || destination != config.DestinationPrimary {
 		fbProv = nil
 	}
 	fallbackModel := c.d.Providers.MainModel(fbCloud)
@@ -374,7 +394,7 @@ func (c *Core) RunTurn(
 		// store (c.d.Agent == nil); the host ensures the row up front, so skip.
 		if c.d.Agent != nil && c.d.Agent.PersistentStore() != nil {
 			if err := c.d.Agent.PersistentStore().EnsureConversation(
-				ctx, req.ConversationID, req.WorkDir, c.d.Providers.MainModel(isCloud),
+				ctx, req.ConversationID, req.WorkDir, selectedModel,
 			); err != nil {
 				fmt.Fprintf(os.Stderr, "[tool-loop] EnsureConversation(%s) failed: %v\n", req.ConversationID, err)
 				persistEnabled = false
@@ -387,8 +407,14 @@ func (c *Core) RunTurn(
 			}
 		}
 		// Persist the user turn before calling the model (crash resilience).
+		// Host-generated autonomous continuation inputs are marked as system
+		// role so persisted history never impersonates a human author.
 		if persistEnabled {
-			persist(agent.UserMessage(req.Input, req.Images))
+			role := llm.RoleUser
+			if req.InputRole != "" {
+				role = llm.Role(req.InputRole)
+			}
+			persist(llm.Message{Role: role, Blocks: agent.UserMessage(req.Input, req.Images).Blocks})
 		}
 	}
 
@@ -403,9 +429,12 @@ func (c *Core) RunTurn(
 	// Once output or tool execution begins, replaying the whole turn is unsafe.
 	// Tool execution events may arrive from concurrent read-only tool workers.
 	var replayUnsafe atomic.Bool
+	var replayUnsafeText atomic.Bool // a visible token delta was already emitted
+	var replayUnsafeTool atomic.Bool // a tool already executed
 	onTextDelta := func(t string) {
 		if t != "" {
 			replayUnsafe.Store(true)
+			replayUnsafeText.Store(true)
 		}
 		sink.Emit(Event{Kind: EventToken, Text: t})
 	}
@@ -460,6 +489,7 @@ func (c *Core) RunTurn(
 	loopSink := func(event agent.LoopEvent) {
 		if event.Kind == agent.LoopToolExecStart {
 			replayUnsafe.Store(true)
+			replayUnsafeTool.Store(true)
 		}
 		forwardLoopEvent(event)
 	}
@@ -479,7 +509,7 @@ func (c *Core) RunTurn(
 		"model":           selectedModel,
 		"is_cloud":        isCloud,
 	})
-	if req.AuthRecovery != nil && isCloud && !fellBack && res.CrossAllowed && fbProv != nil {
+	if req.AuthRecovery != nil && isCloud && req.ChatRoute == nil && !fellBack && res.CrossAllowed && fbProv != nil {
 		window, known := c.knownContextWindowFor(fbCloud, fallbackModel)
 		provider = &authenticationFallback{primary: provider, fallback: fbProv, model: fallbackModel, window: window, windowKnown: known, onSelect: func() {
 			fellBack = true
@@ -503,6 +533,36 @@ func (c *Core) RunTurn(
 		"input_tokens":    result.InputTokens,
 		"output_tokens":   result.OutputTokens,
 	})
+
+	// 6.1. Whole-turn replay gate: a failed turn can only be re-served
+	// (same-provider retry below, or cross-tier fallback) before visible
+	// output or tool execution — re-running would duplicate tokens the user
+	// already saw and repeat side effects. When the gate is closed, record
+	// which side closed it. Instrumentation only: never the emitted text or
+	// the tool arguments themselves, and the retry policy is unchanged.
+	logReplayBlocked := func(attempt string) {
+		if loopErr == nil || !replayUnsafe.Load() {
+			return
+		}
+		blockedBy := make([]string, 0, 2)
+		if replayUnsafeText.Load() {
+			blockedBy = append(blockedBy, "visible_text")
+		}
+		if replayUnsafeTool.Load() {
+			blockedBy = append(blockedBy, "tool_execution")
+		}
+		c.logRoute("loop.replay_blocked", routinglog.Event{
+			"conversation_id": req.ConversationID,
+			"attempt":         attempt,
+			"provider":        providerName(provider),
+			"route_provider":  providerName(provider),
+			"model":           selectedModel,
+			"is_cloud":        isCloud,
+			"blocked_by":      strings.Join(blockedBy, ","),
+			"error_class":     errClassString(loopErr),
+		})
+	}
+	logReplayBlocked("primary")
 
 	// 6.5. Retry the whole turn only before visible output or tool execution.
 	// Unpersisted partial text can still be visible; tools can have external effects.
@@ -538,13 +598,14 @@ func (c *Core) RunTurn(
 			"input_tokens":    result.InputTokens,
 			"output_tokens":   result.OutputTokens,
 		})
+		logReplayBlocked("same_provider_retry")
 	}
 
 	// 7. Cross-tier fallback: on error, attempt the other tier if locus allows.
 	var fallbackNotice string
 	if loopErr != nil && !replayUnsafe.Load() && ctx.Err() == nil && !errors.Is(loopErr, context.Canceled) {
 		failedProvider := failedProviderName(provider, loopErr)
-		if !fellBack && res.CrossAllowed && fbProv != nil && fbProv.Name() == "llama_server" {
+		if req.ChatRoute == nil && !fellBack && res.CrossAllowed && fbProv != nil && fbProv.Name() == "llama_server" {
 			if _, err := llm.ResolveRuntimeContext(ctx, fbProv, fallbackModel, true); err == nil {
 				fallbackHistory, fallbackAccounting = c.assembleAttemptHistory(ctx, req, "cross_tier_fallback", fbProv, fallbackModel, assignment.Quality.CapabilityTier(), false, true)
 				fallbackPrepared = true
@@ -573,7 +634,7 @@ func (c *Core) RunTurn(
 			"trigger_error_class":     errClassString(loopErr),
 			"trigger_error":           errorString(loopErr),
 		})
-		if !fellBack && res.CrossAllowed && fbProv != nil && fallbackPrepared && llm.FailoverableToWindow(llm.ClassOf(loopErr), loopErr, fromWindow, fallbackWindow, fallbackWindowKnown) {
+		if req.ChatRoute == nil && !fellBack && res.CrossAllowed && fbProv != nil && fallbackPrepared && llm.FailoverableToWindow(llm.ClassOf(loopErr), loopErr, fromWindow, fallbackWindow, fallbackWindowKnown) {
 			// The local fallback generally has a much smaller context window than
 			// the cloud provider. Keep its tool catalog compact for every
 			// cross-tier fallback, including transient cloud failures whose error
@@ -969,9 +1030,9 @@ func profileStateSignal(p agent.Profile) string {
 	}
 	switch p.Name {
 	case "plan":
-		return "<planning-mode>\nYou are currently IN PLANNING MODE (a read-only exploration fence is active). You may read the codebase and author the effort's spec.md and plan.md, but write/exec tools on other files are unavailable until the plan is approved. Do NOT call suggest_plan again — you are already planning; proceed to investigate and author the spec. When the plan is ready, call request_plan_approval to hand off to execution; to abandon planning, call plan_exit.\n</planning-mode>"
+		return "<planning-mode>\nYou are currently IN PLANNING MODE (a read-only exploration fence is active). You may read the codebase and author the effort's spec.md and plan.md, but write/exec tools on other files are unavailable until the plan is approved. Do NOT call suggest_plan again — you are already planning; proceed to investigate and author the spec. When the plan is ready, call request_plan_approval with the effort: in a Git repository, approval commits the effort's spec.md and plan.md to git on the current branch (only those files) before leaving planning mode, and a failed commit keeps the session in planning mode; outside a Git repository approval simply leaves planning mode. To abandon planning, call plan_exit.\n</planning-mode>"
 	case "autonomous":
-		return "<autonomous-mode>\nYou are currently IN AUTONOMOUS MODE. Follow the autonomous-run protocol. Work against the approved run brief: pursue the goal, satisfy the done_when items, honor constraints, and pay attention to review_points. Keep visible progress: emit concise user-visible progress beacons before meaningful phases, long or noisy tool batches, verification, checkpointing, and major slice transitions, then continue working in the same turn. For meaningful in-scope forks, use the design-decision protocol, call capture_decision with the real options/trade-offs/hack flags/counterarguments/reversibility, then continue without asking. Stop mid-run only for high-risk boundary cases: effectively irreversible choices, scope expansion, security/permission/data-loss semantics, destructive operations, push/merge/migration/user-data changes, or when you cannot identify a clean preferred option. A checkpoint boundary is not a pause boundary: after checkpointing a solved unit, continue to the next unsatisfied done_when item or necessary implementation slice instead of ending with a status report. When the brief is satisfied, present a concise completion summary, verification results, and remaining limitations, then call request_autonomous_exit. One approval completes the run and leaves autonomous mode. Captured decisions are an audit trail: do not replay settled decisions or ask for renewed acceptance. Raise unresolved blockers or new high-risk choices when they arise, not at completion.\n</autonomous-mode>"
+		return "<autonomous-mode>\nYou are currently IN AUTONOMOUS MODE. Follow the autonomous-run protocol. Work against the approved run brief: pursue the goal, satisfy the done_when items, honor constraints, and pay attention to review_points. Keep visible progress: emit concise user-visible progress beacons before meaningful phases, long or noisy tool batches, verification, checkpointing, and major slice transitions, then continue working in the same turn. For meaningful in-scope forks, use the design-decision protocol, call capture_decision with the real options/trade-offs/hack flags/counterarguments/reversibility, then continue without asking. Stop mid-run only for high-risk boundary cases: effectively irreversible choices, scope expansion, security/permission/data-loss semantics, destructive operations, push/merge/migration/user-data changes, or when you cannot identify a clean preferred option. A checkpoint boundary is not a pause boundary: after checkpointing a solved unit, continue to the next unsatisfied done_when item or necessary implementation slice instead of ending with a status report. When the brief is satisfied, present a concise completion summary, verification results, and remaining limitations, then call request_autonomous_exit. One approval completes the run and leaves autonomous mode. Captured decisions are an audit trail: do not replay settled decisions or ask for renewed acceptance. Raise unresolved blockers or new high-risk choices when they arise, not at completion. If you are blocked and need the user (an approval, decision, credential, missing resource, or external input), call report_autonomous_blocker with a specific reason: the run pauses, the user's next message resumes it.\n</autonomous-mode>"
 	default:
 		return fmt.Sprintf("<active-profile>\nYou are currently in the %q capability profile, which fences off some tools. Tools outside the profile are unavailable this turn.\n</active-profile>", p.Name)
 	}

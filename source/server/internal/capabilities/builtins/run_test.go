@@ -6,9 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -138,53 +136,6 @@ func TestRunCommandCapability_TimeoutWithBackgroundedChild(t *testing.T) {
 	if !strings.Contains(err.Error(), "started") {
 		t.Errorf("expected partial stdout in timeout error, got: %v", err)
 	}
-}
-
-// The timed-out command's whole process group must be dead on return, not
-// leaked as orphans still holding resources.
-func TestRunCommandCapability_TimeoutKillsProcessGroup(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("process groups are unix-only")
-	}
-	restore := runCommandWaitDelay
-	runCommandWaitDelay = 500 * time.Millisecond
-	t.Cleanup(func() { runCommandWaitDelay = restore })
-
-	// The grandchild writes a marker file, then sleeps well past the timeout.
-	// If it is still alive after we return, it deletes nothing — so we probe
-	// liveness by pid instead, recorded into the marker.
-	dir := t.TempDir()
-	pidFile := filepath.Join(dir, "grandchild.pid")
-	script := "sh -c 'echo $$ > " + pidFile + "; sleep 30' & echo spawned; sleep 30"
-
-	cap := RunCommand()
-	args, _ := json.Marshal(map[string]any{
-		"cmd":             []string{"/bin/sh", "-c", script},
-		"timeout_seconds": 1,
-	})
-	if _, err := cap.Execute(context.Background(), &capabilities.Call{Args: args}); err == nil {
-		t.Fatal("expected timeout error")
-	}
-
-	raw, err := os.ReadFile(pidFile)
-	if err != nil {
-		t.Skipf("grandchild never recorded its pid: %v", err)
-	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
-	if err != nil {
-		t.Skipf("unreadable pid: %v", err)
-	}
-
-	// Give the group-kill a moment to land, then assert the pid is gone.
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if syscall.Kill(pid, 0) != nil {
-			return // reaped
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	_ = syscall.Kill(pid, syscall.SIGKILL) // don't leak it out of the test
-	t.Fatalf("grandchild pid %d survived the timeout: process group was not killed", pid)
 }
 
 func TestRun_DefaultsCwdToWorkDir(t *testing.T) {

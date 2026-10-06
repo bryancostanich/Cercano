@@ -67,7 +67,7 @@ func TestCloudRowNavigationRequiresConfirmation(t *testing.T) {
 func TestRoutingTabCloseRequiresConfirmation(t *testing.T) {
 	sp := draftTestPage()
 	sp.scope = scopeRouting
-	sp.commitRouting("routing-secondary", "new")
+	sp.commitRouting("routing-task-review-quality", "economy")
 	m := Model{content: sp, configSurface: &configSurface{active: configTabRouting, focused: true}}
 	if m.closeConfigSurface() != nil || m.configSurface == nil || !sp.settingsNavigationPrompt {
 		t.Fatal("closed dirty page")

@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS conversations (
     id           TEXT PRIMARY KEY,
     title        TEXT NOT NULL DEFAULT '',
     project_dir  TEXT NOT NULL DEFAULT '',
+    dev_work_dir TEXT NOT NULL DEFAULT '',
     model        TEXT NOT NULL DEFAULT '',
     title_source TEXT NOT NULL DEFAULT 'user',
     started_at   INTEGER NOT NULL,
@@ -114,6 +115,9 @@ CREATE TABLE IF NOT EXISTS autonomy_runs (
     revisions_json    TEXT NOT NULL DEFAULT '',
     decisions_json    TEXT NOT NULL DEFAULT '',
     review_json       TEXT NOT NULL DEFAULT '',
+    -- blocker_json records an explicit report_autonomous_blocker stop: the run
+    -- is still "running" but waits for the user's next explicit message.
+    blocker_json      TEXT NOT NULL DEFAULT '',
     created_at        INTEGER NOT NULL,
     updated_at        INTEGER NOT NULL
 );
@@ -141,3 +145,10 @@ CREATE TABLE IF NOT EXISTS dispatch_events (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_autonomy_runs_one_active
     ON autonomy_runs(conversation_id)
     WHERE state IN ('running', 'review_pending');
+
+-- Explicit main-chat selection; independent of global routing and child agents.
+CREATE TABLE IF NOT EXISTS conversation_chat_routes (
+    conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
+    profile TEXT NOT NULL,
+    model TEXT NOT NULL
+);

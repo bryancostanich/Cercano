@@ -17,6 +17,7 @@ func accountOrderPage() *settingsPage {
 }
 func TestBackupCanMoveIntoFirstAccountPosition(t *testing.T) {
 	sp := accountOrderPage()
+	attachRoutingAutosaveAgent(t, sp)
 	if _, _, err := sp.commitRouting("routing-primary-backup-0-up", ""); err != nil {
 		t.Fatal(err)
 	}
@@ -26,13 +27,14 @@ func TestBackupCanMoveIntoFirstAccountPosition(t *testing.T) {
 	if sp.routingDraft.PrimaryBackup != "a" || sp.routingDraft.Secondary != "secondary" {
 		t.Fatal("reorder corrupted other routing")
 	}
-	if !sp.routingDirty || sp.cloudView.Assignments.Primary != "a" {
-		t.Fatal("reorder must stay in draft until save")
+	if sp.routingDirty || sp.cloudView.Assignments.Primary != "b" {
+		t.Fatal("reorder must save immediately")
 	}
 }
 
 func TestAccountOrderingCrossesFirstPositionAndPersists(t *testing.T) {
 	sp := accountOrderPage()
+	attachRoutingAutosaveAgent(t, sp)
 	commit := func(key, value string) {
 		t.Helper()
 		if _, _, err := sp.commitRouting(key, value); err != nil {
@@ -54,20 +56,17 @@ func TestAccountOrderingCrossesFirstPositionAndPersists(t *testing.T) {
 	if sp.routingDraft.Primary != "c" || !reflect.DeepEqual(sp.routingDraft.PrimaryBackupAccounts(), []string{"a", "b"}) {
 		t.Fatal("cannot move last account to first")
 	}
-	if _, _, err := sp.finishRoutingSave("", nil); err != nil {
-		t.Fatal(err)
-	}
 	commit("routing-primary-down", "")
 	if sp.routingDraft.Primary != "a" || !reflect.DeepEqual(sp.routingDraft.PrimaryBackupAccounts(), []string{"c", "b"}) {
 		t.Fatal("first account cannot move down")
 	}
 	commit("routing-discard", "")
 	sp.ensureRoutingDraft()
-	if sp.routingDraft.Primary != "c" || !reflect.DeepEqual(sp.routingDraft.PrimaryBackupAccounts(), []string{"a", "b"}) {
-		t.Fatal("discard did not restore saved order")
+	if sp.routingDraft.Primary != "a" || !reflect.DeepEqual(sp.routingDraft.PrimaryBackupAccounts(), []string{"c", "b"}) {
+		t.Fatal("discard undid an auto-saved order")
 	}
 	commit("routing-primary-remove", "")
-	if sp.routingDraft.Primary != "a" || !reflect.DeepEqual(sp.routingDraft.PrimaryBackupAccounts(), []string{"b"}) {
+	if sp.routingDraft.Primary != "c" || !reflect.DeepEqual(sp.routingDraft.PrimaryBackupAccounts(), []string{"b"}) {
 		t.Fatal("remove did not promote next account")
 	}
 	commit("routing-primary", "")

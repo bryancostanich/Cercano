@@ -423,6 +423,17 @@ func (m *Model) finishStaleSubAgentTabs(reason string) {
 		}
 		tab.done = true
 		tab.errored = true
+		// The parent turn is over, so no terminal event will ever reach this
+		// child: clear its own streaming state and resolve any tool row it
+		// never completed. Left as-is, the child tab keeps the trailing
+		// "working" animation and its in-progress tool spinner alive forever
+		// (both feed the animation tick loop).
+		tab.view.SetStreaming(false)
+		if e := tab.view.lastAssistantEntry(); e != nil {
+			e.Streaming = false
+		}
+		tab.view.resolveStaleInProgressTools()
+		tab.view.rebuild()
 		if reason != "" {
 			tab.view.AppendEntry(&Entry{Role: RoleSystem, Content: reason})
 			tab.view.rebuild()
@@ -505,9 +516,16 @@ func (m *Model) applySubAgentEvent(ev subAgentEventMsg) {
 		// A running child tab (sub-agent or activity) drives the same trailing
 		// "working" animation the main chat uses so a long, quiet phase — a
 		// planning model call, an analyze pass — reads as alive rather than
-		// frozen. Clear it the moment the tab finishes.
+		// frozen. Clear it the moment the tab finishes. A terminal event can
+		// also race a still-in-progress tool row (its completion event was
+		// dropped or never sent), so resolve it here too or the spinner tick
+		// keeps animating a finished tab.
 		if tab.done {
-			view.SetStreaming(false)
+			tab.view.SetStreaming(false)
+			if e := tab.view.lastAssistantEntry(); e != nil {
+				e.Streaming = false
+			}
+			tab.view.resolveStaleInProgressTools()
 		} else {
 			view.SetStreaming(true)
 			view.SetTurnActivity(childTabActivityLabel(ev))

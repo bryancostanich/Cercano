@@ -34,6 +34,9 @@ go.work.sum
 
 # Mac stuff
 **/.DS_STORE
+# Generated local release archives
+/dist/
+
 source/server/bin/
 source/clients/cli/bin/
 source/server/agent
@@ -57,3 +60,10 @@ source/server/cercano
 
 # Local databases (conversations, telemetry, etc.)
 *.db
+
+# Stray build output at the repo root
+/bin/
+
+# Python release-tool test caches
+__pycache__/
+*.pyc

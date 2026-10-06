@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"cercano/source/server/pkg/agentclient"
 	"context"
 	"fmt"
 	"reflect"
@@ -26,6 +27,20 @@ func (sp *settingsPage) ensureRoutingDraft() {
 		}
 	}
 }
+
+// Fresh server snapshots own model-tier fields; only task edits remain drafts.
+func (sp *settingsPage) refreshRoutingModelTiers() {
+	pending := sp.routingDirty && sp.routingDraft != nil
+	previous := sp.routingDraft
+	sp.routingDraft = nil
+	sp.ensureRoutingDraft()
+	saved := sp.routingDraft.Clone()
+	if pending {
+		sp.routingDraft.Tasks = previous.Clone().Tasks
+	}
+	sp.routingDirty = !reflect.DeepEqual(sp.routingDraft, saved)
+}
+
 func qualityLabel(q config.CostTier) string {
 	if q == config.CostEconomy {
 		return "Light"
@@ -156,21 +171,29 @@ func (sp *settingsPage) buildRoutingSections() []form.Section {
 	if sp.routingDirty {
 		status = "Unsaved changes"
 	}
-	tiers.Groups = append(tiers.Groups, form.Group{Title: status, Fields: []form.Field{form.NewButton("routing-save-tiers", "Save routing", sp.routingDirty)}})
+	tiers.Groups = append(tiers.Groups, form.Group{Fields: []form.Field{form.NewReadOnly("routing-autosave", "", "Changes save automatically", "")}})
 	routing := form.Section{Title: "Task routing", ColumnHeadings: [3]string{"Task", "Model tier", "Quality"}, Groups: []form.Group{
 		{Fields: tasks},
 		{Title: status, Fields: []form.Field{form.NewButton("routing-save", "Save routing", sp.routingDirty), form.NewButton("routing-discard", "Discard routing", sp.routingDirty)}},
 	}}
 	return []form.Section{tiers, routing}
 }
-func (sp *settingsPage) commitRouting(field, value string) (string, tea.Cmd, error) {
+func (sp *settingsPage) commitRouting(field, value string) (message string, command tea.Cmd, err error) {
 	sp.ensureRoutingDraft()
+	before, beforeDirty := sp.routingDraft.Clone(), sp.routingDirty
+	// A failed immediate update must not leave an apparently applied selection.
+	defer func() {
+		if err != nil {
+			sp.routingDraft = before
+			sp.routingDirty = beforeDirty
+		}
+	}()
 	switch field {
 	case "routing-discard":
 		sp.routingDraft = nil
 		sp.routingDirty = false
 		return "discarded routing draft", nil, nil
-	case "routing-save", "routing-save-tiers":
+	case "routing-save":
 		if err := sp.routingConfig().ValidateDestinationRedirects(); err != nil {
 			return "", nil, err
 		}
@@ -271,12 +294,46 @@ func (sp *settingsPage) commitRouting(field, value string) (string, tea.Cmd, err
 			saved.SetPrimaryBackupAccounts([]string{sp.cloudView.Backup})
 		}
 	}
+	if !strings.HasPrefix(field, "routing-task-") {
+		return sp.saveModelTierChange(saved)
+	}
 	sp.routingDirty = !reflect.DeepEqual(sp.routingDraft, saved)
 	if !sp.routingDirty {
 		return "routing matches saved settings", nil, nil
 	}
 	return "routing draft changed; Save to apply", nil, nil
 }
+
+// Persist only model-tier fields. Pending task edits remain local until their
+// separate Save routing action; a subsequent task discard cannot undo this save.
+func (sp *settingsPage) saveModelTierChange(saved *agentclient.RoutingAssignments) (string, tea.Cmd, error) {
+	if err := sp.routingConfig().ValidateDestinationRedirects(); err != nil {
+		return "", nil, err
+	}
+	candidate := sp.routingDraft.Clone()
+	candidate.Tasks = saved.Clone().Tasks
+	if reflect.DeepEqual(candidate, saved) {
+		sp.routingDirty = !reflect.DeepEqual(sp.routingDraft, saved)
+		return "model tiers match saved settings", nil, nil
+	}
+	if sp.agent == nil {
+		return "", nil, fmt.Errorf("agent reconnecting — change was not saved; retry in a moment")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	sp.profilesLoaded = false // Reconcile server state even if a reply is lost.
+	warning, err := sp.agent.UpdateRoutingAssignments(ctx, candidate)
+	if err != nil {
+		return "", nil, err
+	}
+	sp.cloudView.Assignments = candidate.Clone()
+	sp.routingDirty = !reflect.DeepEqual(sp.routingDraft, sp.cloudView.Assignments)
+	if warning != "" {
+		return "saved model tiers; provider unavailable: " + warning, nil, nil
+	}
+	return "saved model tiers", nil, nil
+}
+
 func (sp *settingsPage) finishRoutingSave(warning string, err error) (string, tea.Cmd, error) {
 	sp.profilesLoaded = false
 	if err != nil {

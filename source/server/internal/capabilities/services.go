@@ -1,6 +1,7 @@
 package capabilities
 
 import (
+	"cercano/source/server/internal/chatroute"
 	"cercano/source/server/internal/reasoningexperiment"
 	"context"
 	"encoding/json"
@@ -61,6 +62,7 @@ type Services struct {
 	// this package free of a server import, matching Dispatch/EnterProfile. Nil
 	// until wired by the server; restart_agent errors clearly if it is nil.
 	RestartAgent        func(reason string) error
+	SessionModel        chatroute.Control
 	RestartRuntime      func(context.Context, string) (json.RawMessage, error)
 	ReasoningDiagnostic func(context.Context, reasoningexperiment.Spec) (reasoningexperiment.Report, error)
 

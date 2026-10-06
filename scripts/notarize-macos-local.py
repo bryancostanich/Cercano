@@ -1,0 +1,250 @@
+#!/usr/bin/env python3
+"""Upload signed staging binaries to Apple; never publish or auto-resubmit."""
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import shlex
+import shutil
+import subprocess
+import sys
+import tempfile
+import uuid
+import zipfile
+
+
+class Failure(Exception):
+    pass
+
+
+def run(argv, timeout=60):
+    return subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
+
+
+def verify(binary):
+    if binary.is_symlink() or not binary.is_file() or not os.access(binary, os.X_OK):
+        raise Failure(f'Expected regular non-symlink executable: {binary}')
+    if run(['lipo', '-archs', str(binary)]).stdout.strip() != 'arm64':
+        raise Failure(f'Expected arm64-only binary: {binary}')
+    result = run(['codesign', '--verify', '--strict', str(binary)])
+    if result.returncode:
+        raise Failure(f'Signature verification failed: {binary}\n{result.stderr}')
+    result = run(['codesign', '-d', '--verbose=4', str(binary)])
+    details = result.stdout + '\n' + result.stderr
+    if result.returncode or not re.search(r'^Authority=Developer ID Application: .+', details, re.M):
+        raise Failure(f'Missing Developer ID signature: {binary}')
+    if not re.search(r'^CodeDirectory[^\n]*flags=0x[0-9a-fA-F]+\([^\n)]*\bruntime\b', details, re.M):
+        raise Failure(f'Missing hardened runtime: {binary}')
+    timestamp = re.search(r'^Timestamp=(.+)$', details, re.M)
+    if not timestamp or timestamp[1].strip().lower() in ('', 'none'):
+        raise Failure(f'Missing secure timestamp: {binary}')
+
+
+def text(value):
+    return value.decode('utf-8', errors='replace') if isinstance(value, bytes) else value or ''
+
+
+# Fields notarytool is documented to emit in `--output-format json` output.
+# Anything else in tool stdout stays in the runner-only capture files.
+WELL_KNOWN_FIELDS = ('id', 'status', 'message', 'error')
+
+# Credential-shaped values are redacted before anything leaves the runner.
+# Apple never returns the app-specific password (it lives only in the
+# Keychain profile), but a hostile or unexpected tool message must not be
+# able to smuggle credential-like text into logs or the CI artifact.
+SECRET_KEY_PATTERN = r'(?:password|passwd|secret|token|credential|api[-_]?key|private[-_]?key)'
+EXPLICIT_CREDENTIAL_ENVS = (
+    'APPLE_APP_SPECIFIC_PASSWORD',
+    'MACOS_CERTIFICATE_PASSWORD', 
+    'CERTIFICATE_PASSWORD',
+    'MACOS_CERTIFICATE_P12',
+    'CERTIFICATE_P12'
+)
+REDACTION_PATTERNS = (
+    # Apple app-specific password shape: four hyphen-separated groups.
+    re.compile(r'\b[A-Za-z]{4}-[A-Za-z]{4}-[A-Za-z]{4}-[A-Za-z]{4}\b'),
+    # Explicit credential environment variables with their values
+    re.compile(r'(' + '|'.join(re.escape(env) for env in EXPLICIT_CREDENTIAL_ENVS) + r')(=)[^\s\n]+'),
+    # key=value / key: value pairs naming a credential-like key.
+    re.compile(r'(?i)\b(' + SECRET_KEY_PATTERN + r')\b(["\']?\s*[:=]\s*)["\']?[^\s"\',;&]+'),
+    # PEM blocks (private keys, certificates)
+    re.compile(r'-----BEGIN\s+(?:PRIVATE KEY|CERTIFICATE|RSA PRIVATE KEY)-----.+?-----END\s+(?:PRIVATE KEY|CERTIFICATE|RSA PRIVATE KEY)-----', re.DOTALL),
+)
+REDACTED = '[REDACTED]'
+SUMMARY_LIMIT = 400
+
+
+def _redact(match):
+    # key=value pairs keep their key; bare credential-shaped values go whole.
+    if match.lastindex:
+        return match.group(1) + match.group(2) + REDACTED
+    return REDACTED
+
+
+def sanitize(value):
+    """Return a bounded, single-line, credential-redacted copy of value."""
+    if not isinstance(value, str):
+        return None
+    text_value = value
+    for name in EXPLICIT_CREDENTIAL_ENVS:
+        secret = os.environ.get(name)
+        if secret:
+            text_value = text_value.replace(secret, REDACTED)
+    for pattern in REDACTION_PATTERNS:
+        text_value = pattern.sub(_redact, text_value)
+    text_value = ' '.join(text_value.split())
+    if len(text_value) > SUMMARY_LIMIT:
+        text_value = text_value[:SUMMARY_LIMIT].rstrip() + '[truncated]'
+    return text_value
+
+
+def summarize(payload, returncode, timed_out):
+    """Bounded, sanitized summary of well-known notarytool fields only."""
+    entry = {'returncode': returncode, 'timed_out': timed_out}
+    if isinstance(payload, dict):
+        for field in WELL_KNOWN_FIELDS:
+            value = sanitize(payload.get(field))
+            if value:
+                entry[field] = value
+    return entry
+
+
+def summary_lines(report):
+    lines = ['Notarization diagnostics summary (sanitized):']
+    for label, entry in report.items():
+        parts = ['  ' + label + ':']
+        for field in ('id', 'status', 'message', 'error', 'returncode', 'timed_out'):
+            value = entry.get(field)
+            if value is not None:
+                parts.append(f'{field}={value}')
+        lines.append(' '.join(parts))
+    return lines
+
+
+
+def recorded(argv, timeout, output, label):
+    timed_out = False
+    try:
+        result = run(argv, timeout)
+        stdout, stderr, code = result.stdout, result.stderr, result.returncode
+    except subprocess.TimeoutExpired as exc:
+        stdout, stderr, code = text(exc.stdout), text(exc.stderr), -1
+        timed_out = True
+    (output / f'{label}-stdout.txt').write_text(stdout)
+    (output / f'{label}-stderr.txt').write_text(stderr)
+    (output / f'{label}-result.json').write_text(json.dumps({'returncode': code, 'timed_out': timed_out}) + '\n')
+    try:
+        payload = json.loads(stdout)
+    except ValueError:
+        payload = None
+    # Read the actual subprocess stderr, never fixture/environment overrides.
+    # Preserve absence of a status or id: a failed upload is not an Apple
+    # Invalid verdict and must not fabricate one.
+    if stderr.strip() and (code != 0 or timed_out or not isinstance(payload, dict)):
+        payload = dict(payload) if isinstance(payload, dict) else {}
+        if not payload.get('error'):
+            payload['error'] = stderr
+    return code, timed_out, payload
+
+
+def submission_id(payload):
+    value = payload.get('id') if isinstance(payload, dict) else None
+    try:
+        return str(uuid.UUID(value)) if isinstance(value, str) else None
+    except ValueError:
+        return None
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('staging_bin_dir', type=Path)
+    parser.add_argument('output_dir', type=Path, help='Must not already exist; preserves diagnostics on failure')
+    parser.add_argument('--keychain-profile', required=True)
+    parser.add_argument('--keychain')
+    parser.add_argument('--timeout', type=float, default=1800, help='Seconds per Apple request, maximum 1800')
+    args = parser.parse_args()
+    if not 0 < args.timeout <= 1800 or not args.keychain_profile.strip():
+        parser.error('Provide a nonempty profile and timeout in (0, 1800]')
+    auth = ['--keychain-profile', args.keychain_profile]
+    if args.keychain:
+        auth += ['--keychain', args.keychain]
+    output = args.output_dir.absolute()
+    sid = None
+    created = False
+    report = {}
+    try:
+        if run(['uname']).stdout.strip() != 'Darwin' or run(['uname', '-m']).stdout.strip() != 'arm64':
+            raise Failure('Darwin arm64 host required')
+        # Exclusive mkdir also rejects dangling symlinks and concurrent reuse.
+        output.mkdir(mode=0o700, parents=False, exist_ok=False)
+        created = True
+        # Initialize diagnostic report early so it's available even on early failures
+        (output / 'diagnostic-report.json').write_text(json.dumps(report, indent=2, sort_keys=True) + '\n')
+        sources = [args.staging_bin_dir.absolute() / name for name in ('cercano', 'cercano-cli')]
+        for binary in sources:
+            verify(binary)
+        archive = output / 'cercano-notarization-submission.zip'
+        with tempfile.TemporaryDirectory(prefix='cercano-notary-') as tmp:
+            copies = []
+            for binary in sources:
+                copy = Path(tmp) / binary.name
+                shutil.copy2(binary, copy)
+                verify(copy)
+                copies.append(copy)
+            with zipfile.ZipFile(archive, 'x', zipfile.ZIP_DEFLATED) as z:
+                for copy in copies:
+                    z.write(copy, 'bin/' + copy.name)
+        with archive.open('rb') as stream:
+            digest = hashlib.file_digest(stream, 'sha256').hexdigest() if hasattr(hashlib, 'file_digest') else hashlib.sha256(stream.read()).hexdigest()
+        (output / (archive.name + '.sha256')).write_text(f'{digest}  {archive.name}\n')
+        print('Uploading both signed binaries to Apple for notarization.', flush=True)
+        code, timed_out, payload = recorded(
+            ['xcrun', 'notarytool', 'submit', str(archive), *auth, '--wait', '--output-format', 'json'],
+            args.timeout, output, 'submit')
+        report['submit'] = summarize(payload, code, timed_out)
+        sid = submission_id(payload)
+        if sid:
+            (output / 'submission-id.txt').write_text(sid + '\n')
+        # Preserve an available log even for a rejected submission.
+        log_ok = False
+        if sid and not timed_out:
+            log_code, log_timeout, log_payload = recorded(
+                ['xcrun', 'notarytool', 'log', sid, *auth], args.timeout, output, 'log')
+            report['log'] = summarize(log_payload, log_code, log_timeout)
+            log_ok = (log_code == 0 and not log_timeout and isinstance(log_payload, dict)
+                      and log_payload.get('jobId') == sid and log_payload.get('status') == 'Accepted')
+        # Sanitized, well-known fields only — safe for CI logs and the failure
+        # artifact. Raw stdout/stderr stays in the runner-only capture files.
+        (output / 'diagnostic-report.json').write_text(
+            json.dumps(report, indent=2, sort_keys=True) + '\n')
+        if timed_out:
+            raise Failure('Submission wait timed out; Apple may still be processing it. Do not resubmit blindly.')
+        if code or not isinstance(payload, dict) or payload.get('status') != 'Accepted' or not sid:
+            raise Failure('Submission did not return a successful Accepted result. Inspect saved diagnostics.')
+        if not log_ok:
+            raise Failure('Could not verify the matching Accepted notarization log. Inspect saved diagnostics.')
+        (output / 'accepted.json').write_text(json.dumps({'id': sid, 'status': 'Accepted', 'sha256': digest}, indent=2) + '\n')
+        print(f'Accepted: {sid}\nEvidence: {output}\nSubmission ZIP is not final release packaging. Nothing published or stapled.')
+        return 0
+    except (Failure, OSError, subprocess.SubprocessError) as exc:
+        print(f'Error: {exc}', file=sys.stderr)
+        # Bounded, sanitized summary so CI failures explain themselves without
+        # relying on runner-only files. Only well-known notarytool fields.
+        if report:
+            for line in summary_lines(report):
+                print(line)
+        if created:
+            print(f'Diagnostics retained: {output}', file=sys.stderr)
+            print('Inspect before any manual retry; this script never resubmits:', file=sys.stderr)
+            for action in ('history', 'info', 'log'):
+                command = ['xcrun', 'notarytool', action]
+                if action != 'history':
+                    command += [sid or 'SUBMISSION_ID_FROM_HISTORY']
+                print('  ' + shlex.join(command + auth), file=sys.stderr)
+        return 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())

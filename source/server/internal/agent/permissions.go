@@ -52,6 +52,10 @@ func GateDecision(mode PermissionMode, tier llm.Permission) bool {
 // prompts: those tools are not asking for permission to mutate the workspace,
 // they are asking the user to change the conversation's operating mode.
 func GateDecisionForTool(mode PermissionMode, tier llm.Permission, toolName string, isMCP, allowlisted bool) bool {
+	// Model selection is a user control boundary, not an ordinary workspace write.
+	if toolName == "session_model" && tier != llm.PermR {
+		return true
+	}
 	if mode == ModeBypass && isHumanHandoffTool(toolName) {
 		return true
 	}

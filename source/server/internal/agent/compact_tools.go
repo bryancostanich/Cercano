@@ -29,12 +29,12 @@ var compactFallbackTools = map[string]bool{
 	// Native agent workflow and local model helpers.
 	"dispatch": true, "workflow": true, "local": true, "classify": true,
 	"explain": true, "extract": true, "summarize": true, "review": true,
-	"get_protocol": true, "restart_runtime": true, "reasoning_diagnostic": true,
+	"session_model": true, "get_protocol": true, "restart_runtime": true, "reasoning_diagnostic": true,
 	// Planning/autonomous handoff and status tools that the active profile may
 	// require even in a narrowed catalog.
 	"suggest_plan": true, "request_plan_approval": true, "plan_exit": true,
 	"plan_set_status": true, "suggest_autonomous": true, "capture_decision": true,
-	"request_autonomous_exit": true, "auto_exit": true,
+	"request_autonomous_exit": true, "auto_exit": true, "report_autonomous_blocker": true,
 }
 
 func compactFallbackAllows(_ llm.Permission, name string) bool {

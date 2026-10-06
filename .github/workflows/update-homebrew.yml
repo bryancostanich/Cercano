@@ -1,0 +1,55 @@
+name: Update Homebrew for published release
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Published version without v (for example 0.20.3)
+        required: true
+        type: string
+      run_id:
+        description: Successful release workflow run containing the macOS artifact
+        required: true
+        type: string
+permissions:
+  contents: read
+  actions: read
+jobs:
+  update-homebrew:
+    name: Update Homebrew tap only
+    runs-on: ubuntu-24.04
+    environment: release
+    timeout-minutes: 15
+    concurrency:
+      group: cercano-homebrew-tap
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Test recovery and updater
+        run: python3 -m unittest discover -s release/homebrew -p 'test_*.py'
+      - name: Verify published release provenance
+        env:
+          VERSION: ${{ inputs.version }}
+          RUN_ID: ${{ inputs.run_id }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 release/homebrew/check_release_run.py --version "$VERSION" --run-id "$RUN_ID"
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.run_id }}
+          name: cercano-${{ inputs.version }}-darwin-arm64
+          path: dist
+      - name: Update verified formula
+        env:
+          VERSION: ${{ inputs.version }}
+          GITHUB_TOKEN: ${{ github.token }}
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          ARCHIVE="cercano-$VERSION-darwin-arm64.tar.gz"
+          (cd dist && sha256sum --check "$ARCHIVE.sha256")
+          DIGEST="$(awk 'NR==1 {print $1}' "dist/$ARCHIVE.sha256")"
+          python3 release/homebrew/update_tap.py \
+            --version "$VERSION" --sha256 "$DIGEST" \
+            --archive "dist/$ARCHIVE" --formula dist/cercano.rb

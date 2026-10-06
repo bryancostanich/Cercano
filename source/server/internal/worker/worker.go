@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"cercano/source/server/internal/chatroute"
 	"cercano/source/server/internal/reasoningexperiment"
 	"cercano/source/server/internal/visioninspect"
 	"context"
@@ -132,6 +133,7 @@ func (w *WorkerServer) runTurn(stream proto.Worker_RunTurnServer, authRecovery b
 	// Session profile proxy: session-control capabilities such as suggest_plan
 	// must mutate the host's live profile broker, not a worker-local copy.
 	profileCtl := newStreamSessionProfileController(sndr, start.GetConversationId())
+	sessionModel := newStreamSessionModel(sndr, start.GetConversationId())
 	authRequest := newStreamAuthentication(sndr)
 	runtimeControl := newStreamRuntimeControl(sndr)
 
@@ -202,6 +204,8 @@ func (w *WorkerServer) runTurn(stream proto.Worker_RunTurnServer, authRecovery b
 				credSource.deliver(msg.GetCredResponse())
 			case msg.GetOpenEvent() != nil:
 				openProxy.deliver(msg.GetOpenEvent())
+			case msg.GetSessionModelResponse() != nil:
+				sessionModel.deliver(msg.GetSessionModelResponse())
 			case msg.GetProfileResponse() != nil:
 				profileCtl.deliver(msg.GetProfileResponse())
 			case msg.GetCancel() != nil:
@@ -212,7 +216,7 @@ func (w *WorkerServer) runTurn(stream proto.Worker_RunTurnServer, authRecovery b
 	}()
 
 	// Build Deps from StartTurn.
-	deps, buildErr := w.buildDeps(ctx, start, credSource, openProxy, subPersist, profileCtl, mcpControl, autonomyLedger, &permStoreRef, runtimeControl.Restart)
+	deps, buildErr := w.buildDeps(ctx, start, credSource, openProxy, subPersist, profileCtl, mcpControl, autonomyLedger, &permStoreRef, sessionModel.Control, runtimeControl.Restart)
 	if buildErr != nil {
 		sndr.close()
 		cancel() // returning finalizes the stream; the recv goroutine unwinds on the Recv error
@@ -260,10 +264,17 @@ func (w *WorkerServer) runTurn(stream proto.Worker_RunTurnServer, authRecovery b
 	req := runner.Request{
 		ConversationID: start.GetConversationId(),
 		Input:          start.GetInput(),
-		WorkDir:        start.GetWorkDir(),
-		DebugMode:      start.GetDebugMode(),
-		Gen:            start.GetGen(),
+		// Input author for persistence (host-generated continuations persist
+		// as system role). Empty means human input; the runner defaults it.
+		InputRole: start.GetInputRole(),
+		WorkDir:   start.GetWorkDir(),
+		DebugMode: start.GetDebugMode(),
+		Gen:       start.GetGen(),
 	}
+	if route := start.GetChatRoute(); route != nil {
+		req.ChatRoute = &chatroute.Route{Profile: route.GetProfile(), Model: route.GetModel()}
+	}
+
 	if authRecovery {
 		req.AuthRecovery = authRequest.Request
 	}
@@ -324,7 +335,7 @@ func (w *WorkerServer) runTurn(stream proto.Worker_RunTurnServer, authRecovery b
 
 // ─── buildDeps ────────────────────────────────────────────────────────────────
 
-func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, credSource *streamCredentialSource, openProxy *streamOpenProvider, subPersist *streamSubagentPersist, profileCtl *streamSessionProfileController, mcpControl *streamMCPControl, autonomyLedger *streamAutonomyLedger, permStoreRef *atomic.Pointer[agent.PermissionStore], restart ...runtimeRestartFunc) (runner.Deps, error) {
+func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, credSource *streamCredentialSource, openProxy *streamOpenProvider, subPersist *streamSubagentPersist, profileCtl *streamSessionProfileController, mcpControl *streamMCPControl, autonomyLedger *streamAutonomyLedger, permStoreRef *atomic.Pointer[agent.PermissionStore], sessionModel chatroute.Control, restart ...runtimeRestartFunc) (runner.Deps, error) {
 	// Build config from snapshot.
 	cfg := ConfigFromSnapshot(start.GetConfig())
 	cfgService := cfgsvc.New("", cfg, secrets.NewMemory())
@@ -473,7 +484,7 @@ func (w *WorkerServer) buildDeps(ctx context.Context, start *proto.StartTurn, cr
 		if autonomyLedger != nil {
 			autonomy = autonomyLedger
 		}
-		toolSvc = buildWorkerToolSvcWithDiagnostic(permBroker, engine, ctxLoader, provSvc.Cloud(), provSvc.Open(), cfg, subPersist, profileCtl.SetProfile, visionSvc, failureLog, diagnostic, autonomy, provSvc.Candidates, restart...)
+		toolSvc = buildWorkerToolSvcWithDiagnostic(permBroker, engine, ctxLoader, provSvc.Cloud(), provSvc.Open(), cfg, subPersist, profileCtl.SetProfile, visionSvc, failureLog, diagnostic, autonomy, provSvc.Candidates, sessionModel, restart...)
 	}
 
 	// Register a proxy per host-advertised MCP tool. Done AFTER the built-in
@@ -742,7 +753,11 @@ func (r *workerResolver) SetProfileModelEvidence(func(pkgcfg.CloudProfile, strin
 
 func workerChainEvents(d pkgcfg.Destination) func(resilience.Event) {
 	return func(ev resilience.Event) {
-		log.Printf("[worker] %s resilience %s (%s, %s): %s: %v", d, ev.Action, ev.Stage, ev.Class, ev.Notice(), ev.Err)
+		// The worker child has no routing-log writer; the printf log is its
+		// existing decision-log mechanism. Reason/conversation identify the
+		// gate decision; emitted correlation and breakdown flags improve diagnostics.
+		log.Printf("[worker] %s resilience %s (%s, %s) reason=%s conv=%s req=%s emitted=%v text=%v reasoning=%v tool=%v: %s: %v",
+			d, ev.Action, ev.Stage, ev.Class, ev.Reason, ev.ConversationID, ev.RequestID, ev.Emitted, ev.EmittedText, ev.EmittedReasoning, ev.EmittedToolCall, ev.Notice(), ev.Err)
 	}
 }
 

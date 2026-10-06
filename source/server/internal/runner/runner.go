@@ -5,6 +5,7 @@
 package runner
 
 import (
+	"cercano/source/server/internal/chatroute"
 	"context"
 
 	"cercano/source/server/internal/agent"
@@ -50,13 +51,20 @@ type ToolSvc interface {
 // assembles history itself (so it works across a process boundary; see the
 // plan's load-bearing decision).
 type Request struct {
+	// ChatRoute is a per-turn snapshot; changes made by tools apply next turn.
+	ChatRoute      *chatroute.Route
 	DebugMode      bool
 	AuthRecovery   llm.AuthRequester
 	ConversationID string
 	Input          string
-	Images         []agent.InlineImage
-	WorkDir        string
-	Gen            uint64 // this turn's generation, for the host's persist fence
+	// InputRole records the input's author for persistence and history
+	// assembly: llm.RoleUser (default, human input) or llm.RoleSystem
+	// (host-generated autonomous continuation — host-authored, never
+	// impersonating a human turn).
+	InputRole string
+	Images    []agent.InlineImage
+	WorkDir   string
+	Gen       uint64 // this turn's generation, for the host's persist fence
 }
 
 // Result is the turn's outcome.

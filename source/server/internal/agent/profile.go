@@ -84,7 +84,7 @@ func (p Profile) Allows(tier llm.Permission, name string) bool {
 // Both the agent-surface display aliases ("Write"/"Edit") and the underlying
 // capability names ("write_file"/"edit_file") are listed so the fence permits
 // the file tools regardless of which name reaches the gate.
-var planExtraTools = []string{"Write", "Edit", "write_file", "edit_file", "request_plan_approval", "plan_exit"}
+var planExtraTools = []string{"Write", "Edit", "write_file", "edit_file", "request_plan_approval", "plan_exit", "session_model"}
 
 // ToolLiftsPlanFence reports whether a tool, once executed successfully, exits
 // planning mode and therefore must drop the read-only fence for the remainder
@@ -110,13 +110,18 @@ func ToolLiftsPlanFence(toolName string) bool {
 // the model as ordinary steerable tool output.
 func IsSessionControlTool(toolName string) bool {
 	switch toolName {
-	case "suggest_plan",
+	case "session_model", "suggest_plan",
 		"request_plan_approval",
 		"plan_exit",
 		"suggest_autonomous",
 		"request_autonomous_execution",
 		"request_autonomous_exit",
-		"auto_exit":
+		"auto_exit",
+		// An explicit blocker pause is a supervisory control boundary like
+		// the run entry/exit requests: it pauses the host's continuation
+		// chain, and a refused call must stop the turn rather than be fed
+		// back as steerable output.
+		"report_autonomous_blocker":
 		return true
 	default:
 		return false

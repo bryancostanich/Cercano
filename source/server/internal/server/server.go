@@ -1,11 +1,11 @@
 package server
 
 import (
+	"cercano/source/server/internal/chatroute"
 	"cercano/source/server/internal/reasoningexperiment"
 	"cercano/source/server/internal/routingwire"
 	"cercano/source/server/internal/runtimecontrol"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -288,6 +288,7 @@ func (s *Server) InstallCapabilities() {
 		// restart_agent bounces the singleton agent via a self-SIGTERM once the
 		// user approves at the confirm gate. Same drain+child-stop path as the
 		// ShutdownAgent RPC; the CLI reconnect loop auto-launches a fresh agent.
+		SessionModel:   s.sessionModel,
 		RestartRuntime: s.restartRuntimeTool,
 		ReasoningDiagnostic: func(ctx context.Context, spec reasoningexperiment.Spec) (reasoningexperiment.Report, error) {
 			svc, ok := s.providerSvc.(reasoningexperiment.Service)
@@ -1260,6 +1261,10 @@ func (s *Server) SelectExecutionMode() {
 		if store, ok := s.persistSvc.Store().(conversation.DispatchEventStore); ok {
 			recorder.SetDispatchEventSink(worker.HostDispatchEventSink(store))
 		}
+	}
+
+	if control, ok := s.workerRunner.(worker.SessionModelSetter); ok {
+		control.SetSessionModel(s.sessionModel)
 	}
 
 	s.configureWorkerAccounting()
@@ -2999,6 +3004,9 @@ func formatRuntimeTime(t time.Time) string {
 
 // ProcessRequest implements proto.AgentServer (Unary).
 func (s *Server) ProcessRequest(ctx context.Context, req *proto.ProcessRequestRequest) (*proto.ProcessRequestResponse, error) {
+	if err := s.persistDevMode(ctx, req); err != nil {
+		return nil, err
+	}
 	ctx = s.accountingContext(ctx, "local_tool", req.GetConversationId())
 	fmt.Printf("Received request (Unary): %s\n", req.Input)
 
@@ -3019,6 +3027,9 @@ func (s *Server) StreamProcessRequest(req *proto.ProcessRequestRequest, stream p
 
 	if (s.providerSvc.Cloud() != nil || s.providerSvc.Open() != nil) && s.toolSvc.Registry() != nil {
 		return s.streamProcessRequestWithToolLoop(req, stream)
+	}
+	if err := s.persistDevMode(stream.Context(), req); err != nil {
+		return err
 	}
 
 	agentReq := s.mapRequest(req)
@@ -3253,6 +3264,9 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 	// a superseded turn's late writes never interleave into the live history.
 	ctx, turnGen, releaseTurn := s.beginTurn(stream.Context(), req.GetConversationId())
 	defer releaseTurn()
+	if err := s.persistDevMode(ctx, req); err != nil {
+		return err
+	}
 
 	convID := req.GetConversationId()
 
@@ -3321,18 +3335,28 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 	// (including this initiator) receive them via Attach channels.
 	sink := &brokerSink{server: s, broker: s.turnBroker, conv: convID, gen: turnGen}
 
-	runReq := runnersvc.Request{
-		ConversationID: req.GetConversationId(),
-		Input:          req.GetInput(),
-		Images:         mapInlineImages(req.GetImages()),
-		WorkDir:        req.GetWorkDir(),
-		DebugMode:      req.GetDebugMode(),
-		Gen:            turnGen,
-	}
+	// Restore the autonomous profile from the durable ledger at the start of
+	// this client-initiated request (see autonomy_continuation.go): a
+	// reconnected or restarted session must not depend on the client calling
+	// GetSessionProfile before its first turn for the fence to be in place.
+	// Purely a restore — it never launches turns.
+	s.restoreAutonomyProfileAtTurnStart(ctx, convID)
+	// A recorded report_autonomous_blocker pause is cleared by the user's
+	// explicit message: this is the resume signal. The run stayed "running"
+	// while paused; clearing the blocker lets the host chain turns again.
+	s.clearAutonomyBlockerAtRequestStart(ctx, convID)
 
-	if req.GetSupportsAuthRecovery() {
-		runReq.AuthRecovery = s.authenticationRequester(convID, sink)
-	}
+	// Host-managed autonomous continuation state (see autonomy_continuation.go).
+	// prevRun/havePrevRun is the ledger snapshot taken before the upcoming turn;
+	// noProgress counts consecutive turns that produced neither durable ledger
+	// progress nor real tool work; workMonitor (see autonomy_work.go) counts
+	// structural work evidence from the runner events drained below.
+	prevRun, havePrevRun := s.activeAutonomyRun(ctx, convID)
+	noProgress := 0
+	workMonitor := newAutonomyWorkMonitor()
+	input := req.GetInput()
+	inputRole := string(llm.RoleUser) // human input by default; the gate flips to "system" for host-generated continuations
+	images := mapInlineImages(req.GetImages())
 
 	// turnResult carries RunTurn's return values from the goroutine to the
 	// main goroutine. Written exactly once before doneCh receives; read after.
@@ -3341,149 +3365,241 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 		err    error
 		worker bool // true if this turn ran in the worker child (post-turn bookkeeping is then host-owned)
 	}
-	doneCh := make(chan turnResult, 1)
 
-	// Run the turn concurrently so the main goroutine can drain the broker
-	// channel without blocking RunTurn (which calls sink.Emit synchronously).
-	//
-	// Panic recovery: a panic inside RunTurn would otherwise crash the whole
-	// process (kills every client). We recover it here, log the stack (matching
-	// RecoveryStreamInterceptor's style in recovery.go), and write a
-	// codes.Internal result to doneCh so the main goroutine can return cleanly.
-	// doneCh is written exactly once: either the normal return at the end of the
-	// func, or the recover path — never both (the recover fires only when a panic
-	// unwinds past the normal write).
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				log.Printf("panic recovered in StreamProcessRequest: %v\n%s", r, debug.Stack())
-				doneCh <- turnResult{err: grpcstatus.Errorf(codes.Internal, "internal server error")}
-			}
-		}()
-		// Per-turn runner pick. See pickTurnRunner: in-process by default; the
-		// worker only when armed AND this turn touches no host-side MCP tool.
-		tr := s.pickTurnRunner()
-		// Worker turns run in a child process with no local store, so ensure the
-		// conversation row on the host here — otherwise the worker's forwarded
-		// turn writes hit a missing-parent foreign key and are silently dropped
-		// (see docs/bugs/2026-07-09-worker-turn-persistence.md). In-process the
-		// runner ensures the row itself. Model only backfills an empty column on
-		// first insert (EnsureConversation preserves a non-empty model), so the
-		// primary model is a safe value.
-		if convID != "" && s.workerRunner != nil && tr == s.workerRunner &&
-			s.agent != nil && s.agent.PersistentStore() != nil {
-			model := ""
-			if s.providerSvc != nil {
-				model = s.providerSvc.PrimaryModel()
-			}
-			if err := s.agent.PersistentStore().EnsureConversation(ctx, convID, runReq.WorkDir, model); err != nil {
-				fmt.Fprintf(os.Stderr, "[server] worker EnsureConversation(%s) failed: %v\n", convID, err)
-			}
-		}
-		isWorker := s.workerRunner != nil && tr == s.workerRunner
-		res, err := tr.RunTurn(ctx, runReq, sink, requester, persist)
-		doneCh <- turnResult{result: res, err: err, worker: isWorker}
-	}()
-
-	// Drain the initiator's subscriber channel to the stream.
-	//
-	// Order: send replay events first (guaranteed empty here — BeginTurn just
-	// reset the buffer and no Publish has happened yet), then live events from
-	// ch. When doneCh fires the turn is complete; drain any remaining buffered
-	// events in ch before proceeding to send FinalResponse.
+	// Send replay events first (guaranteed empty here — BeginTurn just reset
+	// the buffer and no Publish has happened yet), before any turn starts, so
+	// ordering is guaranteed: replay, then live events.
 	for _, ev := range replay {
 		if err := sendRunnerEvent(stream, ev); err != nil {
-			// Stream gone; goroutine will notice ctx cancellation and return.
-			<-doneCh
 			return err
 		}
 	}
 
-	var tr turnResult
-	draining := false
-	for !draining {
-		select {
-		case ev, ok := <-ch:
-			if !ok {
-				// ch closed by detach (deferred) — should not happen here because
-				// detach runs after this loop, but handle defensively.
+	// One iteration per model turn. The first uses the user's input; when the
+	// autonomy gate allows it (durable run still "running", etc. — decided
+	// strictly from structured ledger state in autonomy_continuation.go), later
+	// iterations chain host-authored continuation turns on the same
+	// conversation, broker turn, and stream. Nothing is launched outside this
+	// client-initiated stream: a disconnect or server restart ends the chain.
+	for turn := 0; ; turn++ {
+		runReq := runnersvc.Request{
+			ConversationID: req.GetConversationId(),
+			Input:          input,
+			InputRole:      inputRole,
+			Images:         images,
+			WorkDir:        req.GetWorkDir(),
+			DebugMode:      req.GetDebugMode(),
+			Gen:            turnGen,
+		}
+		images = nil // attachments apply to the user's turn only
+
+		if req.GetSupportsAuthRecovery() {
+			runReq.AuthRecovery = s.authenticationRequester(convID, sink)
+		}
+		doneCh := make(chan turnResult, 1)
+
+		// Run the turn concurrently so the main goroutine can drain the broker
+		// channel without blocking RunTurn (which calls sink.Emit synchronously).
+		//
+		// Panic recovery: a panic inside RunTurn would otherwise crash the whole
+		// process (kills every client). We recover it here, log the stack (matching
+		// RecoveryStreamInterceptor's style in recovery.go), and write a
+		// codes.Internal result to doneCh so the main goroutine can return cleanly.
+		// doneCh is written exactly once: either the normal return at the end of the
+		// func, or the recover path — never both (the recover fires only when a panic
+		// unwinds past the normal write).
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("panic recovered in StreamProcessRequest: %v\n%s", r, debug.Stack())
+					doneCh <- turnResult{err: grpcstatus.Errorf(codes.Internal, "internal server error")}
+				}
+			}()
+			// Per-turn runner pick. See pickTurnRunner: in-process by default; the
+			// worker only when armed AND this turn touches no host-side MCP tool.
+			tr := s.pickTurnRunner()
+			// Worker turns run in a child process with no local store, so ensure the
+			// conversation row on the host here — otherwise the worker's forwarded
+			// turn writes hit a missing-parent foreign key and are silently dropped
+			// (see docs/bugs/2026-07-09-worker-turn-persistence.md). In-process the
+			// runner ensures the row itself. Model only backfills an empty column on
+			// first insert (EnsureConversation preserves a non-empty model), so the
+			// primary model is a safe value.
+			if convID != "" && s.workerRunner != nil && tr == s.workerRunner &&
+				s.agent != nil && s.agent.PersistentStore() != nil {
+				model := ""
+				if s.providerSvc != nil {
+					model = s.providerSvc.PrimaryModel()
+				}
+				if err := s.agent.PersistentStore().EnsureConversation(ctx, convID, runReq.WorkDir, model); err != nil {
+					fmt.Fprintf(os.Stderr, "[server] worker EnsureConversation(%s) failed: %v\n", convID, err)
+				}
+			}
+			if store, ok := s.persistSvc.Store().(chatroute.Store); ok {
+				var err error
+				runReq.ChatRoute, err = store.ChatRoute(ctx, convID)
+				if err != nil {
+					doneCh <- turnResult{err: fmt.Errorf("load session model: %w", err)}
+					return
+				}
+			}
+			isWorker := s.workerRunner != nil && tr == s.workerRunner
+			res, err := tr.RunTurn(ctx, runReq, sink, requester, persist)
+			doneCh <- turnResult{result: res, err: err, worker: isWorker}
+		}()
+
+		// Drain the initiator's subscriber channel to the stream. Replay events
+		// were already sent before the loop. When doneCh fires the turn is
+		// complete; drain any remaining buffered events in ch before proceeding
+		// to send FinalResponse.
+		var tr turnResult
+		draining := false
+		for !draining {
+			select {
+			case ev, ok := <-ch:
+				if !ok {
+					// ch closed by detach (deferred) — should not happen here because
+					// detach runs after this loop, but handle defensively.
+					draining = true
+				} else {
+					workMonitor.Observe(ev) // autonomous-continuation work evidence
+					if err := sendRunnerEvent(stream, ev); err != nil {
+						<-doneCh
+						return err
+					}
+				}
+			case tr = <-doneCh:
 				draining = true
-			} else {
+			}
+		}
+
+		// Drain any events still buffered in ch after the turn completed. This
+		// ensures trailing events (e.g. a final tool-exec-complete published just
+		// before RunTurn returned) are not dropped.
+	drainLoop:
+		for {
+			select {
+			case ev, ok := <-ch:
+				if !ok {
+					break drainLoop
+				}
+				workMonitor.Observe(ev) // autonomous-continuation work evidence
 				if err := sendRunnerEvent(stream, ev); err != nil {
-					<-doneCh
+					return err
+				}
+			default:
+				break drainLoop
+			}
+		}
+
+		if tr.err != nil {
+			if isTurnCancellation(tr.err) {
+				return nil
+			}
+			return tr.err
+		}
+
+		// If the runner returned a synthetic locus-error FinalText (no real loop
+		// ran), wrap it in a FinalResponse and exit.  The runner signals this by
+		// returning a non-empty FinalText with no Model set.
+		if tr.result.Model == "" {
+			return stream.Send(&proto.StreamProcessResponse{
+				Payload: &proto.StreamProcessResponse_FinalResponse{
+					FinalResponse: &proto.ProcessRequestResponse{Output: tr.result.FinalText},
+				},
+			})
+		}
+
+		// Post-turn bookkeeping for WORKER turns. In-process, runner.Core does this
+		// via c.d.Agent inside RunTurn; the worker child has no Agent and skips it,
+		// so the host compensates here. Runs for worker turns only (tr.worker) —
+		// in-process already did it, so no double-counting.
+		if tr.worker {
+			s.workerPostTurn(convID, tr.result)
+		}
+
+		// Turn boundary: after post-turn bookkeeping (so raw-token accounting is
+		// current) and before the final response, offer a session rollover if the
+		// conversation has grown long enough and the offer is armed. Non-blocking —
+		// we emit the offer and continue; the user replies later via the
+		// Accept/DeclineRollover RPCs. Fully off unless configured.
+		s.maybeOfferRollover(stream.Context(), convID, stream)
+
+		// Send the final response.
+		if err := stream.Send(&proto.StreamProcessResponse{
+			Payload: &proto.StreamProcessResponse_FinalResponse{
+				FinalResponse: &proto.ProcessRequestResponse{
+					Output: strings.ToValidUTF8(tr.result.FinalText, "�"),
+					RoutingMetadata: &proto.RoutingMetadata{
+						ModelName: tr.result.Model,
+					},
+					// Carry token counts so the CLI's "last turn" footer isn't stuck at 0.
+					InputTokens:  int32(tr.result.InputTokens),
+					OutputTokens: int32(tr.result.OutputTokens),
+				},
+			},
+		}); err != nil {
+			return err
+		}
+
+		// ── Autonomous continuation gate ────────────────────────────────────
+		// After a normal successful turn, decide from durable structured state
+		// (autonomy_continuation.go) whether to chain another turn. Stop
+		// conditions: turn error/cancellation (handled above), run no longer
+		// "running" (completed/abandoned/review_pending), no active run, turn
+		// superseded by a newer user message, stream canceled, or the bounded
+		// no-progress safeguard. Progress is durable-first (ledger content),
+		// with real tool work (workMonitor, autonomy_work.go) as the fallback
+		// signal. Never parse model prose.
+		gate := s.evaluateAutonomyContinuation(ctx, convID, turnGen, turn+1, prevRun, havePrevRun, workMonitor, &noProgress)
+		if !gate.cont {
+			// Removed generic "autonomous continuation ended — waiting for human input" message.
+			// Preserve structured notices (e.g., no-progress safeguard) and explicit blocker handling.
+			// Normal completion/abandonment/review_pending no longer emit redundant meta messages.
+			if gate.notice != "" {
+				// Structured pause notice (e.g. the no-progress safeguard): a
+				// ProgressUpdate event, not prose spliced into the final response.
+				if err := stream.Send(&proto.StreamProcessResponse{
+					Payload: &proto.StreamProcessResponse_Progress{
+						Progress: &proto.ProgressUpdate{Message: gate.notice},
+					},
+				}); err != nil {
 					return err
 				}
 			}
-		case tr = <-doneCh:
-			draining = true
-		}
-	}
-
-	// Drain any events still buffered in ch after the turn completed. This
-	// ensures trailing events (e.g. a final tool-exec-complete published just
-	// before RunTurn returned) are not dropped.
-drainLoop:
-	for {
-		select {
-		case ev, ok := <-ch:
-			if !ok {
-				break drainLoop
-			}
-			if err := sendRunnerEvent(stream, ev); err != nil {
-				return err
-			}
-		default:
-			break drainLoop
-		}
-	}
-
-	if tr.err != nil {
-		if isTurnCancellation(tr.err) {
 			return nil
 		}
-		return tr.err
-	}
+		ledgerAdvanced := autonomyLedgerContentChanged(prevRun, havePrevRun, gate.run)
+		if workMonitor.HasWork() {
+			if !ledgerAdvanced && turn >= 1 {
+				// The ledger stayed quiet but the turn did real tool work —
+				// surface that the no-progress bound was reset by work.
+				if err := stream.Send(&proto.StreamProcessResponse{
+					Payload: &proto.StreamProcessResponse_Progress{
+						Progress: &proto.ProgressUpdate{Message: autonomyWorkNotice()},
+					},
+				}); err != nil {
+					return err
+				}
+			}
+			// Fresh segment: the next turn is measured on its own evidence.
+			// Reset also closes the old monitor against late drained events.
+			workMonitor = newAutonomyWorkMonitor()
+		}
+		prevRun, havePrevRun = gate.run, true
 
-	// If the runner returned a synthetic locus-error FinalText (no real loop
-	// ran), wrap it in a FinalResponse and exit.  The runner signals this by
-	// returning a non-empty FinalText with no Model set.
-	if tr.result.Model == "" {
-		return stream.Send(&proto.StreamProcessResponse{
-			Payload: &proto.StreamProcessResponse_FinalResponse{
-				FinalResponse: &proto.ProcessRequestResponse{Output: tr.result.FinalText},
+		// Announce the host-driven continuation with a structured progress event
+		// so clients can display a distinct "continuing autonomously" marker.
+		if err := stream.Send(&proto.StreamProcessResponse{
+			Payload: &proto.StreamProcessResponse_Progress{
+				Progress: &proto.ProgressUpdate{Message: autonomyContinuationAnnouncement(gate.run.RunID, turn+1)},
 			},
-		})
-	}
-
-	// Post-turn bookkeeping for WORKER turns. In-process, runner.Core does this
-	// via c.d.Agent inside RunTurn; the worker child has no Agent and skips it,
-	// so the host compensates here. Runs for worker turns only (tr.worker) —
-	// in-process already did it, so no double-counting.
-	if tr.worker {
-		s.workerPostTurn(convID, tr.result)
-	}
-
-	// Turn boundary: after post-turn bookkeeping (so raw-token accounting is
-	// current) and before the final response, offer a session rollover if the
-	// conversation has grown long enough and the offer is armed. Non-blocking —
-	// we emit the offer and continue; the user replies later via the
-	// Accept/DeclineRollover RPCs. Fully off unless configured.
-	s.maybeOfferRollover(stream.Context(), convID, stream)
-
-	// Send the final response.
-	return stream.Send(&proto.StreamProcessResponse{
-		Payload: &proto.StreamProcessResponse_FinalResponse{
-			FinalResponse: &proto.ProcessRequestResponse{
-				Output: strings.ToValidUTF8(tr.result.FinalText, "�"),
-				RoutingMetadata: &proto.RoutingMetadata{
-					ModelName: tr.result.Model,
-				},
-				// Carry token counts so the CLI's "last turn" footer isn't stuck at 0.
-				InputTokens:  int32(tr.result.InputTokens),
-				OutputTokens: int32(tr.result.OutputTokens),
-			},
-		},
-	})
+		}); err != nil {
+			return err
+		}
+		input = gate.input
+		inputRole = string(llm.RoleSystem) // host-generated continuation, not a human turn
+	} // end turn loop
 }
 
 // workerPostTurn runs the host-owned post-turn bookkeeping that the worker
@@ -3877,17 +3993,15 @@ func (s *Server) GetSessionProfile(ctx context.Context, req *proto.GetSessionPro
 	}
 	convID := req.GetConversationId()
 	active := s.profileBroker.ActiveName(convID)
-	if active == agent.DefaultProfileName && convID != "" && s.persistSvc != nil && s.persistSvc.Store() != nil {
-		if run, err := s.persistSvc.Store().GetActiveAutonomyRun(ctx, convID); err == nil && (run.State == "running" || run.State == "review_pending") {
-			// ProfileBroker is intentionally in-memory for normal session posture, but
-			// autonomous mode has a durable ledger. Rehydrate the active profile from
-			// that ledger so reconnect/resume restores the status chip and prompt
-			// posture for an unfinished run.
-			if err := s.setSessionProfile(convID, "autonomous"); err == nil {
-				active = "autonomous"
-			}
-		} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			log.Printf("GetSessionProfile: autonomy ledger lookup failed for %s: %v", convID, err)
+	if active == agent.DefaultProfileName && convID != "" {
+		// ProfileBroker is intentionally in-memory for normal session posture, but
+		// autonomous mode has a durable ledger. Rehydrate the active profile from
+		// that ledger so reconnect/resume restores the status chip and prompt
+		// posture for an unfinished run. Turn start reuses the same path
+		// (restoreAutonomyProfileAtTurnStart), so a session that never calls
+		// GetSessionProfile still runs fenced turns.
+		if s.restoreAutonomyProfileAtTurnStart(ctx, convID) {
+			active = autonomyProfileName
 		}
 	}
 	return &proto.GetSessionProfileResponse{

@@ -5,6 +5,12 @@ doc is read by the agent on entering development mode (`/d`), alongside
 `docs/features/cli/README.md` (CLI track status + outstanding work) and
 `docs/agent/README.md` (agent architecture).
 
+## Development mode survives resume
+
+Entering `/d` records the repository directory as explicit conversation metadata when its request is admitted. Restarting the CLI and reloading that conversation restores the working-directory override, completion/tool directory, and dev/debug controls without resending the kickoff prompt. Progressive resume includes this state in its first page, before input is enabled; buffered resume restores it from conversation metadata. Conversation rollover carries it forward, while loading an ordinary conversation clears it.
+
+Older conversations have no recorded dev-mode metadata. Enter `/d` once after upgrading to record it; subsequent restarts restore it automatically. Dev mode is never inferred from transcript text or from a conversation merely having a project directory.
+
 ## Delegate to open models — this is the point of Cercano
 
 **Read this before doing recon work.** Cercano exists to keep the frontier

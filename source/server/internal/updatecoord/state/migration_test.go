@@ -162,7 +162,7 @@ func TestFreshDatabaseInitializesSchema2(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	dbPath := filepath.Join(root, "Cercano", "updater", "test-install", stateFileName)
+	dbPath := filepath.Join(root, orgComponent(), "updater", "test-install", stateFileName)
 	if v := rawVersion(t, dbPath); v != SchemaVersion {
 		t.Fatalf("fresh user_version = %d", v)
 	}

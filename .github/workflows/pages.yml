@@ -36,9 +36,6 @@ jobs:
           cache: npm
           cache-dependency-path: website/package-lock.json
 
-      - name: Configure GitHub Pages
-        uses: actions/configure-pages@v5
-
       - name: Install website dependencies
         working-directory: website
         run: npm ci
@@ -60,6 +57,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: build
     steps:
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
       - name: Deploy GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4

@@ -36,11 +36,11 @@ Objective: validate a maintained Go TUF implementation and the required recovery
 
 Objective: give every update a trustworthy installation identity and a single observable lifecycle. Files: source/server/pkg/update/, prospective source/server/internal/updatecoord/{installation,operation,policy}/, configuration types and tests. Tests: table-driven ownership detection, conflicting markers, symlinks, paths with spaces/Unicode, unknown/development installations, concurrent requests, persistence and crash-reload fixtures.
 
-- [ ] Define installation identity, owner/backend, scope, platform, architecture and release-source information using existing conventions
-- [ ] Corroborate provenance against executable paths and package-manager state; do not infer ownership merely from PATH
-- [ ] Represent unknown, ambiguous and development installations without permitting automatic file replacement
-- [ ] Define operation states, progress, errors, retry semantics and persisted recovery information
-- [ ] Separate announced releases from versions available through the installed package source
+- [x] Define installation identity, owner/backend, scope, platform, architecture and release-source information using existing conventions
+- [~] Corroborate provenance against executable paths and package-manager state; do not infer ownership merely from PATH
+- [x] Represent unknown, ambiguous and development installations without permitting automatic file replacement
+- [x] Define operation states, progress, errors, retry semantics and persisted recovery information
+- [x] Separate announced releases from versions available through the installed package source
 - [ ] Record per-version dismissal, explicit self-update enrollment and managed-policy restrictions
 - [ ] Specify the Chocolatey opt-in ownership transition and uninstall/version-tracking contract before implementing it
 - [ ] Test operation deduplication, concurrent clients, unavailable backends and safe persistence/version migration

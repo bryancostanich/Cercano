@@ -2,55 +2,113 @@
 
 import { useEffect, useState } from "react";
 
-const capabilities = [
+const projectUrl = "https://github.com/bryancostanich/Cercano";
+
+const features = [
   {
-    code: "01 / CONTEXT",
-    title: "Context that keeps moving",
-    body: "Rolling background compaction and layered summaries keep long conversations useful without pausing the work.",
+    code: "01 / ROUTING",
+    title: "The right model for the job.",
+    lead: "Context and compute are choices, not defaults.",
+    body: "Cercano routes work by capability, quality, and destination. Keep demanding reasoning with a frontier model, move bounded work to an efficient model, or run it locally.",
+    doc: "advanced-routing.md",
   },
   {
     code: "02 / DELEGATION",
-    title: "Bounded work, separate context",
-    body: "Subagents explore and execute with scoped tools, keeping routine work outside the main reasoning thread.",
+    title: "Delegate work. Keep your focus.",
+    lead: "Subagents work in parallel without crowding the main conversation.",
+    body: "Dispatch research, implementation, and verification into separate, scoped contexts. Open any subagent in its own tab, follow its progress, and bring back only what matters.",
+    doc: "built-in-delegation.md",
+    video: {
+      src: "/videos/delegation.mp4",
+      poster: "/videos/delegation.jpg",
+      label: "Delegation and subagent tabs in Cercano",
+      caption: "Dispatch bounded work, then inspect each agent in its own terminal tab.",
+    },
   },
   {
-    code: "03 / ROUTING",
-    title: "Capability, quality, destination",
-    body: "Choose task class, model tier, and where it runs independently—instead of sending every job down one route.",
+    code: "03 / WORKFLOWS",
+    title: "Process, not just a prompt.",
+    lead: "Good agent work is a sequence of deliberate moves.",
+    body: "Research, planning, subagent execution, systematic debugging, and design decisions are built into the harness. The process stays visible and repeatable instead of living in one oversized instruction.",
+    doc: "powerful-agent-workflows.md",
   },
   {
-    code: "04 / LOCAL",
-    title: "Open weights, managed",
-    body: "A managed local runtime puts your hardware to work without assembling a separate inference stack.",
+    code: "04 / CONTEXT",
+    title: "Catch up without starting over.",
+    lead: "Long sessions keep moving while context is managed in the background.",
+    body: "Layered summaries and non-blocking compaction preserve decisions, current state, and useful history. You can leave, return, and understand where the work stands.",
+    doc: "context-management.md",
   },
   {
     code: "05 / METRICS",
-    title: "See where tokens go",
-    body: "Usage broken down by provider, model, and source makes routing and budget decisions visible.",
+    title: "Know where the tokens go.",
+    lead: "Usage should be legible enough to change a decision.",
+    body: "See token use by provider, model, source, and time. Cercano makes the tradeoffs between local, efficient, and frontier inference concrete.",
+    doc: "advanced-metrics.md",
+    video: {
+      src: "/videos/metrics.mp4",
+      poster: "/videos/metrics.jpg",
+      label: "Token metrics in Cercano",
+      caption: "Inspect model and provider usage without leaving the terminal.",
+    },
   },
   {
-    code: "06 / TERMINAL",
-    title: "A TUI built for real work",
-    body: "Responsive layouts, rich formatting, themes, a context meter, and visible tool and subagent activity.",
+    code: "06 / LOCAL",
+    title: "Put local models to work.",
+    lead: "Open-weight models belong inside the workflow, not beside it.",
+    body: "Cercano manages a local runtime and makes local inference a first-class destination for delegated work, private tasks, and zero-cost iteration.",
+    doc: "integrated-local-runtime.md",
   },
   {
-    code: "07 / SESSIONS",
-    title: "Leave. Return. Continue.",
-    body: "Automatic titles, saved history, search, and resume preserve the work without reconstructing it.",
+    code: "07 / PROVIDERS",
+    title: "Choose your frontier provider.",
+    lead: "Use subscription sign-in, API credentials, or compatible endpoints.",
+    body: "Provider choice remains separate from the coding workflow around it. Switch the underlying model or endpoint without rebuilding how you work.",
+    doc: "openai-providers.md",
   },
   {
-    code: "08 / PROVIDERS",
-    title: "Bring your endpoints",
-    body: "Connect compatible hosted and self-hosted providers without changing the coding workflow around them.",
+    code: "08 / TERMINAL",
+    title: "A terminal that stays readable.",
+    lead: "The interface is dense where it helps and quiet everywhere else.",
+    body: "Responsive layouts, rich formatting, visible tool activity, context meters, subagent tabs, and carefully tuned themes make long sessions comfortable.",
+    doc: "advanced-terminal-ui.md",
+    video: {
+      src: "/videos/terminal-ui.mp4",
+      poster: "/videos/terminal-ui.jpg",
+      label: "Cercano terminal interface and themes",
+      caption: "A polished terminal interface, including the palettes behind this site.",
+    },
   },
   {
-    code: "09 / ARCHITECTURE",
-    title: "Interface and agent, separated",
-    body: "An independent agent process serves terminal and headless clients while keeping their sessions distinct.",
+    code: "09 / SESSIONS",
+    title: "Resume the session, not the setup.",
+    lead: "History is useful when it is searchable and ready to continue.",
+    body: "Automatic titles, saved sessions, search, and resume keep ongoing work close. Pick up the thread without reconstructing the task from memory.",
+    doc: "automatic-session-retention.md",
+    video: {
+      src: "/videos/sessions.mp4",
+      poster: "/videos/sessions.jpg",
+      label: "Searching and resuming a Cercano session",
+      caption: "Find a previous session and continue from the terminal.",
+    },
+  },
+  {
+    code: "10 / ARCHITECTURE",
+    title: "One agent. More than one client.",
+    lead: "The interface and the durable agent core are separate.",
+    body: "An independent service owns sessions, tools, and model access. The terminal stays fast and focused, while headless clients and future interfaces can use the same agent.",
+    doc: "client-server-architecture.md",
+    architecture: true,
+  },
+  {
+    code: "11 / OPEN SOURCE",
+    title: "Free to use. Open to inspect.",
+    lead: "Cercano is 100% free and open source under Apache 2.0.",
+    body: "Run it, study it, extend it, and make it your own. The complete agent, terminal, workflows, and local-runtime integration live in the public repository.",
+    href: `${projectUrl}/blob/main/LICENSE`,
+    linkLabel: "Read the license",
   },
 ];
-
-const projectUrl = "https://github.com/bryancostanich/Cercano";
 
 export default function Home() {
   const [theme, setTheme] = useState<"day" | "night">("day");
@@ -75,9 +133,9 @@ export default function Home() {
           <span>cercano</span>
         </a>
         <nav className="primary-nav" aria-label="Primary navigation">
-          <a href="#capabilities">Capabilities</a>
+          <a href="#features">Features</a>
           <a href="#start">Get started</a>
-          <a href={`${projectUrl}/tree/main/docs/agent`}>Docs</a>
+          <a href={`${projectUrl}/tree/main/docs/agent/features`}>Docs</a>
           <a href={projectUrl}>GitHub ↗</a>
           <button
             className="theme-toggle"
@@ -95,11 +153,11 @@ export default function Home() {
       <main id="top">
         <section className="hero" aria-labelledby="hero-title">
           <div>
-            <p className="eyebrow">AI coding agent · terminal native</p>
+            <p className="eyebrow">100% free + open · terminal native</p>
             <h1 id="hero-title">Use context and compute deliberately.</h1>
           </div>
           <div className="hero-aside">
-            <p className="lede">Cercano brings frontier reasoning, built-in delegation, and open-weight models into one terminal workflow.</p>
+            <p className="lede">Cercano is a premium agent harness for working with frontier and open-weight models—separately or together.</p>
             <a className="command-link" href="#start">
               <code>cercano</code>
               <span>Get started ↓</span>
@@ -108,34 +166,52 @@ export default function Home() {
         </section>
 
         <section className="manifesto" aria-label="Cercano approach">
-          <p className="section-label">One workflow, many routes</p>
-          <p className="manifesto-copy">Keep demanding reasoning in the main conversation. <em>Delegate bounded work.</em> Decide what runs locally and what earns frontier compute.</p>
+          <p className="section-label">Frontier + open</p>
+          <p className="manifesto-copy">A polished terminal, built-in workflows, and deliberate routing put <em>every kind of model</em> inside one coherent way of working.</p>
         </section>
 
-        <section className="capabilities" id="capabilities" aria-labelledby="capabilities-label">
-          <h2 className="visually-hidden" id="capabilities-label">What makes Cercano different</h2>
-          <div className="capability-grid">
-            {capabilities.map((capability) => (
-              <article className="capability" key={capability.code}>
-                <span className="capability-code">{capability.code}</span>
-                <h3>{capability.title}</h3>
-                <p>{capability.body}</p>
+        <section className="features" id="features" aria-labelledby="features-title">
+          <div className="features-heading">
+            <p className="section-label">What Cercano does</p>
+            <h2 id="features-title">An agent designed around the work.</h2>
+          </div>
+
+          <div className="feature-list">
+            {features.map((feature, index) => (
+              <article className={`feature-story${feature.video || feature.architecture ? " feature-story--visual" : ""}`} key={feature.code}>
+                <div className="feature-copy">
+                  <span className="feature-code">{feature.code}</span>
+                  <h3>{feature.title}</h3>
+                  <p className="feature-lead">{feature.lead}</p>
+                  <p className="feature-body">{feature.body}</p>
+                  <a className="text-link" href={feature.href ?? `${projectUrl}/blob/main/docs/agent/features/${feature.doc}`}>
+                    {feature.linkLabel ?? "Read the feature guide"} <span aria-hidden="true">↗</span>
+                  </a>
+                </div>
+
+                {feature.video && (
+                  <figure className="feature-demo">
+                    <div className="video-frame">
+                      <video controls playsInline preload="metadata" poster={feature.video.poster} aria-label={feature.video.label}>
+                        <source src={feature.video.src} type="video/mp4" />
+                        Your browser does not support embedded video.
+                      </video>
+                    </div>
+                    <figcaption><span>{String(index + 1).padStart(2, "0")}</span>{feature.video.caption}</figcaption>
+                  </figure>
+                )}
+
+                {feature.architecture && (
+                  <div className="flow" aria-label="Terminal and headless clients connect to the agent service, which routes work to local and hosted models">
+                    <div className="flow-column"><span>Clients</span><strong>Terminal UI</strong><strong>Headless</strong></div>
+                    <span className="flow-arrow" aria-hidden="true">→</span>
+                    <div className="flow-column flow-core"><span>Core</span><strong>Agent service</strong><small>sessions · tools · state</small></div>
+                    <span className="flow-arrow" aria-hidden="true">→</span>
+                    <div className="flow-column"><span>Models</span><strong>Frontier</strong><strong>Open weight</strong></div>
+                  </div>
+                )}
               </article>
             ))}
-          </div>
-        </section>
-
-        <section className="architecture" aria-labelledby="architecture-title">
-          <div>
-            <p className="section-label">Client / server architecture</p>
-            <h2 id="architecture-title">A thin client around a <span>durable agent core.</span></h2>
-          </div>
-          <div className="flow" aria-label="Terminal client connects to the agent service, which routes work to local and hosted models">
-            <div className="flow-item">Terminal UI<small>interactive</small></div>
-            <span className="flow-arrow" aria-hidden="true">→</span>
-            <div className="flow-item">Agent service<small>state + tools</small></div>
-            <span className="flow-arrow" aria-hidden="true">→</span>
-            <div className="flow-item">Models<small>local / hosted</small></div>
           </div>
         </section>
 
@@ -143,12 +219,16 @@ export default function Home() {
           <div className="start-copy">
             <p className="section-label">Get started</p>
             <h2 id="start-title">One command.<br />Deliberate by default.</h2>
-            <p>Build the server and terminal client, then configure models, routing, and permissions from inside the TUI. Start with a bounded, read-only task in a repository you know.</p>
+            <p>Download a release or build from source, then configure providers, local models, routing, and permissions from inside the TUI.</p>
           </div>
-          <div className="commands" aria-label="Cercano commands">
+          <div className="commands" aria-label="Cercano commands and install notes">
             <div className="command-row"><code><span>$</span> cercano</code><small>Interactive terminal</small></div>
-            <div className="command-row"><code><span>$</span> cercano run &quot;Explain this repository&quot;</code><small>Scripts and automation</small></div>
-            <p>Standalone releases are in progress. For now, follow the source build and agent setup guides.</p>
+            <div className="command-row"><code><span>$</span> cercano run &quot;Explain this repository&quot;</code><small>Scripts + automation</small></div>
+            <div className="start-links">
+              <a href={`${projectUrl}/releases`}>Download a release ↗</a>
+              <a href={`${projectUrl}#building-from-source`}>Build from source ↗</a>
+            </div>
+            <p className="platform-note">macOS is supported today. Linux x86_64 is available as an experimental, unsigned build.</p>
           </div>
         </section>
 
@@ -166,9 +246,7 @@ export default function Home() {
         </section>
       </main>
 
-      <footer>
-        <span>Cercano - 100% Free + Open</span>
-      </footer>
+      <footer><span>Cercano - 100% Free + Open</span></footer>
     </div>
   );
 }

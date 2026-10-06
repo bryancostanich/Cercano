@@ -67,19 +67,43 @@ was considered but not selected because it gives less operational recovery time.
 Offline root renewal is an occasional manual operation and does not inherently
 require generating a new root identity.
 
-## Remaining decision queue, one at a time
+## Approved hosting: shared GitHub Pages website
 
-- Metadata hosting, publication preconditions and retained historical metadata.
-- Concrete signing-job permissions and emergency-recovery review before provisioning.
+The user approved GitHub Pages in the existing Cercano repository and specified
+that it will also host the website. Reserve `updates/tuf/` within the site's
+published output for signed metadata; this is machine-readable static content,
+not a generated HTML page. Application archives stay in existing GitHub Releases.
+No separate public release repository or hosting provider is introduced.
 
-Read-only GitHub inspection confirmed the existing Cercano repository is public
-and has no Pages site enabled. Proposed next choice: host signed metadata on
-GitHub Pages in this same repository, retaining application archives in its
-existing GitHub Releases. Alternative: a separately provisioned object-storage
-endpoint/CDN for metadata. No separate public release repository is proposed.
-Pages would require explicitly enabling a site and tightly scoped deployment
-permissions; this inspection did not change those settings. Hosting selection
-is still pending.
+The base site URL must be configurable: a project Pages site can have a repository
+path prefix, and a later custom domain can change the origin. Do not assume the
+website is hosted at an origin root or apply HTML rewriting to signed JSON.
+Preserve byte-identical immutable numbered roots/versioned metadata and replace
+only the authorized mutable metadata pointers. Website deployment must merge the
+current feed into its complete Pages artifact, while feed renewal must preserve
+the current website. Neither workflow may deploy a subtree alone as the site.
+They must share publication coordination so a stale site build cannot roll back
+feed freshness or delete a root needed by offline clients.
+
+Read-only inspection found Pages disabled before approval. Production enabling,
+DNS/domain changes, signer provisioning and deployment permissions have not been
+performed. The separate-storage alternative was not selected.
+
+## Remaining gate before production provisioning
+
+Concrete signing-job permissions and emergency-recovery procedures need final
+operator review. Initial least-privilege proposal: signing jobs receive only
+required online role keys; root never enters CI. The Pages deployment step needs
+only the approved site artifact and deploy authority, not signing keys. Renewal
+re-verifies current signed metadata and target identities before retaining target
+authorizations; no arbitrary remote files are blessed by a timer. Define release,
+renewal and website publication coordination before granting write authority.
+
+Emergency response must distinguish a broken renewal job from compromised role
+keys: restore renewal for availability errors, but disable compromised signing
+and perform offline-root-authorized role-key rotation for trust errors. Do not
+bypass verification, re-sign suspect targets or claim rotation undoes previously
+installed malicious code. This policy review does not require provisioning now.
 
 Short fixture lifetimes, one-key test role thresholds and test storage
 preconditions are not production defaults. Native runner access and production

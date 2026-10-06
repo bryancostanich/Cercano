@@ -28,7 +28,7 @@ Objective: validate a maintained Go TUF implementation and the required recovery
 - [x] Test offline clients, sequential root rotation, interruption at every metadata-refresh boundary and safe failure without damaging the installed application
 - [x] Demonstrate publication ordering and concurrent-publisher protection in an isolated test repository
 - [-] Present the concrete key roles, thresholds, offline root custody, online signer permissions, expiry/renewal schedule and recovery procedure for operator approval
-- [ ] Present repository hosting and authentication choices for approval before provisioning anything external
+- [x] Present repository hosting and authentication choices for approval before provisioning anything external
 - [x] Record the feasibility verdict and stop for review if library behavior contradicts the approved trust model
 - [x] Checkpoint verified test tooling and security decisions without private keys
 

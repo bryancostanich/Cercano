@@ -14,7 +14,9 @@ security policy.
 
 ## Evidence
 
-16 top-level tests plus refresh-interruption subtests exercise the real Go TUF
+18 top-level tests plus refresh-interruption subtests cover real Go TUF
+verification and test-only publication/site-composition contracts. The verification
+tests exercise the real Go TUF
 client, not a mocked verifier:
 
 - bootstrap and hash-prefixed verified download;
@@ -30,7 +32,14 @@ client, not a mocked verifier:
 - valid rotation recovery from an expired bootstrap root;
 - incomplete publication fails until its immutable metadata is present;
 - a modeled publication compare-and-swap permits one concurrent winner and
-  refuses stale/downgrade writes.
+  refuses stale/downgrade writes;
+- a shared-site composition contract preserves the website and byte-identical
+  signed metadata under `updates/tuf/`, retaining historical roots across a site
+  rebuild and rejecting reserved-path collisions or changed immutable metadata.
+
+The site tests do not deploy Pages or prove edge-cache/hosting atomicity. They
+model the invariant the production site deployment must uphold; concurrency and
+freshness need verification with the chosen publication implementation.
 
 `go test -race -timeout=60s ./...` and `go vet ./...` pass on macOS arm64.
 Windows/Linux x64 test executables cross-compile; they have NOT been executed on

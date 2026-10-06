@@ -60,12 +60,25 @@ func worker(t *testing.T, ctx context.Context, root, mode, ready string) *subpro
 	return cmd
 }
 func TestConcurrentProcessesAllocateDistinctPersistentIDs(t *testing.T) {
+	testConcurrentAllocation(t, false)
+}
+func TestConcurrentProcessesUpgradeLegacyWithoutLosingIDs(t *testing.T) {
+	testConcurrentAllocation(t, true)
+}
+func testConcurrentAllocation(t *testing.T, legacy bool) {
+	t.Helper()
 	root := t.TempDir()
-	s, e := Open(root, "test-install")
-	if e != nil {
-		t.Fatal(e)
+	var s *Store
+	var e error
+	if legacy {
+		legacyV1Database(t, root, "test-install")
+	} else {
+		s, e = Open(root, "test-install")
+		if e != nil {
+			t.Fatal(e)
+		}
+		s.Close()
 	}
-	s.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	cmds := []*subprocess.Cmd{worker(t, ctx, root, "allocate", ""), worker(t, ctx, root, "allocate", "")}
@@ -114,9 +127,20 @@ func TestConcurrentProcessesAllocateDistinctPersistentIDs(t *testing.T) {
 		t.Fatal(e)
 	}
 	defer s.Close()
+	expectedNext := int64(25)
+	if legacy {
+		// The legacy fixture already owns operation ID 1; workers must not reuse it.
+		expectedNext++
+		if seen[1] {
+			t.Fatal("migration reissued the legacy operation ID")
+		}
+		if old, rev, err := s.LoadOperationRecord(ctx, 1); err != nil || old.ID != 1 || rev != 1 {
+			t.Fatalf("legacy operation lost: %+v %d %v", old, rev, err)
+		}
+	}
 	id, e := s.AllocateOperationID(ctx)
-	if e != nil || id != 25 {
-		t.Fatalf("counter after workers=%d %v", id, e)
+	if e != nil || id != expectedNext {
+		t.Fatalf("counter after workers=%d want=%d %v", id, expectedNext, e)
 	}
 }
 func TestKilledWriterRollsBackWithoutCounterReuseOfCommittedIDs(t *testing.T) {

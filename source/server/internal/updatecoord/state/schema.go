@@ -102,6 +102,7 @@ CREATE TABLE dismissal_records (
   source       TEXT NOT NULL,
   version      TEXT NOT NULL,
   revision     INTEGER NOT NULL,
+  active       INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
   record_json  TEXT NOT NULL,
   PRIMARY KEY (install_id, channel, source, version)
 ) WITHOUT ROWID;
@@ -131,7 +132,7 @@ func tablesFor(version int64) map[string]bool {
 	}
 }
 
-// initNewDB initializes a brand-new (absent or zero-byte) database as a
+// initNewDB initializes a brand-new exclusively created database as a
 // recognized version-2 updater state database for installID, in ONE
 // transaction: schema, application_id, user_version, the meta rows, and the
 // install counter row either all commit or none do. It is never run
@@ -297,9 +298,9 @@ func validateExistingDB(ctx context.Context, db dbtx, installID string) error {
 // preflightValidate opens the database read-only and validates the whole
 // recognized schema for the database's own version inside ONE consistent
 // read transaction, so a concurrent version upgrade (another handle
-// migrating a legacy database) can never be observed half-applied. It is
-// strictly read-only: no write, no journal pragma, and no sidecar is
-// created; a refusal leaves the file untouched.
+// migrating a legacy database) can never be observed half-applied. It performs
+// no schema/data write or journal-mode change. SQLite may access existing WAL
+// coordination state; this is not a promise of byte-immutable shared-memory locks.
 func preflightValidate(ctx context.Context, dbPath, installID string) error {
 	ro, err := sql.Open("sqlite", sqliteURI(dbPath, "ro"))
 	if err != nil {
@@ -382,8 +383,12 @@ func migrateSchema1To2(ctx context.Context, conn *sql.Conn, installID string) er
 	}
 	switch version {
 	case SchemaVersion:
-		// A concurrent handle already upgraded the database. Nothing to
-		// do; this transaction is a verified no-op.
+		// A version number alone is not proof of a legitimate concurrent
+		// upgrade. Revalidate layout and identity under this write lock too.
+		if err := validateExistingDB(ctx, conn, installID); err != nil {
+			rollback()
+			return err
+		}
 		return commit()
 	case LegacySchemaVersion:
 		if err := validateExistingDB(ctx, conn, installID); err != nil {

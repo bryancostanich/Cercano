@@ -25,7 +25,7 @@ import (
 // production location.
 func legacyV1Database(t *testing.T, root, installID string) string {
 	t.Helper()
-	dir := filepath.Join(root, "Cercano", "updater", installID)
+	dir := filepath.Join(root, orgComponent(), "updater", installID)
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func legacyV1Database(t *testing.T, root, installID string) string {
 		InstallID:            installID,
 		CanonicalRoot:        `C:\Users\me\AppData\Local\Cercano`,
 		Owner:                "chocolatey",
-		Platform:            "windows",
+		Platform:             "windows",
 		Arch:                 "amd64",
 		Scope:                "user",
 		ReleaseChannel:       "stable",

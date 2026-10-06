@@ -30,12 +30,10 @@ const maxDismissalJSONBytes = 1024 * 1024
 // installation across the row key and the decoded record, so a record from
 // a different installation is refused even if it sits in this database.
 //
-// Clearing a dismissed version removes that one owned row under the same
-// revision compare-and-save as the save path — a stale revision is refused
-// and the caller reloads and retries. Clearing NEVER deletes or rewrites
-// any file this package does not own (the database file itself is never
-// removed): the cleared state is the well-defined "no entry" state, and
-// loading then reports a clean not-found rather than corruption.
+// Clearing preserves a revision-bearing inactive row. This prevents stale
+// callbacks from matching a newly dismissed copy of the same announcement.
+// Load returns ErrRecordNotFound plus the revision for an inactive row; callers
+// must use that token to dismiss it again. Revision zero means never recorded.
 
 // SaveDismissalRecord persists one version-scoped dismissal for this
 // installation. expectedRevision is the compare-and-save revision: 0 inserts
@@ -101,8 +99,28 @@ func (s *Store) saveDismissalRecordConn(ctx context.Context, conn *sql.Conn, exp
 		}
 		return 1, nil
 	}
+	var current int64
+	var active int
+	var previous string
+	err := conn.QueryRowContext(ctx, `SELECT revision,active,record_json FROM dismissal_records WHERE install_id=? AND channel=? AND source=? AND version=?`, s.installID, d.Channel, d.Source, d.Version).Scan(&current, &active, &previous)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, ErrStaleRevision
+	}
+	if err != nil {
+		return 0, err
+	}
+	if active != 0 && active != 1 {
+		return 0, ErrCorruptDatabase
+	}
+	if _, err = s.decodeDismissalRow(d.Channel, d.Source, d.Version, current, previous); err != nil {
+		return 0, err
+	}
+	if current != expectedRevision {
+		return 0, ErrStaleRevision
+	}
+
 	res, err := conn.ExecContext(ctx,
-		`UPDATE dismissal_records SET revision=revision+1, record_json=? WHERE install_id=? AND channel=? AND source=? AND version=? AND revision=?`,
+		`UPDATE dismissal_records SET revision=revision+1, record_json=?, active=1 WHERE install_id=? AND channel=? AND source=? AND version=? AND revision=?`,
 		string(payload), s.installID, d.Channel, d.Source, d.Version, expectedRevision)
 	if err != nil {
 		return 0, fmt.Errorf("state: update dismissal record: %w", err)
@@ -127,6 +145,11 @@ func (s *Store) saveDismissalRecordConn(ctx context.Context, conn *sql.Conn, exp
 // closed as ErrCorruptDatabase/ErrInstallIDMismatch and is never treated
 // as absent or reset.
 func (s *Store) LoadDismissalRecord(ctx context.Context, key policy.Dismissal) (policy.Dismissal, int64, error) {
+	ctx, cancel := context.WithTimeout(ctx, opTimeout)
+	defer cancel()
+	if key.InstallID != s.installID {
+		return policy.Dismissal{}, 0, ErrInstallIDMismatch
+	}
 	if _, err := key.Encode(); err != nil {
 		return policy.Dismissal{}, 0, fmt.Errorf("%w: %v", ErrInvalidRecord, err)
 	}
@@ -137,10 +160,11 @@ func (s *Store) LoadDismissalRecord(ctx context.Context, key policy.Dismissal) (
 	defer conn.Close() //nolint:errcheck // read-only path
 
 	var revision int64
+	var active int
 	var payload string
 	err = conn.QueryRowContext(ctx,
-		`SELECT revision, record_json FROM dismissal_records WHERE install_id=? AND channel=? AND source=? AND version=?`,
-		s.installID, key.Channel, key.Source, key.Version).Scan(&revision, &payload)
+		`SELECT revision, active, record_json FROM dismissal_records WHERE install_id=? AND channel=? AND source=? AND version=?`,
+		s.installID, key.Channel, key.Source, key.Version).Scan(&revision, &active, &payload)
 	if errors.Is(err, sql.ErrNoRows) {
 		return policy.Dismissal{}, 0, ErrRecordNotFound
 	}
@@ -151,6 +175,12 @@ func (s *Store) LoadDismissalRecord(ctx context.Context, key policy.Dismissal) (
 	if err != nil {
 		return policy.Dismissal{}, 0, err
 	}
+	if active == 0 {
+		return policy.Dismissal{}, revision, ErrRecordNotFound
+	}
+	if active != 1 {
+		return policy.Dismissal{}, 0, ErrCorruptDatabase
+	}
 	return rec, revision, nil
 }
 
@@ -160,6 +190,8 @@ func (s *Store) LoadDismissalRecord(ctx context.Context, key policy.Dismissal) (
 // and binding-checked; a single malformed row fails the whole load closed
 // rather than being skipped or reset.
 func (s *Store) ListDismissalRecords(ctx context.Context) ([]policy.Dismissal, error) {
+	ctx, cancel := context.WithTimeout(ctx, opTimeout)
+	defer cancel()
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
 		return nil, err
@@ -167,24 +199,32 @@ func (s *Store) ListDismissalRecords(ctx context.Context) ([]policy.Dismissal, e
 	defer conn.Close() //nolint:errcheck // read-only path
 
 	rows, err := conn.QueryContext(ctx,
-		`SELECT channel, source, version, revision, record_json FROM dismissal_records WHERE install_id=? ORDER BY channel, source, version`,
-		s.installID)
+		`SELECT install_id, channel, source, version, revision, active, record_json FROM dismissal_records ORDER BY channel, source, version`)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrCorruptDatabase, err)
 	}
 	defer rows.Close()
 	out := []policy.Dismissal{}
 	for rows.Next() {
-		var channel, source, version, payload string
+		var owner, channel, source, version, payload string
+		var active int
 		var revision int64
-		if err := rows.Scan(&channel, &source, &version, &revision, &payload); err != nil {
+		if err := rows.Scan(&owner, &channel, &source, &version, &revision, &active, &payload); err != nil {
 			return nil, fmt.Errorf("%w: %v", ErrCorruptDatabase, err)
+		}
+		if owner != s.installID {
+			return nil, ErrInstallIDMismatch
+		}
+		if active != 0 && active != 1 {
+			return nil, ErrCorruptDatabase
 		}
 		rec, err := s.decodeDismissalRow(channel, source, version, revision, payload)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, rec)
+		if active == 1 {
+			out = append(out, rec)
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrCorruptDatabase, err)
@@ -192,19 +232,18 @@ func (s *Store) ListDismissalRecords(ctx context.Context) ([]policy.Dismissal, e
 	return out, nil
 }
 
-// ClearDismissalRecord removes one dismissed version's durable record for
-// this installation. The removal is a revision compare-and-save delete of
-// the single owned row: a stale revision is refused (ErrStaleRevision) and
-// the caller reloads and retries; a missing entry is a clean typed
-// ErrRecordNotFound. Clearing never touches any file this package does not
-// own — the database file is never deleted or recreated; the cleared state
-// is simply the well-defined "no entry" state.
+// ClearDismissalRecord records absence without discarding its revision history.
+// A stale token is refused even after clear/recreate cycles. Read the resulting
+// missing-record revision before re-dismissing. No other installation is touched.
 func (s *Store) ClearDismissalRecord(ctx context.Context, key policy.Dismissal, expectedRevision int64) error {
+	if key.InstallID != s.installID {
+		return ErrInstallIDMismatch
+	}
 	if expectedRevision < 1 || expectedRevision == math.MaxInt64 {
-		return fmt.Errorf("%w: invalid expected revision", ErrInvalidRecord)
+		return ErrInvalidRecord
 	}
 	if _, err := key.Encode(); err != nil {
-		return fmt.Errorf("%w: %v", ErrInvalidRecord, err)
+		return fmt.Errorf("%w: invalid dismissal key", ErrInvalidRecord)
 	}
 	return s.inWriteTx(ctx, func(ctx context.Context, conn *sql.Conn) error {
 		if s.fault != nil {
@@ -212,32 +251,30 @@ func (s *Store) ClearDismissalRecord(ctx context.Context, key policy.Dismissal, 
 				return err
 			}
 		}
-		res, err := conn.ExecContext(ctx,
-			`DELETE FROM dismissal_records WHERE install_id=? AND channel=? AND source=? AND version=? AND revision=?`,
-			s.installID, key.Channel, key.Source, key.Version, expectedRevision)
-		if err != nil {
-			return fmt.Errorf("state: clear dismissal record: %w", err)
-		}
-		n, err := res.RowsAffected()
-		if err != nil {
-			return fmt.Errorf("state: clear dismissal record: %w", err)
-		}
-		if n == 1 {
-			return nil
-		}
 		var revision int64
-		switch err := conn.QueryRowContext(ctx,
-			`SELECT revision FROM dismissal_records WHERE install_id=? AND channel=? AND source=? AND version=?`,
-			s.installID, key.Channel, key.Source, key.Version).Scan(&revision); {
-		case errors.Is(err, sql.ErrNoRows):
+		var active int
+		var payload string
+		err := conn.QueryRowContext(ctx, `SELECT revision,active,record_json FROM dismissal_records WHERE install_id=? AND channel=? AND source=? AND version=?`, s.installID, key.Channel, key.Source, key.Version).Scan(&revision, &active, &payload)
+		if errors.Is(err, sql.ErrNoRows) {
 			return ErrRecordNotFound
-		case err != nil:
-			return fmt.Errorf("%w: %v", ErrCorruptDatabase, err)
-		default:
-			// The entry still exists with a different revision: this clear
-			// is stale; the caller reloads and retries.
+		}
+		if err != nil {
+			return err
+		}
+		if active != 0 && active != 1 {
+			return ErrCorruptDatabase
+		}
+		if _, err = s.decodeDismissalRow(key.Channel, key.Source, key.Version, revision, payload); err != nil {
+			return err
+		}
+		if revision != expectedRevision {
 			return ErrStaleRevision
 		}
+		if active == 0 {
+			return ErrRecordNotFound
+		}
+		_, err = conn.ExecContext(ctx, `UPDATE dismissal_records SET active=0,revision=revision+1 WHERE install_id=? AND channel=? AND source=? AND version=?`, s.installID, key.Channel, key.Source, key.Version)
+		return err
 	})
 }
 

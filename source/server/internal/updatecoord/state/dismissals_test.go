@@ -86,7 +86,7 @@ func TestDismissalScopeIsExactChannelSourceVersionInstall(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer foreign.Close()
-	if _, _, err := foreign.LoadDismissalRecord(ctx, key); !errors.Is(err, ErrRecordNotFound) {
+	if _, _, err := foreign.LoadDismissalRecord(ctx, key); !errors.Is(err, ErrInstallIDMismatch) {
 		t.Fatalf("dismissal leaked across installations: %v", err)
 	}
 	if list, err := foreign.ListDismissalRecords(ctx); err != nil || len(list) != 0 {
@@ -152,7 +152,11 @@ func TestDismissalCASInsertUpdateClear(t *testing.T) {
 	if list, err := s.ListDismissalRecords(ctx); err != nil || len(list) != 0 {
 		t.Fatalf("list after clear: %+v err=%v", list, err)
 	}
-	if rev, err := s.SaveDismissalRecord(ctx, 0, key); err != nil || rev != 1 {
+	_, clearedRevision, err := s.LoadDismissalRecord(ctx, key)
+	if !errors.Is(err, ErrRecordNotFound) || clearedRevision != 3 {
+		t.Fatalf("missing tombstone revision: %d %v", clearedRevision, err)
+	}
+	if rev, err := s.SaveDismissalRecord(ctx, clearedRevision, key); err != nil || rev != 4 {
 		t.Fatalf("re-dismiss after clear: %d %v", rev, err)
 	}
 }

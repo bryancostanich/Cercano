@@ -42,7 +42,7 @@ Objective: give every update a trustworthy installation identity and a single ob
 - [x] Define operation states, progress, errors, retry semantics and persisted recovery information
 - [x] Separate announced releases from versions available through the installed package source
 - [ ] Record per-version dismissal, explicit self-update enrollment and managed-policy restrictions
-- [ ] Specify the Chocolatey opt-in ownership transition and uninstall/version-tracking contract before implementing it
+- [-] Specify the Chocolatey opt-in ownership transition and uninstall/version-tracking contract before implementing it
 - [ ] Test operation deduplication, concurrent clients, unavailable backends and safe persistence/version migration
 - [ ] Checkpoint the ownership and operation foundation
 

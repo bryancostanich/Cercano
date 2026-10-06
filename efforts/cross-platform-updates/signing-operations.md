@@ -1,12 +1,13 @@
-# Initial signing operations — final review before production permissions
+# Initial signing operations — approved profile; provisioning remains gated
 
 Approved architecture: single offline root plus encrypted offline recovery
 backup; automatic GitHub CI routine signing; timestamp7d/snapshot30d/targets90d/
 root1y; daily renewal; GitHub Pages shared with the website. No production keys,
 secrets, Pages configuration or privileges have been created in this effort.
 
-The following is the proposed least-privilege execution profile. It does not
-change the already-approved trust or hosting choices.
+The user explicitly approved this least-privilege execution profile. It does
+not change the already-approved trust or hosting choices. Implementation and
+fixture testing may proceed; production provisioning is still separately gated.
 
 ## Roles and job isolation
 
@@ -62,9 +63,8 @@ into CI or logs. Retain root history needed by offline clients.
 
 ## Authorization boundary
 
-Approval of this execution profile permits implementing and testing these
-boundaries with fixture keys. Actual private-key generation/custody, secret
-installation, enabling Pages, monitoring subscriptions or external services,
-and the first production feed publication remain separately authorized actions
-under the approved plan. Pending that review, isolated tests may run but no
-production permission grant should be inferred.
+The approved execution profile permits implementing and testing these boundaries
+with fixture keys. Actual private-key generation/custody, secret installation,
+enabling Pages, monitoring subscriptions or external services, and the first
+production feed publication remain separately authorized actions under the
+approved plan. No production permission grant follows from profile approval.

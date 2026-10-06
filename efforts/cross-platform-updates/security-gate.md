@@ -1,4 +1,4 @@
-# Security operations gate — root policy approved; remaining choices pending
+# Security operations design gate — approved; production provisioning still gated
 
 The local go-tuf/v2 v2.4.2 proof is feasible and all test keys were ephemeral.
 No production private keys, signer credentials, endpoint or expiration policy
@@ -91,8 +91,9 @@ performed. The separate-storage alternative was not selected.
 
 ## Remaining gate before production provisioning
 
-Concrete signing-job permissions and emergency-recovery procedures need final
-operator review. Initial least-privilege proposal: signing jobs receive only
+The user approved the concrete signing-job and emergency-recovery profile in
+signing-operations.md. The security-design gate is complete; fixture-based
+implementation may continue. The approved profile is: signing jobs receive only
 required online role keys; root never enters CI. The Pages deployment step needs
 only the approved site artifact and deploy authority, not signing keys. Renewal
 re-verifies current signed metadata and target identities before retaining target

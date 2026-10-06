@@ -1,18 +1,20 @@
 # Cercano
 
-**An AI coding agent designed to use context and compute deliberately.**
+**Cercano is a 100% free + open, premium agent/harness that not only has a premium 
+UX, but is designed to use context and compute deliberately.**
 
 **Frontier + open, separately or together.** Use a frontier provider through an
 available subscription sign-in or API credentials, run open-weight models, or
 combine them in one terminal workflow. Keep demanding reasoning in the main
-conversation and delegate bounded work to appropriately priced models—on your
+conversation and delegate bounded work to appropriately priced models, on your
 hardware or with a hosted provider. Subscription eligibility and limits depend
 on the provider; see [provider options](docs/agent/features/openai-providers.md).
 
-Built-in workflows guide research, planning, execution, debugging, and design
-decisions. Background context management and a polished terminal interface help
-you stay focused as sessions grow, with subagent tabs keeping delegated work
-visible without mixing every intermediate step into the main conversation.
+Built-in workflows guide **research**, **planning**, **sub-agent execution**, 
+**debugging**, and **design decisions**. Background context management and 
+compaction and a polished terminal interface help you stay focused as sessions 
+grow, with subagent tabs keeping delegated work visible without mixing every 
+intermediate step into the main conversation.
 
 ## What makes Cercano different
 
@@ -30,7 +32,7 @@ match the work—not forcing every task through the same model.
 **Give investigations their own workspace, not your entire context window.**
 Built-in subagents work with separate context and scoped tools, then return
 focused results. Follow their progress in dedicated tabs while keeping the main
-conversation centered on decisions.
+conversation centered on decisions and the context clean.
 
 Watch a delegated investigation in its own subagent tab:
 
@@ -71,7 +73,7 @@ https://github.com/user-attachments/assets/82c65acd-6b7f-4d6e-8a56-dbe0d3133d8c
 ### Local models, less assembly required
 
 **Use your hardware without building an inference stack first.** Cercano's
-managed local runtime brings open-weight models into the same workflow as your
+managed local mdoel runtime brings open-weight models into the same workflow as your
 cloud providers. Configure a suitable model and let Cercano manage the runtime.
 
 [Explore the integrated runtime →](docs/agent/features/integrated-local-runtime.md)
@@ -109,13 +111,26 @@ https://github.com/user-attachments/assets/d4a81e65-0206-475c-994b-067174f3a5f2
 
 [Explore session retention →](docs/agent/features/automatic-session-retention.md)
 
-### One agent, more than one way to work
+### One agent. Room for any client.
 
-**Use the terminal when you want a conversation. Go headless when you need a
-script.** An independent agent process serves multiple client sessions, keeping
-session state separate while supporting interactive and automated workflows.
+**The agent isn't tied to the interface.** Cercano's independent agent server
+handles execution, models, permissions, and saved conversations; clients provide
+the experience. Today, that means the terminal UI and headless commands. The same
+architecture opens the door to IDE integrations, full desktop applications, and
+other clients—without rebuilding the agent for each one. Those possibilities
+are largely unbuilt, but the separation is here today.
 
 [Explore the client/server architecture →](docs/agent/features/client-server-architecture.md)
+
+### Free and open. Yours to build on.
+
+**A premium agent experience, without a software subscription.** Cercano is free
+and open source under the Apache 2.0 license. Inspect how it works, change it to
+fit your workflow, or build something new on top of it. The software is free;
+cloud inference, provider subscriptions, and the hardware you run it on can
+still carry costs.
+
+[Read the license →](LICENSE) · [Build and contribute →](docs/agent/self-dev.md)
 
 ## Get started
 
@@ -157,13 +172,3 @@ feature page for controls and limitations.
 - [CLI track](docs/features/cli/README.md): implementation status and outstanding work.
 - [Developer guide](docs/agent/self-dev.md): building, testing, and working on Cercano.
 - [Report a problem](https://github.com/bryancostanich/Cercano/issues): include your version, platform, route/model, and reproduction steps; redact credentials and private content.
-
-## Co-processor mode: deprecated for now
-
-The external co-processor integration—using Cercano as a tool inside another
-coding agent—is **deprecated for now**. Its documentation is preserved under
-[docs/co-processor](docs/co-processor/README.md). This documentation transition
-does not remove runtime functionality or set a removal date.
-
-Native subagent delegation and the standalone agent's support for external
-Model Context Protocol (MCP) tools remain separate, current capabilities.

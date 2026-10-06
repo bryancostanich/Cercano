@@ -20,9 +20,10 @@ project URL `https://bryancostanich.github.io/Cercano/`. The export includes the
 `/Cercano` base path in framework and video URLs.
 
 The repository workflow at `.github/workflows/pages.yml` builds, verifies, and
-deploys that directory whenever website files change on `main`. After merging
-the website branch, set **Settings → Pages → Build and deployment → Source** to
-**GitHub Actions** once. Future deployments are automatic.
+deploys that directory whenever website files change on `main`. This repository
+is already configured to publish with GitHub Actions, so future deployments are
+automatic after the website branch is merged. Forks must enable GitHub Actions
+once under **Settings → Pages → Build and deployment → Source**.
 
 When a custom domain is introduced, update `NEXT_PUBLIC_BASE_PATH` and
 `NEXT_PUBLIC_SITE_URL` in the `build:pages` script together.

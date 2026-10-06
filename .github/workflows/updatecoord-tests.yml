@@ -8,6 +8,7 @@ on:
       - 'source/server/go.mod'
       - 'source/server/go.sum'
       - '.github/workflows/updatecoord-tests.yml'
+      - 'efforts/cross-platform-updates/tuf-proof/**'
 permissions:
   contents: read
 jobs:
@@ -25,7 +26,9 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: source/server/go.mod
-          cache-dependency-path: source/server/go.sum
+          cache-dependency-path: |
+            source/server/go.sum
+            efforts/cross-platform-updates/tuf-proof/go.sum
       - name: Record native platform
         working-directory: source/server
         run: go env GOOS GOARCH
@@ -39,3 +42,6 @@ jobs:
       - name: Static checks
         working-directory: source/server
         run: go vet ./internal/updatecoord/...
+      - name: TUF and shared-site fixtures
+        working-directory: efforts/cross-platform-updates/tuf-proof
+        run: go test -count=1 -timeout=2m ./...

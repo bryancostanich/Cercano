@@ -492,6 +492,17 @@ type reader struct {
 	// exactly once no matter how many attempts it took.
 	framing []llm.StreamEvent
 
+	// toolBuf holds tool-call events (start/input_delta/stop) that have been
+	// read while the stream is still uncommitted. Delivered on arrival they
+	// would latch the stream as live — forcing a mid-stream failure to
+	// surface and leaking partially shown tool fragments to the caller.
+	// Held, they let a retryable failure discard the fragments with the
+	// framing and re-serve the SAME request under the existing policy: a
+	// tool-only stream has not delivered content until it completes. The
+	// buffer flushes — in adapter order — ahead of the first committing
+	// event (text/reasoning) or a clean end (message_stop).
+	toolBuf []llm.StreamEvent
+
 	emitted       bool // content was delivered; recovery is off the table
 	emittedText   bool // a text delta was already delivered to the caller
 	emittedReason bool // a reasoning delta was already delivered to the caller
@@ -517,6 +528,18 @@ func (r *reader) gateFields(ev Event) Event {
 	ev.EmittedReasoning = r.emittedReason
 	ev.EmittedToolCall = r.emittedTool
 	return ev
+}
+
+// isToolCallEvent reports whether a stream event belongs to a tool-call
+// block (start/input_delta/stop). Such events are buffered pre-commit: they
+// describe work that has not happened yet, unlike text/reasoning, which are
+// delivered content the moment they flow.
+func isToolCallEvent(t llm.StreamEventType) bool {
+	switch t {
+	case llm.EventToolUseStart, llm.EventToolUseInputDelta, llm.EventToolUseStop:
+		return true
+	}
+	return false
 }
 
 // trackEmittedKind records WHICH kinds of content were already delivered —
@@ -633,16 +656,31 @@ func (r *reader) Next() (llm.StreamEvent, bool, error) {
 				r.framing = append(r.framing, ev)
 				continue
 			}
-			// First live event (or a clean immediate end): the stream is
-			// committed — deliver any held framing ahead of it, in order.
+			// Tool-call events describe work that has not happened yet.
+			// Hold them from the caller until the stream commits below,
+			// delaying tool indicators for tool-only responses. A retryable
+			// failure after tool-only output discards the fragments and
+			// re-serves the SAME request; completion flushes them in order.
+			if ok && isToolCallEvent(ev.Type) {
+				r.toolBuf = append(r.toolBuf, ev)
+				continue
+			}
+			// First committing event (text/reasoning), message_stop, or a
+			// clean immediate end: the stream is committed — deliver any
+			// held framing and buffered tool calls ahead of it, in order.
 			r.emitted = true
 			r.trackEmittedKind(ev)
-			if len(r.framing) > 0 {
-				if ok {
-					r.framing = append(r.framing, ev)
+			if len(r.framing) > 0 || len(r.toolBuf) > 0 {
+				for _, held := range r.toolBuf {
+					r.trackEmittedKind(held)
 				}
 				r.queue = append(r.queue, r.framing...)
 				r.framing = nil
+				r.queue = append(r.queue, r.toolBuf...)
+				r.toolBuf = nil
+				if ok {
+					r.queue = append(r.queue, ev)
+				}
 				continue
 			}
 			return ev, ok, err
@@ -671,10 +709,12 @@ func (r *reader) decide(stage string, err error) bool {
 		_ = r.inner.Close()
 		r.inner = nil
 	}
-	// The dead attempt's held message_start must never replay ahead of the
-	// recovery narration or the fresh attempt's own framing: the caller has
-	// not seen it, and a fresh stream delivers its own.
+	// The dead attempt's held message_start and buffered tool-call fragments
+	// must never replay ahead of the recovery narration or the fresh
+	// attempt's own events: the caller has not seen them, and a fresh stream
+	// delivers its own.
 	r.framing = nil
+	r.toolBuf = nil
 	class := llm.ClassOf(err)
 	r.observeQuota(err)
 	p := r.p

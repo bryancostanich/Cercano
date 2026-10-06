@@ -228,6 +228,9 @@ h1 {
 .feature-story--visual .feature-lead { font-size: 18px; }
 .feature-story--visual .feature-body { margin-top: 12px; }
 .feature-story--visual .text-link { display: block; margin-top: 28px; }
+.feature-story--visual:nth-child(odd) {
+  grid-template-columns: minmax(0, 1.34fr) minmax(280px, .66fr);
+}
 .feature-story--visual:nth-child(odd) .feature-copy { order: 2; }
 .feature-story--visual:nth-child(odd) .feature-demo,
 .feature-story--visual:nth-child(odd) .flow { order: 1; }
@@ -324,7 +327,8 @@ footer {
   .feature-copy h3 { grid-column: 2; grid-row: auto; }
   .feature-lead, .feature-body, .feature-copy .text-link { grid-column: 2; }
   .feature-lead { margin-top: 22px; }
-  .feature-story--visual { grid-template-columns: 1fr; gap: 42px; }
+  .feature-story--visual,
+  .feature-story--visual:nth-child(odd) { grid-template-columns: 1fr; gap: 42px; }
   .feature-story--visual:nth-child(odd) .feature-copy,
   .feature-story--visual:nth-child(odd) .feature-demo,
   .feature-story--visual:nth-child(odd) .flow { order: initial; }

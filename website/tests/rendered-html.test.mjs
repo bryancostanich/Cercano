@@ -45,6 +45,7 @@ test("keeps the TUI palettes and persistent theme behavior", async () => {
     assert.match(css, new RegExp(color, "i"));
   }
   assert.match(css, /--font-mono:\s*var\(--font-plex-mono\)/);
+  assert.match(css, /feature-story--visual:nth-child\(odd\)[^{]*\{[^}]*1\.34fr[^}]*\.66fr/s);
   assert.match(page, /localStorage\.setItem\("cercano-theme"/);
   assert.match(layout, /prefers-color-scheme:\s*dark/);
   assert.match(layout, /IBM_Plex_Mono/);

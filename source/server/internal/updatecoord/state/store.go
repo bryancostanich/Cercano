@@ -72,13 +72,18 @@ type Store struct {
 //   - The state root itself is caller-trusted: only the Cercano/updater/
 //     <installID> chain under it is managed here.
 //
-// An existing database is validated as the dedicated, recognized version-1
-// updater schema (application_id, user_version, exact table set, and
-// meta-bound installID) BEFORE any write or journal pragma touches it.
-// Foreign, future, corrupt, or identity-mismatched databases are refused
-// without modification; there is no migration and no reset. A brand-new
-// (absent) database is initialized as recognized schema
-// version 1 in one transaction.
+// An existing database is validated as the dedicated, recognized updater
+// schema (application_id, user_version, exact table set for the database's
+// own version, and meta-bound installID) BEFORE any write or journal pragma
+// touches it. A legitimate legacy schema-1 database is upgraded in ONE
+// immediate transaction to the current version (additive dismissal_records
+// table plus the recorded version) with every existing operation record,
+// identifier counter, and delegation record retained; the upgrade is
+// revalidated under the same connection and is safe against a concurrent
+// handle performing the same upgrade. Foreign, future, corrupt, or
+// identity-mismatched databases are refused without modification; there is
+// no reset and no destructive migration. A brand-new (absent) database is
+// initialized as the recognized current schema version in one transaction.
 //
 // Open never reads the user's real environment: stateRoot and installID
 // must come from the caller (tests use temporary directories).
@@ -90,15 +95,9 @@ func Open(stateRoot, installID string) (*Store, error) {
 
 	// Read-only preflight prevents unknown databases from being opened writable.
 	if existing {
-		ro, err := sql.Open("sqlite", sqliteURI(dbPath, "ro"))
-		if err != nil {
-			return nil, err
-		}
-		ro.SetMaxOpenConns(1)
 		ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
-		err = validateExistingDB(ctx, ro, installID)
+		err := preflightValidate(ctx, dbPath, installID)
 		cancel()
-		_ = ro.Close()
 		if err != nil {
 			return nil, err
 		}
@@ -132,8 +131,31 @@ func Open(stateRoot, installID string) (*Store, error) {
 	}
 
 	if existing {
-		if err := validateExistingDB(ctx, db, installID); err != nil {
-			return fail(err)
+		// An existing database is either the recognized current version or
+		// the exact legacy schema-1 version this package historically
+		// wrote. Version 1 upgrades here — and ONLY here — in ONE
+		// immediate transaction revalidated under this same connection,
+		// which is safe against a concurrent handle performing the same
+		// upgrade. Every other database stays refused without
+		// modification; there is no reset and no destructive migration.
+		conn, cerr := db.Conn(ctx)
+		if cerr != nil {
+			return fail(fmt.Errorf("state: connect: %w", cerr))
+		}
+		version, verr := readSchemaVersion(ctx, conn)
+		if verr == nil && version == LegacySchemaVersion {
+			verr = migrateSchema1To2(ctx, conn, installID)
+		} else if verr == nil {
+			// Validate on the SAME connection this handle already holds;
+			// the pool is pinned to one connection.
+			verr = validateExistingDB(ctx, conn, installID)
+		}
+		if verr != nil {
+			_ = conn.Close()
+			return fail(verr)
+		}
+		if cerr = conn.Close(); cerr != nil {
+			return fail(fmt.Errorf("state: release connection: %w", cerr))
 		}
 	} else {
 		if err := initNewDB(ctx, db, installID); err != nil {

@@ -3,8 +3,10 @@ package state
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // AppID is the SQLite application_id marking a database as Cercano updater
@@ -13,12 +15,20 @@ import (
 // is read or written.
 const AppID = 0x4352434E // 'C','R','C','N'
 
-// SchemaVersion is the recognized schema version. Version 1 is the first
-// schema this package writes. There is deliberately NO automatic upgrade:
-// a database with any other user_version (including a future one) is
-// refused without modification, and no migration — destructive or
-// otherwise — exists in this slice.
-const SchemaVersion = 1
+// SchemaVersion is the recognized schema version. Version 2 adds the
+// dedicated dismissal_records table. Version 1 databases — and ONLY
+// version-1 databases — are upgraded in one immediate transaction inside
+// Open after full revalidation; the exact legacy schema-1 definition is
+// preserved for that validation and is never treated as an unknown/empty
+// database or overwritten by guessing. A database with any other
+// user_version (including a future one) is refused without modification,
+// and no destructive migration or reset exists.
+const SchemaVersion = 2
+
+// LegacySchemaVersion is the schema version this package recognized before
+// dismissal persistence. It is the only older version a database may carry
+// to be upgraded.
+const LegacySchemaVersion = 1
 
 // meta keys stored in state_meta and validated on every open.
 const (
@@ -26,22 +36,35 @@ const (
 	metaKeyInstallID     = "install_id"
 )
 
-// knownTables is the exact table set of schema version 1. An existing
-// database must contain exactly these tables (ignoring sqlite's internal
-// sqlite_% tables): missing tables mean a partial or corrupt write, extra
-// tables mean a foreign or future database. Both are refused.
-var knownTables = map[string]bool{
+// schema1Tables is the exact table set of schema version 1, kept verbatim so
+// a legacy database is validated against precisely the schema this package
+// used to write — never as an unknown or empty database.
+var schema1Tables = map[string]bool{
 	"state_meta":        true,
 	"install_state":     true,
 	"operation_records": true,
 	"policy_records":    true,
 }
 
-// schemaSQL is the version-1 schema. It is created only for a NEW empty
-// database, inside one transaction together with the application_id,
-// user_version, and meta rows — so a fresh database is either fully
-// initialized or not created at all.
-const schemaSQL = `
+// schema2Tables is the exact table set of schema version 2: the legacy
+// version-1 tables plus the dedicated dismissal_records table. An existing
+// version-2 database must contain exactly these tables (ignoring sqlite's
+// internal sqlite_% tables): missing tables mean a partial or corrupt write,
+// extra tables mean a foreign or future database. Both are refused.
+var schema2Tables = map[string]bool{
+	"state_meta":        true,
+	"install_state":     true,
+	"operation_records": true,
+	"policy_records":    true,
+	"dismissal_records": true,
+}
+
+// schema1SQL is the version-1 schema, byte-for-byte the definition this
+// package historically wrote. It is preserved EXACTLY: legacy databases are
+// validated against this text, and the version-2 upgrade creates only the
+// additive dismissal_records table on top of it — no version-1 object is
+// ever redefined, recreated, or dropped.
+const schema1SQL = `
 CREATE TABLE state_meta (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL
@@ -66,8 +89,50 @@ CREATE TABLE policy_records (
 ) WITHOUT ROWID;
 `
 
+// schema2AddendumSQL is the ONLY schema change from version 1 to version 2:
+// a dedicated dismissal_records table holding one durable per-version
+// dismissal per installation. Each row is addressed by the installation and
+// the dismissed announcement's exact channel/source/version key and carries
+// a per-entry revision (compare-and-save) plus the strict
+// policy.DismissalRecord JSON.
+const schema2AddendumSQL = `
+CREATE TABLE dismissal_records (
+  install_id   TEXT NOT NULL,
+  channel      TEXT NOT NULL,
+  source       TEXT NOT NULL,
+  version      TEXT NOT NULL,
+  revision     INTEGER NOT NULL,
+  record_json  TEXT NOT NULL,
+  PRIMARY KEY (install_id, channel, source, version)
+) WITHOUT ROWID;
+`
+
+// schemaSQLFor returns the full DDL text of a recognized schema version.
+func schemaSQLFor(version int64) string {
+	switch version {
+	case LegacySchemaVersion:
+		return schema1SQL
+	case SchemaVersion:
+		return schema1SQL + schema2AddendumSQL
+	default:
+		return ""
+	}
+}
+
+// tablesFor returns the exact table set of a recognized schema version.
+func tablesFor(version int64) map[string]bool {
+	switch version {
+	case LegacySchemaVersion:
+		return schema1Tables
+	case SchemaVersion:
+		return schema2Tables
+	default:
+		return nil
+	}
+}
+
 // initNewDB initializes a brand-new (absent or zero-byte) database as a
-// recognized version-1 updater state database for installID, in ONE
+// recognized version-2 updater state database for installID, in ONE
 // transaction: schema, application_id, user_version, the meta rows, and the
 // install counter row either all commit or none do. It is never run
 // against a database that already has content.
@@ -80,7 +145,7 @@ func initNewDB(ctx context.Context, db *sql.DB, installID string) error {
 		return err
 	}
 	stmts := []string{
-		schemaSQL,
+		schemaSQLFor(SchemaVersion),
 		fmt.Sprintf("PRAGMA application_id = %d;", AppID),
 		fmt.Sprintf("PRAGMA user_version = %d;", SchemaVersion),
 	}
@@ -105,13 +170,35 @@ func initNewDB(ctx context.Context, db *sql.DB, installID string) error {
 	return nil
 }
 
+// dbtx is the query/statement surface shared by *sql.DB and *sql.Conn, so
+// the same strict validation runs on the read-only preflight connection, the
+// writable connection, and — critically — inside the migration transaction
+// on the very connection that then performs the upgrade.
+type dbtx interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+// exec runs a raw statement (transaction control or pragma).
+func exec(ctx context.Context, db dbtx, query string) error {
+	if _, err := db.ExecContext(ctx, query); err != nil {
+		return err
+	}
+	return nil
+}
+
 // validateExistingDB checks that an existing database is a dedicated,
-// recognized version-1 updater state database bound to installID. It is
+// recognized updater state database bound to installID. The WHOLE
+// recognized schema for the database's own version is validated: a
+// version-1 database must match the exact legacy schema-1 definition and a
+// version-2 database must match the exact version-2 definition — same
+// version with unknown/extra/missing/altered objects is refused. It is
 // strictly read-only: no write and no journal pragma runs before it
 // succeeds. Every anomaly is a typed refusal — foreign, future, corrupt, or
 // identity mismatch — and none of them modifies the file or resets
 // anything.
-func validateExistingDB(ctx context.Context, db *sql.DB, installID string) error {
+func validateExistingDB(ctx context.Context, db dbtx, installID string) error {
 	var appid int64
 	if err := db.QueryRowContext(ctx, "PRAGMA application_id").Scan(&appid); err != nil {
 		return fmt.Errorf("%w: cannot read application_id: %v", ErrCorruptDatabase, err)
@@ -120,22 +207,23 @@ func validateExistingDB(ctx context.Context, db *sql.DB, installID string) error
 		return fmt.Errorf("%w: application_id %#x", ErrForeignDatabase, appid)
 	}
 
-	var uv int64
-	if err := db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&uv); err != nil {
-		return fmt.Errorf("%w: cannot read user_version: %v", ErrCorruptDatabase, err)
+	version, err := readSchemaVersion(ctx, db)
+	if err != nil {
+		return err
 	}
-	if uv != SchemaVersion {
-		if uv > SchemaVersion {
-			return fmt.Errorf("%w: user_version %d > supported %d", ErrFutureSchema, uv, SchemaVersion)
+	tables := tablesFor(version)
+	if tables == nil {
+		if version > SchemaVersion {
+			return fmt.Errorf("%w: user_version %d > supported %d", ErrFutureSchema, version, SchemaVersion)
 		}
-		return fmt.Errorf("%w: user_version %d", ErrForeignDatabase, uv)
+		return fmt.Errorf("%w: user_version %d", ErrForeignDatabase, version)
 	}
 
 	expected := map[string]string{}
 	normalize := func(s string) string {
 		return strings.Join(strings.Fields(strings.TrimSuffix(strings.TrimSpace(s), ";")), " ")
 	}
-	for _, q := range strings.Split(schemaSQL, ";") {
+	for _, q := range strings.Split(schemaSQLFor(version), ";") {
 		fields := strings.Fields(q)
 		if len(fields) > 2 {
 			expected[fields[2]] = normalize(q)
@@ -153,7 +241,7 @@ func validateExistingDB(ctx context.Context, db *sql.DB, installID string) error
 			rows.Close()
 			return ErrCorruptDatabase
 		}
-		if kind != "table" || !knownTables[name] || !definition.Valid || normalize(definition.String) != expected[name] {
+		if kind != "table" || !tables[name] || !definition.Valid || normalize(definition.String) != expected[name] {
 			rows.Close()
 			return fmt.Errorf("%w: unrecognized schema object", ErrForeignDatabase)
 		}
@@ -164,7 +252,7 @@ func validateExistingDB(ctx context.Context, db *sql.DB, installID string) error
 	if err != nil {
 		return ErrCorruptDatabase
 	}
-	if seen != len(knownTables) {
+	if seen != len(tables) {
 		return fmt.Errorf("%w: incomplete schema", ErrCorruptDatabase)
 	}
 
@@ -187,7 +275,9 @@ func validateExistingDB(ctx context.Context, db *sql.DB, installID string) error
 	if len(meta) != 2 {
 		return fmt.Errorf("%w: state_meta is empty", ErrCorruptDatabase)
 	}
-	if got := meta[metaKeySchemaVersion]; got != fmt.Sprint(SchemaVersion) {
+	// The persisted meta version must agree with the file's user_version —
+	// including for a legacy version-1 database, which must still say "1".
+	if got := meta[metaKeySchemaVersion]; got != fmt.Sprint(version) {
 		return fmt.Errorf("%w: meta schema_version %q", ErrCorruptDatabase, got)
 	}
 	if got := meta[metaKeyInstallID]; got != installID {
@@ -204,10 +294,162 @@ func validateExistingDB(ctx context.Context, db *sql.DB, installID string) error
 	return nil
 }
 
-// exec runs a raw statement (transaction control or pragma).
-func exec(ctx context.Context, db *sql.DB, query string) error {
-	if _, err := db.ExecContext(ctx, query); err != nil {
+// preflightValidate opens the database read-only and validates the whole
+// recognized schema for the database's own version inside ONE consistent
+// read transaction, so a concurrent version upgrade (another handle
+// migrating a legacy database) can never be observed half-applied. It is
+// strictly read-only: no write, no journal pragma, and no sidecar is
+// created; a refusal leaves the file untouched.
+func preflightValidate(ctx context.Context, dbPath, installID string) error {
+	ro, err := sql.Open("sqlite", sqliteURI(dbPath, "ro"))
+	if err != nil {
 		return err
 	}
-	return nil
+	defer ro.Close()
+	ro.SetMaxOpenConns(1)
+	conn, err := ro.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close() //nolint:errcheck // read-only preflight path
+	if _, err := conn.ExecContext(ctx, "BEGIN"); err != nil {
+		return fmt.Errorf("%w: cannot begin read snapshot: %v", ErrCorruptDatabase, err)
+	}
+	verr := validateExistingDB(ctx, conn, installID)
+	// End the snapshot. ROLLBACK of a read-only transaction never writes
+	// the database file.
+	rctx, rcancel := context.WithTimeout(context.Background(), opTimeout)
+	defer rcancel()
+	_, _ = conn.ExecContext(rctx, "ROLLBACK") //nolint:errcheck // best-effort snapshot end
+	return verr
+}
+
+// readSchemaVersion reads the database's user_version and rejects
+// unreadable values.
+func readSchemaVersion(ctx context.Context, db dbtx) (int64, error) {
+	var version int64
+	if err := db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
+		return 0, fmt.Errorf("%w: cannot read user_version: %v", ErrCorruptDatabase, err)
+	}
+	return version, nil
+}
+
+// migrationFault is a white-box test hook invoked inside the version-1 to
+// version-2 migration transaction immediately before COMMIT; a non-nil
+// error forces a rollback, proving the upgrade is atomic. It is nil in
+// production and never set outside this package's tests.
+var migrationFault func() error
+
+// migrateSchema1To2 upgrades a legitimate version-1 database to version 2.
+// It MUST run on the writable connection that will perform the upgrade: the
+// whole operation — revalidation of the exact legacy schema under the SAME
+// connection, creation of the additive dismissal_records table, the
+// user_version bump, and the state_meta schema_version update — happens in
+// ONE BEGIN IMMEDIATE transaction, so every existing operation record,
+// identifier counter, and delegation record is retained unchanged and a
+// failure leaves the database logically still a complete version-1
+// database.
+//
+// Concurrent safety: the write lock is taken up front with the same bounded
+// busy retry as every other write. A second handle that opens while another
+// is upgrading simply waits; when it revalidates inside its own transaction
+// it observes version 2 and commits a no-op. A database that is not a
+// fully valid version 1 (or already 2) database at that point is refused —
+// there is no guessing, no reset, and no destructive migration.
+func migrateSchema1To2(ctx context.Context, conn *sql.Conn, installID string) error {
+	if err := beginImmediate(ctx, conn); err != nil {
+		return fmt.Errorf("state: begin migration transaction: %w", err)
+	}
+	rollback := func() {
+		rctx, cancel := context.WithTimeout(context.Background(), opTimeout)
+		defer cancel()
+		_, _ = conn.ExecContext(rctx, "ROLLBACK") //nolint:errcheck // best effort; error path only
+	}
+	commit := func() error {
+		if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+			rollback()
+			return fmt.Errorf("state: commit migration: %w", err)
+		}
+		return nil
+	}
+
+	// Revalidate under the SAME connection, holding the write lock, so the
+	// schema this transaction upgrades cannot change underneath it.
+	version, err := readSchemaVersion(ctx, conn)
+	if err != nil {
+		rollback()
+		return err
+	}
+	switch version {
+	case SchemaVersion:
+		// A concurrent handle already upgraded the database. Nothing to
+		// do; this transaction is a verified no-op.
+		return commit()
+	case LegacySchemaVersion:
+		if err := validateExistingDB(ctx, conn, installID); err != nil {
+			rollback()
+			return err
+		}
+	default:
+		rollback()
+		return fmt.Errorf("%w: user_version %d", ErrForeignDatabase, version)
+	}
+
+	if err := exec(ctx, conn, schema2AddendumSQL); err != nil {
+		rollback()
+		return fmt.Errorf("state: create dismissal_records: %w", err)
+	}
+	if err := exec(ctx, conn, fmt.Sprintf("PRAGMA user_version = %d;", SchemaVersion)); err != nil {
+		rollback()
+		return fmt.Errorf("state: bump user_version: %w", err)
+	}
+	res, err := conn.ExecContext(ctx,
+		`UPDATE state_meta SET value = ? WHERE key = ? AND value = ?`,
+		fmt.Sprint(SchemaVersion), metaKeySchemaVersion, fmt.Sprint(LegacySchemaVersion))
+	if err != nil {
+		rollback()
+		return fmt.Errorf("state: update schema_version meta: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		rollback()
+		return fmt.Errorf("state: update schema_version meta: %w", err)
+	}
+	if n != 1 {
+		rollback()
+		return fmt.Errorf("%w: schema_version meta row missing", ErrCorruptDatabase)
+	}
+	// Test-injection point for the atomic-rollback proof; nil in production.
+	if migrationFault != nil {
+		if ferr := migrationFault(); ferr != nil {
+			rollback()
+			return ferr
+		}
+	}
+	return commit()
+}
+
+// beginImmediate takes the write lock up front with the bounded busy retry
+// shared by every write path: concurrent writers in other processes or on
+// other handles serialize on the busy timeout instead of failing
+// mid-transaction, and a missing deadline still cannot hang a caller.
+func beginImmediate(ctx context.Context, conn *sql.Conn) error {
+	for {
+		_, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE")
+		if err == nil {
+			return nil
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		var code interface{ Code() int }
+		if !errors.As(err, &code) || code.Code()&0xff != 5 {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
 }

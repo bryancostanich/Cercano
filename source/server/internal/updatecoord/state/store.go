@@ -333,23 +333,40 @@ func (s *Store) inWriteTx(ctx context.Context, fn func(ctx context.Context, conn
 // IMMEDIATE transaction, so two racing processes can never observe the same
 // identifier.
 func (s *Store) AllocateOperationID(ctx context.Context) (int64, error) {
-	var next int64
+	var id int64
 	err := s.inWriteTx(ctx, func(ctx context.Context, conn *sql.Conn) error {
-		if s.fault != nil {
-			if err := s.fault(); err != nil {
-				return err
-			}
+		next, err := s.allocateOperationIDConn(ctx, conn)
+		if err != nil {
+			return err
 		}
-		row := conn.QueryRowContext(ctx,
-			`UPDATE install_state SET next_op_id = next_op_id + 1 WHERE install_id = ? AND typeof(next_op_id)='integer' AND next_op_id >= 1 AND next_op_id < 9223372036854775807 RETURNING next_op_id`,
-			s.installID)
-		if err := row.Scan(&next); err != nil {
-			return fmt.Errorf("%w: installation state row missing: %v", ErrCorruptDatabase, err)
-		}
+		id = next
 		return nil
 	})
 	if err != nil {
 		return 0, err
+	}
+	return id, nil
+}
+
+// allocateOperationIDConn is the conn-scoped counter primitive. It MUST be
+// called inside a caller-owned BEGIN IMMEDIATE transaction: composite
+// operations (the operation adapter) share ONE transaction across counter
+// allocation and record writes instead of the exported per-operation
+// helpers, which each open their own transaction. Failing composite
+// transactions roll the counter back with everything else, so an aborted
+// identifier is never burned as a gap.
+func (s *Store) allocateOperationIDConn(ctx context.Context, conn *sql.Conn) (int64, error) {
+	if s.fault != nil {
+		if err := s.fault(); err != nil {
+			return 0, err
+		}
+	}
+	var next int64
+	row := conn.QueryRowContext(ctx,
+		`UPDATE install_state SET next_op_id = next_op_id + 1 WHERE install_id = ? AND typeof(next_op_id)='integer' AND next_op_id >= 1 AND next_op_id < 9223372036854775807 RETURNING next_op_id`,
+		s.installID)
+	if err := row.Scan(&next); err != nil {
+		return 0, fmt.Errorf("%w: installation state row missing: %v", ErrCorruptDatabase, err)
 	}
 	return next - 1, nil
 }

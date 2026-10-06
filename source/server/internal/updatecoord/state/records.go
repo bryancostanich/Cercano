@@ -75,55 +75,112 @@ func (s *Store) SaveOperationRecord(ctx context.Context, expectedRevision int64,
 	}
 
 	err = s.inWriteTx(ctx, func(ctx context.Context, conn *sql.Conn) error {
-		var next int64
-		if err := conn.QueryRowContext(ctx, `SELECT next_op_id FROM install_state WHERE install_id=?`, s.installID).Scan(&next); err != nil {
-			return ErrCorruptDatabase
-		}
-		if rec.ID >= next {
-			return fmt.Errorf("%w: operation ID was not allocated", ErrInvalidRecord)
-		}
-		if s.fault != nil {
-			if ferr := s.fault(); ferr != nil {
-				return ferr
-			}
-		}
-		if expectedRevision == 0 {
-			var count int
-			if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM operation_records WHERE op_id=?`, rec.ID).Scan(&count); err != nil {
-				return err
-			}
-			if count != 0 {
-				return ErrStaleRevision
-			}
-			_, err := conn.ExecContext(ctx,
-				`INSERT INTO operation_records (op_id, install_id, revision, record_json) VALUES (?, ?, 1, ?)`,
-				rec.ID, rec.InstallationID, string(payload))
-			if err != nil {
-				return fmt.Errorf("state: insert operation record: %w", err)
-			}
-			newRevision = 1
-			return nil
-		}
-		res, err := conn.ExecContext(ctx,
-			`UPDATE operation_records SET revision = revision + 1, record_json = ? WHERE op_id = ? AND install_id = ? AND revision = ?`,
-			string(payload), rec.ID, rec.InstallationID, expectedRevision)
+		rev, err := s.saveOperationRecordConn(ctx, conn, expectedRevision, rec, payload)
 		if err != nil {
-			return fmt.Errorf("state: update operation record: %w", err)
+			return err
 		}
-		n, err := res.RowsAffected()
-		if err != nil {
-			return fmt.Errorf("state: update operation record: %w", err)
-		}
-		if n == 0 {
-			return fmt.Errorf("%w: operation record %d is not at revision %d", ErrStaleRevision, rec.ID, expectedRevision)
-		}
-		newRevision = expectedRevision + 1
+		newRevision = rev
 		return nil
 	})
 	if err != nil {
 		return 0, err
 	}
 	return newRevision, nil
+}
+
+// saveOperationRecordConn is the conn-scoped record-write primitive. It
+// MUST be called inside a caller-owned BEGIN IMMEDIATE transaction: the
+// operation adapter composes counter allocation, active-operation selection,
+// and the revisioned record write into ONE transaction instead of nesting
+// the exported per-operation helpers (each opens its own transaction).
+//
+// The allocation check (record ID strictly below the persisted counter) and
+// the revision compare-and-swap run in the same transaction as the write,
+// so an unallocated ID or a stale revision can never commit and a failed
+// composite transaction rolls back with everything else.
+func (s *Store) saveOperationRecordConn(ctx context.Context, conn *sql.Conn, expectedRevision int64, rec operation.Record, payload []byte) (int64, error) {
+	var next int64
+	if err := conn.QueryRowContext(ctx, `SELECT next_op_id FROM install_state WHERE install_id=?`, s.installID).Scan(&next); err != nil {
+		return 0, ErrCorruptDatabase
+	}
+	if rec.ID >= next {
+		return 0, fmt.Errorf("%w: operation ID was not allocated", ErrInvalidRecord)
+	}
+	if s.fault != nil {
+		if ferr := s.fault(); ferr != nil {
+			return 0, ferr
+		}
+	}
+	if expectedRevision == 0 {
+		var count int
+		if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM operation_records WHERE op_id=?`, rec.ID).Scan(&count); err != nil {
+			return 0, err
+		}
+		if count != 0 {
+			return 0, ErrStaleRevision
+		}
+		_, err := conn.ExecContext(ctx,
+			`INSERT INTO operation_records (op_id, install_id, revision, record_json) VALUES (?, ?, 1, ?)`,
+			rec.ID, rec.InstallationID, string(payload))
+		if err != nil {
+			return 0, fmt.Errorf("state: insert operation record: %w", err)
+		}
+		return 1, nil
+	}
+	res, err := conn.ExecContext(ctx,
+		`UPDATE operation_records SET revision = revision + 1, record_json = ? WHERE op_id = ? AND install_id = ? AND revision = ?`,
+		string(payload), rec.ID, rec.InstallationID, expectedRevision)
+	if err != nil {
+		return 0, fmt.Errorf("state: update operation record: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("state: update operation record: %w", err)
+	}
+	if n == 0 {
+		return 0, fmt.Errorf("%w: operation record %d is not at revision %d", ErrStaleRevision, rec.ID, expectedRevision)
+	}
+	return expectedRevision + 1, nil
+}
+
+// loadCurrentOperationConn loads the installation's CURRENT operation
+// record — the record with the HIGHEST persisted operation ID; history
+// below the current operation is immutable from the adapter once a newer
+// operation exists — together with its revision. It reads no rows when no
+// operation exists. It is safe inside a caller-owned write transaction
+// (where it also enforces that the record's ID was allocated below the
+// persisted counter) and outside one, so reads never need the write lock.
+// A row failing strict decoding or validation is ErrCorruptDatabase.
+func (s *Store) loadCurrentOperationConn(ctx context.Context, conn *sql.Conn) (operation.Record, int64, bool, error) {
+	var payload string
+	var opID, revision int64
+	err := conn.QueryRowContext(ctx,
+		`SELECT op_id, revision, record_json FROM operation_records WHERE install_id = ? ORDER BY op_id DESC LIMIT 1`,
+		s.installID).Scan(&opID, &revision, &payload)
+	if errors.Is(err, sql.ErrNoRows) {
+		return operation.Record{}, 0, false, nil
+	}
+	if err != nil {
+		return operation.Record{}, 0, false, fmt.Errorf("state: load current operation: %w", err)
+	}
+	if opID <= 0 || revision < 1 {
+		return operation.Record{}, 0, false, fmt.Errorf("%w: operation record %d at revision %d", ErrCorruptDatabase, opID, revision)
+	}
+	rec, err := decodeOperationRecord([]byte(payload))
+	if err != nil {
+		return operation.Record{}, 0, false, fmt.Errorf("%w: operation record %d: %v", ErrCorruptDatabase, opID, err)
+	}
+	if rec.ID != opID || rec.InstallationID != s.installID {
+		return operation.Record{}, 0, false, fmt.Errorf("%w: operation record %d is bound to a different installation", ErrInstallIDMismatch, opID)
+	}
+	var next int64
+	if err := conn.QueryRowContext(ctx, `SELECT next_op_id FROM install_state WHERE install_id=?`, s.installID).Scan(&next); err != nil {
+		return operation.Record{}, 0, false, ErrCorruptDatabase
+	}
+	if rec.ID >= next {
+		return operation.Record{}, 0, false, fmt.Errorf("%w: operation record %d was never allocated", ErrCorruptDatabase, opID)
+	}
+	return rec, revision, true, nil
 }
 
 // LoadOperationRecord loads the persisted canonical operation.Record with

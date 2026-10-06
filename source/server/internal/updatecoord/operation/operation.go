@@ -276,6 +276,11 @@ const (
 	// activation and the backend has not yet confirmed a safe failed state
 	// or a successful rollback, so no new operation may start.
 	MachineRecoveryNeeded MachineCode = "recovery-needed"
+	// MachineInvalidRecord: a persisted operation record does not satisfy
+	// the model's own invariants (unsupported schema version, unknown
+	// state, or flags inconsistent with the recorded state). The record is
+	// refused, never silently reset or coerced into a default.
+	MachineInvalidRecord MachineCode = "invalid-record"
 )
 
 // Failure is an operation failure record. It has no dedicated raw-detail
@@ -375,9 +380,11 @@ type Snapshot struct {
 	UpdatedAt time.Time
 }
 
-// Record is the persistence-oriented JSON projection of an operation. It is
-// a design deliverable for the later durable-recovery slice only: nothing in
-// this package serializes it to any file, and no migration code exists yet.
+// Record is the persistence-oriented JSON projection of an operation. The
+// store/adapter slice persists it through the state package; this package
+// itself still writes no file and reads no file — RestoreSnapshot is the
+// validated way back from a Record into the pure model, and no migration
+// code exists yet.
 type Record struct {
 	SchemaVersion             int       `json:"schema_version"`
 	ID                        int64     `json:"id"`

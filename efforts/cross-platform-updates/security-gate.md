@@ -28,26 +28,45 @@ single-key-compromise/loss tolerance but imposes custody and signing overhead
 that the operator declined for the initial rollout. This choice is settled;
 implementation must not silently adopt a threshold or put root into CI.
 
+## Approved routine signing policy
+
+The user explicitly approved automatic signing in GitHub CI. Dedicated online
+keys authorize the targets, snapshot and timestamp roles. The root remains
+offline; ordinary application releases do not require the root key or an
+offline signing ceremony.
+
+Separate role keys let jobs receive only the authority they need, but keys
+accessible within the same compromised CI security boundary do not provide
+independent protection. A compromised CI job with targets-key access can
+authorize malicious update contents. Root custody and a rehearsed revocation/
+rotation procedure remain important, but cannot undo code already installed.
+
+The alternative of offline targets authorization was considered for limiting
+CI compromise impact; its per-release ceremony was not chosen. This decision
+is settled. It authorizes the architecture, not production secret provisioning
+or an unreviewed expansion of repository permissions.
+
 ## Remaining decision queue, one at a time
 
-- Routine signing: online targets/snapshot/timestamp signing in release CI,
-  versus manually approved offline targets signing with online freshness roles.
 - Specific role permissions, expiry/renewal periods and emergency recovery.
 - Metadata hosting, publication preconditions and retained historical metadata.
 
-Next recommendation: use dedicated online role keys for routine releases in
-GitHub Actions, never the root key. This permits existing release automation to
-publish updates without another offline signing ceremony. Separate keys limit
-which role a particular job should receive, but keys accessible to the same CI
-security boundary are not independent protection from compromise of that
-boundary. Freshness renewal must be scheduled even without new app releases.
+Next proposed expiry policy (not yet approved): timestamp valid for seven days,
+snapshot for thirty days, targets for ninety days, root for one year. Scheduled
+automation runs daily to renew online metadata as needed, without changing
+approved target contents or root trust. Notify early for offline root renewal
+(starting ninety days before expiry), alert on missed renewal/failure, and
+verify metadata freshness independently of whether a scheduled run starts.
+GitHub scheduling alone is not a guarantee of timely renewal.
 
-The strongest alternative is offline targets signing for each authorized new
-release, with online timestamp/snapshot renewal. That reduces the ability of
-compromised release CI alone to authorize new executable content, at the cost of
-manual signing and handling targets expiration when no release is made.
+The tighter alternative is a one-day timestamp with renewal every six hours,
+retaining the same longer-lived roles. It narrows stale-update-information
+exposure but gives less grace for scheduler, signing or hosting outages. In
+both cases, expiration blocks new updates rather than installed application
+use, and there is no ignore-expiry switch. Routine renewal must verify current
+metadata and targets and must not blindly re-sign arbitrary remote content.
 
-Neither routine-signing alternative is approved yet. Short fixture lifetimes,
-one-key test role thresholds, and test storage preconditions are not production
-defaults. Native runner access and production provisioning/publication remain
-separate authorization gates.
+Short fixture lifetimes, one-key test role thresholds and test storage
+preconditions are not production defaults. Native runner access, production
+provisioning/publication, concrete signing-job scopes and emergency recovery
+remain explicit gates.

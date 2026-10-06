@@ -85,7 +85,6 @@ const features = [
     lead: "History is useful when it is searchable and ready to continue.",
     body: "Automatic titles, saved sessions, search, and resume keep ongoing work close. Pick up the thread without reconstructing the task from memory.",
     doc: "automatic-session-retention.md",
-    wide: true,
     video: {
       src: "/videos/sessions.mp4",
       poster: "/videos/sessions.jpg",
@@ -179,7 +178,7 @@ export default function Home() {
 
           <div className="feature-list">
             {features.map((feature, index) => (
-              <article className={`feature-story${feature.video || feature.architecture ? " feature-story--visual" : ""}${feature.wide ? " feature-story--wide" : ""}`} key={feature.code}>
+              <article className={`feature-story${feature.video || feature.architecture ? " feature-story--visual" : ""}`} key={feature.code}>
                 <div className="feature-copy">
                   <span className="feature-code">{feature.code}</span>
                   <h3>{feature.title}</h3>

@@ -19,6 +19,7 @@ func openAdapter(t *testing.T, root string) (*Store, *Adapter) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = s.Close() })
 	return s, NewAdapter(s)
 }
 
@@ -531,7 +532,85 @@ func TestAdapterInvalidRecordRefusedWithoutMutation(t *testing.T) {
 	}
 }
 
-// TestAdapterConcurrentApplySameIDSerializedAcrossHandles: two handles
+// TestAdapterReachableRecoveredWithHealthSurvivesReopen: health
+// verification survives a cleanup failure and the explicit recover, so the
+// persisted recovered-with-health record is a snapshot the pure model can
+// actually produce. The restore gate must accept it on reopen — never
+// report a corrupt database — and preserve every field.
+func TestAdapterReachableRecoveredWithHealthSurvivesReopen(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	s, a := openAdapter(t, root)
+	driveToInstalling(t, a, "2.0.0")
+	mustApply(t, a, operation.Input{Event: operation.EventInstalled})
+	mustApply(t, a, operation.Input{Event: operation.EventRestarted})
+	mustApply(t, a, operation.Input{Event: operation.EventHealthSuccess})
+	mustApply(t, a, operation.Input{Event: operation.EventFail, Failure: operation.Failure{
+		Code:       operation.MachineCleanupFailed,
+		UserReason: "the superseded files could not be removed",
+	}})
+	recovered := mustApply(t, a, operation.Input{Event: operation.EventRecover})
+	if recovered.State != operation.StateRecovered || !recovered.HealthVerified || !recovered.HasFailure {
+		t.Fatalf("setup: recovered-with-health = %+v", recovered)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	s, a = openAdapter(t, root)
+	defer s.Close()
+	resumed, ok, err := a.Snapshot(ctx)
+	if err != nil || !ok {
+		t.Fatalf("reopen of a reachable recovered-with-health record: ok=%v err=%v", ok, err)
+	}
+	assertSameSnapshot(t, resumed, recovered)
+	if n := recordCount(t, s); n != 1 {
+		t.Fatalf("reopen wrote records: %d", n)
+	}
+}
+
+// TestAdapterActiveWorkSurvivesDeferResumeReopen: active work is cleared
+// only by the idle callback, so it survives defer into deferred AND resume
+// back into ready. Both persisted records are snapshots the pure model can
+// actually produce; the restore gate must accept each across a reopen.
+func TestAdapterActiveWorkSurvivesDeferResumeReopen(t *testing.T) {
+	root := t.TempDir()
+	s, a := openAdapter(t, root)
+	mustStart(t, a, "1.0.0")
+	for _, event := range []operation.Event{operation.EventReady, operation.EventDownload, operation.EventDownloaded, operation.EventVerified, operation.EventWorkActive} {
+		mustApply(t, a, operation.Input{Event: event})
+	}
+	deferred := mustApply(t, a, operation.Input{Event: operation.EventDefer})
+	if deferred.State != operation.StateDeferred || !deferred.ActiveWork {
+		t.Fatalf("invalid setup: %+v", deferred)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, a = openAdapter(t, root)
+	assertSameSnapshot(t, currentSnapshot(t, a), deferred)
+	resumed := mustApply(t, a, operation.Input{Event: operation.EventResume})
+	if resumed.State != operation.StateReady || !resumed.ActiveWork {
+		t.Fatalf("active work lost on resume: %+v", resumed)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	_, a = openAdapter(t, root)
+	assertSameSnapshot(t, currentSnapshot(t, a), resumed)
+}
+
+func assertSameSnapshot(t *testing.T, got, want operation.Snapshot) {
+	t.Helper()
+	if !got.CreatedAt.Equal(want.CreatedAt) || !got.UpdatedAt.Equal(want.UpdatedAt) {
+		t.Fatal("timestamp instant changed across persistence")
+	}
+	want.CreatedAt, want.UpdatedAt = got.CreatedAt, got.UpdatedAt
+	if got != want {
+		t.Fatalf("persisted snapshot changed: got %+v want %+v", got, want)
+	}
+}
+
 // racing the SAME event against the SAME operation are serialized by the
 // write transaction: exactly one event commits, the other is refused by the
 // pure model against the post-commit state, and the persisted revision

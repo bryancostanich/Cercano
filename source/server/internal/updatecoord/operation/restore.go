@@ -69,6 +69,12 @@ func RestoreSnapshot(rec Record) (Snapshot, error) {
 	if snap.HealthVerified && !recordedHealthVerifiedStates[snap.State] {
 		return Snapshot{}, invalidRecord("the record claims verified health outside the states that follow health success")
 	}
+	// Converse of the health invariant: cleanup and complete are reachable
+	// only through health success, so a record claiming either without
+	// verified health cannot have been produced by this model.
+	if (snap.State == StateCleanup || snap.State == StateComplete) && !snap.HealthVerified {
+		return Snapshot{}, invalidRecord("the record claims cleanup or completion without verified health")
+	}
 	if snap.SuccessWithPendingCleanup && snap.State != StateComplete {
 		return Snapshot{}, invalidRecord("the record claims success with pending cleanup outside a complete operation")
 	}
@@ -124,22 +130,30 @@ var (
 	recordedFailureStates = map[State]bool{StateFailed: true, StateRecovered: true}
 	// recordedActiveWorkStates: work becomes active only in StateWaiting
 	// and is cleared only by EventIdle, so it can survive into draining,
-	// and into the pre-activation terminal outcomes reached from waiting
-	// or draining (cancel/defer/fail).
+	// into the pre-activation terminal outcomes reached from waiting or
+	// draining (cancel/defer/fail), back through defer/resume into the
+	// pre-activation states (ready, downloading, verifying), and — after a
+	// pre-activation failure — into recovered via the explicit recover.
 	recordedActiveWorkStates = map[State]bool{
-		StateWaiting:   true,
-		StateDraining:  true,
-		StateCancelled: true,
-		StateDeferred:  true,
-		StateFailed:    true,
+		StateWaiting:     true,
+		StateReady:       true,
+		StateDownloading: true,
+		StateVerifying:   true,
+		StateDraining:    true,
+		StateCancelled:   true,
+		StateDeferred:    true,
+		StateFailed:      true,
+		StateRecovered:   true,
 	}
 	// recordedHealthVerifiedStates: health verification is recorded only by
 	// EventHealthSuccess entering StateCleanup, and survives the edges out
-	// of cleanup (complete, failed).
+	// of cleanup (complete, failed) — including the explicit recover out of
+	// a cleanup failure into recovered.
 	recordedHealthVerifiedStates = map[State]bool{
-		StateCleanup: true,
-		StateComplete: true,
-		StateFailed:   true,
+		StateCleanup:   true,
+		StateComplete:  true,
+		StateFailed:    true,
+		StateRecovered: true,
 	}
 	// recordedAdmissionRestoredStates: the model-level admission-restored
 	// flag is set by pre-activation cancel/defer and cleared by resume.
@@ -151,14 +165,14 @@ var (
 	// StateDraining and is never cleared, so it survives every state
 	// reachable from draining.
 	recordedConsentStates = map[State]bool{
-		StateDraining:   true,
-		StateInstalling: true,
-		StateRestarting: true,
+		StateDraining:    true,
+		StateInstalling:  true,
+		StateRestarting:  true,
 		StateHealthCheck: true,
-		StateCleanup:    true,
-		StateComplete:   true,
-		StateFailed:     true,
-		StateRecovered:  true,
-		StateCancelled:  true,
+		StateCleanup:     true,
+		StateComplete:    true,
+		StateFailed:      true,
+		StateRecovered:   true,
+		StateCancelled:   true,
 	}
 )

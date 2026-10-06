@@ -10,7 +10,7 @@ const ibmPlexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://cercano-ai-agent.b-c119.chatgpt.site"),
+  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? "https://cercano-ai-agent.b-c119.chatgpt.site"),
   title: "Cercano — Use context and compute deliberately",
   description: "A 100% free and open agent harness for working with frontier and open-weight models—separately or together.",
   openGraph: {

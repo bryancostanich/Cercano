@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 
 const projectUrl = "https://github.com/bryancostanich/Cercano";
+const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+const assetUrl = (path: string) => `${basePath}${path}`;
 
 const features = [
   {
@@ -199,8 +201,8 @@ export default function Home() {
                 {feature.video && (
                   <figure className="feature-demo">
                     <div className="video-frame">
-                      <video controls playsInline preload="metadata" poster={feature.video.poster} aria-label={feature.video.label}>
-                        <source src={feature.video.src} type="video/mp4" />
+                      <video controls playsInline preload="metadata" poster={assetUrl(feature.video.poster)} aria-label={feature.video.label}>
+                        <source src={assetUrl(feature.video.src)} type="video/mp4" />
                         Your browser does not support embedded video.
                       </video>
                     </div>

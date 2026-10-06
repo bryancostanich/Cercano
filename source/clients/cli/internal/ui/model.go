@@ -2998,6 +2998,13 @@ func (m *Model) cancelCurrentStreamWithNotice(showNotice bool) {
 	// Compacting=false, so clear it here — a latched compacting flag keeps the
 	// 50ms animation tick alive forever and pins a CPU core until restart.
 	m.clearTurnAnimationState()
+	// Child finalization must run before any new turn starts (steering's
+	// DrainNext path submits immediately after this returns): canceling retires
+	// the turn's generation, so every still-running child tab's done/error
+	// event is now a ghost and its tab would stream/spin forever. This clears
+	// each stale child's streaming state and in-progress tools, leaving
+	// restored tabs and the main view untouched.
+	m.finishStaleSubAgentTabs("sub-agent stopped without a terminal event")
 	if showNotice {
 		m.mainChat().AppendEntry(&Entry{Role: RoleSystem, Content: "⊘ canceled"})
 	}

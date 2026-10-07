@@ -6,6 +6,7 @@ on:
       - 'source/server/internal/updatecoord/**'
       - 'source/server/pkg/update/**'
       - 'source/server/internal/server/**'
+      - 'source/server/cmd/cercano/**'
       - 'source/server/internal/localruntime/**'
       - 'source/server/internal/worker/**'
       - 'source/server/internal/compactiongen/**'

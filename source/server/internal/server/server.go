@@ -189,6 +189,7 @@ type Server struct {
 	updateRuntimeTrackingErr    error
 	updateTrackedCompactor      *compactiongen.Generator
 	updateCompactionTrackingErr error
+	updateHydrationTrackingErr  error
 }
 
 // beginTurn delegates to the turn broker. It registers a new turn for conv,
@@ -1137,8 +1138,9 @@ func NewServer(a *agent.Agent, router RouterCloudUpdater, coordinator *loop.ADKC
 	// resume hydration worker. The worker can outlive its RPC (client
 	// disconnects mid-stream), so it must hold its own admitted lifetime until
 	// it actually returns. Late binding is refused by the service.
-	if err := s.persistSvc.BindResumeHydrationWork(s.updateWork.enter); err != nil {
-		log.Printf("[persistence] resume hydration work admission: %v", err)
+	s.updateHydrationTrackingErr = s.persistSvc.BindResumeHydrationWork(s.updateWork.enter)
+	if s.updateHydrationTrackingErr != nil {
+		log.Printf("[persistence] resume hydration work admission: %v", s.updateHydrationTrackingErr)
 	}
 	// Construct the tool catalog service. permBroker is not yet wired here
 	// (SetPermissions is called by the caller after construction), so it is

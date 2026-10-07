@@ -184,6 +184,12 @@ func (s *ReasoningDiagnostic) do(req *http.Request, next goopenai.HTTPDoer) (res
 	if err != nil {
 		return nil, errors.New("reasoning diagnostic: temperature patch failed")
 	}
+	// Keep the diagnostic's outgoing body on the same wire contract as ordinary
+	// requests: tool results always carry a content field.
+	cloned, err = patchToolResultContent(cloned)
+	if err != nil {
+		return nil, errors.New("reasoning diagnostic: tool-result content patch failed")
+	}
 	b, err = diagnosticReadBody(cloned.Body, s.cfg.MaxBodyBytes)
 	if err != nil {
 		return nil, err

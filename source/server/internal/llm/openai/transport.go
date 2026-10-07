@@ -45,6 +45,10 @@ func (d *normalizingDoer) Do(req *http.Request) (*http.Response, error) {
 	if err != nil {
 		return nil, err
 	}
+	patched, err = patchToolResultContent(patched)
+	if err != nil {
+		return nil, err
+	}
 	resp, err := d.next.Do(patched)
 	if err != nil {
 		log.Printf("[openai] http request failed: conv=%s request_id=%s method=%s path=%s error=%v", diagnosticConversationID(patched), diagnosticRequestID(patched), patched.Method, patched.URL.Path, err)
@@ -84,6 +88,76 @@ func patchExplicitZeroTemperature(req *http.Request) (*http.Request, error) {
 	req.Body = io.NopCloser(bytes.NewReader(body))
 	req.ContentLength = int64(len(body))
 	req.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(body)), nil }
+	return req, nil
+}
+
+// patchToolResultContent guarantees role:"tool" messages always carry a
+// "content" field on the outgoing wire, filling in the empty string when
+// go-openai's `content,omitempty` marshaling dropped a genuinely empty tool
+// result. A missing content field can trigger HTTP 422 "Field required"
+// on strict OpenAI-compatible endpoints. The patch
+// is structured JSON decode/mutate/encode through this HTTPDoer seam — the
+// same approach as patchExplicitZeroTemperature, whose custom MarshalJSON
+// omitempty we cannot override without vendoring the SDK. Messages that
+// already carry content (any value, including null) are left untouched, and
+// non-tool messages are never modified.
+func patchToolResultContent(req *http.Request) (*http.Request, error) {
+	if req.Body == nil || req.Method == http.MethodGet {
+		return req, nil
+	}
+	body, err := io.ReadAll(req.Body)
+	req.Body.Close()
+	if err != nil {
+		return nil, err
+	}
+	restore := func() {
+		req.Body = io.NopCloser(bytes.NewReader(body))
+		req.ContentLength = int64(len(body))
+		req.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(body)), nil }
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(body, &obj); err != nil {
+		restore()
+		return req, nil
+	}
+	rawMsgs, ok := obj["messages"]
+	if !ok {
+		restore()
+		return req, nil
+	}
+	var msgs []map[string]json.RawMessage
+	if err := json.Unmarshal(rawMsgs, &msgs); err != nil {
+		restore()
+		return req, nil
+	}
+	patchedAny := false
+	for _, m := range msgs {
+		var role string
+		if json.Unmarshal(m["role"], &role) != nil || role != "tool" {
+			continue
+		}
+		if _, ok := m["content"]; ok {
+			continue
+		}
+		m["content"] = json.RawMessage(`""`)
+		patchedAny = true
+	}
+	if !patchedAny {
+		restore()
+		return req, nil
+	}
+	obj["messages"], err = json.Marshal(msgs)
+	if err != nil {
+		restore()
+		return req, nil
+	}
+	body, err = json.Marshal(obj)
+	if err != nil {
+		restore()
+		return req, nil
+	}
+	log.Printf("[openai] patched empty tool-result content: method=%s path=%s", req.Method, req.URL.Path)
+	restore()
 	return req, nil
 }
 

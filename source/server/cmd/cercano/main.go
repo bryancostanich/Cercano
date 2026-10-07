@@ -386,14 +386,26 @@ func startGRPCServer(cfg config.Config, bindAddr string, events *crashlog.Writer
 
 	// 64 MiB comfortably fits multiple 20 MiB images (the per-image client cap).
 	const maxGRPCMessageBytes = 64 << 20
+	srv := server.NewServer(orchestrator, lazyRouter, coordinator, cloudFactory, registry)
 	s := grpc.NewServer(
 		grpc.MaxRecvMsgSize(maxGRPCMessageBytes),
 		// Recover handler panics so one bad RPC returns codes.Internal instead of
 		// crashing the singleton agent and dropping every client's stream.
-		grpc.ChainUnaryInterceptor(server.RecoveryUnaryInterceptor()),
-		grpc.ChainStreamInterceptor(server.RecoveryStreamInterceptor()),
+		// Recovery stays OUTERMOST so it also covers panics unwinding through
+		// the update-admission interceptor; admission counts every Agent
+		// request lifetime by default (passive observer streams and the
+		// administrative ShutdownAgent bounce are exempt) so update
+		// preparation sees real in-flight work. Non-Agent services never
+		// match the Agent_ServiceDesc prefix and pass through untouched.
+		grpc.ChainUnaryInterceptor(
+			server.RecoveryUnaryInterceptor(),
+			srv.UpdateAdmissionUnaryInterceptor(),
+		),
+		grpc.ChainStreamInterceptor(
+			server.RecoveryStreamInterceptor(),
+			srv.UpdateAdmissionStreamInterceptor(),
+		),
 	)
-	srv := server.NewServer(orchestrator, lazyRouter, coordinator, cloudFactory, registry)
 	srv.SetBuildVersion(version)
 	compactionCandidates = srv.DispatchCandidates
 	srv.SetRuntimeManager(runtimeManager)

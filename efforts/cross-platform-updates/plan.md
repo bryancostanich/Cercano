@@ -44,13 +44,13 @@ Objective: give every update a trustworthy installation identity and a single ob
 - [x] Record per-version dismissal, explicit self-update enrollment and managed-policy restrictions
 - [x] Specify the Chocolatey opt-in ownership transition and uninstall/version-tracking contract before implementing it
 - [x] Test operation deduplication, concurrent clients, unavailable backends and safe persistence/version migration
-- [ ] Checkpoint the ownership and operation foundation
+- [x] Checkpoint the ownership and operation foundation
 
 ## Phase 4 — Build shared lifecycle coordination
 
 Objective: prevent update races and protect active work before implementing file activation. Files: source/server/internal/updatecoord/, source/server/internal/brewrestart/, source/server/pkg/agentclient/ launch and detach helpers, source/server/internal/procx/, source/server/internal/server/ drain handlers, and additive source/proto/ messages where needed. Tests: native process fixtures, multiple client subprocesses, abandoned locks, agent identity changes, drain cancellation and protocol compatibility. No tests against the live developer agent.
 
-- [ ] Define helper invocation and authenticated local control boundaries using existing transport patterns; request approval if an additional transport or privilege boundary is required
+- [-] Define helper invocation and authenticated local control boundaries using existing transport patterns; request approval if an additional transport or privilege boundary is required
 - [ ] Implement shared launch/update exclusion on Windows, Linux and macOS with stable lock identity and recovery after process death
 - [ ] Identify the exact installation-owned agent, clients and relevant child processes without broad name matching or rename-probe ownership assumptions
 - [ ] Implement the wait-for-idle default and a visible admission barrier once draining begins

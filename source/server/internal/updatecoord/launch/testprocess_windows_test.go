@@ -110,11 +110,11 @@ func jobParentMain() {
 		writeJobResult("child-bound-timeout: " + err.Error())
 		os.Exit(3)
 	}
-	if err := os.WriteFile(*parentDoneMarkerPath, []byte("gone"), 0o600); err != nil {
+	if err := publishFixtureFile(*parentDoneMarkerPath, []byte("gone")); err != nil {
 		writeJobResult("marker-failed: " + err.Error())
 		os.Exit(3)
 	}
-	if err := os.WriteFile(*childPidFilePath, []byte(strconv.Itoa(proc.Pid())), 0o600); err != nil {
+	if err := publishFixtureFile(*childPidFilePath, []byte(strconv.Itoa(proc.Pid()))); err != nil {
 		writeJobResult("pidfile-failed: " + err.Error())
 		os.Exit(3)
 	}
@@ -134,6 +134,14 @@ func classifyJobRefusal(err error) string {
 	}
 }
 
+// writeJobResult publishes the job-parent's outcome ATOMICALLY (temp +
+// rename; see publishFixtureFile): the fixture polls this file, and a
+// created-but-empty or partially written result would race the poll —
+// the exact failure mode CI run 37701866968 proved on the owned-echo
+// result. A publication failure is reported on stderr instead of being
+// silently dropped.
 func writeJobResult(text string) {
-	_ = os.WriteFile(*jobResultPath, []byte(text+"\n"), 0o600)
+	if err := publishFixtureFile(*jobResultPath, []byte(text+"\n")); err != nil {
+		fmt.Fprintf(os.Stderr, "job-parent: publishing result: %v\n", err)
+	}
 }

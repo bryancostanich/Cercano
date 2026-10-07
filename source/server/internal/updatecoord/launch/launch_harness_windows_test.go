@@ -24,6 +24,7 @@ package launch
 // succeed and complete.
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -53,7 +54,16 @@ func ownedEchoMain() {
 		os.Exit(3)
 	}
 	writeResult := func(text string) {
-		_ = os.WriteFile(*echoResultPath, []byte(text+"\n"), 0o600)
+		// Atomic publication (temp + rename; see publishFixtureFile): the
+		// parent polls this file, and CI run 37701866968 proved the direct
+		// os.WriteFile publication races it — the result was read empty
+		// between the create and the content write, and the fixture
+		// failed with an empty reason. A publication failure is reported
+		// on stderr, which the harness parent now captures, so the
+		// outcome is never silently lost.
+		if err := publishFixtureFile(*echoResultPath, []byte(text+"\n")); err != nil {
+			fmt.Fprintf(os.Stderr, "owned-echo: publishing result: %v\n", err)
+		}
 	}
 	if err := enterOwnedPermissiveFixtureJob(); err != nil {
 		writeResult("harness-job-failed: " + err.Error())
@@ -141,18 +151,100 @@ func launchEchoOnceThroughOwnedHarness(t *testing.T, stdoutPath, stderrPath stri
 		"-launch-testprocess-echo-bytes=" + strconv.Itoa(extraBytes),
 	}
 	harness := exec.Command(exe, argv...)
+	// CI run 37701866968 failed with an EMPTY reason: the harness
+	// parent's real exit code, stdout and stderr were never captured, so
+	// a failed harness left the fixture nothing to report. They are
+	// captured now — every failure path below reports the real parent
+	// state, never an empty reason.
+	var harnessStdout, harnessStderr strings.Builder
+	harness.Stdout = &harnessStdout
+	harness.Stderr = &harnessStderr
 	if err := harness.Start(); err != nil {
 		t.Fatalf("starting owned-echo harness: %v", err)
 	}
+	// The single reaper of the fixture-owned harness parent: a real
+	// cmd.Wait through a channel, so the REAL exit code is available to
+	// every reporting path below and to cleanup.
+	harnessExited := make(chan error, 1)
+	go func() { harnessExited <- harness.Wait() }()
 	t.Cleanup(func() {
-		_ = harness.Process.Kill() // no-op if it already exited
-		_, _ = harness.Process.Wait()
+		// No-op if the harness already exited; otherwise kill THIS
+		// fixture-owned parent only and let the reaper goroutine
+		// collect it. There is exactly one Wait — never a second one
+		// racing it.
+		select {
+		case <-harnessExited:
+			return
+		default:
+			_ = harness.Process.Kill()
+			<-harnessExited
+		}
 	})
-
-	result := strings.TrimSpace(waitForFile(t, resultPath, 60*time.Second))
+	// waitHarness reports the harness parent's REAL exit state with its
+	// captured output. It is called on every non-happy path — and on the
+	// happy path too, where a result of "ok" followed by a nonzero exit
+	// is a harness bug that must fail, not pass silently.
+	waitHarness := func() (state string, cleanExit bool) {
+		select {
+		case werr := <-harnessExited:
+			if werr == nil {
+				return fmt.Sprintf("harness-exit=0 harness-stdout=%q harness-stderr=%q",
+					harnessStdout.String(), harnessStderr.String()), true
+			}
+			var exitErr *exec.ExitError
+			if errors.As(werr, &exitErr) {
+				return fmt.Sprintf("harness-exit=%d harness-stdout=%q harness-stderr=%q",
+					exitErr.ExitCode(), harnessStdout.String(), harnessStderr.String()), false
+			}
+			return fmt.Sprintf("harness-wait-error=%v harness-stdout=%q harness-stderr=%q",
+				werr, harnessStdout.String(), harnessStderr.String()), false
+		case <-time.After(10 * time.Second):
+			// The harness exits immediately after publishing its result
+			// on every path, so a 10s overrun is a hang: kill THIS
+			// fixture-owned parent and report the anomaly with the
+			// real captured output.
+			_ = harness.Process.Kill()
+			<-harnessExited
+			return fmt.Sprintf("harness-did-not-exit-within-10s-killed harness-stdout=%q harness-stderr=%q",
+				harnessStdout.String(), harnessStderr.String()), false
+		}
+	}
+	// Bounded poll for the ATOMICALLY published result. The result is
+	// published complete-or-absent (see publishFixtureFile), so an empty
+	// read here means "not yet", never a result: the pre-fix protocol
+	// read a created-but-empty file as a result and failed with an empty
+	// reason (CI 37701866968).
+	result := ""
+	deadline := time.Now().Add(60 * time.Second)
+	for time.Now().Before(deadline) {
+		if data, rerr := os.ReadFile(resultPath); rerr == nil && len(data) > 0 {
+			result = strings.TrimSpace(string(data))
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	switch {
+	case result == "":
+		// No result was published at all — the harness died, hung or
+		// failed its publication before any outcome was recorded. The
+		// real parent exit state and captured output are the evidence;
+		// the failure is never empty.
+		state, _ := waitHarness()
+		t.Fatalf("owned-echo harness published no result within 60s (result-path %s): %s", resultPath, state)
+		return 0, true
 	case strings.HasPrefix(result, "ok pid="):
+		// The harness exits 0 immediately after publishing "ok"; a
+		// nonzero exit here would be a harness bug, so the REAL exit is
+		// observed (this also reaps the parent) before success is
+		// reported.
+		state, clean := waitHarness()
+		if !clean {
+			t.Fatalf("owned-echo harness published %q but then %s", result, state)
+		}
 		fields := strings.Fields(result)
+		if len(fields) < 2 {
+			t.Fatalf("unreadable harness result %q: no pid field", result)
+		}
 		pid, perr := strconv.Atoi(strings.TrimPrefix(fields[1], "pid="))
 		if perr != nil {
 			t.Fatalf("unreadable harness result %q: %v", result, perr)
@@ -162,11 +254,15 @@ func launchEchoOnceThroughOwnedHarness(t *testing.T, stdoutPath, stderrPath stri
 		// The real OS denied the launch even from the owned permitted
 		// path: this environment's outer job policy makes the positive
 		// unprovable here. Reported explicitly — never a silent pass,
-		// never a claimed escape.
-		t.Skipf("host job policy denies the launch even from the owned permissive fixture job; positive launch cannot be proven in this environment (result: %s)", result)
+		// never a claimed escape — with the real parent state attached.
+		state, _ := waitHarness()
+		t.Skipf("host job policy denies the launch even from the owned permissive fixture job; positive launch cannot be proven in this environment (result: %s; %s)", result, state)
 		return 0, true
 	default:
-		t.Fatalf("owned-echo harness failed: %s", result)
+		// A complete, classified-unknown result: reported with the real
+		// parent exit state and captured output, never an empty reason.
+		state, _ := waitHarness()
+		t.Fatalf("owned-echo harness failed: result=%q %s", result, state)
 		return 0, true
 	}
 }

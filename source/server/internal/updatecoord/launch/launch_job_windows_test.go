@@ -135,8 +135,10 @@ func runJobObjectFixture(t *testing.T, variant string) {
 	}
 	// The child holds — after writing its completion marker — until this
 	// release, so the exit observation below is deterministic: release,
-	// then observe the exit through the bound, verified handle.
-	if err := os.WriteFile(childRelease, []byte("go"), 0o600); err != nil {
+	// then observe the exit through the bound, verified handle. The
+	// release is published atomically (see publishFixtureFile) so the
+	// child can never observe a created-but-empty or partial file.
+	if err := publishFixtureFile(childRelease, []byte("go")); err != nil {
 		t.Fatalf("writing child release marker: %v", err)
 	}
 	deadline := time.Now().Add(10 * time.Second)

@@ -5,6 +5,7 @@ package launch
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -95,17 +96,64 @@ func launchEchoOnce(t *testing.T, stdoutPath, stderrPath string, extraBytes int)
 	return pid
 }
 
-// waitForFile polls for a file until timeout, returning its contents.
+// publishFixtureFile atomically publishes a fixture protocol file: the
+// full content is written to a temp file in the SAME directory (same
+// owner, same volume) and then renamed over the destination, so a
+// concurrent reader observes the destination either absent or COMPLETE —
+// never the created-but-empty or partially-written intermediate state.
+//
+// CI run 37701866968 proved the direct os.WriteFile publication races the
+// polling reader: os.WriteFile creates/truncates the destination BEFORE
+// the content write, so waitForFile read the owned-echo harness result
+// as an empty file and TestOneShotLaunch_DiscardedOutputNeverBlocks
+// failed with an EMPTY reason ("owned-echo harness failed: "). Rename
+// over an existing destination is a replace on every supported platform
+// (MoveFileEx(REPLACE_EXISTING) on Windows), and the temp sibling is
+// invisible to every destination poll, so the protocol file appears
+// complete or not at all.
+func publishFixtureFile(path string, data []byte) error {
+	if path == "" {
+		return fmt.Errorf("no protocol path supplied")
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".publish-*")
+	if err != nil {
+		return fmt.Errorf("creating publish temp file next to %s: %w", path, err)
+	}
+	tmpName := tmp.Name()
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("closing publish temp file %s: %w", tmpName, err)
+	}
+	if err := os.WriteFile(tmpName, data, 0o600); err != nil {
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("writing publish temp file %s: %w", tmpName, err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("publishing %s: %w", path, err)
+	}
+	return nil
+}
+
+// waitForFile polls for a file until it carries CONTENT, returning the
+// contents. An empty read is NOT a result: every fixture protocol result
+// is published non-empty and atomically (see publishFixtureFile), and the
+// child log files are written by the child itself after the launch — a
+// file that exists but reads empty is a pre-write or mid-write
+// observation of the writer, and CI run 37701866968 proved returning it
+// races the writer (the owned-echo harness result was read empty and the
+// fixture failed with an empty reason). Polling continues until the file
+// carries bytes or the deadline expires.
 func waitForFile(t *testing.T, path string, timeout time.Duration) string {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		if data, err := os.ReadFile(path); err == nil {
+		if data, err := os.ReadFile(path); err == nil && len(data) > 0 {
 			return string(data)
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
-	t.Fatalf("timed out waiting for %s", path)
+	t.Fatalf("timed out waiting for %s to carry content", path)
 	return ""
 }
 

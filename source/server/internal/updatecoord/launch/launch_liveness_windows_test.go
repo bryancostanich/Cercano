@@ -83,7 +83,7 @@ func waitForParentGone(expectedParentPID int) error {
 		return fmt.Errorf("opening parent %d: %w", expectedParentPID, err)
 	}
 	defer windows.CloseHandle(h) //nolint:errcheck // observation handle only
-	if err := os.WriteFile(*parentBoundMarkerPath, []byte("bound"), 0o600); err != nil {
+	if err := publishFixtureFile(*parentBoundMarkerPath, []byte("bound")); err != nil {
 		return fmt.Errorf("writing parent-bound marker %s: %w", *parentBoundMarkerPath, err)
 	}
 	ev, err := windows.WaitForSingleObject(h, windows.INFINITE)
@@ -345,8 +345,10 @@ func TestOneShotLaunch_BoundExitObjectExistsAndSignals(t *testing.T) {
 		t.Fatalf("bound handle signalled while the hold child is provably alive and unreleased")
 	}
 
-	// Release: the bound handle must become signaled.
-	if err := os.WriteFile(release, []byte("go"), 0o600); err != nil {
+	// Release: the bound handle must become signaled. The release is
+	// published atomically (see publishFixtureFile) so the child can
+	// never observe a created-but-empty or partial file.
+	if err := publishFixtureFile(release, []byte("go")); err != nil {
 		t.Fatalf("writing the release marker: %v", err)
 	}
 	signaled := false

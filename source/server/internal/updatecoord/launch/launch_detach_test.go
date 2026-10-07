@@ -129,7 +129,9 @@ func runDetachedSurvivalFixture(t *testing.T, hardKill bool) (childPID int, chil
 	// The child first holds — after writing its completion marker — for
 	// the fixture's release (a no-op outside Windows), so this
 	// observation is deterministic: release, then observe the exit.
-	if err := os.WriteFile(childRelease, []byte("go"), 0o600); err != nil {
+	// The release is published atomically (see publishFixtureFile) so
+	// the child can never observe a created-but-empty or partial file.
+	if err := publishFixtureFile(childRelease, []byte("go")); err != nil {
 		t.Fatalf("writing child release marker: %v", err)
 	}
 	deadline := time.Now().Add(10 * time.Second)

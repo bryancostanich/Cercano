@@ -205,12 +205,17 @@ func intermediateParentMain() {
 
 	// Signal the fixture, then exit. The child observes the death itself
 	// (getppid on Unix, this marker plus a grace period elsewhere). The
-	// marker is written BEFORE the pidfile so the fixture can safely
-	// hard-kill this process as soon as the pidfile appears.
-	if err := os.WriteFile(*parentDoneMarkerPath, []byte("gone"), 0o644); err != nil {
+	// marker is published BEFORE the pidfile so the fixture can safely
+	// hard-kill this process as soon as the pidfile appears. Both are
+	// published ATOMICALLY (see publishFixtureFile): the fixture polls
+	// them, and a created-but-empty or partial file would race the poll
+	// (the failure mode CI run 37701866968 proved on the owned-echo
+	// result).
+	if err := publishFixtureFile(*parentDoneMarkerPath, []byte("gone")); err != nil {
+		fmt.Fprintln(os.Stderr, "intermediate: parent-done marker:", err)
 		os.Exit(3)
 	}
-	if err := os.WriteFile(*childPidFilePath, []byte(strconv.Itoa(proc.Pid())), 0o644); err != nil {
+	if err := publishFixtureFile(*childPidFilePath, []byte(strconv.Itoa(proc.Pid()))); err != nil {
 		fmt.Fprintln(os.Stderr, "intermediate: pidfile:", err)
 		os.Exit(3)
 	}
@@ -228,8 +233,12 @@ func persistStartError(err error) {
 	if *startErrorPath == "" {
 		return
 	}
-	_ = os.WriteFile(*startErrorPath,
-		[]byte("start-failed: "+launchFailureReport(err)+"\n"), 0o600)
+	// Atomic publication (see publishFixtureFile): the fixture polls this
+	// file, and a created-but-empty or partial write would race the poll.
+	if perr := publishFixtureFile(*startErrorPath,
+		[]byte("start-failed: "+launchFailureReport(err)+"\n")); perr != nil {
+		fmt.Fprintln(os.Stderr, "intermediate: persisting start error:", perr)
+	}
 }
 
 // finalChildMain waits until its initiating parent is genuinely gone, then
@@ -256,7 +265,10 @@ func finalChildMain() {
 		os.Exit(4)
 	}
 	fmt.Println("child-alive-after-parent-exit " + sessionIndependenceLine())
-	if err := os.WriteFile(*completionMarkerPath, []byte("complete"), 0o644); err != nil {
+	// The completion marker is polled by the fixture, so it is published
+	// ATOMICALLY (see publishFixtureFile): complete or absent, never a
+	// created-but-empty or partial file racing the poll.
+	if err := publishFixtureFile(*completionMarkerPath, []byte("complete")); err != nil {
 		fmt.Fprintln(os.Stderr, "child: completion marker:", err)
 		os.Exit(3)
 	}
@@ -309,7 +321,10 @@ func holdChildMain() {
 		fmt.Fprintln(os.Stderr, "hold-child: no marker or release path supplied")
 		os.Exit(3)
 	}
-	if err := os.WriteFile(*completionMarkerPath, []byte("complete"), 0o600); err != nil {
+	// The marker is polled by the fixture, so it is published ATOMICALLY
+	// (see publishFixtureFile): complete or absent, never a created-but-
+	// empty or partial file racing the poll.
+	if err := publishFixtureFile(*completionMarkerPath, []byte("complete")); err != nil {
 		fmt.Fprintln(os.Stderr, "hold-child: marker:", err)
 		os.Exit(3)
 	}

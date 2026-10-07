@@ -176,7 +176,10 @@ func probeChildMain() {
 		fmt.Fprintln(os.Stderr, "probe-child: no marker path supplied")
 		os.Exit(3)
 	}
-	if err := os.WriteFile(*probeMarkerPath, []byte(probeMarkerContent), 0o600); err != nil {
+	// The marker is protocol output of this probe child; it is published
+	// atomically (see publishFixtureFile) like every other fixture
+	// protocol file.
+	if err := publishFixtureFile(*probeMarkerPath, []byte(probeMarkerContent)); err != nil {
 		fmt.Fprintln(os.Stderr, "probe-child: marker:", err)
 		os.Exit(3)
 	}

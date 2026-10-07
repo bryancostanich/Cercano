@@ -180,6 +180,13 @@ type Server struct {
 	// become no-ops while it unwinds. Prevents two turns interleaving history
 	// writes or sharing one upstream (Meridian) session key.
 	turnBroker *broker.Broker
+
+	// Zero-value lifetime tracking for update preparation. The pause boundary
+	// stays internal until asynchronous work sources and drain are integrated.
+	updateWork updateAdmission
+	// Startup-only coverage status; never infer idle from an untracked manager.
+	updateTrackedRuntime     *localruntime.InMemoryManager
+	updateRuntimeTrackingErr error
 }
 
 // beginTurn delegates to the turn broker. It registers a new turn for conv,
@@ -978,6 +985,19 @@ func (s *Server) SetRuntimeManager(m localruntime.Manager) {
 		s.runtimesSvc = runtimessvc.New(s.cfgSvc, s.openModels)
 	}
 	s.runtimesSvc.SetRuntimeManager(m)
+	s.updateRuntimeTrackingErr = nil
+	if m != nil {
+		if tracked, ok := m.(*localruntime.InMemoryManager); ok {
+			if tracked != s.updateTrackedRuntime {
+				s.updateRuntimeTrackingErr = tracked.BindDownloadWork(s.updateWork.enter)
+				if s.updateRuntimeTrackingErr == nil {
+					s.updateTrackedRuntime = tracked
+				}
+			}
+		} else {
+			s.updateRuntimeTrackingErr = fmt.Errorf("runtime manager does not provide download lifetime tracking")
+		}
+	}
 	// The Server observes lifecycle transitions so a completed download of the
 	// active runtime's default model clears the not-ready chip and warms the
 	// sidecar (see runtime_observer.go).
@@ -2165,6 +2185,11 @@ func (s *Server) ListTools(ctx context.Context, req *proto.ListToolsRequest) (*p
 // args. Tool errors are surfaced as InvokeToolResponse.error rather than gRPC
 // errors so the CLI can render them inline.
 func (s *Server) InvokeTool(ctx context.Context, req *proto.InvokeToolRequest) (*proto.InvokeToolResponse, error) {
+	release, admissionErr := s.admitUpdateWork()
+	if admissionErr != nil {
+		return &proto.InvokeToolResponse{Error: admissionErr.Error()}, nil
+	}
+	defer release()
 	resp := &proto.InvokeToolResponse{}
 	reg := s.toolSvc.Registry()
 	if reg == nil {
@@ -2586,6 +2611,11 @@ func (s *Server) ListRuntimeEndpoints(ctx context.Context, req *proto.ListRuntim
 
 // StartRuntimeModel implements proto.AgentServer.
 func (s *Server) StartRuntimeModel(ctx context.Context, req *proto.StartRuntimeModelRequest) (*proto.StartRuntimeModelResponse, error) {
+	release, admissionErr := s.admitUpdateWork()
+	if admissionErr != nil {
+		return &proto.StartRuntimeModelResponse{Error: admissionErr.Error()}, nil
+	}
+	defer release()
 	rm := s.runtimeMgr()
 	if rm == nil {
 		return &proto.StartRuntimeModelResponse{Ok: false, Error: "runtime manager not configured"}, nil
@@ -2631,6 +2661,11 @@ func (s *Server) RestartRuntime(ctx context.Context, req *proto.RestartRuntimeRe
 
 // DownloadRuntimeModel implements proto.AgentServer.
 func (s *Server) DownloadRuntimeModel(ctx context.Context, req *proto.DownloadRuntimeModelRequest) (*proto.DownloadRuntimeModelResponse, error) {
+	release, admissionErr := s.admitUpdateWork()
+	if admissionErr != nil {
+		return &proto.DownloadRuntimeModelResponse{Error: admissionErr.Error()}, nil
+	}
+	defer release() // The manager separately retains the asynchronous job lifetime.
 	rm := s.runtimeMgr()
 	if rm == nil {
 		return &proto.DownloadRuntimeModelResponse{Ok: false, Error: "runtime manager not configured"}, nil
@@ -3004,6 +3039,11 @@ func formatRuntimeTime(t time.Time) string {
 
 // ProcessRequest implements proto.AgentServer (Unary).
 func (s *Server) ProcessRequest(ctx context.Context, req *proto.ProcessRequestRequest) (*proto.ProcessRequestResponse, error) {
+	release, err := s.admitUpdateWork()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	if err := s.persistDevMode(ctx, req); err != nil {
 		return nil, err
 	}
@@ -3023,6 +3063,11 @@ func (s *Server) ProcessRequest(ctx context.Context, req *proto.ProcessRequestRe
 
 // StreamProcessRequest implements proto.AgentServer (Streaming).
 func (s *Server) StreamProcessRequest(req *proto.ProcessRequestRequest, stream proto.Agent_StreamProcessRequestServer) error {
+	release, err := s.admitUpdateWork()
+	if err != nil {
+		return err
+	}
+	defer release()
 	fmt.Printf("Received request (Stream): %s\n", req.Input)
 
 	if (s.providerSvc.Cloud() != nil || s.providerSvc.Open() != nil) && s.toolSvc.Registry() != nil {

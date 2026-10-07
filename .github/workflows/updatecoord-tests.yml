@@ -5,6 +5,9 @@ on:
     paths:
       - 'source/server/internal/updatecoord/**'
       - 'source/server/pkg/update/**'
+      - 'source/server/internal/server/**'
+      - 'source/server/internal/localruntime/**'
+      - 'source/server/internal/worker/**'
       - 'source/server/pkg/agentclient/**'
       - 'source/server/go.mod'
       - 'source/server/go.sum'
@@ -53,6 +56,13 @@ jobs:
       - name: Static checks
         working-directory: source/server
         run: go vet ./internal/updatecoord/...
+      - name: Work admission and asynchronous lifetime fixtures
+        working-directory: source/server
+        run: go test -count=1 -timeout=2m -run 'TestUpdateAdmission|TestObserver|TestDownloadWork|TestUpdateWorker' ./internal/server ./internal/localruntime ./internal/worker
+      - name: Work admission race checks
+        if: runner.os != 'Windows'
+        working-directory: source/server
+        run: go test -race -count=1 -timeout=2m -run 'TestUpdateAdmission|TestObserver|TestDownloadWork|TestUpdateWorker' ./internal/server ./internal/localruntime ./internal/worker
       - name: TUF and shared-site fixtures
         working-directory: efforts/cross-platform-updates/tuf-proof
         run: go test -count=1 -timeout=2m ./...

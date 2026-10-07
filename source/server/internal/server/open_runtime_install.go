@@ -27,6 +27,11 @@ import (
 // terminal frame rather than an RPC error so the client's log pane stays the
 // single source of truth for user-visible outcomes.
 func (s *Server) InstallOpenRuntime(req *proto.InstallOpenRuntimeRequest, stream proto.Agent_InstallOpenRuntimeServer) error {
+	release, admissionErr := s.admitUpdateWork()
+	if admissionErr != nil {
+		return admissionErr
+	}
+	defer release()
 	ctx := stream.Context()
 
 	if req.GetRuntime() != "llama_server" {

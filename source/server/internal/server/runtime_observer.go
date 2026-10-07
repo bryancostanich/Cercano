@@ -40,7 +40,14 @@ func (s *Server) OnDownloadStateChange(ev localruntime.DownloadEvent) {
 	if !isActiveRuntimeDefault(cfg, ev.Model) {
 		return
 	}
-	go s.onActiveDefaultDownloaded(runtime, ev.Model)
+	// Retain activity before spawning, so download completion cannot expose a
+	// false idle gap before the warm-up starts. A completed download remains
+	// usable if preparation has already paused optional background warm-up.
+	release, err := s.updateWork.enter()
+	if err != nil {
+		return
+	}
+	go func() { defer release(); s.onActiveDefaultDownloaded(runtime, ev.Model) }()
 }
 
 // OnInstanceStateChange is present so the Server satisfies the Observer

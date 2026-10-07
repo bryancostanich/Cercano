@@ -50,10 +50,10 @@ Objective: give every update a trustworthy installation identity and a single ob
 
 Objective: prevent update races and protect active work before implementing file activation. Files: source/server/internal/updatecoord/, source/server/internal/brewrestart/, source/server/pkg/agentclient/ launch and detach helpers, source/server/internal/procx/, source/server/internal/server/ drain handlers, and additive source/proto/ messages where needed. Tests: native process fixtures, multiple client subprocesses, abandoned locks, agent identity changes, drain cancellation and protocol compatibility. No tests against the live developer agent.
 
-- [ ] Implement the approved one-shot helper invocation boundary using validated local inputs, existing coordination and persisted status; no new listening service or control credentials
-- [ ] Implement shared launch/update exclusion on Windows, Linux and macOS with stable lock identity and recovery after process death
+- [~] Implement the approved one-shot helper invocation boundary using validated local inputs, existing coordination and persisted status; no new listening service or control credentials
+- [~] Implement shared launch/update exclusion on Windows, Linux and macOS with stable lock identity and recovery after process death
 - [ ] Identify the exact installation-owned agent, clients and relevant child processes without broad name matching or rename-probe ownership assumptions
-- [ ] Implement the wait-for-idle default and a visible admission barrier once draining begins
+- [~] Implement the wait-for-idle default and a visible admission barrier once draining begins
 - [ ] Add explicit user-confirmed cancellation of active work without an implicit timeout-to-kill policy
 - [ ] Restore normal admission on deferral, safe pre-activation cancellation or failed preparation
 - [ ] Coordinate restart and reconnect without introducing a version compatibility handshake

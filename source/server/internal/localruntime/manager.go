@@ -47,17 +47,19 @@ func WithConfigLoader(loader func() (config.Config, error)) Option {
 // InMemoryManager is the first runtime manager implementation. It keeps
 // dashboard state in memory and delegates real runtime behavior to providers.
 type InMemoryManager struct {
-	mu           sync.RWMutex
-	providers    map[string]Provider
-	instances    map[string]InstanceRecord
-	endpoints    []EndpointRecord
-	downloads    map[string]ModelRecord
-	downloadJobs map[string]*downloadJob
-	httpClient   *http.Client
-	logs         []LogEntry
-	logLimit     int
-	observers    []Observer
-	configLoader func() (config.Config, error)
+	mu                sync.RWMutex
+	providers         map[string]Provider
+	instances         map[string]InstanceRecord
+	endpoints         []EndpointRecord
+	downloads         map[string]ModelRecord
+	downloadJobs      map[string]*downloadJob
+	allDownloadJobs   map[*downloadJob]struct{}
+	downloadAdmission func() (func(), error)
+	httpClient        *http.Client
+	logs              []LogEntry
+	logLimit          int
+	observers         []Observer
+	configLoader      func() (config.Config, error)
 }
 
 // ConfigReloader is an optional capability a Provider may implement so the
@@ -71,7 +73,8 @@ type ConfigReloader interface {
 }
 
 type downloadJob struct {
-	cancel context.CancelFunc
+	cancel      context.CancelFunc
+	releaseWork func() // guarded by manager.mu, released only after actual cleanup
 }
 
 func NewManager(opts ...Option) *InMemoryManager {
@@ -409,6 +412,24 @@ func (m *InMemoryManager) DownloadModel(ctx context.Context, req DownloadRequest
 		cancel()
 		return &existing, nil
 	}
+	if m.downloadAdmission != nil {
+		release, err := m.downloadAdmission()
+		if err != nil {
+			m.mu.Unlock()
+			cancel()
+			return nil, err
+		}
+		if release == nil {
+			m.mu.Unlock()
+			cancel()
+			return nil, errors.New("download work admission returned no release")
+		}
+		job.releaseWork = release
+	}
+	if m.allDownloadJobs == nil {
+		m.allDownloadJobs = make(map[*downloadJob]struct{})
+	}
+	m.allDownloadJobs[job] = struct{}{}
 	m.downloadJobs[model.ID] = job
 	m.mu.Unlock()
 	model = m.setDownloadState(model, Downloading, "")
@@ -670,10 +691,50 @@ func (m *InMemoryManager) setDownloadState(model ModelRecord, next DownloadState
 
 func (m *InMemoryManager) clearDownloadJob(modelID string, job *downloadJob) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	if m.downloadJobs[modelID] == job {
 		delete(m.downloadJobs, modelID)
 	}
+	delete(m.allDownloadJobs, job)
+	release := job.releaseWork
+	job.releaseWork = nil
+	m.mu.Unlock()
+	if release != nil {
+		release()
+	}
+}
+
+// BindDownloadWork installs a startup admission hook, including already-running
+// and retired-but-unwinding jobs. Acquire must not call back into the manager.
+// It is not an observer: final release follows actual job cleanup, not merely
+// a Cancelled/Downloaded notification. Rebinding is rejected.
+func (m *InMemoryManager) BindDownloadWork(acquire func() (func(), error)) error {
+	if acquire == nil {
+		return errors.New("nil download work admission")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.downloadAdmission != nil {
+		return errors.New("download work admission already bound")
+	}
+	acquired := make(map[*downloadJob]func())
+	for job := range m.allDownloadJobs {
+		release, err := acquire()
+		if err != nil || release == nil {
+			for _, undo := range acquired {
+				undo()
+			}
+			if err != nil {
+				return err
+			}
+			return errors.New("download work admission returned no release")
+		}
+		acquired[job] = release
+	}
+	for job, release := range acquired {
+		job.releaseWork = release
+	}
+	m.downloadAdmission = acquire
+	return nil
 }
 
 func (m *InMemoryManager) failDownload(model ModelRecord, err error) {

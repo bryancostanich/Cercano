@@ -11,6 +11,11 @@ import (
 // Errors are surfaced in the response (IsError/Error) rather than as gRPC
 // errors so the caller can render them inline.
 func (s *Server) InvokeCapability(ctx context.Context, req *proto.InvokeCapabilityRequest) (*proto.InvokeCapabilityResponse, error) {
+	release, err := s.admitUpdateWork()
+	if err != nil {
+		return &proto.InvokeCapabilityResponse{IsError: true, Error: err.Error()}, nil
+	}
+	defer release()
 	result, isError, errMsg := s.toolSvc.InvokeCapability(ctx, req.GetName(), req.GetArgsJson(), req.GetWorkDir())
 	if isError {
 		return &proto.InvokeCapabilityResponse{IsError: true, Error: errMsg}, nil

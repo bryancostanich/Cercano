@@ -6,10 +6,10 @@ Execute the approved spec.md. Transfer existing repositories into cercano-ai, es
 
 Objective: replace the historical inventory with a durable, current baseline before mutations. Files: effort execution notes and sanitized manifests, with complete local preservation backups outside repositories at a user-approved location. Tests: repository/worktree enumeration, remote reachability, backup integrity, and local recovery checks. Do not fetch into or modify checkouts during this phase until their pre-fetch state is recorded.
 
-- [~] Confirm the execution checkout and locate the approved planning commit; use a dedicated migration worktree for code changes after approval.
-- [ ] Record GitHub identity, destination organization membership, repository visibility, effective permissions, and destination-name availability for all seven repositories.
-- [ ] Record source commit IDs, refs, tracking relationships, remotes with credentials redacted, dirty tracked files, untracked and ignored files, and registered worktree metadata.
-- [ ] Include all 54 baseline checkouts/worktrees, nested worktrees, standalone backup/document directories, and any newly discovered Cercano workspaces.
+- [x] Confirm the execution checkout and locate the approved planning commit; use a dedicated migration worktree for code changes after approval.
+- [x] Record GitHub identity, destination organization membership, repository visibility, effective permissions, and destination-name availability for all seven repositories.
+- [x] Record source commit IDs, refs, tracking relationships, remotes with credentials redacted, dirty tracked files, untracked and ignored files, and registered worktree metadata.
+- [-] Include all 54 baseline checkouts/worktrees, nested worktrees, standalone backup/document directories, and any newly discovered Cercano workspaces.
 - [ ] Inventory release jobs, local agents and servers, editor workspaces, saved session working directories, and other writers or absolute-path consumers.
 - [ ] Establish a backup location and recovery procedure; preserve Git refs and metadata as well as dirty/untracked/ignored files. Git bundles alone are not a complete workspace backup.
 - [ ] Verify backup readability and representative recovery outside active workspaces without exposing secrets.

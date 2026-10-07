@@ -38,6 +38,8 @@ func runJobObjectFixture(t *testing.T, variant string) {
 	resultPath := filepath.Join(dir, "job-result")
 	pidFile := filepath.Join(dir, "child.pid")
 	parentDone := filepath.Join(dir, "parent-done")
+	parentBound := filepath.Join(dir, "parent-bound")
+	childRelease := filepath.Join(dir, "child-release")
 	completion := filepath.Join(dir, "completion")
 	childLog := filepath.Join(dir, "child.log")
 
@@ -52,6 +54,8 @@ func runJobObjectFixture(t *testing.T, variant string) {
 		"-launch-testprocess-pidfile="+pidFile,
 		"-launch-testprocess-child-log="+childLog,
 		"-launch-testprocess-parent-done="+parentDone,
+		"-launch-testprocess-parent-bound="+parentBound,
+		"-launch-testprocess-child-release="+childRelease,
 		"-launch-testprocess-completion="+completion,
 	)
 	if err := parent.Start(); err != nil {
@@ -96,10 +100,19 @@ func runJobObjectFixture(t *testing.T, variant string) {
 	if err != nil {
 		t.Fatalf("unreadable child pid %q: %v", rawPid, err)
 	}
+	// Bind the fixture's observation of the breakaway child through a
+	// REAL, verified handle (own-image check included) as early as
+	// possible after the pid is known, so every later answer and the
+	// cleanup kill refer to exactly this child — never a recycled pid.
+	watch, err := watchFixtureChild(pid)
+	if err != nil {
+		t.Fatalf("binding breakaway child %d: %v", pid, err)
+	}
+	t.Cleanup(watch.Close)
 	confirmedGone := false
 	t.Cleanup(func() {
 		if !confirmedGone {
-			terminateGrandchildPID(pid)
+			watch.TerminateIfRunning()
 		}
 	})
 	// The parent's exit closes the last job handle, terminating the
@@ -120,9 +133,19 @@ func runJobObjectFixture(t *testing.T, variant string) {
 	if !strings.Contains(string(logData), "child-alive-after-parent-exit") {
 		t.Errorf("child log = %q, want post-job-close child output", logData)
 	}
+	// The child holds — after writing its completion marker — until this
+	// release, so the exit observation below is deterministic: release,
+	// then observe the exit through the bound, verified handle.
+	if err := os.WriteFile(childRelease, []byte("go"), 0o600); err != nil {
+		t.Fatalf("writing child release marker: %v", err)
+	}
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
-		if grandchildGone(pid) {
+		gone, werr := watch.Exited()
+		if werr != nil {
+			t.Fatalf("watching breakaway child %d: %v", pid, werr)
+		}
+		if gone {
 			confirmedGone = true
 			break
 		}

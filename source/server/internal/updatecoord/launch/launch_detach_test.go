@@ -34,6 +34,8 @@ func runDetachedSurvivalFixture(t *testing.T, hardKill bool) (childPID int, chil
 	pidFile := filepath.Join(dir, "child.pid")
 	startErr := filepath.Join(dir, "start-error")
 	parentDone := filepath.Join(dir, "parent-done")
+	parentBound := filepath.Join(dir, "parent-bound")
+	childRelease := filepath.Join(dir, "child-release")
 	completion := filepath.Join(dir, "completion")
 
 	exe, err := helperExecutable()
@@ -49,6 +51,8 @@ func runDetachedSurvivalFixture(t *testing.T, hardKill bool) (childPID int, chil
 		"-launch-testprocess-start-error="+startErr,
 		"-launch-testprocess-child-log="+childLog,
 		"-launch-testprocess-parent-done="+parentDone,
+		"-launch-testprocess-parent-bound="+parentBound,
+		"-launch-testprocess-child-release="+childRelease,
 		"-launch-testprocess-completion="+completion,
 	)
 	if err := parent.Start(); err != nil {
@@ -68,14 +72,24 @@ func runDetachedSurvivalFixture(t *testing.T, hardKill bool) (childPID int, chil
 	if err != nil {
 		t.Fatalf("unreadable child pid %q: %v", rawPid, err)
 	}
-	// Safety net for the grandchild on every path; the confirmed flag keeps
-	// paths where the grandchild was observed to exit from ever signalling
-	// again, so a recycled pid can never be terminated by cleanup.
+	// Bind the fixture's observation of the grandchild through a REAL,
+	// platform-native watch as early as possible after the pid is known
+	// (on Windows: OpenProcess + owned-image verification; on Unix: the
+	// kernel pid probe). Errors fail the test loudly — liveness is never
+	// guessed, and a recycled pid can never be observed or signalled.
+	watch, err := watchFixtureChild(pid)
+	if err != nil {
+		t.Fatalf("binding grandchild %d: %v", pid, err)
+	}
+	t.Cleanup(watch.Close)
+	// Safety net for the grandchild on every path; the confirmed flag
+	// keeps paths where the grandchild was observed to exit from ever
+	// signalling again, and the watch (not the bare pid) is what acts.
 	// t.Cleanup runs on the same goroutine as the test body.
 	confirmedGone := false
 	t.Cleanup(func() {
 		if !confirmedGone {
-			terminateGrandchildPID(pid)
+			watch.TerminateIfRunning()
 		}
 	})
 
@@ -110,11 +124,21 @@ func runDetachedSurvivalFixture(t *testing.T, hardKill bool) (childPID int, chil
 		t.Errorf("child was left attached to the parent's session/group: %q", logData)
 	}
 
-	// Confirm the grandchild exited on its own (init reaped it on Unix);
-	// only then is the safety net disarmed.
+	// Confirm the grandchild exited on its own, using the bound watch's
+	// native answer (kernel probe on Unix; signaled handle on Windows).
+	// The child first holds — after writing its completion marker — for
+	// the fixture's release (a no-op outside Windows), so this
+	// observation is deterministic: release, then observe the exit.
+	if err := os.WriteFile(childRelease, []byte("go"), 0o600); err != nil {
+		t.Fatalf("writing child release marker: %v", err)
+	}
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
-		if grandchildGone(pid) {
+		gone, werr := watch.Exited()
+		if werr != nil {
+			t.Fatalf("watching grandchild %d: %v", pid, werr)
+		}
+		if gone {
 			confirmedGone = true
 			break
 		}
@@ -128,16 +152,23 @@ func runDetachedSurvivalFixture(t *testing.T, hardKill bool) (childPID int, chil
 
 // waitForPidOrStartError waits, bounded, for the intermediate parent
 // either to record the launched child's pid or to persist an immediately
-// refused Launch. A persisted start failure fails the test right away
-// with the classified, job-context-annotated error instead of surfacing
-// as an opaque timeout; it never changes the healthy-path semantics.
+// refused Launch. A persisted start failure is examined: the real OS
+// denying the launch even from the helper's own permissive fixture job
+// (Windows: classified access-denied breakaway denial) means this
+// environment's outer job policy makes the survival proof unprovable
+// here — that is reported explicitly as a skip, never a silent pass and
+// never a claimed escape; anything else fails fast with the classified,
+// job-context-annotated error instead of surfacing as an opaque timeout.
 func waitForPidOrStartError(t *testing.T, pidPath, startErrPath string, timeout time.Duration) string {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		if data, err := os.ReadFile(startErrPath); err == nil {
-			t.Fatalf("intermediate parent's Launch was refused (persisted immediately): %s",
-				strings.TrimSpace(string(data)))
+			report := strings.TrimSpace(string(data))
+			if strings.Contains(report, "code=access-denied") {
+				t.Skipf("host job policy denies the launch even from the owned permissive fixture job; parent-death survival cannot be proven in this environment (report: %s)", report)
+			}
+			t.Fatalf("intermediate parent's Launch was refused (persisted immediately): %s", report)
 		}
 		if data, err := os.ReadFile(pidPath); err == nil {
 			return string(data)

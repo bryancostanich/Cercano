@@ -23,7 +23,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"testing"
-	"time"
 )
 
 const (
@@ -33,6 +32,8 @@ const (
 	helperRoleEchoOnce           = "echo-once"
 	helperRoleJobParent          = "job-parent"
 	helperRoleProbeChild         = "probe-child"
+	helperRoleOwnedEcho          = "owned-echo"
+	helperRoleHoldChild          = "hold-child"
 )
 
 var (
@@ -60,6 +61,17 @@ var (
 	jobVariant    = flag.String("launch-testprocess-job-variant", "", "job-parent: \"deny\" (breakaway forbidden) or \"allow\" (breakaway permitted)")
 	jobResultPath = flag.String("launch-testprocess-job-result", "", "job-parent: where to record the launch outcome")
 
+	// owned-echo harness inputs (Windows owned permissive job launch
+	// context; see launch_harness_windows_test.go):
+	echoResultPath = flag.String("launch-testprocess-echo-result", "", "owned-echo harness: where to record the launch outcome")
+	echoStdoutPath = flag.String("launch-testprocess-echo-stdout", "", "owned-echo harness: child stdout log path (empty discards)")
+	echoStderrPath = flag.String("launch-testprocess-echo-stderr", "", "owned-echo harness: child stderr log path (empty discards)")
+
+	// bound-handshake inputs (Windows handle-based liveness; see
+	// launch_liveness_windows_test.go):
+	parentBoundMarkerPath = flag.String("launch-testprocess-parent-bound", "", "final child: where to record that it holds the parent's real process handle")
+	childReleasePath      = flag.String("launch-testprocess-child-release", "", "final child: fixture-written release path; the child exits only after completing AND being released")
+
 	// echo-once inputs:
 	echoLine  = flag.String("launch-testprocess-echo-line", "fixture-line", "echo-once: fixed line to write")
 	echoBytes = flag.Int("launch-testprocess-echo-bytes", 0, "echo-once: extra bytes written to stdout before exit")
@@ -86,6 +98,10 @@ func TestMain(m *testing.M) {
 		jobParentMain()
 	case helperRoleProbeChild:
 		probeChildMain()
+	case helperRoleOwnedEcho:
+		ownedEchoMain()
+	case helperRoleHoldChild:
+		holdChildMain()
 	default:
 		fmt.Fprintln(os.Stderr, "testprocess: unknown role:", *helperRole)
 		os.Exit(2)
@@ -120,12 +136,27 @@ func intermediateParentMain() {
 		fmt.Fprintln(os.Stderr, "intermediate: own path:", err)
 		os.Exit(3)
 	}
+	// Windows: enter a fixture-OWNED permissive job (allow-breakaway,
+	// kill-on-close) BEFORE the launch, so the production breakaway
+	// launch is attempted from a context the OS permits. CI run
+	// 37667337045 proved exactly this: the inherited CI job (limit
+	// flags 0x0) denies every breakaway variant, while a launch from a
+	// helper inside its own permissive job SUCCEEDS. The job belongs to
+	// this helper process and dies with it; the inherited CI job and
+	// every global policy are untouched. No-op on other platforms.
+	if err := enterOwnedPermissiveFixtureJob(); err != nil {
+		persistStartError(err)
+		fmt.Fprintln(os.Stderr, "intermediate: owned permissive fixture job:", err)
+		os.Exit(3)
+	}
 	proc, err := Launch(Options{
 		Executable: exe,
 		Argv: []string{
 			"-launch-testprocess-role=" + helperRoleFinalChild,
 			"-launch-testprocess-completion=" + *completionMarkerPath,
 			"-launch-testprocess-parent-done=" + *parentDoneMarkerPath,
+			"-launch-testprocess-parent-bound=" + *parentBoundMarkerPath,
+			"-launch-testprocess-child-release=" + *childReleasePath,
 			"-launch-testprocess-parent-pid=" + strconv.Itoa(os.Getpid()),
 		},
 		StdoutPath: *childLogPath,
@@ -159,6 +190,18 @@ func intermediateParentMain() {
 	_ = os.Stdin.Close()
 	_ = os.Stdout.Close()
 	_ = os.Stderr.Close()
+
+	// Bound handshake (Windows; no-op elsewhere): do not exit until the
+	// child has provably opened a real handle to this process. Without
+	// it the child's OpenProcess could race this process's teardown and
+	// the test fixture's handle close, and the parent-death proof would
+	// be nondeterministic. A timeout is a persisted failure, never a
+	// silently assumed bind.
+	if err := awaitChildParentBound(); err != nil {
+		persistStartError(fmt.Errorf("child bound-handshake: %w", err))
+		fmt.Fprintln(os.Stderr, "intermediate: child bound-handshake:", err)
+		os.Exit(3)
+	}
 
 	// Signal the fixture, then exit. The child observes the death itself
 	// (getppid on Unix, this marker plus a grace period elsewhere). The
@@ -203,22 +246,28 @@ func finalChildMain() {
 	// reparented us. Reading getppid() here would then record the
 	// reparented parent and never observe the change.
 	expectedParent := *parentPID
-	gone := false
-	deadline := time.Now().Add(60 * time.Second)
-	for !gone && time.Now().Before(deadline) {
-		gone = parentIsGone(expectedParent)
-		if !gone {
-			time.Sleep(20 * time.Millisecond)
-		}
-	}
-	if !gone {
-		fmt.Fprintln(os.Stderr, "child: intermediate parent never exited")
+	// Parent-death proof is platform-native and authoritative: kernel
+	// reparenting on Unix, a REAL process handle + wait on Windows (the
+	// former marker-plus-500ms-grace heuristic could observe a living
+	// parent as gone; a signaled handle cannot). Any error fails this
+	// child loudly — death is never assumed.
+	if err := waitForParentGone(expectedParent); err != nil {
+		fmt.Fprintln(os.Stderr, "child: parent-gone proof:", err)
 		os.Exit(4)
 	}
 	fmt.Println("child-alive-after-parent-exit " + sessionIndependenceLine())
 	if err := os.WriteFile(*completionMarkerPath, []byte("complete"), 0o644); err != nil {
 		fmt.Fprintln(os.Stderr, "child: completion marker:", err)
 		os.Exit(3)
+	}
+	// Bound release (Windows; no-op elsewhere): after the completion
+	// marker this child stays alive until the fixture — which by then
+	// holds a handle bound to this exact process — releases it. That
+	// makes the fixture's exit observation deterministic and its
+	// cleanup kill immune to pid reuse (no post-exit pid signalling).
+	if err := holdForFixtureRelease(); err != nil {
+		fmt.Fprintln(os.Stderr, "child: release:", err)
+		os.Exit(4)
 	}
 	os.Exit(0)
 }
@@ -242,6 +291,31 @@ func echoOnceMain() {
 				break
 			}
 		}
+	}
+	os.Exit(0)
+}
+
+// holdChildMain is the small liveness-probe child: it writes its
+// completion marker FIRST, then stays alive until the fixture releases it
+// through the release path (the same bound holdForFixtureRelease used by
+// the final child), then exits 0. The deterministic hold makes it the
+// probe target for the handle-liveness proof: a fixture can bind a real
+// handle while the child is provably alive, verify the handle is NOT
+// signaled, then release and observe the signaled exit object — exactly
+// the Windows "exit object can exist and be signaled" contract (see
+// launch_liveness_windows_test.go).
+func holdChildMain() {
+	if *completionMarkerPath == "" || *childReleasePath == "" {
+		fmt.Fprintln(os.Stderr, "hold-child: no marker or release path supplied")
+		os.Exit(3)
+	}
+	if err := os.WriteFile(*completionMarkerPath, []byte("complete"), 0o600); err != nil {
+		fmt.Fprintln(os.Stderr, "hold-child: marker:", err)
+		os.Exit(3)
+	}
+	if err := holdForFixtureRelease(); err != nil {
+		fmt.Fprintln(os.Stderr, "hold-child: release:", err)
+		os.Exit(4)
 	}
 	os.Exit(0)
 }

@@ -79,6 +79,8 @@ func jobParentMain() {
 			"-launch-testprocess-role=" + helperRoleFinalChild,
 			"-launch-testprocess-completion=" + *completionMarkerPath,
 			"-launch-testprocess-parent-done=" + *parentDoneMarkerPath,
+			"-launch-testprocess-parent-bound=" + *parentBoundMarkerPath,
+			"-launch-testprocess-child-release=" + *childReleasePath,
 			"-launch-testprocess-parent-pid=" + strconv.Itoa(os.Getpid()),
 		},
 		StdoutPath: *childLogPath,
@@ -98,6 +100,14 @@ func jobParentMain() {
 		// breakaway. The child stayed inside the fixture job and dies
 		// with it when this process exits; record the bug loudly.
 		writeJobResult("accepted-unexpected: pid=" + strconv.Itoa(proc.Pid()))
+		os.Exit(3)
+	}
+	// Bound handshake: do not exit until the child provably holds a real
+	// handle to this process, so its parent-death proof cannot race this
+	// process's teardown. A timeout is recorded as a classified failure,
+	// never an assumed bind.
+	if err := awaitChildParentBound(); err != nil {
+		writeJobResult("child-bound-timeout: " + err.Error())
 		os.Exit(3)
 	}
 	if err := os.WriteFile(*parentDoneMarkerPath, []byte("gone"), 0o600); err != nil {

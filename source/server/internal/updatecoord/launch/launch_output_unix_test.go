@@ -116,12 +116,22 @@ func TestOneShotLaunch_ReapsShortChildWhileParentAlive(t *testing.T) {
 		t.Fatalf("Launch: %v", err)
 	}
 	pid := proc.Pid()
+	// Bind the fixture's observation of this direct child to a real,
+	// platform-native watch (kernel pid probe on Unix) before anything is
+	// observed or signalled, so the cleanup net can never hit a recycled
+	// pid. Errors fail the test loudly — liveness is never guessed.
+	watch, err := watchFixtureChild(pid)
+	if err != nil {
+		t.Fatalf("binding echo-once child %d: %v", pid, err)
+	}
+	t.Cleanup(watch.Close)
 	confirmedGone := false
 	t.Cleanup(func() {
 		// Never signal after reaping is confirmed: the pid may have
-		// been recycled by then.
+		// been recycled by then. The watch, not the bare pid, is
+		// what acts.
 		if !confirmedGone {
-			terminateGrandchildPID(pid)
+			watch.TerminateIfRunning()
 		}
 	})
 

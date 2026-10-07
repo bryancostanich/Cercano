@@ -19,6 +19,17 @@ import (
 // safety net terminates it on every path where that does not happen.
 func launchEchoOnce(t *testing.T, stdoutPath, stderrPath string, extraBytes int) int {
 	t.Helper()
+	// Windows dispatch: the positive launch is proven inside a helper
+	// subprocess that first enters a fixture-OWNED permissive job (see
+	// launch_harness_windows_test.go). CI run 37667337045 established
+	// that the default CI job (limit flags 0x0) refuses EVERY breakaway
+	// launch, so a direct Launch from this test process can only ever
+	// be refused there — the fail-closed production contract, not a
+	// test defect. The default-context expectation itself is covered by
+	// TestOneShotLaunch_DefaultContextRefusalClassifiedNoChild.
+	if pid, handled := launchEchoOncePositive(t, stdoutPath, stderrPath, extraBytes); handled {
+		return pid
+	}
 	exe, err := helperExecutable()
 	if err != nil {
 		t.Fatalf("test binary path: %v", err)
@@ -46,32 +57,41 @@ func launchEchoOnce(t *testing.T, stdoutPath, stderrPath string, extraBytes int)
 		t.Fatalf("Launch refused: %s", launchFailureReport(err))
 	}
 	pid := proc.Pid()
+	// Bind the fixture's observation of this direct child to a REAL,
+	// platform-native watch before anything is observed or signalled:
+	// the signaled state of a verified handle on Windows, the kernel
+	// pid probe on Unix. Errors fail loudly — liveness is never
+	// guessed, and a recycled pid can never be observed or signalled.
+	watch, err := watchFixtureChild(pid)
+	if err != nil {
+		t.Fatalf("binding echo-once child %d: %v", pid, err)
+	}
+	t.Cleanup(watch.Close)
 	// Safety net for paths where the child never exits on its own; the
-	// flag keeps the normal (reaped) path from ever signalling again, so a
-	// recycled pid can never be terminated by cleanup. t.Cleanup runs on
-	// the same goroutine as the test body.
+	// flag keeps the normal (reaped) path from ever signalling again, so
+	// a recycled pid can never be terminated by cleanup. t.Cleanup runs
+	// on the same goroutine as the test body.
 	confirmedGone := false
 	t.Cleanup(func() {
 		if !confirmedGone {
-			terminateGrandchildPID(pid)
+			watch.TerminateIfRunning()
 		}
 	})
-	p, err := os.FindProcess(pid)
-	if err != nil {
-		return pid
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		gone, werr := watch.Exited()
+		if werr != nil {
+			t.Fatalf("watching echo-once child %d: %v", pid, werr)
+		}
+		if gone {
+			// The exact OS answer observed: the child exited (and, on
+			// Unix, the launcher's reaper reaped it).
+			confirmedGone = true
+			return pid
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
-	done := make(chan struct{})
-	go func() {
-		_, _ = p.Wait()
-		close(done)
-	}()
-	select {
-	case <-done:
-		// Wait both observed and reaped this direct child.
-		confirmedGone = true
-	case <-time.After(10 * time.Second):
-		t.Fatalf("echo-once child %d did not exit within 10s", pid)
-	}
+	t.Fatalf("echo-once child %d did not exit within 10s", pid)
 	return pid
 }
 

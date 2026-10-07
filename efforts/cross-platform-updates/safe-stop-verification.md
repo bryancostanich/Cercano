@@ -40,6 +40,7 @@ live agent/installation action occurred.
 The delegation tool reported its configured 1,000,000 token-volume-unit limit
 exhausted (1,010,297 used at the stop, including cache reads where reported; NOT
 a monetary total). Remaining partial edits were reviewed, fixed, tested and
-checkpointed directly to leave a coherent branch. Further delegated work needs
-a budget increase, or explicit authorization to continue directly without
-sub-agents. No routing, runtime, billing or budget configuration was changed.
+checkpointed directly to leave a coherent branch. The user subsequently clarified that the budget resets per delegation and
+explicitly authorized continued delegation. The inferred run-wide blocker is
+withdrawn; subsequent work should use fresh bounded delegations normally.
+No routing, runtime, billing or budget configuration was changed.

@@ -11,6 +11,7 @@ on:
       - 'source/server/internal/worker/**'
       - 'source/server/internal/compactiongen/**'
       - 'source/server/internal/hostsvc/persistence/**'
+      - 'source/server/internal/hostsvc/credentials/**'
       - 'source/server/pkg/agentclient/**'
       - 'source/server/go.mod'
       - 'source/server/go.sum'
@@ -61,11 +62,11 @@ jobs:
         run: go vet ./internal/updatecoord/...
       - name: Work admission and asynchronous lifetime fixtures
         working-directory: source/server
-        run: go test -count=1 -timeout=2m -run 'TestUpdateAdmission|TestObserver|TestDownloadWork|TestUpdateWorker|TestUpdateCompaction' ./internal/server ./internal/localruntime ./internal/worker ./internal/compactiongen
+        run: go test -count=1 -timeout=2m -run 'TestUpdateAdmission|TestObserver|TestDownloadWork|TestUpdateWorker|TestUpdateCompaction|TestUpdateCredential' ./internal/server ./internal/localruntime ./internal/worker ./internal/compactiongen ./internal/hostsvc/credentials
       - name: Work admission race checks
         if: runner.os != 'Windows'
         working-directory: source/server
-        run: go test -race -count=1 -timeout=2m -run 'TestUpdateAdmission|TestObserver|TestDownloadWork|TestUpdateWorker|TestUpdateCompaction' ./internal/server ./internal/localruntime ./internal/worker ./internal/compactiongen
+        run: go test -race -count=1 -timeout=2m -run 'TestUpdateAdmission|TestObserver|TestDownloadWork|TestUpdateWorker|TestUpdateCompaction|TestUpdateCredential' ./internal/server ./internal/localruntime ./internal/worker ./internal/compactiongen ./internal/hostsvc/credentials
       - name: Persistence service integration fixtures
         working-directory: source/server
         run: go test -count=1 -timeout=2m ./internal/hostsvc/persistence

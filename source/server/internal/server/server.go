@@ -190,6 +190,7 @@ type Server struct {
 	updateTrackedCompactor      *compactiongen.Generator
 	updateCompactionTrackingErr error
 	updateHydrationTrackingErr  error
+	updateCredentialTrackingErr error
 }
 
 // beginTurn delegates to the turn broker. It registers a new turn for conv,
@@ -1141,6 +1142,18 @@ func NewServer(a *agent.Agent, router RouterCloudUpdater, coordinator *loop.ADKC
 	s.updateHydrationTrackingErr = s.persistSvc.BindResumeHydrationWork(s.updateWork.enter)
 	if s.updateHydrationTrackingErr != nil {
 		log.Printf("[persistence] resume hydration work admission: %v", s.updateHydrationTrackingErr)
+	}
+	// Startup-only: bind the same gate to the credential service's refresh
+	// flights. A shared refresh runs detached from any single waiter (its
+	// work context is WithoutCancel), and a waiter can return early on its own
+	// cancellation while the refresh keeps running and may still commit a
+	// rotated token — so each flight holds its own admitted lifetime from
+	// before it is spawned until the refresh goroutine actually returns. The
+	// hook observes only the admission gate: it never receives or reads
+	// profile names, tokens, or secret values.
+	s.updateCredentialTrackingErr = cfgService.Credentials().BindWorkAdmission(s.updateWork.enter)
+	if s.updateCredentialTrackingErr != nil {
+		log.Printf("[credentials] refresh work admission: %v", s.updateCredentialTrackingErr)
 	}
 	// Construct the tool catalog service. permBroker is not yet wired here
 	// (SetPermissions is called by the caller after construction), so it is

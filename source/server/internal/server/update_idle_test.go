@@ -12,9 +12,11 @@ import (
 	"testing"
 	"time"
 
+	"cercano/source/server/internal/anthropicauth"
 	"cercano/source/server/internal/compactiongen"
 	"cercano/source/server/internal/compactor"
 	"cercano/source/server/internal/localruntime"
+	"cercano/source/server/internal/secrets"
 )
 
 // waitUntilWaiterParked blocks until at least one waitForUpdateIdle caller has
@@ -49,8 +51,11 @@ func TestWaitForUpdateIdleSealsGateAndReleaseIsIdempotent(t *testing.T) {
 	if s.updateHydrationTrackingErr != nil {
 		t.Fatalf("hydration binding refused at construction: %v", s.updateHydrationTrackingErr)
 	}
+	if s.updateCredentialTrackingErr != nil {
+		t.Fatalf("credential binding refused at construction: %v", s.updateCredentialTrackingErr)
+	}
 	cov := s.updateCoverageSnapshot()
-	if cov.runtimeDownloads != nil || cov.compaction != nil || cov.resumeHydration != nil {
+	if cov.runtimeDownloads != nil || cov.compaction != nil || cov.resumeHydration != nil || cov.credentialRefresh != nil {
 		t.Fatalf("fresh server coverage not clean: %+v", cov)
 	}
 
@@ -78,6 +83,7 @@ func TestWaitForUpdateIdleRefusesUntrackedCoverageBeforeWait(t *testing.T) {
 	s.updateRuntimeTrackingErr = errors.New("downloads unbound")
 	s.updateCompactionTrackingErr = errors.New("compaction unbound")
 	s.updateHydrationTrackingErr = errors.New("hydration unbound")
+	s.updateCredentialTrackingErr = errors.New("credentials unbound")
 
 	release, err := s.waitForUpdateIdle(context.Background())
 	if release != nil {
@@ -86,7 +92,7 @@ func TestWaitForUpdateIdleRefusesUntrackedCoverageBeforeWait(t *testing.T) {
 	if !errors.Is(err, errUpdateCoverageIncomplete) {
 		t.Fatalf("refusal error = %v, want update coverage incomplete", err)
 	}
-	for _, want := range []string{"runtime model download", "background compaction", "resume hydration"} {
+	for _, want := range []string{"runtime model download", "background compaction", "resume hydration", "credential refresh"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("refusal does not name source %q: %v", want, err)
 		}
@@ -402,4 +408,82 @@ func TestWaitForUpdateIdleWaitsForRealCompactionWork(t *testing.T) {
 	if err := g.Close(closeCtx); err != nil {
 		t.Fatalf("compaction generator close: %v", err)
 	}
+}
+
+func TestWaitForUpdateIdleWaitsForRealCredentialRefresh(t *testing.T) {
+	s := NewServer(nil, nil, nil, nil, nil)
+	if s.updateCredentialTrackingErr != nil {
+		t.Fatalf("credential tracking refused: %v", s.updateCredentialTrackingErr)
+	}
+	// Late store install, mirroring the front door: the credentials service
+	// keeps its identity and swaps the backend.
+	store := secrets.NewMemory()
+	s.cfgSvc.SetSecrets(store)
+	creds := s.cfgSvc.Credentials()
+	if err := anthropicauth.Save(creds, "work", anthropicauth.TokenSet{Access: "expired", Refresh: "single-use", ExpiresAt: time.Now().Add(-time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	unblock := make(chan struct{})
+	var unblockOnce sync.Once
+	unblockNow := func() { unblockOnce.Do(func() { close(unblock) }) }
+	defer unblockNow()
+	entered := make(chan struct{})
+	var once sync.Once
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		once.Do(func() { close(entered) })
+		<-unblock // hold the real refresh open: the flight keeps its lease
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"fresh","refresh_token":"rotated","expires_in":3600}`))
+	}))
+	defer srv.Close()
+
+	// A real token refresh over the in-process test endpoint: one flight,
+	// holding one admitted lifetime until the refresh goroutine returns.
+	view := creds.Anthropic("work", anthropicauth.Flow{TokenURL: srv.URL})
+	tokErr := make(chan error, 1)
+	go func() {
+		access, err := view.Token(context.Background())
+		if err == nil && access != "fresh" {
+			err = errors.New("wrong access token")
+		}
+		tokErr <- err
+	}()
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("credential refresh never reached the token endpoint")
+	}
+
+	// While the real refresh flight holds its admitted lifetime, the wait
+	// blocks; aborting the wait must NOT cancel the refresh.
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	release, err := s.waitForUpdateIdle(ctx)
+	cancel()
+	if release != nil || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("wait did not block on the real credential refresh: release=%v err=%v", release != nil, err)
+	}
+
+	// The refresh finishes on its own terms — nothing was cancelled — and
+	// commits the rotated token after the aborted wait returned.
+	unblockNow()
+	if err := <-tokErr; err != nil {
+		t.Fatalf("refresh did not finish on its own terms: %v", err)
+	}
+	raw, err := store.Get("work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts, err := anthropicauth.DecodeTokenSet(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ts.Access != "fresh" || ts.Refresh != "rotated" {
+		t.Fatalf("rotated token not persisted after the aborted wait: %+v", ts)
+	}
+
+	release, err = s.waitForUpdateIdle(context.Background()) // seals only once the flight's lifetime retires
+	if err != nil {
+		t.Fatalf("wait after refresh drained: %v", err)
+	}
+	release()
 }

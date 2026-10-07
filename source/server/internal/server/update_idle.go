@@ -28,18 +28,20 @@ var errUpdateCoverageIncomplete = errors.New("update coverage incomplete")
 // startup bind seams (BindDownloadWork, BindWorkAdmission,
 // BindResumeHydrationWork) and never carry secret material.
 type updateCoverage struct {
-	runtimeDownloads error
-	compaction       error
-	resumeHydration  error
+	runtimeDownloads  error
+	compaction        error
+	resumeHydration   error
+	credentialRefresh error
 }
 
 // updateCoverageSnapshot returns the observed startup coverage fields the
 // Server recorded when its work-tracking hooks were bound.
 func (s *Server) updateCoverageSnapshot() updateCoverage {
 	return updateCoverage{
-		runtimeDownloads: s.updateRuntimeTrackingErr,
-		compaction:       s.updateCompactionTrackingErr,
-		resumeHydration:  s.updateHydrationTrackingErr,
+		runtimeDownloads:  s.updateRuntimeTrackingErr,
+		compaction:        s.updateCompactionTrackingErr,
+		resumeHydration:   s.updateHydrationTrackingErr,
+		credentialRefresh: s.updateCredentialTrackingErr,
 	}
 }
 
@@ -54,7 +56,10 @@ func (c updateCoverage) refusal() error {
 		missing = append(missing, "background compaction lifetimes untracked: "+c.compaction.Error())
 	}
 	if c.resumeHydration != nil {
-		missing = append(missing, "resume hydration worker lifetimes untracked: "+c.resumeHydration.Error())
+		missing = append(missing, "resume hydration lifetimes untracked: "+c.resumeHydration.Error())
+	}
+	if c.credentialRefresh != nil {
+		missing = append(missing, "credential refresh lifetimes untracked: "+c.credentialRefresh.Error())
 	}
 	if len(missing) == 0 {
 		return nil

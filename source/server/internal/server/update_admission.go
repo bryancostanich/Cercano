@@ -96,12 +96,22 @@ func agentFullMethodPrefix() string {
 }
 
 // updateAdmissionExemptUnary lists the DOCUMENTED administrative Agent unary
-// methods that stay callable while update preparation holds the pause.
+// methods that stay callable while update preparation holds the pause. Both
+// entries are stop-path methods whose handlers never pin a work lifetime, so
+// admitting them cannot defeat the idle observation; the list must not grow
+// casually.
 //
-// ShutdownAgent is the client-driven bounce the update flow itself depends on
-// to swap binaries: its handler only schedules a self-SIGTERM (scheduleSelfShutdown),
-// so refusing it under the pause would strand the paused process with no way
-// for a client to restart it. It is the only unary exemption.
+//   - ShutdownAgent (unchanged legacy bounce): its handler only schedules the
+//     process's normal stop (scheduleSelfShutdown — configured stop path or
+//     self-SIGTERM fallback), so refusing it under the pause would strand the
+//     paused process with no way for a client to restart it.
+//   - ShutdownAgentWhenIdle (safe stop, see safe_stop.go): its CONTRACT is to
+//     wait for the fully observed idle gate itself — a second lifetime here
+//     would make its own wait never go idle (deadlock). Exempting it also
+//     keeps idempotent repeat requests servable while the committed seal
+//     holds, so clients can confirm a committed stop. The commit deliberately
+//     leaves admission sealed through the actual process exit; only the
+//     passive observer streams below continue serving new work.
 //
 // Deliberately NOT exempt: RestartRuntime and RestartMcpServer perform actual
 // component work (stopping/starting inference instances; synchronous MCP child
@@ -109,7 +119,10 @@ func agentFullMethodPrefix() string {
 // GetAgentInfo does not exist in this proto (there is no such RPC on
 // agent.Agent), so there is nothing to exempt under that name.
 func updateAdmissionExemptUnary(prefix string) map[string]bool {
-	return map[string]bool{prefix + "ShutdownAgent": true}
+	return map[string]bool{
+		prefix + "ShutdownAgent":         true,
+		prefix + "ShutdownAgentWhenIdle": true,
+	}
 }
 
 // updateAdmissionExemptStreams lists the DOCUMENTED passive Agent stream

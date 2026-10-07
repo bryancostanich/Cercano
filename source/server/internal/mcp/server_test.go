@@ -119,6 +119,12 @@ func (m *mockAgentClient) ShutdownAgent(ctx context.Context, in *proto.ShutdownA
 	return &proto.ShutdownAgentResponse{Accepted: true, Message: "shutdown scheduled"}, nil
 }
 
+// ShutdownAgentWhenIdle stub-satisfies the additive safe-stop RPC for the
+// hand-written mock; the MCP tests never exercise it.
+func (m *mockAgentClient) ShutdownAgentWhenIdle(ctx context.Context, in *proto.ShutdownAgentWhenIdleRequest, opts ...grpc.CallOption) (*proto.ShutdownAgentWhenIdleResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "safe stop not implemented by mock")
+}
+
 func (m *mockAgentClient) GetConfig(ctx context.Context, in *proto.GetConfigRequest, opts ...grpc.CallOption) (*proto.GetConfigResponse, error) {
 	return &proto.GetConfigResponse{}, nil
 }

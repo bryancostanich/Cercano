@@ -192,10 +192,15 @@ func ollamaStartupWarning(check func(string) error, baseURL string) string {
 const drainGrace = 10 * time.Minute
 
 // startGRPCServer initializes all providers and starts the gRPC server.
-// Returns the listener address and a cleanup function.
+// Returns the listener address, a cleanup function, and the process-local
+// stop request whose channel the caller's serve loop selects on: both OS
+// signals and in-process API stop requests (safe-stop, idle shutdown, the
+// restart bounce) feed the SAME cleanup.
 // events may be nil (MCP embedded mode opens no log); a nil writer makes
 // durable runtime-event recording a no-op rather than a crash.
-func startGRPCServer(cfg config.Config, bindAddr string, events *crashlog.Writer) (string, func(), error) {
+// stopRequest may be nil (MCP embedded mode); if provided, it must be
+// caller-owned and will be configured as the process stop requester.
+func startGRPCServer(cfg config.Config, bindAddr string, events *crashlog.Writer, stopRequest *processStopRequest) (string, func(), *processStopRequest, error) {
 	if warn := ollamaStartupWarning(checkOllama, cfg.OllamaURL); warn != "" {
 		fmt.Fprintln(os.Stderr, warn)
 	}
@@ -264,11 +269,11 @@ func startGRPCServer(cfg config.Config, bindAddr string, events *crashlog.Writer
 	// empty picker while a degraded singleton owns the port.
 	persistentStorePath, err := conversation.DefaultPath()
 	if err != nil {
-		return "", nil, fmt.Errorf("resolve conversation store path: %w", err)
+		return "", nil, nil, fmt.Errorf("resolve conversation store path: %w", err)
 	}
 	persistentStore, err := openAgentConversationStore(persistentStorePath)
 	if err != nil {
-		return "", nil, fmt.Errorf("%w; refusing to start agent without /history and /resume persistence", err)
+		return "", nil, nil, fmt.Errorf("%w; refusing to start agent without /history and /resume persistence", err)
 	}
 	fmt.Fprintf(os.Stderr, "Conversation store: %s\n", persistentStorePath)
 
@@ -381,7 +386,7 @@ func startGRPCServer(cfg config.Config, bindAddr string, events *crashlog.Writer
 
 	lis, err := net.Listen("tcp", bindAddr)
 	if err != nil {
-		return "", nil, fmt.Errorf("failed to listen on %s: %v", bindAddr, err)
+		return "", nil, nil, fmt.Errorf("failed to listen on %s: %v", bindAddr, err)
 	}
 
 	// 64 MiB comfortably fits multiple 20 MiB images (the per-image client cap).
@@ -409,11 +414,14 @@ func startGRPCServer(cfg config.Config, bindAddr string, events *crashlog.Writer
 	srv.SetBuildVersion(version)
 	compactionCandidates = srv.DispatchCandidates
 	srv.SetRuntimeManager(runtimeManager)
-	if os.Getenv("CERCANO_AUTOLAUNCHED") == "1" && cfg.Agent.ShutdownOnLastClient {
+	// Process-local stop path, shared by OS signals and every in-process stop
+	// trigger (safe-stop RPC, idle shutdown, restart bounce). The old
+	// self-SIGTERM is gone from here: signaling our own PID is unsupported on
+	// Windows, and the channel routes through the identical drain cleanup.
+	configureProcessStopRequester(srv, stopRequest)
+	if stopRequest != nil && os.Getenv("CERCANO_AUTOLAUNCHED") == "1" && cfg.Agent.ShutdownOnLastClient {
 		srv.EnableIdleShutdown(2*time.Second, func() {
-			if p, err := os.FindProcess(os.Getpid()); err == nil {
-				_ = p.Signal(syscall.SIGTERM)
-			}
+			stopRequest.request("idle shutdown: last client disconnected")
 		})
 	}
 
@@ -681,7 +689,7 @@ func startGRPCServer(cfg config.Config, bindAddr string, events *crashlog.Writer
 		}
 	}
 
-	return lis.Addr().String(), cleanup, nil
+	return lis.Addr().String(), cleanup, stopRequest, nil
 }
 
 func buildRuntimeManager(cfg config.Config, events *crashlog.Writer) localruntime.Manager {
@@ -1750,6 +1758,43 @@ func generateSessionID() string {
 }
 
 // runServerMode starts the gRPC server in standalone mode (for IDE clients).
+// processStopRequest is a process-local, OS-signal-free stop trigger. It lets
+// the agent's own APIs (the ShutdownAgentWhenIdle safe-stop RPC, the idle
+// shutdown watcher, and the restart bounce) hand the process to the SAME
+// drain cleanup the OS signal handler runs — without the process
+// self-signaling, which is required for Windows portability
+// (os.Process.Signal to our own PID is unsupported there). No new network
+// surface: the channel lives entirely inside the process, and the API RPCs
+// that feed it were already authenticated entry points.
+type processStopRequest struct {
+	ch chan struct{}
+}
+
+func configureProcessStopRequester(srv *server.Server, owner *processStopRequest) {
+	if owner == nil {
+		srv.SetProcessStopRequester(nil)
+		return
+	}
+	srv.SetProcessStopRequester(owner.request)
+}
+
+func newProcessStopRequest() *processStopRequest {
+	return &processStopRequest{ch: make(chan struct{}, 1)}
+}
+
+// request records a stop request with its reason (for logging), coalescing
+// repeats. It never blocks and never sends a signal.
+func (r *processStopRequest) request(reason string) {
+	log.Printf("process stop requested: %s", reason)
+	select {
+	case r.ch <- struct{}{}:
+	default: // a stop request is already pending; coalesce
+	}
+}
+
+// wait is the channel the serve loop selects on alongside OS signals.
+func (r *processStopRequest) wait() <-chan struct{} { return r.ch }
+
 func runServerMode(cfg config.Config) {
 	// Tee log.Printf diagnostics to ~/.cercano-dispatch.log so they survive
 	// when the CLI auto-launches this agent and swallows its stderr. Without
@@ -1788,7 +1833,9 @@ func runServerMode(cfg config.Config) {
 		fmt.Printf("Crash log: %s\n", crashLogPath)
 	}
 
-	addr, cleanup, err := startGRPCServer(cfg, ":"+cfg.Port, crashWriter)
+	// Create and own the stop request for standalone server mode
+	stopRequest := newProcessStopRequest()
+	addr, cleanup, stopRequest, err := startGRPCServer(cfg, ":"+cfg.Port, crashWriter, stopRequest)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "\n[ERROR] %v\n", err)
 		if crashWriter != nil {
@@ -1804,14 +1851,27 @@ func runServerMode(cfg config.Config) {
 	// rebuild; dying instantly here severed every in-flight stream (clients
 	// saw "Unavailable: error reading from server: EOF"), so drain instead.
 	//
+	// Both stop triggers — OS signals and the process-local stop request
+	// (fed by the safe-stop RPC, the idle shutdown watcher, and the restart
+	// bounce) — run the SAME cleanup, so API-driven stops drain identically
+	// to signal-driven ones and the channel path needs no signals at all
+	// (Windows cannot self-signal).
+	//
 	// Every signal now also gets recorded to the crash log so operators
 	// can distinguish a graceful stop from a mysterious disappearance.
 	sigCh := make(chan os.Signal, 2)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
-	sig := <-sigCh
-	fmt.Printf("Received %v — draining in-flight requests (signal again to force quit)...\n", sig)
-	if crashWriter != nil {
-		crashWriter.LogSignal(sig.String(), map[string]any{"stage": "runServerMode", "graceful": true})
+	select {
+	case sig := <-sigCh:
+		fmt.Printf("Received %v — draining in-flight requests (signal again to force quit)...\n", sig)
+		if crashWriter != nil {
+			crashWriter.LogSignal(sig.String(), map[string]any{"stage": "runServerMode", "graceful": true})
+		}
+	case <-stopRequest.wait():
+		fmt.Printf("Stop requested — draining in-flight requests (signal to force quit)...\n")
+		if crashWriter != nil {
+			crashWriter.LogSignal("process-stop-request", map[string]any{"stage": "runServerMode", "graceful": true})
+		}
 	}
 	go func() {
 		<-sigCh
@@ -1858,7 +1918,8 @@ func runMCPMode(cfg config.Config, externalGRPC string) {
 
 		// MCP embedded mode opens no crash log; runtime events are a
 		// no-op here rather than a second writer on the same file.
-		addr, _, err := startGRPCServer(cfg, "localhost:0", nil)
+		// Embedded MCP owns no standalone stop loop; safe-stop stays unavailable.
+		addr, _, _, err := startGRPCServer(cfg, "localhost:0", nil, nil)
 		if err != nil {
 			// Start in degraded mode so the MCP pipe stays alive and
 			// the client gets a clear error instead of "Failed to reconnect".

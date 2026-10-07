@@ -120,7 +120,7 @@ func TestWaitForUpdateIdleRefusesCoverageFailureAfterSealWithoutLeak(t *testing.
 	// Wait until the waiter is parked inside pauseWhenIdle so its pre-wait
 	// coverage check has already passed; only then break coverage.
 	waitUntilWaiterParked(t, s)
-	s.updateCompactionTrackingErr = errors.New("hook rebound mid-wait")
+	s.setInjectedUpdateTrackingErr("compaction", errors.New("hook rebound mid-wait"))
 	work() // drain: the waiter seals, then re-checks coverage.
 
 	err = <-waitErr

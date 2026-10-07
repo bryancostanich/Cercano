@@ -191,6 +191,19 @@ type Server struct {
 	updateCompactionTrackingErr error
 	updateHydrationTrackingErr  error
 	updateCredentialTrackingErr error
+
+	// Safe stop (ShutdownAgentWhenIdle): one-shot commit state plus the
+	// configured process-stop requester. processStopRequester hands the process
+	// to its normal drain-and-exit path (see safe_stop.go) WITHOUT
+	// self-signaling; the safe-stop handler refuses to act when it is not
+	// configured — it never falls back to sending itself a signal.
+	safeStopMu           sync.Mutex
+	safeStopCommitted    bool
+	processStopRequester func(reason string)
+	// injectMu guards the test-injectable tracking-error fields: in production
+	// they are written once at startup, but the injection seams allow tests to
+	// mutate them while a waiter runs.
+	injectMu sync.RWMutex
 }
 
 // beginTurn delegates to the turn broker. It registers a new turn for conv,
@@ -1999,12 +2012,14 @@ func (s *Server) UpdateConfig(ctx context.Context, req *proto.UpdateConfigReques
 // shutdown so the requesting client can receive the acknowledgement and let its
 // reconnect loop/auto-launch path bring up a fresh agent.
 //
-// The bounce is driven by a self-SIGTERM, not a bare BeginShutdown(): only the
-// SIGTERM path runs the full cleanup() cascade (DrainThenStop → mcpMgr.Stop →
-// srv.Shutdown → stopRuntimeInstances), which drains in-flight turns AND stops
-// every llama-server child before the process exits. Calling BeginShutdown()
-// alone would only close the event streams — kicking clients off while the
-// process (and its runtime children) kept running.
+// The bounce routes through scheduleSelfShutdown: the configured process-stop
+// requester (or, where none is configured, a self-SIGTERM), not a bare
+// BeginShutdown(): only the process's normal stop path runs the full cleanup()
+// cascade (DrainThenStop → mcpMgr.Stop → srv.Shutdown → stopRuntimeInstances),
+// which drains in-flight turns AND stops every llama-server child before the
+// process exits. Calling BeginShutdown() alone would only close the event
+// streams — kicking clients off while the process (and its runtime children)
+// kept running.
 func (s *Server) ShutdownAgent(ctx context.Context, req *proto.ShutdownAgentRequest) (*proto.ShutdownAgentResponse, error) {
 	reason := strings.TrimSpace(req.GetReason())
 	if reason == "" {
@@ -2016,15 +2031,26 @@ func (s *Server) ShutdownAgent(ctx context.Context, req *proto.ShutdownAgentRequ
 }
 
 // scheduleSelfShutdown ends the standing event streams (so attached clients see
-// the disconnect and begin reconnecting immediately) and then sends the process
-// SIGTERM after a short delay. The delay lets the accepting RPC's response flush
-// to the caller before the listener closes. SIGTERM routes through the main
-// signal handler's cleanup(), the only path that drains turns and stops runtime
-// children. Shared by ShutdownAgent and the restart_agent capability.
+// the disconnect and begin reconnecting immediately) and then asks the process
+// to run its normal stop path after a short delay. The delay lets the
+// accepting RPC's response flush to the caller before the listener closes.
+//
+// When a process-stop requester is configured (the binary entrypoint wires the
+// process-local shutdown-request channel here — see SetProcessStopRequester),
+// it is used instead of self-signaling: os.Process.Signal to one's own PID is
+// unsupported on Windows, and the channel feeds the SAME drain cleanup the OS
+// signal handler runs, so both stop paths share one teardown. The self-SIGTERM
+// fallback remains only for servers constructed outside a process entrypoint
+// (tests, embedders) where no channel was configured. Shared by ShutdownAgent
+// and the restart_agent capability.
 func (s *Server) scheduleSelfShutdown() {
 	go func() {
 		time.Sleep(150 * time.Millisecond)
 		s.BeginShutdown()
+		if fn := s.getProcessStopRequester(); fn != nil {
+			fn("agent restart requested")
+			return
+		}
 		if p, err := os.FindProcess(os.Getpid()); err == nil {
 			_ = p.Signal(syscall.SIGTERM)
 		}

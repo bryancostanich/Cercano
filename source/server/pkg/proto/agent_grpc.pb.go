@@ -26,6 +26,7 @@ const (
 	Agent_UpdateConfig_FullMethodName                          = "/agent.Agent/UpdateConfig"
 	Agent_ResetSetup_FullMethodName                            = "/agent.Agent/ResetSetup"
 	Agent_ShutdownAgent_FullMethodName                         = "/agent.Agent/ShutdownAgent"
+	Agent_ShutdownAgentWhenIdle_FullMethodName                 = "/agent.Agent/ShutdownAgentWhenIdle"
 	Agent_GetConfig_FullMethodName                             = "/agent.Agent/GetConfig"
 	Agent_ListConversations_FullMethodName                     = "/agent.Agent/ListConversations"
 	Agent_ResumeConversation_FullMethodName                    = "/agent.Agent/ResumeConversation"
@@ -127,6 +128,18 @@ type AgentClient interface {
 	// is sent. CLI clients use this for restart-required config changes; their
 	// reconnect loop auto-launches the replacement agent.
 	ShutdownAgent(ctx context.Context, in *ShutdownAgentRequest, opts ...grpc.CallOption) (*ShutdownAgentResponse, error)
+	// ShutdownAgentWhenIdle is the bounded, safe-stop variant for updaters: it
+	// waits for every update-relevant work source (turns, runtime model
+	// downloads, background compaction, resume hydration, credential refresh) to
+	// become idle — never cancelling in-flight work — then atomically commits a
+	// one-shot stop and hands the process to its configured normal
+	// drain-and-exit path. expected_pid is an identity guard, NOT
+	// authentication: it ensures the caller means exactly the agent process
+	// they observed (e.g. an updater about to replace that binary) so a stale
+	// request cannot stop the wrong agent. PID equality is not a security
+	// boundary and never authenticates the caller. While old agents implement
+	// only ShutdownAgent, this method returns Unimplemented on them.
+	ShutdownAgentWhenIdle(ctx context.Context, in *ShutdownAgentWhenIdleRequest, opts ...grpc.CallOption) (*ShutdownAgentWhenIdleResponse, error)
 	// GetConfig returns the current runtime config. API key is reported as a
 	// presence bool only — the literal value never leaves the agent.
 	GetConfig(ctx context.Context, in *GetConfigRequest, opts ...grpc.CallOption) (*GetConfigResponse, error)
@@ -423,6 +436,16 @@ func (c *agentClient) ShutdownAgent(ctx context.Context, in *ShutdownAgentReques
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ShutdownAgentResponse)
 	err := c.cc.Invoke(ctx, Agent_ShutdownAgent_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentClient) ShutdownAgentWhenIdle(ctx context.Context, in *ShutdownAgentWhenIdleRequest, opts ...grpc.CallOption) (*ShutdownAgentWhenIdleResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ShutdownAgentWhenIdleResponse)
+	err := c.cc.Invoke(ctx, Agent_ShutdownAgentWhenIdle_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1248,6 +1271,18 @@ type AgentServer interface {
 	// is sent. CLI clients use this for restart-required config changes; their
 	// reconnect loop auto-launches the replacement agent.
 	ShutdownAgent(context.Context, *ShutdownAgentRequest) (*ShutdownAgentResponse, error)
+	// ShutdownAgentWhenIdle is the bounded, safe-stop variant for updaters: it
+	// waits for every update-relevant work source (turns, runtime model
+	// downloads, background compaction, resume hydration, credential refresh) to
+	// become idle — never cancelling in-flight work — then atomically commits a
+	// one-shot stop and hands the process to its configured normal
+	// drain-and-exit path. expected_pid is an identity guard, NOT
+	// authentication: it ensures the caller means exactly the agent process
+	// they observed (e.g. an updater about to replace that binary) so a stale
+	// request cannot stop the wrong agent. PID equality is not a security
+	// boundary and never authenticates the caller. While old agents implement
+	// only ShutdownAgent, this method returns Unimplemented on them.
+	ShutdownAgentWhenIdle(context.Context, *ShutdownAgentWhenIdleRequest) (*ShutdownAgentWhenIdleResponse, error)
 	// GetConfig returns the current runtime config. API key is reported as a
 	// presence bool only — the literal value never leaves the agent.
 	GetConfig(context.Context, *GetConfigRequest) (*GetConfigResponse, error)
@@ -1482,6 +1517,9 @@ func (UnimplementedAgentServer) ResetSetup(context.Context, *ResetSetupRequest) 
 }
 func (UnimplementedAgentServer) ShutdownAgent(context.Context, *ShutdownAgentRequest) (*ShutdownAgentResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ShutdownAgent not implemented")
+}
+func (UnimplementedAgentServer) ShutdownAgentWhenIdle(context.Context, *ShutdownAgentWhenIdleRequest) (*ShutdownAgentWhenIdleResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ShutdownAgentWhenIdle not implemented")
 }
 func (UnimplementedAgentServer) GetConfig(context.Context, *GetConfigRequest) (*GetConfigResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetConfig not implemented")
@@ -1822,6 +1860,24 @@ func _Agent_ShutdownAgent_Handler(srv interface{}, ctx context.Context, dec func
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(AgentServer).ShutdownAgent(ctx, req.(*ShutdownAgentRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Agent_ShutdownAgentWhenIdle_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ShutdownAgentWhenIdleRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServer).ShutdownAgentWhenIdle(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Agent_ShutdownAgentWhenIdle_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServer).ShutdownAgentWhenIdle(ctx, req.(*ShutdownAgentWhenIdleRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -3042,6 +3098,10 @@ var Agent_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ShutdownAgent",
 			Handler:    _Agent_ShutdownAgent_Handler,
+		},
+		{
+			MethodName: "ShutdownAgentWhenIdle",
+			Handler:    _Agent_ShutdownAgentWhenIdle_Handler,
 		},
 		{
 			MethodName: "GetConfig",

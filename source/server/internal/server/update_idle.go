@@ -34,9 +34,30 @@ type updateCoverage struct {
 	credentialRefresh error
 }
 
+// setInjectedUpdateTrackingErr atomically records an (unbound) tracking
+// error for one coverage source. Used by the startup bind seams and tests.
+// The lock (Server.injectMu) also guards these reads for tests that mutate
+// coverage while a waiter runs.
+func (s *Server) setInjectedUpdateTrackingErr(which string, err error) {
+	s.injectMu.Lock()
+	defer s.injectMu.Unlock()
+	switch which {
+	case "runtime":
+		s.updateRuntimeTrackingErr = err
+	case "compaction":
+		s.updateCompactionTrackingErr = err
+	case "hydration":
+		s.updateHydrationTrackingErr = err
+	case "credential":
+		s.updateCredentialTrackingErr = err
+	}
+}
+
 // updateCoverageSnapshot returns the observed startup coverage fields the
 // Server recorded when its work-tracking hooks were bound.
 func (s *Server) updateCoverageSnapshot() updateCoverage {
+	s.injectMu.RLock()
+	defer s.injectMu.RUnlock()
 	return updateCoverage{
 		runtimeDownloads:  s.updateRuntimeTrackingErr,
 		compaction:        s.updateCompactionTrackingErr,

@@ -36,6 +36,19 @@ service Agent {
   // reconnect loop auto-launches the replacement agent.
   rpc ShutdownAgent (ShutdownAgentRequest) returns (ShutdownAgentResponse) {}
 
+  // ShutdownAgentWhenIdle is the bounded, safe-stop variant for updaters: it
+  // waits for every update-relevant work source (turns, runtime model
+  // downloads, background compaction, resume hydration, credential refresh) to
+  // become idle — never cancelling in-flight work — then atomically commits a
+  // one-shot stop and hands the process to its configured normal
+  // drain-and-exit path. expected_pid is an identity guard, NOT
+  // authentication: it ensures the caller means exactly the agent process
+  // they observed (e.g. an updater about to replace that binary) so a stale
+  // request cannot stop the wrong agent. PID equality is not a security
+  // boundary and never authenticates the caller. While old agents implement
+  // only ShutdownAgent, this method returns Unimplemented on them.
+  rpc ShutdownAgentWhenIdle (ShutdownAgentWhenIdleRequest) returns (ShutdownAgentWhenIdleResponse) {}
+
   // GetConfig returns the current runtime config. API key is reported as a
   // presence bool only — the literal value never leaves the agent.
   rpc GetConfig (GetConfigRequest) returns (GetConfigResponse) {}
@@ -510,6 +523,22 @@ message ShutdownAgentRequest {
 }
 
 message ShutdownAgentResponse {
+  bool accepted = 1;
+  string message = 2;
+}
+
+// ShutdownAgentWhenIdleRequest: expected_pid is an identity guard, NOT
+// authentication. It must be positive and must equal the receiving agent
+// process's PID, so a request composed against a previous agent process is
+// rejected instead of stopping the wrong agent. The external caller (e.g. an
+// updater) is separately responsible for verifying the actual process
+// identity/installation before issuing the stop.
+message ShutdownAgentWhenIdleRequest {
+  int64 expected_pid = 1; // must be > 0 and equal to this agent process's PID
+  string reason = 2;
+}
+
+message ShutdownAgentWhenIdleResponse {
   bool accepted = 1;
   string message = 2;
 }

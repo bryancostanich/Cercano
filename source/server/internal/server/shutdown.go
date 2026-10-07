@@ -15,6 +15,7 @@
 package server
 
 import (
+	"context"
 	"time"
 
 	"google.golang.org/grpc"
@@ -46,9 +47,22 @@ func (s *Server) EnableIdleShutdown(delay time.Duration, shutdown func()) {
 			if delay > 0 {
 				time.Sleep(delay)
 			}
-			if s.events != nil && s.events.subscriberCount() == 0 {
-				shutdown()
+			if s.events == nil || s.events.subscriberCount() != 0 {
+				return
 			}
+			// A disconnected UI is not proof of idle work. In particular a
+			// one-shot updater must not lose its wait to this older timer.
+			release, err := s.waitForUpdateIdle(context.Background())
+			if err != nil {
+				return
+			}
+			if s.events.subscriberCount() != 0 {
+				release()
+				return
+			}
+			// The lifecycle owner is committing to exit; do not reopen work
+			// admission while the normal drain path is starting.
+			shutdown()
 		}()
 	})
 }

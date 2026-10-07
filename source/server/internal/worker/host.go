@@ -663,14 +663,38 @@ func (w *workerRunner) RunTurn(
 		startTurn.Accounting = &proto.AccountingWork{OperationId: a.OperationID, ConversationId: req.ConversationID, SessionId: a.SessionID, Source: a.Source}
 	}
 
+	// Local cancellable turn context. Every callback goroutine the drain loop
+	// below spawns runs on turnCtx, and the turn stream itself is bound to it,
+	// so cancelling turnCtx unwinds BOTH ctx-aware callbacks and any callback
+	// blocked in stream.Send.
+	//
+	// Deferred teardown runs LIFO, so the registration order here — cleanupFn
+	// (already deferred above), callbacks.Wait, then turnCancel — executes as:
+	//
+	//	1. turnCancel      — cancel the turn context first, so in-flight
+	//	                     callbacks and blocked stream.Sends unwind;
+	//	2. callbacks.Wait   — join every callback goroutine (each one is
+	//	                     registered in `callbacks` BEFORE its `go`, and
+	//	                     calls Done inside);
+	//	3. cleanupFn        — only then release the pooled worker / close the
+	//	                     injected conn.
+	//
+	// Returning from RunTurn therefore guarantees every callback goroutine has
+	// actually ended BEFORE the transport is released: no callback can send on
+	// (or block against) a released/closed worker.
+	var callbacks sync.WaitGroup
+	defer callbacks.Wait()
+	turnCtx, turnCancel := context.WithCancel(ctx)
+	defer turnCancel() // runs on EVERY return path from here on
+
 	// ── 6. Open bidi stream and send StartTurn ────────────────────────────
 	client := proto.NewWorkerClient(conn)
 	var err error
 	var stream proto.Worker_RunTurnClient
 	if needsAuthProtocol {
-		stream, err = client.RunTurnWithAuthentication(ctx)
+		stream, err = client.RunTurnWithAuthentication(turnCtx)
 	} else {
-		stream, err = client.RunTurn(ctx)
+		stream, err = client.RunTurn(turnCtx)
 	}
 	if err != nil {
 		return runner.Result{}, fmt.Errorf("workerRunner: open stream: %w", err)
@@ -744,14 +768,16 @@ func (w *workerRunner) RunTurn(
 		case *proto.WorkerToHost_PermRequest:
 			// Answer in a goroutine so a slow human decision doesn't block Recv.
 			pr := m.PermRequest
+			callbacks.Add(1)
 			go func() {
+				defer callbacks.Done()
 				id := pr.GetId()
 				tier := llm.Permission(pr.GetTier())
 				var args json.RawMessage
 				if aj := pr.GetArgsJson(); aj != "" {
 					args = json.RawMessage(aj)
 				}
-				allow, err := requester(ctx, pr.GetToolUseId(), pr.GetName(), args, tier, pr.GetDestructive())
+				allow, err := requester(turnCtx, pr.GetToolUseId(), pr.GetName(), args, tier, pr.GetDestructive())
 				resp := &proto.PermissionResponse{
 					Id:    id,
 					Allow: allow,
@@ -771,13 +797,15 @@ func (w *workerRunner) RunTurn(
 
 		case *proto.WorkerToHost_AuthRequest:
 			request := m.AuthRequest
+			callbacks.Add(1)
 			go func() {
+				defer callbacks.Done()
 				response := &proto.WorkerAuthenticationResponse{Id: request.GetId()}
 				if req.AuthRecovery == nil || request.GetChallenge() == nil {
 					response.Error = "authentication recovery unavailable"
 				} else {
 					c := request.GetChallenge()
-					choice, e := req.AuthRecovery(ctx, llm.AuthChallenge{Provider: c.GetProvider(), Profile: c.GetProfileName(), Reason: c.GetReason(), Fallback: c.GetFallback(), RetrySafe: c.GetRetrySafe()})
+					choice, e := req.AuthRecovery(turnCtx, llm.AuthChallenge{Provider: c.GetProvider(), Profile: c.GetProfileName(), Reason: c.GetReason(), Fallback: c.GetFallback(), RetrySafe: c.GetRetrySafe()})
 					if e != nil {
 						response.Error = "authentication recovery canceled"
 					} else {
@@ -789,11 +817,24 @@ func (w *workerRunner) RunTurn(
 		case *proto.WorkerToHost_CredRequest:
 			// Answer credential requests off the drain path (in a goroutine) so
 			// a slow keychain/OAuth resolve doesn't stall the event stream.
+			//
+			// NOTE (shared credential flight): resolveCredential routes through
+			// the host credential service, which DEDUPLICATES concurrent
+			// resolves for a profile in a shared in-flight (see
+			// hostsvc/credentials service.go: flight). That flight is owned by
+			// the credential service, not by this turn: cancelling turnCtx
+			// releases THIS callback's wait, but a flight other consumers still
+			// share may keep running and may therefore OUTLIVE this individual
+			// resolve callback. That is a separate, pending gap in turn-scoped
+			// credential fetching — this callback join deliberately does NOT
+			// alter auth/credential semantics.
 			cr := m.CredRequest
+			callbacks.Add(1)
 			go func() {
+				defer callbacks.Done()
 				id := cr.GetId()
 				profileName := cr.GetProfileName()
-				token, account, credErr := w.resolveCredential(ctx, cfg, profileName)
+				token, account, credErr := w.resolveCredential(turnCtx, cfg, profileName)
 				resp := &proto.CredentialResponse{Id: id}
 				if credErr != nil {
 					resp.Error = "credential resolution failed"
@@ -812,7 +853,11 @@ func (w *workerRunner) RunTurn(
 			// local runtime manager, so it proxies open calls here and we run
 			// them through the host's open provider, streaming events back.
 			or := m.OpenRequest
-			go w.serveOpenInference(ctx, or, safeSend)
+			callbacks.Add(1)
+			go func() {
+				defer callbacks.Done()
+				w.serveOpenInference(turnCtx, or, safeSend)
+			}()
 
 		case *proto.WorkerToHost_Persist:
 			if m.Persist != nil && m.Persist.Message != nil {
@@ -854,12 +899,14 @@ func (w *workerRunner) RunTurn(
 
 		case *proto.WorkerToHost_RuntimeRequest:
 			request := m.RuntimeRequest
+			callbacks.Add(1)
 			go func() {
+				defer callbacks.Done()
 				response := &proto.RuntimeRestartToolResponse{Id: request.GetId()}
 				if w.restartRuntime == nil {
 					response.Error = "runtime control not configured"
 				} else {
-					result, err := w.restartRuntime(ctx, request.GetInstanceId())
+					result, err := w.restartRuntime(turnCtx, request.GetInstanceId())
 					if err != nil {
 						response.Error = err.Error()
 					} else {
@@ -877,12 +924,14 @@ func (w *workerRunner) RunTurn(
 			// cleanly. Runs in its own goroutine: an MCP call can block on server
 			// warm-up, and the stream reader must stay responsive to Cancel.
 			request := m.McpRequest
+			callbacks.Add(1)
 			go func() {
+				defer callbacks.Done()
 				response := &proto.McpCallResponse{Id: request.GetId()}
 				if w.mcpCall == nil {
 					response.Error = "mcp not configured on host"
 				} else {
-					result, err := w.mcpCall(ctx, request.GetName(), request.GetArgsJson())
+					result, err := w.mcpCall(turnCtx, request.GetName(), request.GetArgsJson())
 					if err != nil {
 						response.Error = err.Error()
 					} else {
@@ -900,12 +949,14 @@ func (w *workerRunner) RunTurn(
 			// (the ledger's only owner) and acknowledge, so the capability's
 			// control flow depends on the durable write completing.
 			request := m.AutonomyRequest
+			callbacks.Add(1)
 			go func() {
+				defer callbacks.Done()
 				response := &proto.AutonomyLedgerResponse{Id: request.GetId()}
 				if w.autonomyLedger == nil {
 					response.Error = "autonomy ledger is not available"
 				} else {
-					runJSON, found, err := w.autonomyLedger(ctx, request.GetOp(), string(request.GetRunJson()), request.GetConversationId())
+					runJSON, found, err := w.autonomyLedger(turnCtx, request.GetOp(), string(request.GetRunJson()), request.GetConversationId())
 					if err != nil {
 						response.Error = err.Error()
 					} else {
@@ -920,14 +971,16 @@ func (w *workerRunner) RunTurn(
 
 		case *proto.WorkerToHost_SessionModelRequest:
 			request := m.SessionModelRequest
+			callbacks.Add(1)
 			go func() {
+				defer callbacks.Done()
 				response := &proto.SessionModelResponse{Id: request.GetId()}
 				if request.GetConversationId() != req.ConversationID {
 					response.Error = "session model control is scoped to the active conversation"
 				} else if w.sessionModel == nil {
 					response.Error = "session model control unavailable"
 				} else {
-					result, err := w.sessionModel(ctx, req.ConversationID, chatroute.Request{Action: request.GetAction(), Profile: request.GetProfile(), Model: request.GetModel()})
+					result, err := w.sessionModel(turnCtx, req.ConversationID, chatroute.Request{Action: request.GetAction(), Profile: request.GetProfile(), Model: request.GetModel()})
 					if err != nil {
 						response.Error = err.Error()
 					} else {
@@ -944,12 +997,14 @@ func (w *workerRunner) RunTurn(
 			// state. Apply profile changes on the host profile broker and respond so
 			// the capability can report success/failure to the model.
 			pr := m.ProfileRequest
+			callbacks.Add(1)
 			go func() {
+				defer callbacks.Done()
 				resp := &proto.SessionProfileResponse{Id: pr.GetId(), Ok: true}
 				if w.setProfile == nil {
 					resp.Ok = false
 					resp.Error = "session profile control not configured"
-				} else if err := w.setProfile(ctx, pr.GetConversationId(), pr.GetName()); err != nil {
+				} else if err := w.setProfile(turnCtx, pr.GetConversationId(), pr.GetName()); err != nil {
 					resp.Ok = false
 					resp.Error = err.Error()
 				}

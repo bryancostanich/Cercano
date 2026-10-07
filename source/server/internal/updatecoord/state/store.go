@@ -43,6 +43,10 @@ const (
 type Store struct {
 	db        *sql.DB
 	installID string
+	// dir is the stable, absolute managed state directory this store owns:
+	// root/<Cercano|cercano>/updater/<installID>. It is recorded at Open
+	// time from the validated managed chain and never re-derived.
+	dir string
 
 	// fault is a white-box test hook invoked inside every write transaction
 	// after BEGIN IMMEDIATE; a non-nil error forces a rollback. It is nil
@@ -192,7 +196,7 @@ func openAttempt(parent context.Context, stateRoot, installID string) (*Store, e
 		return fail(fmt.Errorf("state: set journal mode: %w", err))
 	}
 
-	return &Store{db: db, installID: installID}, nil
+	return &Store{db: db, installID: installID, dir: filepath.Dir(dbPath)}, nil
 }
 
 // Close closes the store's database handle.
@@ -204,6 +208,16 @@ func (s *Store) Close() error {
 // to.
 func (s *Store) InstallID() string {
 	return s.installID
+}
+
+// Directory returns the stable, absolute installation state directory this
+// store owns: the validated root/<Cercano|cercano>/updater/<installID>
+// chain the database lives in. The value is recorded at Open time from the
+// chain this package itself validated (or created) and is immutable for
+// the lifetime of the store; callers must never substitute their own lock
+// or state directory for it.
+func (s *Store) Directory() string {
+	return s.dir
 }
 
 // prepareStateLocation validates the caller-supplied state root and the

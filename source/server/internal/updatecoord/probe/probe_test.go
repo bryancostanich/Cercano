@@ -548,9 +548,13 @@ func TestCorroborate_NonApplicableProviderSkippedEntirely(t *testing.T) {
 	// A provider that never speaks for this platform (and is even
 	// unavailable) cannot hold ownership here, so it is skipped rather than
 	// blocking the observation.
-	windowsOnly := &fakeProvider{
-		name:      "choco-test",
-		platforms: []string{"windows"},
+	otherPlatform := "windows"
+	if runtime.GOOS == "windows" {
+		otherPlatform = "linux"
+	}
+	otherOnly := &fakeProvider{
+		name:      "other-platform-test",
+		platforms: []string{otherPlatform},
 		err:       errors.New("backend unavailable"),
 	}
 	brewOK := &fakeProvider{
@@ -558,7 +562,7 @@ func TestCorroborate_NonApplicableProviderSkippedEntirely(t *testing.T) {
 		platforms: hostPlatforms(),
 		receipts:  []Receipt{brewReceipt(p.exe)},
 	}
-	c := Corroborate(f, []ReceiptProvider{windowsOnly, brewOK})
+	c := Corroborate(f, []ReceiptProvider{otherOnly, brewOK})
 	if !c.Complete() || len(c.Unavailable) != 0 {
 		t.Fatalf("non-applicable provider must not affect completeness: %+v", c.Unavailable)
 	}

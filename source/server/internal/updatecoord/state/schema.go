@@ -202,7 +202,7 @@ func exec(ctx context.Context, db dbtx, query string) error {
 func validateExistingDB(ctx context.Context, db dbtx, installID string) error {
 	var appid int64
 	if err := db.QueryRowContext(ctx, "PRAGMA application_id").Scan(&appid); err != nil {
-		return fmt.Errorf("%w: cannot read application_id: %v", ErrCorruptDatabase, err)
+		return fmt.Errorf("%w: cannot read application_id: %w", ErrCorruptDatabase, err)
 	}
 	if appid != AppID {
 		return fmt.Errorf("%w: application_id %#x", ErrForeignDatabase, appid)
@@ -314,7 +314,7 @@ func preflightValidate(ctx context.Context, dbPath, installID string) error {
 	}
 	defer conn.Close() //nolint:errcheck // read-only preflight path
 	if _, err := conn.ExecContext(ctx, "BEGIN"); err != nil {
-		return fmt.Errorf("%w: cannot begin read snapshot: %v", ErrCorruptDatabase, err)
+		return fmt.Errorf("%w: cannot begin read snapshot: %w", ErrCorruptDatabase, err)
 	}
 	verr := validateExistingDB(ctx, conn, installID)
 	// End the snapshot. ROLLBACK of a read-only transaction never writes
@@ -330,7 +330,7 @@ func preflightValidate(ctx context.Context, dbPath, installID string) error {
 func readSchemaVersion(ctx context.Context, db dbtx) (int64, error) {
 	var version int64
 	if err := db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
-		return 0, fmt.Errorf("%w: cannot read user_version: %v", ErrCorruptDatabase, err)
+		return 0, fmt.Errorf("%w: cannot read user_version: %w", ErrCorruptDatabase, err)
 	}
 	return version, nil
 }

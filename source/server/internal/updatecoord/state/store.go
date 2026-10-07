@@ -88,6 +88,29 @@ type Store struct {
 // Open never reads the user's real environment: stateRoot and installID
 // must come from the caller (tests use temporary directories).
 func Open(stateRoot, installID string) (*Store, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
+	defer cancel()
+	for {
+		store, err := openAttempt(ctx, stateRoot, installID)
+		if err == nil {
+			return store, nil
+		}
+		var code interface{ Code() int }
+		if !errors.As(err, &code) || code.Code()&0xff != 5 {
+			return nil, err
+		}
+		// An open may fail transiently before BEGIN (including connection
+		// initialization or read preflight). Re-observe the entire database
+		// on retry, never assume a partly attempted migration completed.
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
+func openAttempt(parent context.Context, stateRoot, installID string) (*Store, error) {
 	dbPath, existing, err := prepareStateLocation(stateRoot, installID)
 	if err != nil {
 		return nil, err
@@ -95,7 +118,7 @@ func Open(stateRoot, installID string) (*Store, error) {
 
 	// Read-only preflight prevents unknown databases from being opened writable.
 	if existing {
-		ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
+		ctx, cancel := context.WithTimeout(parent, opTimeout)
 		err := preflightValidate(ctx, dbPath, installID)
 		cancel()
 		if err != nil {
@@ -118,7 +141,7 @@ func Open(stateRoot, installID string) (*Store, error) {
 		return nil, err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
+	ctx, cancel := context.WithTimeout(parent, opTimeout)
 	defer cancel()
 
 	// busy_timeout is a connection-local setting and does not touch the

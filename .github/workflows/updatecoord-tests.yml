@@ -5,6 +5,7 @@ on:
     paths:
       - 'source/server/internal/updatecoord/**'
       - 'source/server/pkg/update/**'
+      - 'source/server/pkg/agentclient/**'
       - 'source/server/go.mod'
       - 'source/server/go.sum'
       - '.github/workflows/updatecoord-tests.yml'
@@ -35,6 +36,16 @@ jobs:
       - name: Native temporary-state and subprocess tests
         working-directory: source/server
         run: go test -count=1 -timeout=2m ./internal/updatecoord/... ./pkg/update
+      - name: Windows launch lock tests
+        # Only the Windows-specific launch-lock primitives are hermetic on
+        # Windows today; do not run the rest of the server suite here.
+        if: runner.os == 'Windows'
+        working-directory: source/server
+        run: go test -count=1 -timeout=2m -run '^TestWindowsLaunchLock' ./pkg/agentclient
+      - name: Windows launch lock static checks
+        if: runner.os == 'Windows'
+        working-directory: source/server
+        run: go vet ./pkg/agentclient
       - name: Race tests
         if: runner.os != 'Windows'
         working-directory: source/server

@@ -38,3 +38,26 @@ A durable backup location remains subject to user approval. Propose /Users/bryan
 Recovery procedure: retain a complete metadata-preserving snapshot and path manifest; verify archive/file readability and representative restoration into an isolated temporary location without touching originals. Before relocation, pause affected writers, refresh the snapshot, and validate preservation. If relocation fails, pause writers, preserve the failed state for diagnosis, restore the snapshot to the documented original paths, and repair/verify worktree metadata before resuming. Any overwrite during recovery requires explicit approval. Backup tooling and verification must detect files changing during capture; a live provisional snapshot is not accepted as a quiesced recovery point.
 
 No repository transfer or relocation is authorized by the cleanup confirmation. Inventory metadata in /tmp is temporary and is not a verified recovery backup.
+
+## Backup authorization and baseline revision
+
+The user approved /Users/bryancostanich/git_repos/cercano-ai-migration-backups and instructed that further removed worktrees be skipped because cleanup is ongoing. Refresh the current registry and candidate directories before copying; exclude already-absent paths without another cleanup approval. Record disappearances and concurrent changes during capture explicitly rather than treating a live partial snapshot as a verified quiesced recovery point. Preserve every remaining workspace and do not initiate cleanup. This revises the preservation baseline only; transfer, publishing, access, and relocation gates remain unchanged.
+
+## Approved live backup and recovery check
+
+Created the approved owner-only backup root and timestamped snapshot:
+`/Users/bryancostanich/git_repos/cercano-ai-migration-backups/20261007T232032Z-live-preflight`.
+
+Copied all 13 remaining candidate source directories, including Git metadata and ignored/untracked files. Verified 54,783 regular-file hashes. One cross-platform-updates test file changed during verification (source size 6486 bytes versus captured 6470 bytes); kept the original captured version and stored the newer version separately with a stable-read check and hash. No source files were changed. This is a provisional live capture, not a quiesced point-in-time recovery baseline.
+
+Restored the core repository into an isolated backup-owned recovery-check directory. Restored refs match the metadata manifest and `git fsck --full --no-reflogs` passed. Did not operate on restored linked-worktree pointers, which still reference original paths. A full quiesced snapshot and worktree recovery verification remain prerequisites for relocation.
+
+Fetched origin without pruning for the three repositories after preserving pre-fetch metadata. Cercano main was 8 ahead/16 behind, Cercloud synchronized, shared tap 2 behind at that snapshot. No working-tree reconciliation was performed; preserve active user branches and prepare source changes in an isolated worktree from current upstream later. Fetch summary is stored privately with the snapshot.
+
+## Integration inspection and authorization blocker
+
+Saved integration-preflight.json in the private snapshot. All seven source repositories report Actions enabled with all actions allowed; no repository rulesets or hooks were returned. Core environments include github-pages with branch policy and release without protection rules. Repository secret names were inspected without values; plugin publishing uses PLUGIN_SYNC_TOKEN. Remaining environment/organization secrets, branch protections, OAuth/external services and package checks are not yet complete.
+
+Destination organization Actions policy inspection returns HTTP 403. Current CLI OAuth scopes are admin:public_key, gist, read:org, repo, workflow; they lack admin:org. No authorization changes have been made. Destination organization currently has no teams or GitHub App installations. Personal-account installation enumeration also returned 403 because that endpoint requires GitHub-App user authorization; expanding admin:org alone will not solve that separate check.
+
+Request either manual confirmation of destination Actions settings (least additional credential privilege) or explicit approval to expand CLI authorization with admin:org and complete the interactive browser authorization. That scope is broader than this one organization and must not be added implicitly. Manual review of source-account installed GitHub Apps and other externally configured integrations remains necessary unless supported alternate read access becomes available. No transfers or publishing have happened.

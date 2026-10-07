@@ -11,9 +11,9 @@ Objective: replace the historical inventory with a durable, current baseline bef
 - [x] Record source commit IDs, refs, tracking relationships, remotes with credentials redacted, dirty tracked files, untracked and ignored files, and registered worktree metadata.
 - [x] Include all 54 baseline checkouts/worktrees, nested worktrees, standalone backup/document directories, and any newly discovered Cercano workspaces.
 - [ ] Inventory release jobs, local agents and servers, editor workspaces, saved session working directories, and other writers or absolute-path consumers.
-- [-] Establish a backup location and recovery procedure; preserve Git refs and metadata as well as dirty/untracked/ignored files. Git bundles alone are not a complete workspace backup.
-- [ ] Verify backup readability and representative recovery outside active workspaces without exposing secrets.
-- [ ] Fetch current remote refs after recording the baseline; classify divergence and reconcile only migration prerequisites, preserving unfinished branches and files.
+- [x] Establish a backup location and recovery procedure; preserve Git refs and metadata as well as dirty/untracked/ignored files. Git bundles alone are not a complete workspace backup.
+- [x] Verify backup readability and representative recovery outside active workspaces without exposing secrets.
+- [~] Fetch current remote refs after recording the baseline; classify divergence and reconcile only migration prerequisites, preserving unfinished branches and files.
 - [ ] Record any conflicts or ownership ambiguity as blockers rather than discarding, stashing, or committing user work implicitly.
 
 ## Phase 2 — Verify permissions and integration prerequisites
@@ -23,7 +23,7 @@ Objective: ensure transfer and publishing can succeed without changing private a
 - [ ] Compare Cercloud's existing effective access with destination organization defaults and teams.
   - [ ] Stop for a focused decision if the move would broaden private access; do not silently alter organization-wide permissions.
 - [ ] Verify GitHub plan and organization policy implications for private repositories, protections, environments, and Actions.
-- [ ] Inspect source and destination Actions permissions, protected branches/rulesets, environments, deployment restrictions, variables, and repository/environment/organization secret names.
+- [-] Inspect source and destination Actions permissions, protected branches/rulesets, environments, deployment restrictions, variables, and repository/environment/organization secret names.
 - [ ] Inventory Homebrew publishing and plugin sync token authorization, including organization approval requirements; request explicit approval for necessary credential or scope changes.
 - [ ] Verify Apple signing/notarization configuration and record required environment protection and release settings without reading secret values into logs.
 - [ ] Inventory GitHub Apps, webhooks, OAuth integrations, external deployments, and package/container registries where present; record transfer-specific requirements or access blockers.

@@ -9,7 +9,9 @@ intermediate file read and tool response.
 
 Delegation is native to the agent. You do not need an external co-processor
 integration to use it. Saved task routing selects appropriate models, optionally
-including local models or hosted open-weight providers.
+including local models or hosted open-weight providers. In the terminal client,
+subagent tabs let you inspect the investigation separately from the parent
+conversation as progress arrives.
 
 ## Why it matters
 
@@ -35,6 +37,8 @@ the reported route and granted tools to see where the work actually runs.
   write-capable grants interact with the permission/approval policy.
 - Not every task is automatically delegated, and delegation is not necessarily
   local. Saved routes and placement restrictions determine execution.
+- Dispatch returns the subagent's result when it completes. Live tab updates
+  should not be confused with a fire-and-forget background job.
 - Subagents can fail or return incorrect results. Their conclusions still need
   review; additional inference and verification can outweigh savings on small tasks.
 - Separate context is not a filesystem sandbox. Granted edits affect real files.

@@ -5,10 +5,11 @@ page also explains the controls and limitations behind the headline.
 
 | Feature | Why it matters |
 |---|---|
-| [Advanced Context Management](context-management.md) | Keep long sessions moving with manageable working context and fewer repeated history tokens. |
-| [Built-In Delegation](built-in-delegation.md) | Reserve main-context space and frontier inference for work that needs them. |
-| [Advanced Metrics](advanced-metrics.md) | Understand where tokens go before changing your routing or budget. |
 | [Advanced Routing Engine](advanced-routing.md) | Choose capability and execution destination independently for each kind of task. |
+| [Built-In Delegation](built-in-delegation.md) | Reserve main-context space and frontier inference for work that needs them. |
+| [Powerful Agent Workflows](powerful-agent-workflows.md) | Handle complex reasoning tasks with structured protocols for research, debugging, planning, and decisions. |
+| [Advanced Context Management](context-management.md) | Keep long sessions moving with manageable working context and fewer repeated history tokens. |
+| [Advanced Metrics](advanced-metrics.md) | Understand where tokens go before changing your routing or budget. |
 | [Integrated Local Runtime](integrated-local-runtime.md) | Put open-weight models to work without assembling the runtime yourself. |
 | [OpenAI-Compatible Providers](openai-providers.md) | Choose hosted or self-hosted inference without replacing your agent workflow. |
 | [Advanced Terminal UI](advanced-terminal-ui.md) | Follow complex work through readable formatting, responsive layouts, and themes. |

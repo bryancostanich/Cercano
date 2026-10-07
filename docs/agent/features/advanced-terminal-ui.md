@@ -4,6 +4,8 @@
 
 Cercano's terminal client combines rich response formatting, responsive layouts,
 color themes, a live context meter, and visible tool and subagent activity.
+Subagent tabs separate delegated investigations from the main conversation, so
+you can inspect their progress without losing your place in the parent task.
 Settings bring model selection, routing, permissions, and metrics into the same
 interface instead of requiring a separate configuration workflow.
 
@@ -12,8 +14,10 @@ interface instead of requiring a separate configuration workflow.
 Long coding sessions produce dense output: code, tables, tool results, and
 parallel lines of investigation. Readable presentation helps you follow what
 the agent is doing, spot decisions that need attention, and stay focused on the
-work rather than deciphering a transcript. Themes let you adapt the interface
-to your preferences.
+work rather than deciphering a transcript. Information is organized around the
+work: the main conversation for decisions, subagent tabs for delegated detail,
+and settings for the controls you need. Themes let you adapt the interface to
+your preferences.
 
 ## Try it
 
@@ -26,11 +30,14 @@ Start `cercano`, then use:
 - `/help` for the current keymap and command list.
 
 Ask the agent to compare a few project components in a table and inspect the
-rendering in your normal terminal size.
+rendering in your normal terminal size. Then ask it to delegate a read-only code
+search and switch to the subagent tab to follow that investigation.
 
 ## Controls and limitations
 
-- Layout and color rendering depend on terminal dimensions and capabilities.
+- **Layout and color rendering** depend on terminal dimensions and capabilities.
+- Subagent tabs show progress as it arrives. They do not by themselves imply
+  that a dispatch is detached or that the parent can finish without its result.
 - The interactive client and headless output are different presentations of
   the same agent; do not expect terminal interactions in a script.
 - The [CLI track](../../features/cli/README.md) records remaining interface work.

@@ -12,6 +12,8 @@ Ollama is also supported; the selected backend determines how local models run.
 Put your own hardware to work without making inference infrastructure another
 project. A local runtime provides a practical destination for routine delegation
 and other suitable tasks, avoiding provider per-token charges for that inference.
+The managed setup handles model downloads and runtime configuration, reducing
+the operational overhead of running local inference.
 
 ## Try it
 

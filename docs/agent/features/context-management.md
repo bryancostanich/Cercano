@@ -8,13 +8,23 @@ view rather than replaying an ever-growing transcript on every request.
 Compaction runs asynchronously, so requests do not wait for a summarizer.
 The stored conversation history remains separate from that compacted view.
 
+Cercano's compaction algorithms include **map-reduce**: summarize bounded
+segments of older raw history, then merge their structured summaries. This
+avoids repeatedly feeding the whole transcript into one summarization request
+and gives long histories a manageable representation. Map-reduce is an
+implemented compaction technique, not the name of a user-selectable mode or a
+claim that every background compaction operation follows that algorithm.
+
 ## Why it matters
 
 Keep working through long investigations and large refactors without stopping
 for periodic summarization. A smaller active context leaves more space for
 current work and reduces repeated history tokens sent to the model. That can
 reduce token costs, although compaction itself consumes inference and savings
-depend on your models and workload.
+depend on your models and workload. Keeping repetitive history out of the active
+window leaves more room for relevant evidence and current decisions, supporting
+longer, more focused sessions—not a guarantee of lossless recall or unchanged
+answer quality at arbitrary conversation lengths.
 
 ## Try it
 

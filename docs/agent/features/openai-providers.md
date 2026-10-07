@@ -7,12 +7,27 @@ configured base URL, credentials, and model. That includes compatible hosted
 open-weight services and self-hosted inference servers, not just OpenAI itself.
 Profiles connect these endpoints to Cercano's routing system.
 
+### Frontier subscriptions and open models together
+
+Cercano also has provider-specific subscription sign-in paths for ChatGPT and
+Claude, separate from API-key access to compatible endpoints. You can use a
+frontier provider for the main conversation and route suitable delegated work
+to local or hosted open-weight models—or use those models on their own.
+
+Subscription sign-in is not a universal replacement for API credentials. Account
+eligibility, usage limits, provider terms, and third-party-client support apply;
+availability can change. An implemented sign-in path is not a promise of provider
+endorsement or unlimited access. Check the options presented in `/cloud` and the
+[current provider reference](../README.md).
+
 ## Why it matters
 
 Choose inference based on capability, price, and where you want work to run—not
 on whether your coding agent has a bespoke integration with a particular vendor.
 Change providers or try new open-weight models while keeping the same terminal,
-sessions, tools, and delegation workflow.
+sessions, tools, and delegation workflow. Combining frontier and open models
+lets you reserve your frontier allowance or API budget for work that benefits
+from it instead of using the same inference route for every task.
 
 ## Try it
 

@@ -68,7 +68,14 @@ func upgradeRestartCommand(args []string, out io.Writer, configuredPort func() (
 	defer cancel()
 	restarted, err := restart(ctx, path, endpoint)
 	if err != nil {
-		fmt.Fprintf(out, "Upgrade restart failed: %v\nThe update may already be installed. Check agent logs; use /restart-agent if the old agent is still serving, or start cercano manually if no agent is running.\n", err)
+		switch {
+		case brewrestart.IsSafeStopBusy(err):
+			fmt.Fprintf(out, "Upgrade restart not completed: %v\nThe running agent was left in place with active update-relevant work in progress; nothing was stopped and no replacement was started. The update is installed and takes effect after the agent restarts. Re-run this command once the current work finishes, or use --timeout to wait longer.\n", err)
+		case brewrestart.IsSafeStopUnsupported(err):
+			fmt.Fprintf(out, "Upgrade restart not completed: %v\nThe running agent predates the safe-stop request and cannot be stopped safely. It was left in place; nothing was stopped and no replacement was started. The update is installed and takes effect after a manual restart (use /restart-agent or stop and start cercano), then future upgrades can restart it safely.\n", err)
+		default:
+			fmt.Fprintf(out, "Upgrade restart failed: %v\nThe update may already be installed. Check agent logs; use /restart-agent if the old agent is still serving, or start cercano manually if no agent is running.\n", err)
+		}
 		return 1
 	}
 	if restarted {

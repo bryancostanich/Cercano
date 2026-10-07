@@ -8,7 +8,8 @@ import (
 
 // restartOps separates lifecycle effects so sequencing and refusal paths can
 // be tested without touching a live agent. Production adapters use kernel
-// inspection, the shared CLI launch lock and the existing ShutdownAgent RPC.
+// inspection, the shared CLI launch lock and the ShutdownAgentWhenIdle
+// safe-stop RPC (never the legacy ShutdownAgent bounce; see safestop.go).
 type restartOps struct {
 	source    processSource
 	capture   func(Identity) (LaunchState, error)

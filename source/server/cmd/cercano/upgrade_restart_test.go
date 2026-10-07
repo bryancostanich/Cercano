@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"net/netip"
 	"strings"
 	"testing"
+
+	"cercano/source/server/internal/brewrestart"
 )
 
 func TestUpgradeRestartCommand(t *testing.T) {
@@ -14,6 +17,7 @@ func TestUpgradeRestartCommand(t *testing.T) {
 		name                       string
 		args                       []string
 		cfgErr, exeErr, restartErr bool
+		busyErr, unsupportedErr   bool
 		restarted                  bool
 		wantCode, wantCalls        int
 		message                    string
@@ -28,6 +32,8 @@ func TestUpgradeRestartCommand(t *testing.T) {
 		{name: "absent", wantCode: 0, wantCalls: 1, message: "nothing started"},
 		{name: "restarted", restarted: true, wantCode: 0, wantCalls: 1, message: "restarted using"},
 		{name: "restart failure", restartErr: true, wantCode: 1, wantCalls: 1, message: "update may already be installed"},
+		{name: "busy agent left running", busyErr: true, wantCode: 1, wantCalls: 1, message: "left in place with active update-relevant work"},
+		{name: "old agent unsupported", unsupportedErr: true, wantCode: 1, wantCalls: 1, message: "predates the safe-stop request"},
 		{name: "explicit address bypasses config", args: []string{"--address", "127.0.0.1:4242"}, cfgErr: true, wantCode: 0, wantCalls: 1},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -56,7 +62,12 @@ func TestUpgradeRestartCommand(t *testing.T) {
 					if path != "/fake/Cellar/cercano/2/bin/cercano" || endpoint.String() != "127.0.0.1:4242" {
 						t.Fatal("incorrect restart target")
 					}
-					if tt.restartErr {
+					switch {
+					case tt.busyErr:
+						return false, fmt.Errorf("shutdown request failed: %w", brewrestart.ErrSafeStopBusy)
+					case tt.unsupportedErr:
+						return false, fmt.Errorf("shutdown request failed: %w", brewrestart.ErrSafeStopUnsupported)
+					case tt.restartErr:
 						return false, errors.New("failure")
 					}
 					return tt.restarted, nil

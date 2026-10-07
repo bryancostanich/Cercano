@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -19,16 +20,54 @@ import (
 	"cercano/source/server/pkg/agentclient"
 	"cercano/source/server/pkg/proto"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type restartFixture struct {
 	proto.UnimplementedAgentServer
 	stop chan struct{}
 	once sync.Once
+	busy bool
+	root string
 }
 
+// ShutdownAgent is the LEGACY fire-and-forget bounce. The restart
+// coordinator must never call it after the safe-stop migration, so the
+// fixture records any call as a marker file for tests to fail on.
 func (s *restartFixture) ShutdownAgent(context.Context, *proto.ShutdownAgentRequest) (*proto.ShutdownAgentResponse, error) {
+	_ = os.WriteFile(filepath.Join(s.root, "legacy-called"), []byte("legacy ShutdownAgent called"), 0600)
+	return &proto.ShutdownAgentResponse{Accepted: true}, nil
+}
+
+// ShutdownAgentWhenIdle mirrors the real server's identity guard: only the
+// PID from a verified ownership inspection may commit the safe stop. Busy
+// fixtures block until the request deadline, exactly like an agent with
+// active update-relevant work — they never stop on their own.
+func (s *restartFixture) ShutdownAgentWhenIdle(ctx context.Context, req *proto.ShutdownAgentWhenIdleRequest) (*proto.ShutdownAgentWhenIdleResponse, error) {
+	if req.GetExpectedPid() != int64(os.Getpid()) {
+		return nil, status.Errorf(codes.FailedPrecondition,
+			"expected_pid %d does not match this agent process (pid %d)", req.GetExpectedPid(), os.Getpid())
+	}
+	if s.busy {
+		<-ctx.Done()
+		return nil, status.Error(codes.DeadlineExceeded, "safe stop wait timed out")
+	}
+	_ = os.WriteFile(filepath.Join(s.root, "safe-stop-pid"), []byte(strconv.FormatInt(req.GetExpectedPid(), 10)), 0600)
 	s.once.Do(func() { close(s.stop) })
+	return &proto.ShutdownAgentWhenIdleResponse{Accepted: true, Message: "safe stop committed"}, nil
+}
+
+// oldRestartFixture models a released agent binary predating the safe-stop
+// method: only the legacy RPC exists; ShutdownAgentWhenIdle answers
+// codes.Unimplemented via the embedded server.
+type oldRestartFixture struct {
+	proto.UnimplementedAgentServer
+	root string
+}
+
+func (s *oldRestartFixture) ShutdownAgent(context.Context, *proto.ShutdownAgentRequest) (*proto.ShutdownAgentResponse, error) {
+	_ = os.WriteFile(filepath.Join(s.root, "legacy-called"), []byte("legacy ShutdownAgent called"), 0600)
 	return &proto.ShutdownAgentResponse{Accepted: true}, nil
 }
 
@@ -54,12 +93,35 @@ func runRestartFixture() int {
 	if err != nil {
 		return 2
 	}
-	service := &restartFixture{stop: make(chan struct{})}
 	gs := grpc.NewServer()
-	proto.RegisterAgentServer(gs, service)
+	var service *restartFixture
+	switch mode := os.Getenv("CERCANO_COORD_FIXTURE_MODE"); mode {
+	case "old":
+		// A released agent binary predating the safe-stop RPC: only the
+		// legacy bounce exists; ShutdownAgentWhenIdle answers Unimplemented.
+		proto.RegisterAgentServer(gs, &oldRestartFixture{root: root})
+	case "busy":
+		// Active update-relevant work: the safe stop waits and never stops
+		// the process; the fixture stays alive until the test kills it.
+		service = &restartFixture{stop: make(chan struct{}), busy: true, root: root}
+		proto.RegisterAgentServer(gs, service)
+	default:
+		service = &restartFixture{stop: make(chan struct{}), root: root}
+		proto.RegisterAgentServer(gs, service)
+	}
 	go func() { _ = gs.Serve(listener) }()
 	cwd, _ := os.Getwd()
 	_ = os.WriteFile(filepath.Join(root, version+"-ready"), []byte(fmt.Sprintf("%d\n%s\n%s", os.Getpid(), cwd, os.Getenv("FIXTURE_SETTING"))), 0600)
+	if service == nil {
+		// old fixture: nothing can commit a stop; stay put.
+		time.Sleep(20 * time.Second)
+		return 3
+	}
+	if service.busy {
+		// busy fixture: never commits; stay alive until killed.
+		time.Sleep(20 * time.Second)
+		return 3
+	}
 	select {
 	case <-service.stop:
 	case <-time.After(20 * time.Second):
@@ -190,6 +252,15 @@ func TestNativeCoordinatorRestartsWithoutClients(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "overlap")); !os.IsNotExist(err) {
 		t.Fatal("new process started before old exited")
+	}
+	// The update-related stop was the safe-stop RPC, committed exactly once
+	// with the PID from the kernel-verified ownership inspection.
+	stopPID, err := strconv.Atoi(strings.TrimSpace(string(waitFixtureFile(t, filepath.Join(root, "safe-stop-pid")))))
+	if err != nil || stopPID != old.Process.Pid {
+		t.Fatalf("safe stop committed for pid %d, want the verified old agent pid %d", stopPID, old.Process.Pid)
+	}
+	if _, err := os.Stat(filepath.Join(root, "legacy-called")); !os.IsNotExist(err) {
+		t.Fatal("legacy ShutdownAgent was called instead of the safe-stop RPC")
 	}
 	ready := string(waitFixtureFile(t, filepath.Join(root, "2-ready")))
 	want := fmt.Sprintf("%d\n%s\npreserved value", replacement.PID, root)

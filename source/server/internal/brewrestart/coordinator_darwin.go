@@ -104,6 +104,14 @@ func openRestartLog(s LaunchState) (*os.File, error) {
 	return f, nil
 }
 
+// requestShutdown stops the verified agent before its replacement starts.
+// Ownership (kernel identity + exact listener endpoint) is checked again
+// after connecting, so the replacement's start cannot race a stolen socket.
+// The update-related stop is the bounded ShutdownAgentWhenIdle safe-stop RPC
+// carrying the PID from the verified identity — never the legacy
+// fire-and-forget ShutdownAgent. Work in flight is waited on until the
+// restart deadline (never cancelled); an agent predating the safe-stop RPC
+// is left running rather than bounced. See safestop.go for typed outcomes.
 func requestShutdown(ctx context.Context, id Identity, endpoint netip.AddrPort) error {
 	dialCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -119,14 +127,9 @@ func requestShutdown(ctx context.Context, id Identity, endpoint netip.AddrPort) 
 	if !owns {
 		return fmt.Errorf("agent no longer owns the target listener")
 	}
-	response, err := proto.NewAgentClient(conn).ShutdownAgent(dialCtx, &proto.ShutdownAgentRequest{Reason: "Homebrew installation updated"})
-	if err != nil {
-		return err
-	}
-	if !response.GetAccepted() {
-		return fmt.Errorf("agent refused shutdown")
-	}
-	return nil
+	// ctx (not dialCtx) bounds the wait for idle: the safe stop drains
+	// in-flight work until the overall restart deadline expires.
+	return safeStopRequest(ctx, proto.NewAgentClient(conn), id.PID, "Homebrew installation updated")
 }
 
 func pauseRestart(ctx context.Context) error {

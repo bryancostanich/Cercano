@@ -165,6 +165,9 @@ func TestUpdateAdmissionPrimaryEntrypointsRefuseBeforeSideEffects(t *testing.T) 
 	if err := s.StartClaudeLogin(nil, nil); status.Code(err) != codes.Unavailable {
 		t.Fatalf("login admitted: %v", err)
 	}
+	if err := s.RegenerateContext(nil, nil); status.Code(err) != codes.Unavailable {
+		t.Fatalf("compaction admitted: %v", err)
+	}
 	out, e := s.InvokeCapability(context.Background(), nil)
 	if e != nil || out == nil || !out.IsError {
 		t.Fatalf("tool: %+v %v", out, e)

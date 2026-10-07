@@ -29,11 +29,13 @@ type Store interface {
 
 // Generator debounces compaction per conversation.
 type Generator struct {
-	rootContext context.Context
-	cancelRoot  context.CancelFunc
-	closed      bool // guarded by mu
-	workers     sync.WaitGroup
-	workersDone chan struct{}
+	workAdmission func() (func(), error) // startup hook, guarded by mu
+	activeWork    int
+	rootContext   context.Context
+	cancelRoot    context.CancelFunc
+	closed        bool // guarded by mu
+	workers       sync.WaitGroup
+	workersDone   chan struct{}
 
 	attemptSink usage.AttemptSink // guarded by mu
 	store       Store
@@ -45,7 +47,7 @@ type Generator struct {
 
 	mu       sync.Mutex
 	enabled  bool // guarded by mu — the runtime kill switch
-	timers   map[string]*time.Timer
+	timers   map[string]*scheduledPass
 	inflight map[string]bool
 
 	// toolElisionOnly (guarded by mu) switches a pass from LLM summarization
@@ -72,7 +74,7 @@ func New(store Store, summarize compaction.SummarizeFunc, cfg compactor.Config, 
 		rootContext: root, cancelRoot: cancel, workersDone: make(chan struct{}),
 		store: store, summarize: summarize, cfg: cfg, tok: tok, debounce: debounce,
 		logf:     func(f string, a ...any) { fmt.Fprintf(os.Stderr, f, a...) },
-		timers:   make(map[string]*time.Timer),
+		timers:   make(map[string]*scheduledPass),
 		inflight: make(map[string]bool),
 	}
 }
@@ -146,31 +148,57 @@ func (g *Generator) elisionOnly() (func(ctx context.Context, conversationID stri
 
 // Schedule requests a debounced compaction pass; rapid calls coalesce.
 // Noops when the kill switch is off.
+// scheduledPass owns its admission until the callback exits or Stop succeeds.
+type scheduledPass struct {
+	timer   *time.Timer
+	release func()
+}
+
 func (g *Generator) Schedule(conversationID string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if g.closed {
+	if g.closed || !g.enabled {
 		return
 	}
-	if !g.enabled {
+	if job := g.timers[conversationID]; job != nil && job.timer.Stop() {
+		job.timer.Reset(g.debounce)
 		return
 	}
-	if t, ok := g.timers[conversationID]; ok {
-		t.Reset(g.debounce)
-		return
+	release := func() {}
+	if g.workAdmission != nil {
+		var err error
+		release, err = g.workAdmission()
+		if err != nil || release == nil {
+			return
+		} // No work was accepted after the pause.
 	}
-	g.timers[conversationID] = time.AfterFunc(g.debounce, func() {
+	g.workers.Add(1) // Include callbacks that have fired but not entered startWork yet.
+	job := &scheduledPass{release: func() { release(); g.workers.Done() }}
+	job.timer = time.AfterFunc(g.debounce, func() {
+		defer job.release()
 		g.mu.Lock()
-		delete(g.timers, conversationID)
+		if g.timers[conversationID] == job {
+			delete(g.timers, conversationID)
+		}
 		g.mu.Unlock()
 		ctx, cancel := compaction.WithExecutionBudget(context.Background())
 		defer cancel()
 		_ = g.runCompaction(ctx, conversationID)
 	})
+	g.timers[conversationID] = job
 }
 
-// CompactNow runs a compaction pass synchronously (used by the request-path
-// hard-limit override).
+// CompactAsync retains work before spawning and outlives the requesting stream.
+func (g *Generator) CompactAsync(conversationID string) error {
+	ctx, release, ok := g.startWork(context.Background())
+	if !ok {
+		return context.Canceled
+	}
+	go func() { defer release(); _ = g.runCompaction(ctx, conversationID) }()
+	return nil
+}
+
+// CompactNow runs a synchronous pass, including the request-path hard limit.
 func (g *Generator) CompactNow(ctx context.Context, conversationID string) error {
 	return g.runCompaction(ctx, conversationID)
 }

@@ -1260,7 +1260,9 @@ func (x *svc) RegenerateContext(req *proto.RegenerateContextRequest, stream prot
 		// pass claims the conversation immediately (so the status bar can show
 		// real Compacting=true), persists bounded progress, and reschedules
 		// itself while backlog remains.
-		go func() { _ = x.compactionGen.CompactNow(context.Background(), convID) }()
+		if err := x.compactionGen.CompactAsync(convID); err != nil {
+			return stream.Send(&proto.RegenerateContextProgress{Done: true, Ok: false, Error: "context compaction cannot start while the agent is preparing to stop"})
+		}
 		return stream.Send(&proto.RegenerateContextProgress{
 			Done: true,
 			Ok:   true,

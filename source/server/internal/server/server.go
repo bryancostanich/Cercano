@@ -185,8 +185,10 @@ type Server struct {
 	// stays internal until asynchronous work sources and drain are integrated.
 	updateWork updateAdmission
 	// Startup-only coverage status; never infer idle from an untracked manager.
-	updateTrackedRuntime     *localruntime.InMemoryManager
-	updateRuntimeTrackingErr error
+	updateTrackedRuntime        *localruntime.InMemoryManager
+	updateRuntimeTrackingErr    error
+	updateTrackedCompactor      *compactiongen.Generator
+	updateCompactionTrackingErr error
 }
 
 // beginTurn delegates to the turn broker. It registers a new turn for conv,
@@ -1046,6 +1048,13 @@ func (s *Server) SetLoopCompactorFactory(fn func() agent.LoopCompactor) {
 // SetCompactionGenerator attaches the background compaction scheduler so that
 // /config compaction-enabled true|false flips it at runtime without a restart.
 func (s *Server) SetCompactionGenerator(g *compactiongen.Generator) {
+	s.updateCompactionTrackingErr = nil
+	if g != nil && g != s.updateTrackedCompactor {
+		s.updateCompactionTrackingErr = g.BindWorkAdmission(s.updateWork.enter)
+		if s.updateCompactionTrackingErr == nil {
+			s.updateTrackedCompactor = g
+		}
+	}
 	s.persistSvc.SetCompactionGenerator(g)
 }
 

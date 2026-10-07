@@ -4,6 +4,8 @@ package brewrestart
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net"
 	"net/netip"
 	"os"
@@ -11,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -73,15 +76,61 @@ func startCoordinatorFixture(t *testing.T, mode string) (string, string, netip.A
 }
 
 // fixtureStillOwns reports whether the fixture agent is still the same live
-// process holding the endpoint's listener.
+// process holding the endpoint's listener. Only a positive observation (same
+// live PID owning the listener) passes, and definitive evidence of a stop
+// (PID gone, identity changed, alive but no longer listening) still fails
+// the assertion. A single ownership snapshot can transiently fail with
+// EBADF/EAGAIN — a socket fd enumerated by PROC_PIDLISTFDS may already be
+// closed when proc_pidfdinfo queries it, e.g. the fixture's gRPC server
+// tearing down the accepted connection fd from the safe-stop RPC that just
+// returned. Production code treats exactly those errnos as transient
+// (pollReplacementReady), so the assertion retries the whole snapshot
+// instead of misreporting an inspection error as a stopped agent.
 func fixtureStillOwns(t *testing.T, old *exec.Cmd, endpoint netip.AddrPort) bool {
 	t.Helper()
-	id, err := Inspect(old.Process.Pid)
+	deadline := time.Now().Add(2 * time.Second)
+	var lastErr error
+	for {
+		alive, confirmed, err := fixtureOwnership(old.Process.Pid, endpoint)
+		if err != nil {
+			lastErr = err
+		}
+		if confirmed {
+			if !alive {
+				t.Logf("ownership check for pid %d: %v", old.Process.Pid, err)
+			}
+			return alive
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("ownership of pid %d could not be confirmed within 2s: %v", old.Process.Pid, lastErr)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+}
+
+// fixtureOwnership takes one ownership snapshot of the fixture. confirmed
+// means the observation is definitive (alive-and-listening, or provably not
+// the same listening process); unconfirmed means the snapshot raced with fd
+// churn and must be retried before concluding anything about the agent.
+func fixtureOwnership(pid int, endpoint netip.AddrPort) (alive, confirmed bool, err error) {
+	id, err := Inspect(pid)
 	if err != nil {
-		return false
+		if errors.Is(err, syscall.EAGAIN) {
+			return false, false, err
+		}
+		return false, true, fmt.Errorf("fixture pid %d is no longer inspectable: %w", pid, err)
 	}
 	listens, err := HoldsListener(id, endpoint)
-	return err == nil && listens
+	if err != nil {
+		if errors.Is(err, syscall.EBADF) || errors.Is(err, syscall.EAGAIN) {
+			return false, false, err
+		}
+		return false, true, fmt.Errorf("listener inspection for pid %d failed: %w", pid, err)
+	}
+	if !listens {
+		return false, true, fmt.Errorf("pid %d is alive but no longer holds %s", pid, endpoint)
+	}
+	return true, true, nil
 }
 
 // countingStarts wraps the ops.start adapter so a test can assert exactly

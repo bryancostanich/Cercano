@@ -173,10 +173,15 @@ func TestGateLogStreamCommittedFailureNamesContentEmitted(t *testing.T) {
 	}
 }
 
+// Held pre-commit events become DELIVERED kinds only once the stream
+// commits: this response ends cleanly (message_stop flushes the buffered
+// reasoning + tool events) and the failure arrives on the NEXT read, so the
+// committed-stream gate must name the reasoning + tool kinds, no text.
 func TestGateLogStreamEmittedReasoningAndToolCallKinds(t *testing.T) {
 	stream := &fakeStream{events: []llm.StreamEvent{
 		{Type: llm.EventReasoning},
 		{Type: llm.EventToolUseStart, ToolName: "noop"},
+		{Type: llm.EventMessageStop},
 	}, err: networkErr("primary")}
 	primary := &fakeProvider{name: "primary", streamOverride: func(context.Context, inference.Call) (inference.Stream, error) { return stream, nil }}
 	p, events, _ := build(primary, nil)

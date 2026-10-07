@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"sync"
 	"time"
 
 	"google.golang.org/grpc"
@@ -60,6 +61,7 @@ const MaxMsgBytes = maxGRPCWorkerMsgBytes
 
 // workerHandle owns a spawned worker process and its gRPC connection.
 type workerHandle struct {
+	teardown   sync.Once
 	cmd        *exec.Cmd
 	conn       *grpc.ClientConn
 	socketPath string
@@ -77,23 +79,25 @@ func (h *workerHandle) Kill() {
 	if h == nil {
 		return
 	}
-	if h.cmd != nil && h.cmd.Process != nil {
-		killGroupOrProcess(h.cmd.Process)
-		// Best-effort wait so the OS reclaims the zombie.
-		_ = h.cmd.Wait()
-		// Only our own pidfile is removed; needs the pid, so it lives inside
-		// this guard (a partially-built handle has no process and no pidfile).
-		removePidFileIfOwned(h.pidPath, h.cmd.Process.Pid)
-	}
-	if h.conn != nil {
-		_ = h.conn.Close()
-	}
-	if h.socketPath != "" {
-		_ = os.Remove(h.socketPath)
-	}
-	if h.onKill != nil {
-		h.onKill()
-	}
+	h.teardown.Do(func() {
+		if h.cmd != nil && h.cmd.Process != nil {
+			killGroupOrProcess(h.cmd.Process)
+			// Best-effort wait so the OS reclaims the zombie.
+			_ = h.cmd.Wait()
+			// Only our own pidfile is removed; needs the pid, so it lives inside
+			// this guard (a partially-built handle has no process and no pidfile).
+			removePidFileIfOwned(h.pidPath, h.cmd.Process.Pid)
+		}
+		if h.conn != nil {
+			_ = h.conn.Close()
+		}
+		if h.socketPath != "" {
+			_ = os.Remove(h.socketPath)
+		}
+		if h.onKill != nil {
+			h.onKill()
+		}
+	})
 }
 
 // spawnWorker starts a worker process on a fresh unix socket and returns a

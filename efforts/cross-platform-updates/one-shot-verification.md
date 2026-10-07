@@ -29,15 +29,29 @@ PowerShell command cannot hide a failed test.
   lock instead of the prior nil/no-op. Its exported coordination API matches the
   Unix shape; Unix implementation/namespace is unchanged. Temporary-directory
   tests cover cancellation, contention, release, parallel starts and child death.
+- A narrow independent-process launch primitive now exists
+  (source/server/internal/updatecoord/launch) and is verified in
+  launch-verification.md: explicit trusted absolute executable plus fixed
+  caller-built argv only, no PATH/home/metadata-command resolution, own session
+  on Unix (setsid), deliberate Windows creation flags with no job-breakaway
+  claim, stdin always the null device, stdout/stderr to caller-owned regular
+  log files or discard, never parent pipes, and the launcher never waits,
+  cancels or signals the child nor holds any update lease. The utility process
+  is expected to acquire its own exclusion lease.
 
 ## Explicit remaining work
 
 This is not yet an executable installed updater or complete launch integration.
 There is no helper entrypoint/process-copy/bootstrap wiring, real backend
 activation, safe idle/admission barrier, installed-process restart or Update UI.
+The launch primitive solves only the process-lifetime boundary: an executable,
+its argv and its output destinations must still be supplied by a production
+caller that has already resolved and verified the executable and installation.
 The per-installation update lock and legacy auto-launch lock still need coherent
 ordering/integration; a parent must not hold a lock while waiting on its child
-for the same lock. Old clients that do not participate cannot be assumed excluded.
+for the same lock. The launch primitive launches no lease holder: whoever
+composes it with oneshot must still prove the utility acquires its own lease.
+Old clients that do not participate cannot be assumed excluded.
 
 Windows ACL/ownership validation is not supplied by Unix-style 0600 bits.
 Preflight pathname checks are not a sandbox against a hostile same-user owner

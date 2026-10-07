@@ -32,6 +32,24 @@ Self-managed updates deliver a consistent agent/client pair through a verified c
 
 The implementation is complete only after native installed-system tests exercise real operations on Windows, Linux, and macOS. Compiling an artifact or reporting `--version` is insufficient evidence of update safety.
 
+## Approved simplification: one-shot utility, not a service
+
+The user explicitly approved a short-lived Go update utility in place of the
+proposed interactive updater service. This revises the execution brief: no new
+listening control API, updater daemon, socket/pipe service or control credential
+system. Existing app/agent coordination handles consent and safe preparation;
+a narrowly scoped utility performs one operation independently of agent lifetime,
+uses installation-wide exclusion, and records progress/outcome durably. Inherited
+output is best-effort and must not make the operation depend on an attached UI.
+
+Do not add privileged update triggers to unauthenticated existing RPC merely to
+avoid the rejected service. Prefer direct local launch from the initiating app;
+validate operation identity, installation policy and inputs before side effects.
+Do not hold a parent-owned lock that the child then waits on. A disconnected UI
+is not consent to cancel work or kill an installer. Ordinary version compatibility
+and connection behavior remain unchanged. Installer/bootstrap and real privilege
+handoff still retain their existing review gates.
+
 ## User experience
 
 During normal interactive use, checks run asynchronously with bounded requests, caching, backoff, and a clear distinction between no update and inability to check. Checking must not delay startup, invoke elevation, launch a model, or block ordinary work. Version/help commands remain offline and side-effect-free.

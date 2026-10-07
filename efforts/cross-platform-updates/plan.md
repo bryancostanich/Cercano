@@ -50,7 +50,7 @@ Objective: give every update a trustworthy installation identity and a single ob
 
 Objective: prevent update races and protect active work before implementing file activation. Files: source/server/internal/updatecoord/, source/server/internal/brewrestart/, source/server/pkg/agentclient/ launch and detach helpers, source/server/internal/procx/, source/server/internal/server/ drain handlers, and additive source/proto/ messages where needed. Tests: native process fixtures, multiple client subprocesses, abandoned locks, agent identity changes, drain cancellation and protocol compatibility. No tests against the live developer agent.
 
-- [-] Define helper invocation and authenticated local control boundaries using existing transport patterns; request approval if an additional transport or privilege boundary is required
+- [ ] Implement the approved one-shot helper invocation boundary using validated local inputs, existing coordination and persisted status; no new listening service or control credentials
 - [ ] Implement shared launch/update exclusion on Windows, Linux and macOS with stable lock identity and recovery after process death
 - [ ] Identify the exact installation-owned agent, clients and relevant child processes without broad name matching or rename-probe ownership assumptions
 - [ ] Implement the wait-for-idle default and a visible admission barrier once draining begins
@@ -91,7 +91,7 @@ Objective: expose the same discovery-to-completion experience while dispatching 
 - [ ] Add Update, Release notes and Later with per-version dismissal and managed-policy handling
 - [ ] Show installability separately from release announcements when package repositories lag
 - [ ] Present installation owner, target version, privilege needs and active-work consequences before applying
-- [ ] Connect user-approved actions to the operation service without embedding release-provided shell commands
+- [ ] Connect user-approved actions to the one-shot utility and persisted operation state without a new service or release-provided shell commands
 - [ ] Stream progress and waiting/draining/restarting/cleanup states consistently to all attached clients
 - [ ] Handle lost/reconnected clients and recover operation state after UI restart
 - [ ] Provide exact safe command guidance when automatic elevation or backend execution is unavailable

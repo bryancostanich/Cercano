@@ -17,7 +17,15 @@ Phase7 work. No production code calls the new probe or storage modules yet.
 Phase3's value, persistence and filesystem foundation is checkpointed, but live
 provenance integration is not claimed complete.
 
-## Next explicit security gate: local update-control authentication
+## Superseded proposal — not an active approval gate
+
+The user approved a one-shot utility after rejecting the unnecessary service
+assumption. Neither transport option below was adopted. No new control API,
+listening service or credentials will be implemented. See the approved
+simplification in spec.md and the revised Phase4 invocation task. The historical
+analysis remains here for audit, not as a requirement to revisit.
+
+## Historical proposal: local update-control authentication
 
 Read-only inspection found the agent's main TCP gRPC listener constructed in
 source/server/cmd/cercano/main.go with recovery interceptors but no per-user

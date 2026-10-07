@@ -106,6 +106,15 @@ type Service interface {
 	SetCompactionGenerator(g *compactiongen.Generator)
 	SetContextLoader(l *projectctx.Loader)
 
+	// BindResumeHydrationWork installs a startup-only work admission hook for
+	// the viewport-first resume hydration worker. Acquire runs before the
+	// worker is spawned; its release func runs when the worker actually
+	// returns, so a disconnecting RPC never releases the lease early. nil
+	// acquire, rebinding, and late attach while hydration work is active are
+	// refused. Caller installs this hook at startup only; it performs no
+	// runtime-default writes.
+	BindResumeHydrationWork(acquire func() (func(), error)) error
+
 	// RecordTurnContextUsage caches the exact provider-facing request
 	// accounting captured while serving a turn, so the context meter survives
 	// an agent restart instead of resetting to "unknown". Best-effort: a cache
@@ -210,6 +219,17 @@ type svc struct {
 	// touched, and the floor resets when the agent restarts.
 	elideMu       sync.Mutex
 	elisionFloors map[string]int64
+
+	// resumeAdmission is the startup-only work-admission hook for the
+	// viewport-first resume hydration worker. The worker can outlive its RPC
+	// (client disconnects mid-stream), so it holds its own admitted lifetime
+	// from before it is spawned until it actually returns. nil keeps the
+	// pre-hook behavior: hydration runs without a tracked lifetime.
+	// resumeHydrationActive counts workers between spawn and actual return so
+	// late binding can be refused.
+	resumeAdmissionMu     sync.Mutex
+	resumeAdmission       func() (func(), error)
+	resumeHydrationActive int
 }
 
 // New constructs a Service.
@@ -243,6 +263,64 @@ func New(
 		cloudModel:       cloudModel,
 		elisionFloors:    map[string]int64{},
 	}
+}
+
+// BindResumeHydrationWork is the startup-only hook from Service. It is not an
+// observer: acquire is called synchronously before each hydration worker is
+// spawned, and release tracks the worker's actual return.
+func (x *svc) BindResumeHydrationWork(acquire func() (func(), error)) error {
+	if acquire == nil {
+		return fmt.Errorf("nil resume hydration work admission")
+	}
+	x.resumeAdmissionMu.Lock()
+	defer x.resumeAdmissionMu.Unlock()
+	if x.resumeAdmission != nil {
+		return fmt.Errorf("resume hydration work admission already bound")
+	}
+	if x.resumeHydrationActive != 0 {
+		return fmt.Errorf("resume hydration work admission cannot be attached while hydration is active")
+	}
+	x.resumeAdmission = acquire
+	return nil
+}
+
+// beginResumeHydrationWork acquires one admitted lifetime for a hydration
+// worker BEFORE it is spawned, so release follows the worker's actual return —
+// not the RPC's — even when the stream disconnects, its context is cancelled,
+// or an earlier send errors. Refused admission returns an error and starts
+// nothing. An unbound hook keeps the pre-hook behavior: hydration runs
+// without a tracked lifetime, but it still counts as active work so a late
+// BindResumeHydrationWork is refused rather than pretending it is idle.
+func (x *svc) beginResumeHydrationWork() (func(), error) {
+	x.resumeAdmissionMu.Lock()
+	x.resumeHydrationActive++
+	acquire := x.resumeAdmission
+	x.resumeAdmissionMu.Unlock()
+	var releaseActivity func()
+	if acquire != nil {
+		release, err := acquire()
+		if err != nil || release == nil {
+			x.resumeAdmissionMu.Lock()
+			x.resumeHydrationActive--
+			x.resumeAdmissionMu.Unlock()
+			if err != nil {
+				return nil, fmt.Errorf("conversation resume hydration unavailable: %w", err)
+			}
+			return nil, fmt.Errorf("conversation resume hydration admission returned no release")
+		}
+		releaseActivity = release
+	}
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			x.resumeAdmissionMu.Lock()
+			x.resumeHydrationActive--
+			x.resumeAdmissionMu.Unlock()
+			if releaseActivity != nil {
+				releaseActivity()
+			}
+		})
+	}, nil
 }
 
 // elisionFloor returns the conversation's /elide-context floor, 0 if unset.
@@ -708,8 +786,18 @@ func (x *svc) StreamResumeConversationViewportFirst(req *proto.ResumeConversatio
 		return err
 	}
 
+	// Retain the admitted lifetime BEFORE spawning the worker; release is
+	// deferred inside the worker, so it tracks actual hydration return even
+	// when this RPC returns first (client disconnect, cancelled ctx, or an
+	// earlier send error). Refused admission rejects the stream without
+	// starting hydration.
+	releaseHydration, admitErr := x.beginResumeHydrationWork()
+	if admitErr != nil {
+		return admitErr
+	}
 	hydrationDone := make(chan error, 1)
 	go func() {
+		defer releaseHydration()
 		_, err := x.convAgent.ResumeConversation(ctx, convID)
 		hydrationDone <- err
 	}()

@@ -1133,6 +1133,13 @@ func NewServer(a *agent.Agent, router RouterCloudUpdater, coordinator *loop.ADKC
 		return llm.ResolveRuntimeContext(context.Background(), s.providerSvc.Open(), model, false)
 	})
 	s.persistSvc.SetCloudContextWindow(s.cloudContextWindow)
+	// Startup-only: bind the update work admission gate to the viewport-first
+	// resume hydration worker. The worker can outlive its RPC (client
+	// disconnects mid-stream), so it must hold its own admitted lifetime until
+	// it actually returns. Late binding is refused by the service.
+	if err := s.persistSvc.BindResumeHydrationWork(s.updateWork.enter); err != nil {
+		log.Printf("[persistence] resume hydration work admission: %v", err)
+	}
 	// Construct the tool catalog service. permBroker is not yet wired here
 	// (SetPermissions is called by the caller after construction), so it is
 	// passed nil and updated via toolSvc.SetPermBroker in SetPermissions.
@@ -2040,6 +2047,8 @@ func (s *Server) GetConversation(ctx context.Context, req *proto.GetConversation
 }
 
 // ResumeConversation implements proto.AgentServer — delegates to persistSvc.
+// Admitted work: synchronous hydration runs inside this RPC's lifetime, so the
+// release below is bounded by the RPC return.
 func (s *Server) ResumeConversation(ctx context.Context, req *proto.ResumeConversationRequest) (*proto.ResumeConversationResponse, error) {
 	started := time.Now()
 	if s.resumePersistenceUnavailable() {
@@ -2047,6 +2056,12 @@ func (s *Server) ResumeConversation(ctx context.Context, req *proto.ResumeConver
 		s.logResumeRPCFailure("resume_conversation", nil, req, started, err, "persistence_unavailable")
 		return nil, err
 	}
+	release, admissionErr := s.admitUpdateWork()
+	if admissionErr != nil {
+		s.logResumeRPCFailure("resume_conversation", nil, req, started, admissionErr, "admission_unavailable")
+		return nil, admissionErr
+	}
+	defer release()
 	resp, err := s.persistSvc.ResumeConversation(ctx, req)
 	if err != nil {
 		s.logResumeRPCFailure("resume_conversation", nil, req, started, err, "db_failure")
@@ -2055,6 +2070,8 @@ func (s *Server) ResumeConversation(ctx context.Context, req *proto.ResumeConver
 }
 
 // StreamResumeConversation implements proto.AgentServer — delegates to persistSvc.
+// Admitted work: the resume call (including rehydration) is synchronous within
+// this RPC, so the release below is bounded by the RPC return.
 func (s *Server) StreamResumeConversation(req *proto.ResumeConversationRequest, stream proto.Agent_StreamResumeConversationServer) error {
 	started := time.Now()
 	if s.resumePersistenceUnavailable() {
@@ -2062,6 +2079,12 @@ func (s *Server) StreamResumeConversation(req *proto.ResumeConversationRequest, 
 		s.logResumeRPCFailure("stream_resume_conversation", nil, req, started, err, "persistence_unavailable")
 		return err
 	}
+	release, admissionErr := s.admitUpdateWork()
+	if admissionErr != nil {
+		s.logResumeRPCFailure("stream_resume_conversation", nil, req, started, admissionErr, "admission_unavailable")
+		return admissionErr
+	}
+	defer release()
 	err := s.persistSvc.StreamResumeConversation(req, stream)
 	if err != nil {
 		s.logResumeRPCFailure("stream_resume_conversation", nil, req, started, err, "db_failure")
@@ -2070,6 +2093,10 @@ func (s *Server) StreamResumeConversation(req *proto.ResumeConversationRequest, 
 }
 
 // StreamResumeConversationViewportFirst implements proto.AgentServer — delegates to persistSvc.
+// Admitted work: this lease covers the synchronous RPC body (tail fetch and
+// backfill). The hydration worker spawned inside persistSvc holds its own
+// lease for its actual lifetime, so it stays admitted even after this RPC
+// returns on a client disconnect.
 func (s *Server) StreamResumeConversationViewportFirst(req *proto.ResumeConversationViewportFirstRequest, stream proto.Agent_StreamResumeConversationViewportFirstServer) error {
 	started := time.Now()
 	if s.resumePersistenceUnavailable() {
@@ -2077,6 +2104,12 @@ func (s *Server) StreamResumeConversationViewportFirst(req *proto.ResumeConversa
 		s.logResumeRPCFailure("stream_resume_conversation_viewport_first", nil, req, started, err, "persistence_unavailable")
 		return err
 	}
+	release, admissionErr := s.admitUpdateWork()
+	if admissionErr != nil {
+		s.logResumeRPCFailure("stream_resume_conversation_viewport_first", nil, req, started, admissionErr, "admission_unavailable")
+		return admissionErr
+	}
+	defer release()
 	err := s.persistSvc.StreamResumeConversationViewportFirst(req, stream)
 	if err != nil {
 		s.logResumeRPCFailure("stream_resume_conversation_viewport_first", nil, req, started, err, "db_failure")

@@ -53,7 +53,7 @@ Objective: prevent update races and protect active work before implementing file
 - [~] Implement the approved one-shot helper invocation boundary using validated local inputs, existing coordination and persisted status; no new listening service or control credentials
 - [~] Implement shared launch/update exclusion on Windows, Linux and macOS with stable lock identity and recovery after process death
 - [ ] Identify the exact installation-owned agent, clients and relevant child processes without broad name matching or rename-probe ownership assumptions
-- [~] Implement the wait-for-idle default and a visible admission barrier once draining begins
+- [x] Implement the wait-for-idle default and a visible admission barrier once draining begins
 - [ ] Add explicit user-confirmed cancellation of active work without an implicit timeout-to-kill policy
 - [ ] Restore normal admission on deferral, safe pre-activation cancellation or failed preparation
 - [ ] Coordinate restart and reconnect without introducing a version compatibility handshake

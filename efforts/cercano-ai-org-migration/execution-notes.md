@@ -19,6 +19,22 @@ Current evidence is temporary, access-restricted, and not itself a recovery back
 
 The local manifest records refs, worktree metadata, cached tracking relationships, status including untracked files, and collapsed ignored-directory entries. It does not hash all workspace contents. It must be retained in an approved durable location and refreshed during the final quiesced snapshot before relocation. No backup location has yet been approved or backups created.
 
-## Coordination needed
+## Cleanup confirmation
 
-Confirm whether the reduction from 51 to 9 Cercano worktrees was an intentional cleanup outside this run. If worktrees were moved rather than removed, provide their new locations. The run is paused at the preservation inventory gate, not the remote cutover gate. No need to stop all ongoing work for this question.
+The user confirmed: "yes, i've been cleaning them up". The reduction from the historical worktree count is intentional activity outside this run. Use a freshly recorded current registry as the preservation baseline; do not recreate removed worktrees. Continue preserving all remaining work, including standalone backups and unregistered candidate directories. Refresh again before the final quiesced snapshot because cleanup and development may continue.
+
+## Confirmed baseline refresh
+
+After cleanup confirmation, a fresh direct inventory reports 7 Cercano worktrees, 1 Cercloud checkout, and 2 shared tap worktrees: 10 in total. All registered paths exist and all status/ignored-file reads succeeded. The current manifest includes refs, redacted remotes, dirty/untracked status, and collapsed ignored entries. Dirty workspaces are Cercano (including planning documentation), Cercano-release-macos, and Cercloud. Four non-repository candidates remain: the three standalone backup/document directories and the Cercano-worktrees container.
+
+The historical 54-workspace task is satisfied against the user's explicitly revised current-state baseline, not by asserting the removed workspaces were preserved. Cleanup may still continue; refresh before final preservation.
+
+The authoritative refreshed manifest is /tmp/cercano-org-migration-preflight/local-baseline-confirmed.json, mode 0600. A delegated refresh did not complete and was superseded by this verified direct inventory. Process cwd inspection found a VS Code plugin process using the main checkout. This narrow check is not a complete open-file or saved-session inventory and does not establish that relocation is safe; no processes were stopped. Evidence: /tmp/cercano-org-migration-preflight/process-cwd.json.
+
+## Coordination still required
+
+A durable backup location remains subject to user approval. Propose /Users/bryancostanich/git_repos/cercano-ai-migration-backups, outside both the source paths and the destination being moved into, with a uniquely timestamped snapshot directory and owner-only permissions. This would be a same-machine rollback copy, not protection against disk failure. Backups must include Git metadata and remaining ignored/untracked contents, which may contain sensitive local configuration. They must not be committed or uploaded.
+
+Recovery procedure: retain a complete metadata-preserving snapshot and path manifest; verify archive/file readability and representative restoration into an isolated temporary location without touching originals. Before relocation, pause affected writers, refresh the snapshot, and validate preservation. If relocation fails, pause writers, preserve the failed state for diagnosis, restore the snapshot to the documented original paths, and repair/verify worktree metadata before resuming. Any overwrite during recovery requires explicit approval. Backup tooling and verification must detect files changing during capture; a live provisional snapshot is not accepted as a quiesced recovery point.
+
+No repository transfer or relocation is authorized by the cleanup confirmation. Inventory metadata in /tmp is temporary and is not a verified recovery backup.

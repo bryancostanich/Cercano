@@ -90,6 +90,8 @@ func confirmStopAfterUncertainty(ctx context.Context, source processSource, id I
 			return stopUnknown, err
 		case err == nil:
 			sameAlive = true
+		default:
+			sameAlive = false // A later unknown sample supersedes an earlier live one.
 		}
 		// err == nil && same process, or a transient EAGAIN snapshot: probe
 		// again after a short pause until the bound or the overall deadline.
@@ -164,7 +166,7 @@ func coordinateRestart(ctx context.Context, ops restartOps, newExecutable string
 		confirmation, inspectErr := confirmStopAfterUncertainty(ctx, ops.source, *owner)
 		switch confirmation {
 		case stopSameAgentAlive:
-			return false, fmt.Errorf("%w: shutdown ended ambiguously (%v); the same agent process is still running, was not stopped, and no replacement was started",
+			return false, fmt.Errorf("%w: shutdown ended ambiguously (%v); the same agent was present at the last inspection; stop completion remains unconfirmed and no replacement was started",
 				ErrSafeStopUncertain, err)
 		case stopUnknown:
 			// Includes the case where the bounded post-install deadline

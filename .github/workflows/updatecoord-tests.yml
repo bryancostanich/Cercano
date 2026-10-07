@@ -15,6 +15,7 @@ on:
       - 'source/server/internal/hostsvc/persistence/**'
       - 'source/server/internal/hostsvc/credentials/**'
       - 'source/server/pkg/agentclient/**'
+      - 'source/server/internal/brewrestart/**'
       - 'source/server/go.mod'
       - 'source/server/go.sum'
       - '.github/workflows/updatecoord-tests.yml'
@@ -75,6 +76,13 @@ jobs:
       - name: Process stop ownership fixtures
         working-directory: source/server
         run: go test -count=1 -timeout=2m -run 'Test.*Stop|Test.*Shutdown' ./cmd/cercano
+      - name: Safe update restart fixtures
+        working-directory: source/server
+        run: go test -count=1 -timeout=2m ./internal/brewrestart
+      - name: Windows launch capability evidence
+        if: runner.os == 'Windows'
+        working-directory: source/server
+        run: go test -v -count=1 -timeout=2m -run 'TestOneShotLaunch' ./internal/updatecoord/launch
       - name: CLI protocol compatibility compilation
         working-directory: source/clients/cli
         run: go test -run '^$' ./...

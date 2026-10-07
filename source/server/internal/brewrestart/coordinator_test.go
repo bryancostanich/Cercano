@@ -83,7 +83,7 @@ func TestCoordinateRestartUncertainStopResolution(t *testing.T) {
 	id := Identity{PID: 1, UID: 501, Executable: "/opt/homebrew/Cellar/cercano/1/bin/cercano", StartSeconds: 1}
 	for _, tt := range []struct {
 		name          string
-		expireDuring  bool // restart deadline expires while the stop wait blocks
+		expireDuring  bool                 // restart deadline expires while the stop wait blocks
 		during        func(*fakeProcesses) // identity change after discovery, during the stop
 		wantRestarted bool
 		wantErrIn     string
@@ -91,7 +91,7 @@ func TestCoordinateRestartUncertainStopResolution(t *testing.T) {
 		{name: "agent verifiably gone continues existing restart", during: func(f *fakeProcesses) {
 			f.inspectErrors[1] = syscall.ESRCH
 		}, wantRestarted: true},
-		{name: "exact same agent alive is unconfirmed, never forced", wantErrIn: "same agent process is still running"},
+		{name: "exact same agent alive is unconfirmed, never forced", wantErrIn: "same agent was present at the last inspection"},
 		{name: "reused or foreign PID identity refuses restart", during: func(f *fakeProcesses) {
 			reused := id
 			reused.StartSeconds++

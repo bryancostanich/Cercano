@@ -183,8 +183,8 @@ func TestNativeCoordinatorUncertainAliveAgentIsNeverForced(t *testing.T) {
 	if restarted || !isSafeStopUncertain(err) {
 		t.Fatalf("restarted=%v err=%v, want typed uncertain diagnostic", restarted, err)
 	}
-	if !strings.Contains(err.Error(), "same agent process is still running") {
-		t.Fatalf("err=%v, want explicit same-process-still-alive guidance", err)
+	if !strings.Contains(err.Error(), "same agent was present at the last inspection") {
+		t.Fatalf("err=%v, want explicit last-observation guidance", err)
 	}
 	if *starts != 0 {
 		t.Fatalf("started %d replacement agents although the agent never stopped", *starts)

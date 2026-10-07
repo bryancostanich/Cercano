@@ -195,9 +195,10 @@ func Observe(opts Options) (Facts, error) {
 
 // StillObserved re-checks that the observed executable and root are still
 // present with the same file identity. A missing file, a non-regular
-// replacement, a changed file identity (including a rewritten executable), a
+// replacement, a changed file identity (including observable size or modification-time changes), a
 // missing or replaced root, or a root that no longer resolves to the
-// observed directory fails closed with an error.
+// observed directory fails closed with an error. These are identity/metadata
+// observations, not content authentication or a lock against later changes.
 func (f Facts) StillObserved() error {
 	info, err := os.Stat(f.resolvedPath)
 	if err != nil {
@@ -206,7 +207,7 @@ func (f Facts) StillObserved() error {
 	if !info.Mode().IsRegular() {
 		return fmt.Errorf("probe: executable %q is no longer a regular file", f.resolvedPath)
 	}
-	if !os.SameFile(info, f.exeIdentity) {
+	if !os.SameFile(info, f.exeIdentity) || info.Size() != f.exeIdentity.Size() || !info.ModTime().Equal(f.exeIdentity.ModTime()) {
 		return fmt.Errorf("probe: executable %q changed identity since observation", f.resolvedPath)
 	}
 	if f.resolvedRoot != "" {
@@ -353,6 +354,8 @@ type UnavailableProvider struct {
 // for installation.Classify plus the observational refusals and provider
 // unavailability that a trusted runtime resolver must surface.
 type Corroboration struct {
+	observation    Facts
+	observationErr error
 	// Executable is the observed executable evidence.
 	Executable installation.ExecutableEvidence
 	// Managers is the corroborated manager evidence for
@@ -375,12 +378,18 @@ type Corroboration struct {
 // an unavailable provider might hold conflicting ownership evidence, so
 // callers must treat the installation as non-actionable instead of
 // classifying on partial evidence.
-func (c Corroboration) Complete() bool { return len(c.Unavailable) == 0 }
+func (c Corroboration) Complete() bool { return c.observationErr == nil && len(c.Unavailable) == 0 }
 
 // Classify runs installation.Classify over the corroborated evidence. It
 // fails closed while any applicable provider is unavailable or incomplete:
 // the partial result is returned as an error, never as a classification.
 func (c Corroboration) Classify(self installation.SelfManagedEvidence) (installation.Classification, error) {
+	if c.observationErr != nil {
+		return installation.Classification{}, c.observationErr
+	}
+	if err := c.observation.StillObserved(); err != nil {
+		return installation.Classification{}, err
+	}
 	if !c.Complete() {
 		names := make([]string, 0, len(c.Unavailable))
 		for _, u := range c.Unavailable {
@@ -390,7 +399,7 @@ func (c Corroboration) Classify(self installation.SelfManagedEvidence) (installa
 			"probe: applicable receipt provider(s) unavailable, ownership cannot be corroborated: %s",
 			strings.Join(names, ", "))
 	}
-	return installation.Classify(c.Executable, c.Managers, self), nil
+	return installation.Classify(c.observation.ExecutableEvidence(), c.Managers, self), nil
 }
 
 // Corroborate checks each injected candidate receipt against the observed
@@ -418,9 +427,18 @@ func (c Corroboration) Classify(self installation.SelfManagedEvidence) (installa
 // authority; classification and auto-editability remain the pure value
 // model's contract.
 func Corroborate(facts Facts, providers []ReceiptProvider) Corroboration {
-	c := Corroboration{Executable: facts.ExecutableEvidence()}
-	var order []installation.Owner
-	evidence := make(map[installation.Owner]*installation.ManagerEvidence)
+	c := Corroboration{Executable: facts.ExecutableEvidence(), observation: facts}
+	if err := facts.StillObserved(); err != nil {
+		c.observationErr = err
+		return c
+	}
+	type claimKey struct {
+		manager     installation.Owner
+		pkg, source string
+		scope       installation.Scope
+	}
+	var order []claimKey
+	evidence := make(map[claimKey]*installation.ManagerEvidence)
 	for _, p := range providers {
 		if !p.AppliesTo(facts.platform) {
 			continue
@@ -442,7 +460,8 @@ func Corroborate(facts Facts, providers []ReceiptProvider) Corroboration {
 			// A provider that supplies receipts is reporting an installed
 			// cercano package from its manager; that presence is
 			// observational and never ownership by itself.
-			mgr := evidence[r.Manager]
+			key := claimKey{r.Manager, r.PackageName, r.SourceID, r.Scope}
+			mgr := evidence[key]
 			if mgr == nil {
 				mgr = &installation.ManagerEvidence{
 					Manager:          r.Manager,
@@ -451,8 +470,8 @@ func Corroborate(facts Facts, providers []ReceiptProvider) Corroboration {
 					PackageName:      r.PackageName,
 					Scope:            r.Scope,
 				}
-				evidence[r.Manager] = mgr
-				order = append(order, r.Manager)
+				evidence[key] = mgr
+				order = append(order, key)
 			}
 			owned, refusal := probeOwned(facts, p.Name(), r)
 			if refusal != nil {
@@ -467,9 +486,26 @@ func Corroborate(facts Facts, providers []ReceiptProvider) Corroboration {
 	}
 	// Deterministic output independent of provider registration order: an
 	// ambiguous conflict must always report the same owner list.
-	sort.Slice(order, func(i, j int) bool { return order[i] < order[j] })
+	sort.Slice(order, func(i, j int) bool {
+		a, b := order[i], order[j]
+		if a.manager != b.manager {
+			return a.manager < b.manager
+		}
+		if a.pkg != b.pkg {
+			return a.pkg < b.pkg
+		}
+		if a.source != b.source {
+			return a.source < b.source
+		}
+		return a.scope < b.scope
+	})
 	for _, m := range order {
 		c.Managers = append(c.Managers, *evidence[m])
+	}
+	if err := facts.StillObserved(); err != nil {
+		c.observationErr = err
+		c.Managers = nil
+		c.Owned = nil
 	}
 	return c
 }

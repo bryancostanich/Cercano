@@ -480,7 +480,7 @@ func TestBrokenProgressReporterDoesNotCancelJob(t *testing.T) {
 			broken: func(p Progress) error { return errors.New("broken writer") },
 		},
 		{
-			name: "panicking reporter",
+			name:   "panicking reporter",
 			broken: func(p Progress) error { panic("catastrophic writer") },
 		},
 	} {

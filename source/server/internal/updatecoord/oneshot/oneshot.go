@@ -1,72 +1,18 @@
-// Package oneshot implements the approved ONE-SHOT update-utility execution
-// boundary: a bounded, in-process slice that lets trusted compiled code
-// perform exactly one update operation against a per-installation SQLite
-// state store, under the installation's shared exclusion lock.
+// Package oneshot runs one persisted update operation under its installation
+// lock. It adds no listener, service, credentials, process spawning or CLI wiring.
 //
-// Approved scope and explicit non-goals:
+// The caller supplies a trusted store; the request supplies only installation
+// and operation IDs. The lock uses the store's stable directory, never a launch
+// argument. Callers must still protect that directory against replacement.
 //
-//   - This is a SHORT-LIVED UTILITY slice, not a service. There is no
-//     listener, no socket/pipe control API, no daemon, and no control
-//     credential or token system. The executor is called in-process by the
-//     trusted host that compiled it.
-//   - There is NO process-spawning wrapper, artifact download/bootstrap, or
-//     main-CLI wiring here yet: those are later, separately gated phases
-//     (plan Phase 5). This package only defines and enforces the execution
-//     boundary and its invariants so later phases can be built on it.
-//   - No new transport, manager invocation (Homebrew/APT/Chocolatey), state
-//     or home-directory creation default, credential access, or agent-kill
-//     behavior is added.
+// Backends are compiled code, not commands from metadata. They must quiesce
+// owned work before returning and use Controller for legal state transitions.
+// The context belongs to the utility lifetime, not an attached UI connection.
 //
-// Trust model:
-//
-//   - The state.Store is opened by the caller on an EXPLICIT root (tests use
-//     temporary roots; nothing here discovers or opens the user's live
-//     state). The Request must name the store's exact installation and the
-//     CURRENT operation; anything else is refused before any work runs.
-//   - The exclusive exclusion lock is acquired in the SAME stable
-//     installation state directory the store itself owns
-//     (Store.Directory()), never in a caller-supplied lock path. The lock
-//     directory identity therefore cannot be redirected by any input.
-//   - The backend callback is TRUSTED COMPILED CODE wired by the host
-//     process — never instructions, paths, or commands taken from release
-//     metadata or user input. It must quiesce all work it owns before it
-//     returns; the boundary never terminates or manages processes for it.
-//   - The backend mutates state ONLY through this package's Controller,
-//     which delegates to the existing state.Adapter and its pure
-//     operation.Store model. This slice adds no second state machine and
-//     no new transition: every legality rule (protected regions, recovery
-//     freezes, consent, health-before-cleanup) stays enforced by the
-//     existing model.
-//
-// Context discipline:
-//
-//   - The context handed to Run (and to the backend) is the UTILITY
-//     LIFETIME context — explicitly NOT a UI connection context. A lost or
-//     disconnected UI must never decide the transaction outcome, release
-//     admission, or cancel protected work.
-//   - After the backend returns, the boundary re-reads and records the
-//     outcome using a bounded, cancellation-INDEPENDENT context, so a
-//     cancelled caller context can neither fake success nor leave a
-//     protected interrupted state unrecorded. Protected interrupted states
-//     remain recovery-needed; admission is never released based on a UI
-//     disconnect.
-//
-// Outcome discipline:
-//
-//   - Success is returned ONLY after the adapter confirms the persisted
-//     current operation is StateComplete. A nil backend error with an
-//     unfinished persisted state is a typed ErrIncomplete; the boundary
-//     NEVER marks the operation complete by itself.
-//   - A backend error persists ONE sanitized generic failure — a fixed
-//     machine code and fixed user phrase, never the backend's raw error
-//     text — and ONLY where the model still permits it: terminal,
-//     failed-marked, recovery-requested, and recovery-needed states are
-//     preserved exactly as the backend (or a protected interruption) left
-//     them.
-//   - The best-effort progress reporter receives only safe fields
-//     (installation, operation ID, target version, state) — never raw
-//     reasons or filesystem paths — and its errors or panics can never
-//     decide the transaction outcome.
+// Success requires persisted completion. Outcome recording gets a bounded,
+// cancellation-independent context; recording failures are reported rather
+// than hidden. Existing recovery state is preserved. Progress is optional and
+// excludes raw error text; reporters must return promptly without blocking I/O.
 package oneshot
 
 import (
@@ -112,7 +58,8 @@ var (
 	ErrIncomplete = errors.New("oneshot: backend returned without a completed operation")
 	// ErrBackendFailed: the trusted backend reported failure. A sanitized
 	// generic failure was recorded where the model permitted it.
-	ErrBackendFailed = errors.New("oneshot: backend failed")
+	ErrBackendFailed    = errors.New("oneshot: backend failed")
+	ErrOutcomeRecording = errors.New("oneshot: outcome could not be recorded")
 )
 
 const (
@@ -199,7 +146,14 @@ func (c *Controller) OperationID() int64 {
 // Snapshot returns the operation's current persisted snapshot as the
 // adapter sees it.
 func (c *Controller) Snapshot(ctx context.Context) (operation.Snapshot, bool, error) {
-	return c.adapter.Snapshot(ctx)
+	snap, ok, err := c.adapter.Snapshot(ctx)
+	if err != nil {
+		return operation.Snapshot{}, false, err
+	}
+	if !ok || snap.ID != c.opID {
+		return operation.Snapshot{}, false, ErrStaleOperation
+	}
+	return snap, true, nil
 }
 
 // Apply advances the bound operation by one legal model transition. The
@@ -244,7 +198,7 @@ func New(store *state.Store, backend Backend) (*Executor, error) {
 
 // SetProgressReporter installs an optional best-effort progress callback.
 // The callback receives only safe fields. Its errors or panics disable
-// further reports and can NEVER decide the transaction outcome.
+// further reports. Configure this before Run; the callback must be nonblocking.
 func (e *Executor) SetProgressReporter(fn func(Progress) error) {
 	e.progress = fn
 }
@@ -332,9 +286,12 @@ func (e *Executor) Run(ctx context.Context, req Request) (Result, error) {
 		return Result{}, fmt.Errorf("%w: current operation vanished while the backend ran", ErrStaleOperation)
 	}
 
+	if final.ID != req.OperationID {
+		return Result{}, fmt.Errorf("%w: current operation changed before outcome recording", ErrStaleOperation)
+	}
 	if backendErr != nil {
-		recordGenericFailure(outcomeCtx, adapter, final)
-		return Result{}, fmt.Errorf("%w: %w", ErrBackendFailed, backendErr)
+		recordErr := recordGenericFailure(outcomeCtx, adapter, final)
+		return Result{}, errors.Join(fmt.Errorf("%w: %w", ErrBackendFailed, backendErr), recordErr)
 	}
 	if final.ID == req.OperationID && final.State == operation.StateComplete {
 		return Result{
@@ -355,16 +312,19 @@ func (e *Executor) Run(ctx context.Context, req Request) (Result, error) {
 // (recovery-requested or recovery-needed) are preserved exactly: the
 // boundary never overwrites the backend's own or an interruption's recorded
 // outcome, and a refused recording leaves the state untouched.
-func recordGenericFailure(ctx context.Context, adapter *state.Adapter, snap operation.Snapshot) {
+func recordGenericFailure(ctx context.Context, adapter *state.Adapter, snap operation.Snapshot) error {
 	if snap.State.Terminal() || snap.HasFailure || snap.RecoveryRequested || snap.RecoveryNeeded {
-		return
+		return nil
 	}
 	_, err := adapter.Apply(ctx, operation.Input{
 		Event:       operation.EventFail,
-		OperationID:  snap.ID,
-		Failure:      genericFailure,
+		OperationID: snap.ID,
+		Failure:     genericFailure,
 	})
-	_ = err // an illegal recording attempt is skipped, preserving the state
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrOutcomeRecording, err)
+	}
+	return nil
 }
 
 // report delivers one best-effort progress report of safe fields only. A
@@ -382,7 +342,7 @@ func (e *Executor) report(snap operation.Snapshot) {
 	}()
 	if err := fn(Progress{
 		InstallID:     e.store.InstallID(),
-		OperationID:    snap.ID,
+		OperationID:   snap.ID,
 		TargetVersion: snap.TargetVersion,
 		State:         snap.State,
 	}); err != nil {

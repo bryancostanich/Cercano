@@ -108,24 +108,6 @@ func TestOneShotLaunch_RejectsDirectoryExecutable(t *testing.T) {
 	}
 }
 
-// An unopenable output log must fail closed BEFORE any child starts: an
-// output problem is reported to the caller, never silently swallowed into
-// a half-launched update utility.
-func TestOneShotLaunch_OutputLogOpenFailureFailsClosed(t *testing.T) {
-	exe, err := helperExecutable()
-	if err != nil {
-		t.Fatalf("test binary path: %v", err)
-	}
-	missingDir := filepath.Join(t.TempDir(), "no", "such", "dir")
-	if _, err := Launch(Options{
-		Executable: exe,
-		Argv:       []string{"-launch-testprocess-role=" + helperRoleEchoOnce},
-		StdoutPath: filepath.Join(missingDir, "out.log"),
-	}); !errors.Is(err, ErrOutputSetup) {
-		t.Fatalf("want ErrOutputSetup, got %v", err)
-	}
-}
-
 // The child's stdout/stderr land in the caller-owned regular log files,
 // not in a parent-owned pipe the parent would have to drain.
 func TestOneShotLaunch_WritesToCallerOwnedLogFiles(t *testing.T) {

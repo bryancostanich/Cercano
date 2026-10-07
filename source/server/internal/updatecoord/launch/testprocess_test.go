@@ -31,16 +31,23 @@ const (
 	helperRoleIntermediateParent = "intermediate-parent"
 	helperRoleFinalChild         = "final-child"
 	helperRoleEchoOnce           = "echo-once"
+	helperRoleJobParent          = "job-parent"
 )
 
 var (
 	helperRole = flag.String("launch-testprocess-role", helperRoleNone, "internal fixture role")
 
-	// intermediate-parent inputs (paths supplied by the test):
-	childPidFilePath     = flag.String("launch-testprocess-pidfile", "", "intermediate parent: where to record the launched child pid")
-	childLogPath         = flag.String("launch-testprocess-child-log", "", "intermediate parent: child stdout/stderr log path")
+	// intermediate-parent and job-parent inputs (paths supplied by the
+	// test):
+	childPidFilePath     = flag.String("launch-testprocess-pidfile", "", "intermediate/job parent: where to record the launched child pid")
+	childLogPath         = flag.String("launch-testprocess-child-log", "", "intermediate/job parent: child stdout/stderr log path")
 	parentDoneMarkerPath = flag.String("launch-testprocess-parent-done", "", "parent exit marker path")
 	completionMarkerPath = flag.String("launch-testprocess-completion", "", "final child completion marker path")
+
+	// job-parent inputs (Windows job-object fixtures; see
+	// testprocess_windows_test.go):
+	jobVariant    = flag.String("launch-testprocess-job-variant", "", "job-parent: \"deny\" (breakaway forbidden) or \"allow\" (breakaway permitted)")
+	jobResultPath = flag.String("launch-testprocess-job-result", "", "job-parent: where to record the launch outcome")
 
 	// echo-once inputs:
 	echoLine  = flag.String("launch-testprocess-echo-line", "fixture-line", "echo-once: fixed line to write")
@@ -64,6 +71,8 @@ func TestMain(m *testing.M) {
 		finalChildMain()
 	case helperRoleEchoOnce:
 		echoOnceMain()
+	case helperRoleJobParent:
+		jobParentMain()
 	default:
 		fmt.Fprintln(os.Stderr, "testprocess: unknown role:", *helperRole)
 		os.Exit(2)

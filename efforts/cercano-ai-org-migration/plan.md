@@ -23,7 +23,7 @@ Objective: ensure transfer and publishing can succeed without changing private a
 - [ ] Compare Cercloud's existing effective access with destination organization defaults and teams.
   - [ ] Stop for a focused decision if the move would broaden private access; do not silently alter organization-wide permissions.
 - [ ] Verify GitHub plan and organization policy implications for private repositories, protections, environments, and Actions.
-- [-] Inspect source and destination Actions permissions, protected branches/rulesets, environments, deployment restrictions, variables, and repository/environment/organization secret names.
+- [~] Inspect source and destination Actions permissions, protected branches/rulesets, environments, deployment restrictions, variables, and repository/environment/organization secret names.
 - [ ] Inventory Homebrew publishing and plugin sync token authorization, including organization approval requirements; request explicit approval for necessary credential or scope changes.
 - [ ] Verify Apple signing/notarization configuration and record required environment protection and release settings without reading secret values into logs.
 - [ ] Inventory GitHub Apps, webhooks, OAuth integrations, external deployments, and package/container registries where present; record transfer-specific requirements or access blockers.

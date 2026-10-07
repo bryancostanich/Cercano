@@ -70,6 +70,13 @@ cercano restart-after-upgrade
 
 Or restart from an attached client with `/restart-agent`.
 
+One restart outcome is **not** a failure: if the stop request ends ambiguously
+(a deadline or a dropped connection where the agent may have already stopped),
+the command reports that the outcome is unconfirmed rather than claiming the
+agent is "left running". Run the retry command above; it is safe whether or
+not the old agent already stopped, because it only acts on an owned agent
+found at the configured endpoint and never forces a stop.
+
 ### If you run the agent on a custom port
 
 If you set the port through an environment variable rather than the config

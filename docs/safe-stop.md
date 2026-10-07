@@ -52,3 +52,33 @@ the request).
   there), and OS signals feed the same drain-and-cleanup path as API stops —
   no network listener, no self-kill, and no change to the worker process
   signal protocol.
+
+## Client-side outcomes
+
+The client can never prove "busy" or "left running" from its own deadline:
+the server may commit the stop just before the deadline with the
+confirmation lost in transit. The client-side helpers therefore type the
+endings instead of guessing:
+
+- **Definitive refusal / acceptance.** An accepted response (or an explicit
+  refusal such as the PID mismatch or a coverage refusal) is definitive; the
+  legacy `ShutdownAgent` bounce is never used as a fallback.
+- **`ErrSafeStopUnsupported`** — the agent predates the method and answered
+  `Unimplemented`. Definitive skip: the agent was left running, nothing was
+  stopped and nothing was started.
+- **`ErrSafeStopUncertain`** — the RPC ended in a deadline, cancellation or
+  transport (availability) ambiguity. The agent may already have stopped or
+  may still be running; this outcome never claims either way on its own.
+- **Everything else** propagates as a plain failure; callers must not
+  classify arbitrary errors as skip diagnostics.
+
+The brewrestart coordinator resolves `ErrSafeStopUncertain` with a fresh
+bounded **local** inspection of the kernel-verified identity (never another
+RPC to the possibly-dying agent, never a forced stop): a positively gone PID
+continues the existing restart under the held launch lock; the exact same
+process still alive is reported as unconfirmed with clear guidance and no
+force; an unknown, reused or foreign identity refuses the restart rather
+than inventing a PID-reuse proof. If the post-install deadline already
+expired, the state is reported as unconfirmed — never "left running" — and
+the package update itself is not treated as failed.
+

@@ -10,16 +10,17 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
 
 // startCoordinatorFixture builds a two-version Cellar layout rooted in a
 // temp directory, starts the OLD version's process as a test fixture agent
-// (mode: "", "busy", or "old") bound to a reserved loopback endpoint, and
-// registers cleanup. It never touches a developer's live agent: discovery is
-// restricted to the fixture PID via fixtureProcesses, never the developer's
-// real processes.
+// (mode: "", "busy", "lost", "stall", or "old") bound to a reserved loopback
+// endpoint, and registers cleanup. It never touches a developer's live
+// agent: discovery is restricted to the fixture PID via fixtureProcesses,
+// never the developer's real processes.
 func startCoordinatorFixture(t *testing.T, mode string) (string, string, netip.AddrPort, *exec.Cmd) {
 	t.Helper()
 	root, err := filepath.EvalSymlinks(t.TempDir())
@@ -95,10 +96,14 @@ func countingStarts(ops *restartOps) *int {
 	return count
 }
 
-// Active update-relevant work at the restart deadline: the agent is LEFT
-// RUNNING, no replacement is started, no legacy bounce is attempted, and
-// the failure carries the typed busy diagnostic.
-func TestNativeCoordinatorBusyAgentIsLeftRunning(t *testing.T) {
+// Active update-relevant work at the restart deadline: the client's
+// DeadlineExceeded proves nothing — the agent may have committed the stop
+// just before the deadline with the confirmation lost. The coordinator
+// therefore reports the typed UNCERTAIN outcome (never a busy claim), the
+// agent is not force-stopped, no replacement is started, no legacy bounce
+// is attempted, and the bounded post-install deadline leaves the state
+// unconfirmed rather than claiming "left running".
+func TestNativeCoordinatorBusyDeadlineIsUncertainWithoutForce(t *testing.T) {
 	root, newExe, endpoint, old := startCoordinatorFixture(t, "busy")
 	ctx, cancel := context.WithTimeout(context.Background(), 1200*time.Millisecond)
 	defer cancel()
@@ -106,20 +111,95 @@ func TestNativeCoordinatorBusyAgentIsLeftRunning(t *testing.T) {
 	ops.source = fixtureProcesses{pid: old.Process.Pid} // never enumerate/inspect the developer's processes
 	starts := countingStarts(&ops)
 	restarted, err := coordinateRestart(ctx, ops, newExe, uint32(os.Getuid()), endpoint)
-	if restarted || !isSafeStopBusy(err) {
-		t.Fatalf("restarted=%v err=%v, want typed busy diagnostic", restarted, err)
+	if restarted || !isSafeStopUncertain(err) {
+		t.Fatalf("restarted=%v err=%v, want typed uncertain diagnostic", restarted, err)
+	}
+	if isSafeStopUnsupported(err) {
+		t.Fatalf("deadline misclassified as definitive unsupported: %v", err)
+	}
+	if strings.Contains(err.Error(), "busy") {
+		t.Fatalf("err=%v must not claim busy from the client deadline alone", err)
 	}
 	if *starts != 0 {
 		t.Fatalf("started %d replacement agents while work was in flight", *starts)
 	}
 	if !fixtureStillOwns(t, old, endpoint) {
-		t.Fatal("busy agent was stopped or lost its listener")
+		t.Fatal("agent was force-stopped during an unconfirmed wait")
 	}
 	if _, err := os.Stat(filepath.Join(root, "2-ready")); !os.IsNotExist(err) {
 		t.Fatal("replacement agent was started during a busy wait")
 	}
 	if _, err := os.Stat(filepath.Join(root, "legacy-called")); !os.IsNotExist(err) {
 		t.Fatal("legacy ShutdownAgent was called after a busy wait")
+	}
+}
+
+// Regression: the agent commits the safe stop just before the deadline and
+// the confirmation is lost in transit (Unavailable). The client-side ending
+// is ambiguous, so the coordinator resolves it with a fresh bounded local
+// inspection under the held launch lock: the verified PID is positively
+// gone, so the EXISTING restart continues — wait-exit, start replacement,
+// readiness — without ever falling back to the legacy bounce.
+func TestNativeCoordinatorCommittedStopLostConfirmationStillRestarts(t *testing.T) {
+	root, newExe, endpoint, old := startCoordinatorFixture(t, "lost")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ops := nativeRestartOps()
+	ops.source = fixtureProcesses{pid: old.Process.Pid} // never enumerate/inspect the developer's processes
+	starts := countingStarts(&ops)
+	restarted, err := coordinateRestart(ctx, ops, newExe, uint32(os.Getuid()), endpoint)
+	if err != nil || !restarted {
+		t.Fatalf("restarted=%v err=%v, want the existing restart to complete", restarted, err)
+	}
+	if *starts != 1 {
+		t.Fatalf("started %d replacement agents, want exactly one", *starts)
+	}
+	// The committed stop was for the verified PID only.
+	pidBytes, err := os.ReadFile(filepath.Join(root, "safe-stop-pid"))
+	if err != nil {
+		t.Fatalf("no safe stop committed: %v", err)
+	}
+	if got, want := string(pidBytes), strconv.Itoa(old.Process.Pid); got != want {
+		t.Fatalf("safe-stop-pid=%q want %q", got, want)
+	}
+	if _, err := os.Stat(filepath.Join(root, "legacy-called")); !os.IsNotExist(err) {
+		t.Fatal("legacy ShutdownAgent was used to resolve the ambiguous ending")
+	}
+	waitFixtureFile(t, filepath.Join(root, "2-ready"))
+}
+
+// The transport drops (Unavailable) without a commit and the exact same
+// agent process is verifiably still alive: nothing may be forced, no
+// replacement may be started, and the coordinator reports the unconfirmed
+// state with clear guidance — never a busy claim or a forced stop.
+func TestNativeCoordinatorUncertainAliveAgentIsNeverForced(t *testing.T) {
+	root, newExe, endpoint, old := startCoordinatorFixture(t, "stall")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ops := nativeRestartOps()
+	ops.source = fixtureProcesses{pid: old.Process.Pid} // never enumerate/inspect the developer's processes
+	starts := countingStarts(&ops)
+	restarted, err := coordinateRestart(ctx, ops, newExe, uint32(os.Getuid()), endpoint)
+	if restarted || !isSafeStopUncertain(err) {
+		t.Fatalf("restarted=%v err=%v, want typed uncertain diagnostic", restarted, err)
+	}
+	if !strings.Contains(err.Error(), "same agent process is still running") {
+		t.Fatalf("err=%v, want explicit same-process-still-alive guidance", err)
+	}
+	if *starts != 0 {
+		t.Fatalf("started %d replacement agents although the agent never stopped", *starts)
+	}
+	if !fixtureStillOwns(t, old, endpoint) {
+		t.Fatal("alive agent was stopped despite an unconfirmed outcome")
+	}
+	if _, err := os.Stat(filepath.Join(root, "safe-stop-pid")); !os.IsNotExist(err) {
+		t.Fatal("safe stop must not be recorded for a dropped transport")
+	}
+	if _, err := os.Stat(filepath.Join(root, "2-ready")); !os.IsNotExist(err) {
+		t.Fatal("replacement agent was started although the agent never stopped")
+	}
+	if _, err := os.Stat(filepath.Join(root, "legacy-called")); !os.IsNotExist(err) {
+		t.Fatal("legacy ShutdownAgent was used as an uncertainty fallback")
 	}
 }
 

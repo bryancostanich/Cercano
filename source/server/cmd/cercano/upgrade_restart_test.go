@@ -17,7 +17,7 @@ func TestUpgradeRestartCommand(t *testing.T) {
 		name                       string
 		args                       []string
 		cfgErr, exeErr, restartErr bool
-		busyErr, unsupportedErr   bool
+		uncertainErr, unsupportedErr bool
 		restarted                  bool
 		wantCode, wantCalls        int
 		message                    string
@@ -32,7 +32,7 @@ func TestUpgradeRestartCommand(t *testing.T) {
 		{name: "absent", wantCode: 0, wantCalls: 1, message: "nothing started"},
 		{name: "restarted", restarted: true, wantCode: 0, wantCalls: 1, message: "restarted using"},
 		{name: "restart failure", restartErr: true, wantCode: 1, wantCalls: 1, message: "update may already be installed"},
-		{name: "busy agent left running", busyErr: true, wantCode: 1, wantCalls: 1, message: "left in place with active update-relevant work"},
+		{name: "unconfirmed stop reports no proof either way", uncertainErr: true, wantCode: 0, wantCalls: 1, message: "outcome is unconfirmed"},
 		{name: "old agent unsupported", unsupportedErr: true, wantCode: 1, wantCalls: 1, message: "predates the safe-stop request"},
 		{name: "explicit address bypasses config", args: []string{"--address", "127.0.0.1:4242"}, cfgErr: true, wantCode: 0, wantCalls: 1},
 	} {
@@ -63,8 +63,8 @@ func TestUpgradeRestartCommand(t *testing.T) {
 						t.Fatal("incorrect restart target")
 					}
 					switch {
-					case tt.busyErr:
-						return false, fmt.Errorf("shutdown request failed: %w", brewrestart.ErrSafeStopBusy)
+					case tt.uncertainErr:
+						return false, fmt.Errorf("shutdown request failed: %w", brewrestart.ErrSafeStopUncertain)
 					case tt.unsupportedErr:
 						return false, fmt.Errorf("shutdown request failed: %w", brewrestart.ErrSafeStopUnsupported)
 					case tt.restartErr:

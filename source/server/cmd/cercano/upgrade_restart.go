@@ -69,8 +69,13 @@ func upgradeRestartCommand(args []string, out io.Writer, configuredPort func() (
 	restarted, err := restart(ctx, path, endpoint)
 	if err != nil {
 		switch {
-		case brewrestart.IsSafeStopBusy(err):
-			fmt.Fprintf(out, "Upgrade restart not completed: %v\nThe running agent was left in place with active update-relevant work in progress; nothing was stopped and no replacement was started. The update is installed and takes effect after the agent restarts. Re-run this command once the current work finishes, or use --timeout to wait longer.\n", err)
+		case brewrestart.IsSafeStopUncertain(err):
+			// The package update itself did not fail: the deadline or
+			// transport ending is ambiguous, so report the unconfirmed state
+			// honestly — never "left running" — with actionable guidance,
+			// and do not fail the brew install hook for it.
+			fmt.Fprintf(out, "Upgrade restart not completed: %v\nThe safe-stop outcome is unconfirmed: the agent may already have stopped or may still be running the previous binary — the deadline or transport ending carries no proof either way. Nothing was force-stopped and no replacement was started. The update is installed and takes effect once the agent restarts; check whether the agent still responds or inspect its logs, then re-run this command or use /restart-agent from an attached client.\n", err)
+			return 0
 		case brewrestart.IsSafeStopUnsupported(err):
 			fmt.Fprintf(out, "Upgrade restart not completed: %v\nThe running agent predates the safe-stop request and cannot be stopped safely. It was left in place; nothing was stopped and no replacement was started. The update is installed and takes effect after a manual restart (use /restart-agent or stop and start cercano), then future upgrades can restart it safely.\n", err)
 		default:

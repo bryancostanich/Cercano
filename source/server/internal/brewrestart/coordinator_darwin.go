@@ -111,7 +111,11 @@ func openRestartLog(s LaunchState) (*os.File, error) {
 // carrying the PID from the verified identity — never the legacy
 // fire-and-forget ShutdownAgent. Work in flight is waited on until the
 // restart deadline (never cancelled); an agent predating the safe-stop RPC
-// is left running rather than bounced. See safestop.go for typed outcomes.
+// is left running rather than bounced. A deadline or transport ending is
+// ambiguous — the stop may have committed with the confirmation lost — so
+// the coordinator resolves it with a fresh bounded local inspection of the
+// verified identity (see coordinator.go) instead of claiming the agent was
+// busy or left alive. See safestop.go for typed outcomes.
 func requestShutdown(ctx context.Context, id Identity, endpoint netip.AddrPort) error {
 	dialCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()

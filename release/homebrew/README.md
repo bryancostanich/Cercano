@@ -28,6 +28,8 @@ For an existing owned agent, the coordinator captures launch settings, validates
 
 Failures before shutdown leave the existing agent alone. Failures during/after shutdown are reported; they cannot promise that the old agent is still running. An unsuccessful restart does not roll back the installed files. Inspect logs before retrying:
 
+If the safe-stop request ends ambiguously — a deadline or a dropped transport, where the agent may have committed the stop with the confirmation lost — the coordinator resolves it with a fresh bounded local inspection of the kernel-verified identity rather than guessing: a positively gone PID continues the existing restart under the held lock; the exact same process still alive is reported as unconfirmed with clear guidance and nothing forced; an unknown, reused or foreign identity refuses the restart. When the post-install deadline itself prohibits that recovery, the command reports the unconfirmed state — never "left running" — and exits successfully so the installed package is not treated as failed; the user guidance says how to confirm and finish the restart manually.
+
 ```
 /absolute/new/keg/bin/cercano restart-after-upgrade
 ```

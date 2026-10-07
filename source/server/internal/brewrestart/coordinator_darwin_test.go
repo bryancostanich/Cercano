@@ -26,10 +26,12 @@ import (
 
 type restartFixture struct {
 	proto.UnimplementedAgentServer
-	stop chan struct{}
-	once sync.Once
-	busy bool
-	root string
+	stop  chan struct{}
+	once  sync.Once
+	busy  bool
+	lost  bool // commit the stop, then lose the confirmation (Unavailable) before exiting
+	stall bool // transport drops (Unavailable) without committing; stay alive
+	root  string
 }
 
 // ShutdownAgent is the LEGACY fire-and-forget bounce. The restart
@@ -43,7 +45,10 @@ func (s *restartFixture) ShutdownAgent(context.Context, *proto.ShutdownAgentRequ
 // ShutdownAgentWhenIdle mirrors the real server's identity guard: only the
 // PID from a verified ownership inspection may commit the safe stop. Busy
 // fixtures block until the request deadline, exactly like an agent with
-// active update-relevant work — they never stop on their own.
+// active update-relevant work — they never stop on their own. The "lost"
+// fixture commits the stop and then loses the confirmation in transit
+// (Unavailable) before the process exits; the "stall" fixture drops the
+// transport (Unavailable) without committing and stays alive.
 func (s *restartFixture) ShutdownAgentWhenIdle(ctx context.Context, req *proto.ShutdownAgentWhenIdleRequest) (*proto.ShutdownAgentWhenIdleResponse, error) {
 	if req.GetExpectedPid() != int64(os.Getpid()) {
 		return nil, status.Errorf(codes.FailedPrecondition,
@@ -53,8 +58,17 @@ func (s *restartFixture) ShutdownAgentWhenIdle(ctx context.Context, req *proto.S
 		<-ctx.Done()
 		return nil, status.Error(codes.DeadlineExceeded, "safe stop wait timed out")
 	}
+	if s.stall {
+		return nil, status.Error(codes.Unavailable, "transport dropped before the stop could be confirmed")
+	}
 	_ = os.WriteFile(filepath.Join(s.root, "safe-stop-pid"), []byte(strconv.FormatInt(req.GetExpectedPid(), 10)), 0600)
 	s.once.Do(func() { close(s.stop) })
+	if s.lost {
+		// The stop committed and the process is draining, but the client
+		// never receives a confirmation: the client-side deadline/transport
+		// ending cannot prove the agent was busy or left alive.
+		return nil, status.Error(codes.Unavailable, "stop committed but the confirmation was lost in transit")
+	}
 	return &proto.ShutdownAgentWhenIdleResponse{Accepted: true, Message: "safe stop committed"}, nil
 }
 
@@ -105,6 +119,18 @@ func runRestartFixture() int {
 		// the process; the fixture stays alive until the test kills it.
 		service = &restartFixture{stop: make(chan struct{}), busy: true, root: root}
 		proto.RegisterAgentServer(gs, service)
+	case "lost":
+		// The agent commits the safe stop and exits, but the confirmation
+		// is lost in transit: the coordinator must resolve the ambiguity
+		// with local inspection and complete the existing restart.
+		service = &restartFixture{stop: make(chan struct{}), lost: true, root: root}
+		proto.RegisterAgentServer(gs, service)
+	case "stall":
+		// The transport drops without a commit: the exact same process is
+		// verifiably still alive, so nothing may be forced and the outcome
+		// must be reported as unconfirmed.
+		service = &restartFixture{stop: make(chan struct{}), stall: true, root: root}
+		proto.RegisterAgentServer(gs, service)
 	default:
 		service = &restartFixture{stop: make(chan struct{}), root: root}
 		proto.RegisterAgentServer(gs, service)
@@ -117,8 +143,8 @@ func runRestartFixture() int {
 		time.Sleep(20 * time.Second)
 		return 3
 	}
-	if service.busy {
-		// busy fixture: never commits; stay alive until killed.
+	if service.busy || service.stall {
+		// busy/stall fixtures never commit; stay alive until killed.
 		time.Sleep(20 * time.Second)
 		return 3
 	}

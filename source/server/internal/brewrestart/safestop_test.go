@@ -23,20 +23,29 @@ import (
 // kernel-verified ownership inspection) and NEVER fall back to the legacy
 // fire-and-forget ShutdownAgent bounce. These tests use bufconn fakes of the
 // agent so nothing here starts, stops or signals a real process.
+//
+// The client can never prove "busy" from its own deadline: the server may
+// commit the stop just before the deadline and lose the confirmation in
+// transit. Deadline/transport endings are therefore typed as UNCERTAIN, never
+// as a claim that the agent was busy or left alive.
 // ---------------------------------------------------------------------------
 
 // safeStopFake is a bufconn agent. It enforces the same identity guard as the
 // real server (expected_pid must equal agentPID), records every RPC, and can
-// be configured as busy (blocks until the request deadline), old (only the
-// legacy RPC is implemented), or idle (commits immediately).
+// be configured as busy (blocks until the request deadline), commitThenHold
+// (marks the stop committed and THEN waits for the request deadline, losing
+// the confirmation), unavailable (transport drop), old (only the legacy RPC
+// is implemented), or idle (commits and confirms immediately).
 type safeStopFake struct {
 	proto.UnimplementedAgentServer
-	mu       sync.Mutex
-	agentPID int64
-	busy     bool
-	legacy   int
-	stopPID  int64
-	stopped  int
+	mu             sync.Mutex
+	agentPID       int64
+	busy           bool
+	commitThenHold bool
+	unavailable    bool
+	legacy         int
+	stopPID        int64
+	stopped        int
 }
 
 func (f *safeStopFake) ShutdownAgent(context.Context, *proto.ShutdownAgentRequest) (*proto.ShutdownAgentResponse, error) {
@@ -56,6 +65,18 @@ func (f *safeStopFake) ShutdownAgentWhenIdle(ctx context.Context, req *proto.Shu
 	if f.busy {
 		<-ctx.Done()
 		return nil, status.Error(codes.DeadlineExceeded, "safe stop wait timed out")
+	}
+	if f.commitThenHold {
+		// The server commits the stop and seals admission, then the deadline
+		// fires before the confirmation can be delivered: the client's
+		// DeadlineExceeded cannot distinguish this from a busy agent.
+		f.stopPID = req.GetExpectedPid()
+		f.stopped++
+		<-ctx.Done()
+		return nil, status.Error(codes.DeadlineExceeded, "safe stop wait timed out")
+	}
+	if f.unavailable {
+		return nil, status.Error(codes.Unavailable, "transport dropped before the stop could be confirmed")
 	}
 	f.stopPID = req.GetExpectedPid()
 	f.stopped++
@@ -85,26 +106,74 @@ func startSafeStopFake(t *testing.T, fake proto.AgentServer) proto.AgentClient {
 	return proto.NewAgentClient(conn)
 }
 
-// Active work: the safe-stop wait times out at the bounded deadline. The work
-// is left running (no stop commit), the legacy bounce is never used, and the
-// caller gets the typed busy diagnostic.
-func TestSafeStopRequestBusyDeadlineLeavesAgentRunningWithoutLegacyCalls(t *testing.T) {
+// Active work: the safe-stop wait times out at the bounded deadline. Nothing
+// was stopped by the client, the legacy bounce is never used, and the caller
+// gets the typed UNCERTAIN diagnostic — the client's own deadline never
+// proves the agent was busy or left alive.
+func TestSafeStopRequestBusyDeadlineIsUncertainWithoutLegacyCalls(t *testing.T) {
 	fake := &safeStopFake{agentPID: 1234, busy: true}
 	client := startSafeStopFake(t, fake)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 	err := safeStopRequest(ctx, client, 1234, "Homebrew installation updated")
-	if !isSafeStopBusy(err) {
-		t.Fatalf("busy agent: err=%v, want typed busy diagnostic", err)
+	if !isSafeStopUncertain(err) {
+		t.Fatalf("busy agent: err=%v, want typed uncertain diagnostic", err)
 	}
 	legacy, stopped, _ := fake.calls()
 	if legacy != 0 || stopped != 0 {
 		t.Fatalf("legacy=%d stopped=%d, want no stop of any kind", legacy, stopped)
 	}
-	// The fake is still serving: the agent was left alive and untouched.
+	// The fake is still serving: this busy fixture was in fact left alive,
+	// but the client-side contract only reports the ambiguous deadline.
 	if _, err := client.GetConfig(context.Background(), &proto.GetConfigRequest{}); status.Code(err) != codes.Unimplemented {
 		t.Fatalf("unrelated probe after busy wait: %v", err)
+	}
+}
+
+// Regression: the server may COMMIT the stop just before the deadline and
+// lose the confirmation in transit. A DeadlineExceeded response therefore
+// carries no proof that the agent was busy or left alive — the client must
+// report the typed uncertain outcome even though the fake records that the
+// stop was actually committed.
+func TestSafeStopRequestDeadlineAfterCommitIsUncertainNotBusy(t *testing.T) {
+	fake := &safeStopFake{agentPID: 1234, commitThenHold: true}
+	client := startSafeStopFake(t, fake)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	err := safeStopRequest(ctx, client, 1234, "Homebrew installation updated")
+	if !isSafeStopUncertain(err) {
+		t.Fatalf("committed-then-deadline: err=%v, want typed uncertain diagnostic", err)
+	}
+	if isSafeStopUnsupported(err) {
+		t.Fatalf("committed-then-deadline misclassified as unsupported: %v", err)
+	}
+	legacy, stopped, stopPID := fake.calls()
+	if legacy != 0 {
+		t.Fatalf("legacy=%d, want zero legacy calls", legacy)
+	}
+	// The stop WAS committed server-side before the deadline: proof that a
+	// client-side deadline alone cannot claim "busy / left alive".
+	if stopped != 1 || stopPID != 1234 {
+		t.Fatalf("stopped=%d stopPID=%d, want the stop committed for pid 1234", stopped, stopPID)
+	}
+}
+
+// A transport drop (Unavailable) is equally ambiguous: the stop may have
+// committed before the connection was lost. The typed uncertain outcome must
+// fire, and nothing may be claimed about the agent being busy or alive.
+func TestSafeStopRequestUnavailableTransportIsUncertain(t *testing.T) {
+	fake := &safeStopFake{agentPID: 1234, unavailable: true}
+	client := startSafeStopFake(t, fake)
+
+	err := safeStopRequest(context.Background(), client, 1234, "Homebrew installation updated")
+	if !isSafeStopUncertain(err) {
+		t.Fatalf("unavailable transport: err=%v, want typed uncertain diagnostic", err)
+	}
+	legacy, _, _ := fake.calls()
+	if legacy != 0 {
+		t.Fatalf("legacy=%d, want zero legacy calls", legacy)
 	}
 }
 
@@ -159,7 +228,7 @@ func TestSafeStopRequestIdleCommitsOnceWithVerifiedPID(t *testing.T) {
 }
 
 // A wrong expected PID is a refusal (FailedPrecondition): no stop of any
-// kind, no busy/unsupported misclassification, no legacy fallback.
+// kind, no uncertain/unsupported misclassification, no legacy fallback.
 func TestSafeStopRequestWrongPIDIsRefusedWithoutAnyStop(t *testing.T) {
 	fake := &safeStopFake{agentPID: 100}
 	client := startSafeStopFake(t, fake)
@@ -168,8 +237,8 @@ func TestSafeStopRequestWrongPIDIsRefusedWithoutAnyStop(t *testing.T) {
 	if status.Code(err) != codes.FailedPrecondition {
 		t.Fatalf("wrong pid: err=%v, want FailedPrecondition", err)
 	}
-	if isSafeStopBusy(err) || isSafeStopUnsupported(err) {
-		t.Fatalf("wrong pid misclassified as busy/unsupported: %v", err)
+	if isSafeStopUncertain(err) || isSafeStopUnsupported(err) {
+		t.Fatalf("wrong pid misclassified as uncertain/unsupported: %v", err)
 	}
 	legacy, stopped, _ := fake.calls()
 	if legacy != 0 || stopped != 0 {
@@ -177,11 +246,14 @@ func TestSafeStopRequestWrongPIDIsRefusedWithoutAnyStop(t *testing.T) {
 	}
 }
 
-// TestSafeStopRequestNoAgent verifies the RPC layer's contribution to the
-// no-agent contract at the coordinator seam: with no server listening the
-// request cannot succeed, and the typed skip diagnostics never fire on a
-// plain dial failure.
-func TestSafeStopRequestNoAgentIsNotASkipDiagnostic(t *testing.T) {
+// TestSafeStopRequestNoAgent documents the RPC layer's contribution to the
+// no-agent contract: with no server reachable, a lazy client cannot
+// distinguish "never reached" from "committed then lost in transit", so the
+// transport ending is typed UNCERTAIN — never a definitive busy/unsupported
+// skip claim. (The coordinator never reaches this path for a truly absent
+// agent: discovery returns before any stop RPC, and the blocking dial plus
+// listener-ownership recheck precede the safe stop.)
+func TestSafeStopRequestUnreachableAgentIsUncertainNotDefinitive(t *testing.T) {
 	l := bufconn.Listen(1 << 20)
 	gs := grpc.NewServer()
 	go func() { _ = gs.Serve(l) }()
@@ -196,7 +268,10 @@ func TestSafeStopRequestNoAgentIsNotASkipDiagnostic(t *testing.T) {
 	client := proto.NewAgentClient(conn)
 
 	err = safeStopRequest(context.Background(), client, 1, "Homebrew installation updated")
-	if err == nil || isSafeStopBusy(err) || isSafeStopUnsupported(err) {
-		t.Fatalf("no agent: err=%v, want a plain failure not a skip diagnostic", err)
+	if !isSafeStopUncertain(err) {
+		t.Fatalf("no agent: err=%v, want the typed uncertain transport outcome", err)
+	}
+	if isSafeStopUnsupported(err) {
+		t.Fatalf("no agent: err=%v, must not be the definitive unsupported claim", err)
 	}
 }

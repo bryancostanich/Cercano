@@ -32,6 +32,7 @@ const (
 	helperRoleFinalChild         = "final-child"
 	helperRoleEchoOnce           = "echo-once"
 	helperRoleJobParent          = "job-parent"
+	helperRoleProbeChild         = "probe-child"
 )
 
 var (
@@ -43,6 +44,16 @@ var (
 	childLogPath         = flag.String("launch-testprocess-child-log", "", "intermediate/job parent: child stdout/stderr log path")
 	parentDoneMarkerPath = flag.String("launch-testprocess-parent-done", "", "parent exit marker path")
 	completionMarkerPath = flag.String("launch-testprocess-completion", "", "final child completion marker path")
+
+	// intermediate-parent TEST-ONLY failure reporting (path supplied by
+	// the test): where an immediately failed Launch is persisted so the
+	// fixture fails fast with the classified error instead of timing out
+	// on the pidfile. See persistStartError.
+	startErrorPath = flag.String("launch-testprocess-start-error", "", "intermediate parent: where to persist an immediately refused Launch")
+
+	// probe-child inputs (Windows CreateProcess flag diagnostics; see
+	// launch_diag_windows_test.go):
+	probeMarkerPath = flag.String("launch-testprocess-probe-marker", "", "probe-child: known temp marker path to write and exit")
 
 	// job-parent inputs (Windows job-object fixtures; see
 	// testprocess_windows_test.go):
@@ -73,6 +84,8 @@ func TestMain(m *testing.M) {
 		echoOnceMain()
 	case helperRoleJobParent:
 		jobParentMain()
+	case helperRoleProbeChild:
+		probeChildMain()
 	default:
 		fmt.Fprintln(os.Stderr, "testprocess: unknown role:", *helperRole)
 		os.Exit(2)
@@ -119,6 +132,15 @@ func intermediateParentMain() {
 		StderrPath: *childLogPath,
 	})
 	if err != nil {
+		// TEST-ONLY failure reporting: persist the refused launch
+		// IMMEDIATELY, before any other failure mode can occur. Without
+		// this the fixture can only observe the missing pidfile, and a
+		// refused launch surfaces as an opaque 20-second timeout (this
+		// helper's stderr is invisible: os/exec connects it to the null
+		// device). The persisted report carries the classified
+		// CreateProcess outcome plus this helper's own native job
+		// context on Windows (see launchFailureReport).
+		persistStartError(err)
 		fmt.Fprintln(os.Stderr, "intermediate: launch:", err)
 		os.Exit(3)
 	}
@@ -150,6 +172,21 @@ func intermediateParentMain() {
 		os.Exit(3)
 	}
 	os.Exit(0)
+}
+
+// persistStartError is TEST-ONLY failure reporting: it writes the refused
+// Launch to the fixture-supplied start-error path immediately (see the
+// intermediateParentMain call site). launchFailureReport supplies the
+// platform-specific detail: the classified CreateProcess outcome plus the
+// calling helper's own job context on Windows, or the plain error
+// elsewhere. It never changes any launch behavior: writing the report is
+// the only effect.
+func persistStartError(err error) {
+	if *startErrorPath == "" {
+		return
+	}
+	_ = os.WriteFile(*startErrorPath,
+		[]byte("start-failed: "+launchFailureReport(err)+"\n"), 0o600)
 }
 
 // finalChildMain waits until its initiating parent is genuinely gone, then

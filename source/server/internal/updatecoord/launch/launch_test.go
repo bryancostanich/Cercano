@@ -37,7 +37,13 @@ func launchEchoOnce(t *testing.T, stdoutPath, stderrPath string, extraBytes int)
 		StderrPath: stderrPath,
 	})
 	if err != nil {
-		t.Fatalf("Launch: %v", err)
+		// TEST-ONLY failure reporting: a refused Launch fails with the
+		// classified CreateProcess outcome plus this test process's own
+		// job context on Windows (see launch_diag_windows_test.go), so
+		// native CI failure output carries the diagnosis with it. The
+		// assertion semantics are unchanged: a refused launch is still
+		// a failure.
+		t.Fatalf("Launch refused: %s", launchFailureReport(err))
 	}
 	pid := proc.Pid()
 	// Safety net for paths where the child never exits on its own; the

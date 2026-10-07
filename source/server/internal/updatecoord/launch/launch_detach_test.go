@@ -32,6 +32,7 @@ func runDetachedSurvivalFixture(t *testing.T, hardKill bool) (childPID int, chil
 	dir := t.TempDir()
 	childLog = filepath.Join(dir, "child.log")
 	pidFile := filepath.Join(dir, "child.pid")
+	startErr := filepath.Join(dir, "start-error")
 	parentDone := filepath.Join(dir, "parent-done")
 	completion := filepath.Join(dir, "completion")
 
@@ -45,6 +46,7 @@ func runDetachedSurvivalFixture(t *testing.T, hardKill bool) (childPID int, chil
 	parent := exec.Command(exe,
 		"-launch-testprocess-role="+helperRoleIntermediateParent,
 		"-launch-testprocess-pidfile="+pidFile,
+		"-launch-testprocess-start-error="+startErr,
 		"-launch-testprocess-child-log="+childLog,
 		"-launch-testprocess-parent-done="+parentDone,
 		"-launch-testprocess-completion="+completion,
@@ -58,7 +60,10 @@ func runDetachedSurvivalFixture(t *testing.T, hardKill bool) (childPID int, chil
 	})
 
 	// Wait for the parent to have launched the child and recorded its pid.
-	rawPid := waitForFile(t, pidFile, 20*time.Second)
+	// A refused Launch is persisted by the intermediate parent to startErr
+	// and fails fast here with the classified error — never as an opaque
+	// pidfile timeout.
+	rawPid := waitForPidOrStartError(t, pidFile, startErr, 20*time.Second)
 	pid, err := strconv.Atoi(strings.TrimSpace(rawPid))
 	if err != nil {
 		t.Fatalf("unreadable child pid %q: %v", rawPid, err)
@@ -119,6 +124,28 @@ func runDetachedSurvivalFixture(t *testing.T, hardKill bool) (childPID int, chil
 		t.Errorf("final child %d still present after writing its completion marker", pid)
 	}
 	return pid, childLog
+}
+
+// waitForPidOrStartError waits, bounded, for the intermediate parent
+// either to record the launched child's pid or to persist an immediately
+// refused Launch. A persisted start failure fails the test right away
+// with the classified, job-context-annotated error instead of surfacing
+// as an opaque timeout; it never changes the healthy-path semantics.
+func waitForPidOrStartError(t *testing.T, pidPath, startErrPath string, timeout time.Duration) string {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if data, err := os.ReadFile(startErrPath); err == nil {
+			t.Fatalf("intermediate parent's Launch was refused (persisted immediately): %s",
+				strings.TrimSpace(string(data)))
+		}
+		if data, err := os.ReadFile(pidPath); err == nil {
+			return string(data)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s or %s", pidPath, startErrPath)
+	return ""
 }
 
 // waitForCompletion polls for the completion marker, dumping the child log

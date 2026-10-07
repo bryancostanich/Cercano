@@ -28,6 +28,16 @@ times concurrently despite its idempotence contract. sync.Once now makes all
 callers wait for one teardown/reap; no repeated process-group signal is sent.
 Tests use seams/owned fixtures and do not kill the developer's agent or workers.
 
+Additional compaction coverage verified in native run
+https://github.com/bryancostanich/Cercano/actions/runs/37575399074
+(commit 20e2c3725b40): scheduled timers retain activity before execution; resets
+reuse pending leases; fired callbacks keep distinct ownership from replacements;
+Close waits for actual callbacks even when cancellation has been requested.
+Manual background compaction uses CompactAsync so admission is retained before
+its goroutine starts. The persistence-service integration suite passes natively
+on all three platforms, with local compaction/persistence race tests also passing.
+Late tracker attachment refuses rather than declaring existing work idle.
+
 Remaining before live preparation is exposed: finish the remaining background
 work/entrypoint audit, explicit user-approved cancellation, safe agent shutdown
 and owned-runtime cleanup, launch-lock ordering, and one-shot process/bootstrap

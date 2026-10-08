@@ -13,10 +13,10 @@ func TestTaskTaxonomy(t *testing.T) {
 	}{
 		{Task("reconnaissance"), TaskAssignment{DestinationLocal, CostEconomy}},
 		{Task("mechanical_development"), TaskAssignment{DestinationLocal, CostStandard}},
-		{Task("investigation"), TaskAssignment{DestinationSecondary, CostPremium}},
-		{Task("implementation"), TaskAssignment{DestinationSecondary, CostPremium}},
-		{Task("review"), TaskAssignment{DestinationSecondary, CostPremium}},
-		{Task("research"), TaskAssignment{DestinationSecondary, CostPremium}},
+		{Task("investigation"), TaskAssignment{DestinationSecondary, CostStandard}},
+		{Task("implementation"), TaskAssignment{DestinationSecondary, CostStandard}},
+		{Task("review"), TaskAssignment{DestinationSecondary, CostStandard}},
+		{Task("research"), TaskAssignment{DestinationSecondary, CostStandard}},
 		{Task("git_land"), TaskAssignment{DestinationLocal, CostPremium}},
 	}
 	for _, tt := range tests {

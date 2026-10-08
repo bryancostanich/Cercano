@@ -54,10 +54,10 @@ Choose `class` at the semantic entry point:
 
 - `reconnaissance`: narrow read-only tracing, extraction and summaries (Local/Light).
 - `mechanical_development`: well-specified edits (Local/Standard).
-- `investigation`: open-ended diagnosis (Secondary/Premium).
-- `implementation`: substantial implementation (Secondary/Premium).
-- `review`: standalone adversarial review (Secondary/Premium).
-- `research`: source gathering, query generation and synthesis (Secondary/Premium).
+- `investigation`: open-ended diagnosis (Secondary/Standard).
+- `implementation`: substantial implementation (Secondary/Standard).
+- `review`: standalone adversarial review (Secondary/Standard).
+- `research`: source gathering, query generation and synthesis (Secondary/Standard).
 - `git_land`: the existing landing workflow including its nested review (Local/Premium).
 - `watchdog`: normal Watchdog routing (Local/Standard); no special placement exemption.
 

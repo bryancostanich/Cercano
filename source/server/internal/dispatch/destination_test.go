@@ -48,7 +48,7 @@ func TestDestinationChainsAndTaskTarget(t *testing.T) {
 			e := NewEngine(provs(candidates), func() locus.Mode { return locus.CloudPrimary }, nil)
 			e.SetDestinationModelFor(func(sel inference.Selection, tier config.Tier) string { return sel.Profile + "-" + string(tier) })
 			target, err := e.Target(Spec{RoutingTask: config.TaskDispatch})
-			if err != nil || target.Model != "s-most_capable" {
+			if err != nil || target.Model != "s-everyday" {
 				t.Fatalf("target=%+v err=%v", target, err)
 			}
 			_, err = e.Dispatch(context.Background(), Spec{RoutingTask: config.TaskChat})
@@ -126,7 +126,7 @@ func TestPreparedTargetUsesSavedSecondaryDestination(t *testing.T) {
 	e := NewEngine(provs(Providers{Cloud: primary, Destinations: map[config.Destination]inference.Candidate{config.DestinationPrimary: {Provider: primary, Profile: "p", IsCloud: true}, config.DestinationSecondary: {Provider: secondary, Profile: "s", IsCloud: true}}}), func() locus.Mode { return locus.CloudOnly }, nil)
 	e.SetDestinationModelFor(func(sel inference.Selection, tier config.Tier) string { return sel.Profile + ":" + string(tier) })
 	target, err := e.PreparedTarget(context.Background(), Spec{RoutingTask: config.TaskDispatch})
-	if err != nil || target.Provider != "secondary" || target.Model != "s:most_capable" || len(primary.calls) != 0 || len(secondary.calls) != 0 {
+	if err != nil || target.Provider != "secondary" || target.Model != "s:everyday" || len(primary.calls) != 0 || len(secondary.calls) != 0 {
 		t.Fatalf("prepared target bypassed destination selection: %+v %v", target, err)
 	}
 }

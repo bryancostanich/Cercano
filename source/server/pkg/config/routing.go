@@ -50,7 +50,7 @@ type TaskDefinition struct {
 var taskDefinitions = [...]TaskDefinition{
 	{TaskChat, "Chat", TaskAssignment{DestinationPrimary, CostStandard}},
 	{TaskCompaction, "Compaction", TaskAssignment{DestinationSecondary, CostEconomy}},
-	{TaskDispatch, "Default dispatch", TaskAssignment{DestinationSecondary, CostPremium}},
+	{TaskDispatch, "Default dispatch", TaskAssignment{DestinationSecondary, CostStandard}},
 	{TaskReconnaissance, "Reconnaissance", TaskAssignment{DestinationLocal, CostEconomy}},
 	{TaskMechanicalDevelopment, "Mechanical development", TaskAssignment{DestinationLocal, CostStandard}},
 	{TaskInvestigation, "Investigation", TaskAssignment{DestinationSecondary, CostStandard}},

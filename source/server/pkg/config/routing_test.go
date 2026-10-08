@@ -40,7 +40,7 @@ func TestRoutingSparseProfilesAndTasks(t *testing.T) {
 	if got := c.ResolveTask(TaskChat, ""); got != (TaskAssignment{DestinationPrimary, CostStandard}) {
 		t.Fatal(got)
 	}
-	if got := c.ResolveTask(TaskDispatch, ""); got != (TaskAssignment{DestinationSecondary, CostPremium}) {
+	if got := c.ResolveTask(TaskDispatch, ""); got != (TaskAssignment{DestinationSecondary, CostStandard}) {
 		t.Fatal(got)
 	}
 	c.TaskAssignments = map[Task]TaskAssignment{TaskDispatch: {Destination: DestinationSecondary, Quality: CostStandard}}

@@ -171,10 +171,12 @@ func TestProviderGraphRetainsTaskAssignmentsUntilRebuild(t *testing.T) {
 	c.CloudProfiles = []config.CloudProfile{{Name: "p", Flavor: "messages"}, {Name: "b", Flavor: "messages"}}
 	c.ActiveCloudProfile = "p"
 	c.SecondaryCloudProfile = "p"
-	// Build the graph with Chat pinned premium so the assertions below test
-	// "the built graph retains its quality until rebuild" rather than tracking
-	// whatever the product default happens to be.
-	c.TaskAssignments = map[config.Task]config.TaskAssignment{config.TaskChat: {Quality: config.CostPremium}}
+	// Pin both Chat and Dispatch to Premium so these assertions test graph
+	// snapshot isolation independently of either task's product default.
+	c.TaskAssignments = map[config.Task]config.TaskAssignment{
+		config.TaskChat:     {Quality: config.CostPremium},
+		config.TaskDispatch: {Quality: config.CostPremium},
+	}
 	s.cfgSvc.Set(c)
 	s.cfgSvc.Secrets().Set("p", "fixture-p")
 	s.cfgSvc.Secrets().Set("b", "fixture-b")

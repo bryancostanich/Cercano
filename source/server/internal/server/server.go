@@ -3292,7 +3292,7 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 	// The initiator uses AttachLossless (not Attach) because its stream is the
 	// turn's authoritative output: every event must arrive, even if stream.Send
 	// is momentarily slow. Passive Task-4 attachers use Attach (drop-on-full).
-	replay, ch, detach := s.turnBroker.AttachLossless(convID)
+	replay, ch, deliveryBarrier, detach := s.turnBroker.AttachLosslessWithBarrier(convID)
 	defer detach()
 
 	// requester gates a W/X permission prompt: blocks until the client responds
@@ -3484,6 +3484,28 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 				}
 			case tr = <-doneCh:
 				draining = true
+			}
+		}
+
+		// Turn completion precedes asynchronous broker forwarding. Fence the
+		// ordered queue and keep receiving until every earlier event has been
+		// forwarded. Only then does an empty output channel prove completion.
+		delivered := deliveryBarrier()
+	deliveryLoop:
+		for {
+			select {
+			case <-stream.Context().Done():
+				return stream.Context().Err()
+			case <-delivered:
+				break deliveryLoop
+			case ev, ok := <-ch:
+				if !ok {
+					return fmt.Errorf("initiator subscription closed before delivery barrier")
+				}
+				workMonitor.Observe(ev)
+				if err := sendRunnerEvent(stream, ev); err != nil {
+					return err
+				}
 			}
 		}
 

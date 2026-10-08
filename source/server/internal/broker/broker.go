@@ -35,9 +35,14 @@ const subChanCap = 64 // buffered subscriber channel capacity; drop-on-full if f
 // All fields are guarded by Broker.mu except the channels, which are written
 // under mu and read by the drain goroutine.
 type losslessSub struct {
-	queue  []runner.Event // unbounded buffer; append under mu, pop by drain goroutine
+	queue  []losslessItem // events and ordered delivery barriers
 	notify chan struct{}  // non-blocking signal that queue has new items (cap 1)
 	done   chan struct{}  // closed by detach; tells drain goroutine to exit
+}
+
+type losslessItem struct {
+	event   runner.Event
+	barrier chan struct{}
 }
 
 // convState bundles all per-conversation mutable state under Broker.mu.
@@ -214,7 +219,7 @@ func (b *Broker) Publish(conv string, gen uint64, ev runner.Event) {
 		}
 	}
 	for _, ls := range cs.lsubs {
-		ls.queue = append(ls.queue, ev)
+		ls.queue = append(ls.queue, losslessItem{event: ev})
 		// Non-blocking signal: drain goroutine will wake and forward.
 		select {
 		case ls.notify <- struct{}{}:
@@ -289,6 +294,15 @@ func (b *Broker) Attach(conv string) (replay []runner.Event, ch <-chan runner.Ev
 // The caller MUST call detach() when done to release the goroutine and the
 // subscriber registration.
 func (b *Broker) AttachLossless(conv string) (replay []runner.Event, ch <-chan runner.Event, detach func()) {
+	replay, ch, _, detach = b.AttachLosslessWithBarrier(conv)
+	return
+}
+
+// AttachLosslessWithBarrier also returns an ordered delivery fence. The returned
+// channel closes only after all earlier publications have been forwarded to ch.
+// Callers must continue consuming ch while waiting, then drain its buffered tail.
+// A cancelled/detached subscription need not acknowledge pending barriers.
+func (b *Broker) AttachLosslessWithBarrier(conv string) (replay []runner.Event, ch <-chan runner.Event, barrier func() <-chan struct{}, detach func()) {
 	b.mu.Lock()
 	cs := b.convLocked(conv)
 
@@ -322,9 +336,12 @@ func (b *Broker) AttachLossless(conv string) (replay []runner.Event, ch <-chan r
 				remaining := ls.queue
 				ls.queue = nil
 				b.mu.Unlock()
-				for _, ev := range remaining {
+				for _, item := range remaining {
+					if item.barrier != nil {
+						continue
+					}
 					select {
-					case out <- ev:
+					case out <- item.event:
 					default: // consumer gone / out full — abandon the rest
 					}
 				}
@@ -338,9 +355,13 @@ func (b *Broker) AttachLossless(conv string) (replay []runner.Event, ch <-chan r
 				// reading out (e.g. stream.Send error) and later detaches, a bare
 				// blocking send would wedge at out's capacity and never observe
 				// done. Selecting on done lets the goroutine exit instead of leaking.
-				for _, ev := range items {
+				for _, item := range items {
+					if item.barrier != nil {
+						close(item.barrier)
+						continue
+					}
 					select {
-					case out <- ev:
+					case out <- item.event:
 					case <-ls.done:
 						return
 					}
@@ -360,5 +381,21 @@ func (b *Broker) AttachLossless(conv string) (replay []runner.Event, ch <-chan r
 			close(ls.done)
 		})
 	}
-	return replay, out, detach
+	barrier = func() <-chan struct{} {
+		ack := make(chan struct{})
+		b.mu.Lock()
+		select {
+		case <-ls.done:
+			// No acknowledgement: detachment is cancellation, not delivery.
+		default:
+			ls.queue = append(ls.queue, losslessItem{barrier: ack})
+			select {
+			case ls.notify <- struct{}{}:
+			default:
+			}
+		}
+		b.mu.Unlock()
+		return ack
+	}
+	return replay, out, barrier, detach
 }

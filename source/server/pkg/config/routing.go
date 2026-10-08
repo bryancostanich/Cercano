@@ -101,37 +101,23 @@ func (c Config) TaskAssignment(task Task) TaskAssignment {
 	return a
 }
 
-// DispatchTokenBudget is the default cumulative billed-token cap (input +
-// output summed over every model call) for one delegated dispatch of this
-// cost class. Scale: a healthy recon dispatch bills well under 100K tokens;
-// the runaway that motivated the budget billed ~3.7M in one dispatch
-// (docs/bugs/deepinfra-dispatch-followups.md). UnlimitedDispatchTokenBudget
-// disables the cap; main turns — not dispatches — run uncapped.
-//
-// The sum is dominated by resent history, not by work produced. A measured
-// implementation dispatch billed 2,780,649 input against 82,942 output: 97%
-// input, ~34x the cumulative cap per unique generated token. Input grows
-// roughly quadratically with turn count because every turn resends the
-// conversation, so this cap converts to a turn ceiling that is independent of
-// how productive those turns are. At ~37K mean input the old 3M Premium
-// ceiling bound that dispatch at 74 turns, stopping it mid-implementation with
-// its plan still in context.
-//
-// Premium is therefore sized for sustained implementation rather than for the
-// runaway: enough headroom to finish a substantial refactor and verify it,
-// while still tripping well before an unbounded loop runs unattended. Economy
-// and Standard are unchanged; they bound recon and investigation work, where
-// the existing ceilings are already generous.
+// DispatchTokenBudget caps cumulative token volume (input + output across model
+// calls) for one delegated dispatch; it is not a monetary billing limit.
+// Standard and Premium allow 10M tokens for sustained investigation and
+// implementation, including repeatedly submitted context. Economy retains its
+// 300K bound for narrower work. Unknown qualities use the Standard default.
+// UnlimitedDispatchTokenBudget explicitly disables the cap; main turns use no
+// cumulative dispatch cap.
 func (q CostTier) DispatchTokenBudget() int {
 	switch q {
 	case CostEconomy:
 		return 300_000
 	case CostStandard:
-		return 1_000_000
+		return 10_000_000
 	case CostPremium:
 		return 10_000_000
 	}
-	return 1_000_000
+	return 10_000_000
 }
 
 // UnlimitedDispatchTokenBudget explicitly disables the dispatch token cap.

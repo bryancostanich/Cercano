@@ -139,3 +139,15 @@ The installer gate is blocked: do not claim a clean fresh install. Ask whether t
 ## Installer exception accepted and issue filed
 
 User approved the recommendation and requested an issue. Filed https://github.com/cercano-ai/Cercano/issues/55 with observed reproduction, successful checks, unresolved deterministic trigger, and process-ownership safety requirements. Record the installer task as completed with this explicit accepted exception, not as a successful post-install test. Continue migration without modifying runtime behavior or publishing a new release.
+
+## Existing-tap compatibility and local relocation preflight
+
+Verified old bryancostanich/tap GitHub URL clone into the isolated Homebrew prefix. Temporarily modeled an existing standalone receipt by setting its source tap to the old name (fixture only; restored original afterward). `brew upgrade bryancostanich/tap/cercano` reported v0.20.3 already installed and exited 0. Binary hash, isolated config and a saved-data sentinel stayed unchanged. This is a same-version compatibility test, not a future-version upgrade or an actual receipt retargeting test. Published precise guidance in tap commit 56a5a10c4b35; no uninstall required. The isolated test also fetched Homebrew core into its private prefix, not the host prefix.
+
+Fresh relocation map contains 11 top-level source directories mapped by unchanged basename into /Users/bryancostanich/git_repos/cercano-ai. There are 7 registered checkouts/worktrees: 3 Cercano, 3 shared tap, 1 Cercloud. Include 3 standalone backups and the Cercano-worktrees container. No mapped destination exists. Additional migration worktrees are included. Map is saved privately in the remote-cutover snapshot as local-relocation-map.json, and the latest temporary copy is /tmp/cercano-local-relocation-map.json. Refresh after further cleanup as approved.
+
+Processes with source-root cwd or loaded files include VS Code Plugin PID 1610, Cercano PID 41710 (executable source/server/bin/cercano), and related node/dotnet/MCP processes. This session cannot simply move its own executable/working directories while related tools continue writing. These PIDs are observations, not kill authorizations; re-identify before any stop. No processes were stopped.
+
+Staged byte-identical copies of both current runtime binaries under the private remote-cutover snapshot/stable-runtime. SHA-256 checked against source; not launched and not substituted into PATH or the active service. This prepares a stable handoff but does not establish that the active agent has switched. Obtain local pause and handoff coordination, then verify the old source-root processes are gone, take the final quiesced snapshot, and relocate/repair Git worktrees. User must approve stopping affected sessions; do not terminate unrelated editors/tools or broaden shutdown scope implicitly.
+
+Local move is blocked at its explicit coordination gate. Remote transfers and publication do not authorize filesystem relocation or process termination by themselves. All source directories remain in their original locations.

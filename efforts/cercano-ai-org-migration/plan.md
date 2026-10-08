@@ -83,9 +83,9 @@ Objective: demonstrate a working delivery path for new and existing users before
 
 Objective: move local development into /Users/bryancostanich/git_repos/cercano-ai while preserving every original workspace and ensuring Git metadata remains valid. Files: local filesystem locations, Git worktree metadata and approved path-dependent configuration; no source cleanup. Tests: before/after manifest comparison, worktree/ref enumeration, content preservation checks, remote access, and representative developer commands.
 
-- [ ] Produce an explicit old-to-new path map for all repository roots, worktrees, nested worktrees, and backup/document directories; retain a recognizable relative layout and detect collisions before moving.
-- [ ] Include any new migration worktree created during this effort and prepare a stable execution location outside directories being moved.
-- [ ] Obtain approval for the local pause window; stop affected writers and refresh the final preservation snapshot immediately before relocation.
+- [x] Produce an explicit old-to-new path map for all repository roots, worktrees, nested worktrees, and backup/document directories; retain a recognizable relative layout and detect collisions before moving.
+- [~] Include any new migration worktree created during this effort and prepare a stable execution location outside directories being moved.
+- [-] Obtain approval for the local pause window; stop affected writers and refresh the final preservation snapshot immediately before relocation.
 - [ ] Recheck backup integrity and capture the recovery commands and metadata paths needed if relocation stops partway through.
 - [ ] Relocate the three existing main repositories and their linked worktrees with supported Git move/repair procedures; account explicitly for nested worktrees and main-checkout move limitations.
 - [ ] Move the standalone backup/document directories without filtering ignored files or deleting their originals before verification.

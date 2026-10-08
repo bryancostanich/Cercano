@@ -34,15 +34,15 @@ Objective: ensure transfer and publishing can succeed without changing private a
 
 Objective: prepare reviewed changes against current upstream before public cutover, without pointing the live product at missing destinations. Files: source/server/pkg/update/update.go and focused tests; release/homebrew/update_tap.py, render_formula.py, promote_to_tap.py and their tests; relevant release scripts, .github/workflows/, README/docs, website configuration, and tap files. Locate exact current paths during execution rather than copying stale local versions. Tests: focused updater and Homebrew unit tests, owner-qualified endpoint assertions, workflow validation, documentation link checks, and website build/path checks.
 
-- [ ] Create the implementation worktree with git_worktree from reconciled current source; keep migration edits separate from unfinished user work.
+- [x] Create the implementation worktree with git_worktree from reconciled current source; keep migration edits separate from unfinished user work.
 - [ ] Search current tracked source for personal-owner API/download URLs, tap names, Pages URLs, plugin destinations, and absolute development paths; classify live references versus historical documentation.
-- [ ] Update updater/release endpoints and tests to cercano-ai while retaining redirect validation, token confinement, artifact checks, and existing release naming.
-- [ ] Update formula rendering/publishing and workflow destinations to cercano-ai/homebrew-tap; preserve checksums, optimistic locking, and authentication boundaries.
+- [x] Update updater/release endpoints and tests to cercano-ai while retaining redirect validation, token confinement, artifact checks, and existing release naming.
+- [x] Update formula rendering/publishing and workflow destinations to cercano-ai/homebrew-tap; preserve checksums, optimistic locking, and authentication boundaries.
 - [x] Inspect both tap repositories and compare formula history and current contents before selecting the canonical formula; stop if substantive differences require a decision.
-- [ ] Preserve and review Lattice cask references and behavior as part of the shared tap transfer.
+- [x] Preserve and review Lattice cask references and behavior as part of the shared tap transfer.
 - [ ] Prepare transition guidance for users of both personal taps and the dedicated homebrew-cercano repository; do not introduce duplicate independent publishers.
 - [ ] Prepare legacy plugin sync owner changes and required token authorization without removing deprecated plugin support.
-- [ ] Prepare Pages links and deployment configuration using the current upstream website source; retain /Cercano when appropriate and do not add an unapproved domain migration.
+- [x] Prepare Pages links and deployment configuration using the current upstream website source; retain /Cercano when appropriate and do not add an unapproved domain migration.
 - [ ] Update current installation and contribution documentation and badges; leave historic references alone where rewriting them would misrepresent history.
 - [ ] Run focused tests and static checks; checkpoint reviewed source changes without publishing premature destinations.
 - [ ] Record the exact commits and settings changes to apply during cutover, plus the fallback for each integration if its check fails.
@@ -51,7 +51,7 @@ Objective: prepare reviewed changes against current upstream before public cutov
 
 Objective: move repository ownership and activate prepared integrations during a controlled window. Files: reviewed migration commits and execution evidence; GitHub settings and remote URLs change only after confirmation. Tests: before/after repository identity and metadata comparison, permissions checks, old/new endpoint probes, workflow configuration checks, and attachment access.
 
-- [ ] Present the transfer list, destination names, visibility/access findings, coordinated publication actions, and recovery limits; obtain explicit execution confirmation before transfers and publishing.
+- [-] Present the transfer list, destination names, visibility/access findings, coordinated publication actions, and recovery limits; obtain explicit execution confirmation before transfers and publishing.
 - [ ] Pause affected writers and automated publishing with approval, recording previous settings for restoration.
 - [ ] Transfer existing homebrew-tap, homebrew-cercano, cercano-claude, cercano-codex, cercano-gemini, Cercloud, and Cercano in the dependency-aware order established in Phase 2.
   - [ ] Verify each transfer completes and retains required history, refs, issues, pull requests, releases, visibility, and access before proceeding.

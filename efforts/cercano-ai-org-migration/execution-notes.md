@@ -81,3 +81,11 @@ Before implementing tap migration behavior, obtain a decision: preserve the dedi
 ## Legacy compatibility decision resolved by user
 
 User: "this is all new. we dont need to preserve the intel mac stuff. those are super old at this point". Proceed with the canonical standalone formula and current platform requirements; do not build a legacy upgrade bridge or wait for platform parity. Preserve history/artifacts and label the old dedicated tap superseded, without claiming unsupported platforms work. Record this as a spec revision, not a silent relaxation of acceptance criteria. No new publication or deletion authorization is implied.
+
+## Prepared migration slice and next coordination gate
+
+Created isolated core and tap implementation worktrees from origin/main without reconciling the active user main checkout. Core commit b21ee75589eb prepares updater, provenance, publishing, plugin sync, docs and website namespace changes. Tap commit 5768ae147191 prepares canonical identity/formula URLs while preserving version, digest, restart behavior and Lattice byte-for-byte. Nothing was pushed.
+
+Verification: Go updater tests, 58 Homebrew Python tests, 6 Ruby tests, Pages build plus 2 tests, vinext build plus 3 tests, whitespace checks passed. Website initial failure was a stale old-domain expectation, corrected after observing rendered new-domain output. Existing dependency audit warnings are recorded in cutover-checklist.md; no dependency upgrades were made.
+
+Remote cutover checklist now records dependency order, workflow coordination, access caveats, exact prepared commits, artifact checks, rollback limits and outstanding manual external-integration inventory. Pause for user confirmation of remote-writer coordination and transfer/publication authorization. This gate does not authorize local relocation.

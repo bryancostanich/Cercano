@@ -295,8 +295,8 @@ func inferProviderVendor(p CloudProfile) string {
 			return p.Backend
 		}
 		// Backend-less OpenAI-compatible providers (DeepInfra, Together,
-		// OpenRouter, DeepSeek) all speak the chat-completions dialect but
-		// serve entirely different model lineups. Without this, every one of
+		// OpenRouter, DeepSeek, Cerebras) all speak the chat-completions
+		// dialect but serve entirely different model lineups. Without this, every one of
 		// them inferred vendor "openai" and drew OpenAI model ids out of the
 		// cost tables — a DeepInfra profile would resolve to "gpt-5.5", send
 		// it to DeepInfra, and be rejected. The base URL is what actually
@@ -330,6 +330,8 @@ func vendorByHost(baseURL string) string {
 		return "openrouter"
 	case strings.Contains(host, "deepseek."):
 		return "deepseek"
+	case strings.Contains(host, "cerebras."):
+		return "cerebras"
 	}
 	return ""
 }

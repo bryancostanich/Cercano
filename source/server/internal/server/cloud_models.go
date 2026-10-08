@@ -52,6 +52,17 @@ func (s *Server) ListCloudProfileModels(ctx context.Context, req *proto.ListClou
 		}
 		return out, nil
 	}
+	// Cerebras serves an OpenAI-shaped /models catalog on its own base URL.
+	// It needs the profile's key and there is no public registry source for
+	// it, so the list comes straight from the authenticated endpoint.
+	if p.Provider == "cerebras" || (endpoint != nil && strings.EqualFold(endpoint.Hostname(), "api.cerebras.ai")) {
+		if p.Flavor == "chat_completions" {
+			return s.listCerebrasModels(ctx, name, p.BaseURL)
+		}
+		// Fall through: a cerebras profile on another flavor keeps the
+		// standard flavor-gated error below.
+	}
+
 	base := strings.TrimRight(p.BaseURL, "/")
 	if base == "" {
 		return &proto.ListCloudProfileModelsResponse{Error: "profile has no base_url"}, nil
@@ -127,4 +138,66 @@ func newHexID(nBytes int) string {
 		return "0"
 	}
 	return hex.EncodeToString(b)
+}
+
+// listCerebrasModels fetches GET <base>/models with the profile's keychain API
+// key as a bearer token and parses the OpenAI shape { "data": [ {"id": ...},
+// ... ] }. Only ids the endpoint itself returned are surfaced — no capability,
+// pricing, or lineup metadata is invented on Cerebras's behalf. The request is
+// bounded (6s timeout, 16 MiB body cap, 500-model cap) and redirects are
+// refused outright so the bearer token can never follow a redirect off-host.
+func (s *Server) listCerebrasModels(ctx context.Context, profileName, baseURL string) (*proto.ListCloudProfileModelsResponse, error) {
+	base := strings.TrimRight(baseURL, "/")
+	if base == "" {
+		return &proto.ListCloudProfileModelsResponse{Error: "profile has no base_url"}, nil
+	}
+	modelsURL := base + "/models"
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsURL, nil)
+	if err != nil {
+		return &proto.ListCloudProfileModelsResponse{Error: err.Error()}, nil
+	}
+	if st := s.cfgSvc.Secrets(); st != nil {
+		if key, err := st.Get(profileName); err == nil && key != "" {
+			httpReq.Header.Set("Authorization", "Bearer "+key)
+		}
+	}
+	client := &http.Client{
+		Timeout: 6 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return fmt.Errorf("cerebras /models refused redirect (bearer token must not follow off-host)")
+		},
+	}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return &proto.ListCloudProfileModelsResponse{Error: err.Error()}, nil
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
+	if err != nil {
+		return &proto.ListCloudProfileModelsResponse{Error: err.Error()}, nil
+	}
+	if resp.StatusCode >= 400 {
+		return &proto.ListCloudProfileModelsResponse{
+			Error: fmt.Sprintf("%s returned %d", modelsURL, resp.StatusCode),
+		}, nil
+	}
+	var parsed struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return &proto.ListCloudProfileModelsResponse{Error: "parse: " + err.Error()}, nil
+	}
+	out := &proto.ListCloudProfileModelsResponse{}
+	for i, m := range parsed.Data {
+		if i >= 500 {
+			break
+		}
+		if m.ID == "" {
+			continue
+		}
+		out.Models = append(out.Models, &proto.CloudModelInfo{Id: m.ID, DisplayName: m.ID})
+	}
+	return out, nil
 }

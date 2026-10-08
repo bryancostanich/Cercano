@@ -73,6 +73,7 @@ func TestProviderIDForDerivation(t *testing.T) {
 		{"chat backendless together host", ProfileRef{Flavor: "chat_completions", BaseURL: "https://api.together.xyz/v1"}, "together"},
 		{"chat backendless openrouter host", ProfileRef{Flavor: "chat_completions", BaseURL: "https://openrouter.ai/api/v1"}, "openrouter"},
 		{"chat backendless deepseek host", ProfileRef{Flavor: "chat_completions", BaseURL: "https://api.deepseek.com"}, "deepseek"},
+		{"chat backendless cerebras host", ProfileRef{Flavor: "chat_completions", BaseURL: "https://api.cerebras.ai/v1"}, "cerebras"},
 		{"chat unknown host → custom", ProfileRef{Flavor: "chat_completions", BaseURL: "https://api.example.com/v1"}, ""},
 		{"unknown flavor → custom", ProfileRef{Flavor: "whatever"}, ""},
 	}
@@ -219,4 +220,29 @@ func TestDeepInfraIsVerified(t *testing.T) {
 		}
 	}
 	t.Fatal("DeepInfra missing from catalog")
+}
+
+// Cerebras is catalogued like the other backend-less OpenAI-compatible
+// providers: chat-completions dialect, its real endpoint, and an (untested)
+// label until a live check validates it. There is no invented cost lineup —
+// the vendor's cost table stays empty and model discovery happens at runtime.
+func TestCerebrasCatalogEntry(t *testing.T) {
+	for _, p := range Catalog() {
+		if p.ID == "cerebras" {
+			if p.Flavor != "chat_completions" {
+				t.Errorf("cerebras flavor = %q, want chat_completions", p.Flavor)
+			}
+			if p.Backend != "" {
+				t.Errorf("cerebras backend = %q, want default (empty)", p.Backend)
+			}
+			if p.BaseURL != "https://api.cerebras.ai/v1" {
+				t.Errorf("cerebras base_url = %q", p.BaseURL)
+			}
+			if p.Tier != TierUntested {
+				t.Errorf("cerebras tier = %q, want untested", p.Tier)
+			}
+			return
+		}
+	}
+	t.Fatal("cerebras missing from catalog")
 }

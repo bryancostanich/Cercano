@@ -54,6 +54,7 @@ func Catalog() []Provider {
 		{ID: "together", Label: "together", Flavor: "chat_completions", Backend: "", BaseURL: "https://api.together.xyz/v1", Tier: TierUntested},
 		{ID: "openrouter", Label: "openrouter", Flavor: "chat_completions", Backend: "", BaseURL: "https://openrouter.ai/api/v1", Tier: TierUntested},
 		{ID: "deepseek", Label: "deepseek", Flavor: "chat_completions", Backend: "", BaseURL: "https://api.deepseek.com", Tier: TierUntested},
+		{ID: "cerebras", Label: "cerebras", Flavor: "chat_completions", Backend: "", BaseURL: "https://api.cerebras.ai/v1", Tier: TierUntested},
 		{ID: "bedrock", Label: "bedrock", Flavor: "bedrock", BaseURL: "", Tier: TierComingSoon},
 	}
 }
@@ -193,6 +194,8 @@ func providerIDByHost(baseURL string) string {
 		return "openrouter"
 	case strings.Contains(host, "deepseek."):
 		return "deepseek"
+	case strings.Contains(host, "cerebras."):
+		return "cerebras"
 	}
 	return ""
 }

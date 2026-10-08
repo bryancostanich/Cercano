@@ -28,6 +28,7 @@ func TestInferProviderVendor_BackendlessProvidersByHost(t *testing.T) {
 		{"together", "https://api.together.xyz/v1", "together"},
 		{"openrouter", "https://openrouter.ai/api/v1", "openrouter"},
 		{"deepseek", "https://api.deepseek.com", "deepseek"},
+		{"cerebras", "https://api.cerebras.ai/v1", "cerebras"},
 		{"uppercase host still matches", "https://API.DEEPINFRA.COM/v1/openai", "deepinfra"},
 		// A genuinely unknown OpenAI-compatible endpoint keeps the old
 		// behavior: assume the OpenAI lineup, since that dialect is what it
@@ -135,4 +136,19 @@ func containsSlash(s string) bool {
 		}
 	}
 	return false
+}
+
+// TestResolveCloudModelForTier_CerebrasNoInventedLineup: the catalog carries
+// Cerebras as an untested backend-less provider, but no Cerebras cost table is
+// shipped — no model ids, capabilities, or pricing are invented on its behalf
+// (the live catalog is discovered at runtime instead). Every tier must resolve
+// to nothing rather than to some foreign vendor's id.
+func TestResolveCloudModelForTier_CerebrasNoInventedLineup(t *testing.T) {
+	cfg := Defaults()
+	p := CloudProfile{Name: "cerebras", Flavor: "chat_completions", BaseURL: "https://api.cerebras.ai/v1"}
+	for _, tier := range []Tier{TierMostCapable, TierEveryday, TierFastLight, TierFastLightText} {
+		if got := cfg.ModelProfiles.ResolveCloudModelForTier(p, tier); got != "" {
+			t.Errorf("tier %s invented model %q for a vendor with no shipped lineup", tier, got)
+		}
+	}
 }

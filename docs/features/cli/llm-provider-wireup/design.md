@@ -113,6 +113,9 @@ base URL, label tier).
 - `together` — backend default — `https://api.together.xyz/v1`
 - `openrouter` — backend default — `https://openrouter.ai/api/v1`
 - `deepseek` — backend default — `https://api.deepseek.com`
+- `cerebras` — backend default — `https://api.cerebras.ai/v1` (added later; the
+  settings page lists it as `(untested)` and its catalog comes from the live
+  authenticated `/models` endpoint rather than a shipped cost table)
 
 **Coming soon (flavor not built; labeled `(coming soon)`, activate blocked):**
 - `bedrock` — flavor `bedrock`

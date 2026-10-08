@@ -145,7 +145,7 @@ API keys are **never stored in YAML** — they live in the OS keychain (macOS Ke
 
 The `/s` settings page has a **Cloud Providers** section: a vertical list of your
 configured profiles plus known-provider templates (anthropic, openai, gemini,
-groq, deepinfra, together, openrouter, deepseek) and `+ other` for any
+groq, deepinfra, together, openrouter, deepseek, cerebras) and `+ other` for any
 OpenAI-compatible endpoint. Selecting a row opens an inline editor for its
 base URL, model, and API key (stored in the OS keychain), with save / activate /
 delete actions. Untested backends are labeled `(untested)`; flavors not yet

@@ -104,14 +104,14 @@ func (c Config) TaskAssignment(task Task) TaskAssignment {
 // DispatchTokenBudget caps cumulative token volume (input + output across model
 // calls) for one delegated dispatch; it is not a monetary billing limit.
 // Standard and Premium allow 10M tokens for sustained investigation and
-// implementation, including repeatedly submitted context. Economy retains its
-// 300K bound for narrower work. Unknown qualities use the Standard default.
-// UnlimitedDispatchTokenBudget explicitly disables the cap; main turns use no
-// cumulative dispatch cap.
+// implementation, including repeatedly submitted context. Economy allows 1M
+// tokens for broader work while still providing some budget protection.
+// Unknown qualities use the Standard default. UnlimitedDispatchTokenBudget
+// explicitly disables the cap; main turns use no cumulative dispatch cap.
 func (q CostTier) DispatchTokenBudget() int {
 	switch q {
 	case CostEconomy:
-		return 300_000
+		return 1_000_000
 	case CostStandard:
 		return 10_000_000
 	case CostPremium:

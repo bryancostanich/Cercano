@@ -24,7 +24,7 @@ func TestResolveTokenBudget(t *testing.T) {
 		spec Spec
 		want int
 	}{
-		{"economy-task-default", Spec{RoutingTask: config.Task("reconnaissance")}, 300_000},
+		{"economy-task-default", Spec{RoutingTask: config.Task("reconnaissance")}, 1_000_000},
 		{"premium-task-default", Spec{RoutingTask: config.Task("implementation")}, 10_000_000},
 		{"standard-task-default", Spec{RoutingTask: config.Task("investigation")}, 10_000_000},
 		{"explicit-budget-wins", Spec{RoutingTask: config.Task("implementation"), TokenBudget: 42_000}, 42_000},
@@ -50,7 +50,7 @@ func TestCostTierDispatchTokenBudgets(t *testing.T) {
 	// silently unbound dispatches. Scale: healthy recon bills <100K, the
 	// motivating runaway billed ~3.7M.
 	for tier, want := range map[config.CostTier]int{
-		config.CostEconomy:  300_000,
+		config.CostEconomy:  1_000_000,
 		config.CostStandard: 10_000_000,
 		config.CostPremium:  10_000_000,
 		config.CostTier(""): 10_000_000,

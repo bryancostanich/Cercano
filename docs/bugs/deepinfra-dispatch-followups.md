@@ -33,7 +33,7 @@ Fixed by a cumulative billed-token budget on delegated tool loops:
   iteration cap remains the backstop for that path.
 - `dispatch.Spec.TokenBudget`: explicit budgets pass through;
   `config.UnlimitedDispatchTokenBudget` opts out; 0 resolves the class default
-  from the routing assignment's cost tier — Economy 300K, Standard 10M,
+  from the routing assignment's cost tier — Economy 1M, Standard 10M,
   Premium 10M (`CostTier.DispatchTokenBudget`). Main turns stay uncapped;
   every agentic dispatch (host and worker share `RunAgenticDispatch`) is
   budgeted unless explicitly opted out, including taskless legacy dispatches.
@@ -124,5 +124,5 @@ reproduction test, and no telemetry-confirmed threshold yet. Do not close
 either from this document alone.
 
 Standard subsequently raised from 1M to 10M as well, including the Standard
-fallback for unspecified quality. Economy remains 300K; Premium remains 10M.
-These are cumulative token-volume limits, not monetary budgets.
+fallback for unspecified quality. Economy raised from 300K to 1M; Premium
+remains 10M. These are cumulative token-volume limits, not monetary budgets.

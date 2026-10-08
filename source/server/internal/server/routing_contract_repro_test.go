@@ -188,7 +188,7 @@ func TestProviderGraphRetainsTaskAssignmentsUntilRebuild(t *testing.T) {
 	c.TaskAssignments = map[config.Task]config.TaskAssignment{config.TaskChat: {Quality: config.CostEconomy}, config.TaskDispatch: {Quality: config.CostEconomy}}
 	s.cfgSvc.Set(c)
 	candidates := s.providerSvc.Candidates()
-	if candidates.TaskFor(config.TaskDispatch).Quality != config.CostPremium {
+	if candidates.TaskFor(config.TaskDispatch).Quality != config.CostStandard {
 		t.Fatal("unbuilt task configuration leaked into provider graph")
 	}
 	main, _, _, err := s.providerSvc.Main()

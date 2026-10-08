@@ -48,8 +48,8 @@ func TestRoutingSettingsAtomicPresence(t *testing.T) {
 	if got.ActiveCloudProfile != "" || got.BackupCloudProfile != "" || got.SecondaryCloudProfile != "" || got.SecondaryBackupCloudProfile != "" || len(got.TaskAssignments) != 0 {
 		t.Fatal("clear did not reset assignments")
 	}
-	if got.TaskAssignment(config.TaskDispatch).Quality != config.CostPremium {
-		t.Fatal("cleared task did not inherit Premium")
+	if got.TaskAssignment(config.TaskDispatch).Quality != config.CostStandard {
+		t.Fatal("cleared task did not inherit Standard")
 	}
 }
 

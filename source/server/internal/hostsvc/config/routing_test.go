@@ -63,7 +63,7 @@ func TestTaskAssignmentClearRestoresDefaults(t *testing.T) {
 	if err := svc.SetTaskAssignment(cfg.TaskDispatch, nil); err != nil {
 		t.Fatal(err)
 	}
-	if got := svc.Get().TaskAssignment(cfg.TaskDispatch); got.Destination != cfg.DestinationSecondary || got.Quality != cfg.CostPremium {
+	if got := svc.Get().TaskAssignment(cfg.TaskDispatch); got.Destination != cfg.DestinationSecondary || got.Quality != cfg.CostStandard {
 		t.Fatal(got)
 	}
 }

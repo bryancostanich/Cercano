@@ -147,7 +147,7 @@ func TestLegacyOneShotUsesDefaultDispatchClass(t *testing.T) {
 		return dispatch.Providers{Open: local, Destinations: map[config.Destination]inference.Candidate{config.DestinationSecondary: {Provider: secondary, IsCloud: true}}}
 	}, func() locus.Mode { return locus.CloudPrimary }, nil)
 	eng.SetDestinationModelFor(func(sel inference.Selection, tier config.Tier) string {
-		if tier != config.TierMostCapable {
+		if tier != config.TierEveryday {
 			t.Errorf("tier=%s", tier)
 		}
 		return sel.Provider.Name()

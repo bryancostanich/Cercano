@@ -1,4 +1,8 @@
-# One-shot executable/bootstrap contract — awaiting approval
+# One-shot executable/bootstrap contract — approved
+
+The user explicitly approved the recommended private update mode in the existing
+agent binary. The common authority/lifetime boundaries below are the implementation
+contract. The separate-executable alternative is retained only as decision history.
 
 The service proposal remains rejected. Both options here are short-lived
 utilities, using the existing agent connection and no new listening endpoint.
@@ -34,7 +38,9 @@ Proposed common authority/lifetime boundaries:
   Temporary executable cleanup happens after exit, never by assuming Windows
   permits deletion of a running image. No user data is part of version cleanup.
 - Updater schema compatibility, prior-selection recovery and helper image
-  selection must be tested explicitly. No speculative migration or production
-  helper self-upgrade is authorized by this pending document.
+  selection must be tested explicitly. This approval authorizes implementation
+  and isolated tests, not speculative migrations or changes to live installations.
 
-Neither executable option is implemented as an installed entrypoint yet.
+The private entrypoint and temporary-copy bootstrap are approved for implementation.
+Normal startup must not enter update mode implicitly, and legacy binaries must
+not be probed with an unknown execution flag that could start an agent.

@@ -284,3 +284,28 @@ func TestRunCommandGrantAliasesHaveWriteTier(t *testing.T) {
 		}
 	}
 }
+
+func TestDispatchSchemaDescription(t *testing.T) {
+	c := Dispatch()
+	schema := c.Schema()
+	
+	// Verify the schema contains the deliberate override guidance
+	if !strings.Contains(string(schema), "Omit tier for normal dispatches to honor the selected class's saved quality") {
+		t.Error("schema should instruct to omit tier for normal dispatches to honor saved quality")
+	}
+	
+	// Verify the schema contains the deliberate override guidance
+	if !strings.Contains(string(schema), "Supply tier only for a deliberate quality override") {
+		t.Error("schema should instruct to supply tier only for deliberate quality override")
+	}
+	
+	// Verify the schema contains the override behavior
+	if !strings.Contains(string(schema), "explicit values override the saved setting") {
+		t.Error("schema should document that explicit values override the saved setting")
+	}
+	
+	// Verify the tier options are still documented
+	if !strings.Contains(string(schema), "Explicit light selects Economy, standard selects Standard, and deep selects Premium") {
+		t.Error("schema should document tier selection behavior")
+	}
+}

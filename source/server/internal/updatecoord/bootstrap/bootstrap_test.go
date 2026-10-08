@@ -331,10 +331,17 @@ func TestPrepareRefusesPlacementInsideForbiddenRoots(t *testing.T) {
 	if err := os.MkdirAll(versions, 0o755); err != nil {
 		t.Fatalf("creating version tree: %v", err)
 	}
+	// The source is a syntactically valid but nonexistent path: the
+	// placement refusal must happen during request validation, before any
+	// source I/O. It must be absolute on EVERY platform — a Unix-only
+	// literal like "/x" is not absolute on Windows (no volume), so the
+	// request would be refused as invalid before the placement boundary
+	// was ever examined.
+	absent := filepath.Join(base, "cercano")
 	// A caller-provided state root that IS the version root...
 	req := Request{
 		Oneshot:        oneshotRequest(),
-		Source:         Source{Path: "/x", ExpectedSHA256: hex.EncodeToString(bytes.Repeat([]byte{1}, sha256.Size)), ExpectedLength: 1},
+		Source:         Source{Path: absent, ExpectedSHA256: hex.EncodeToString(bytes.Repeat([]byte{1}, sha256.Size)), ExpectedLength: 1},
 		StateRoot:      versions,
 		ForbiddenRoots: []string{versions},
 	}
@@ -605,6 +612,14 @@ func TestPrepareHandlesUTF8Paths(t *testing.T) {
 // different file was bound to it mid-copy. The pathname must be compared
 // against the opened identity before and after the copy, and a bound
 // replacement must never be modified.
+//
+// On Windows the mutation may be prevented by the OS itself: openSourceFile
+// holds the source without FILE_SHARE_DELETE, so the rename fails with a
+// sharing violation or access denied while the copy proceeds on the
+// unchanged original. The test branches on the observed outcome instead of
+// pretending the mutation succeeded: a real mutation must yield
+// ErrSourceChanged; a prevented mutation must leave a positively verified
+// copy of the unchanged source; anything else fails.
 func TestPrepareRejectsSourcePathnameReplacedDuringCopy(t *testing.T) {
 	replacementBytes := []byte("not the trusted image")
 
@@ -614,31 +629,48 @@ func TestPrepareRejectsSourcePathnameReplacedDuringCopy(t *testing.T) {
 		assertDecoys := decoys(t, stateRoot, versions)
 		srcDir := t.TempDir()
 		srcPath, digest, length := makeSource(t, srcDir, "cercano", 2*copyChunkSize)
+		before, beforeInfo := snapshotSource(t, srcPath)
 		replacement := filepath.Join(srcDir, "replacement")
 		if err := os.WriteFile(replacement, replacementBytes, 0o755); err != nil {
 			t.Fatalf("writing replacement: %v", err)
 		}
+		var renameErr error
 		testHookChunk = func(copied int64) {
 			if copied == copyChunkSize {
-				if err := os.Rename(replacement, srcPath); err != nil {
-					t.Errorf("binding replacement to source pathname: %v", err)
-				}
+				renameErr = os.Rename(replacement, srcPath)
 			}
 		}
 
 		req := validRequest(t, stateRoot, versions, srcPath, digest, length)
-		if _, err := Prepare(context.Background(), req); !errors.Is(err, ErrSourceChanged) {
-			t.Fatalf("Prepare with replaced pathname: error %v, want ErrSourceChanged", err)
+		img, err := Prepare(context.Background(), req)
+		switch {
+		case renameErr == nil:
+			// The pathname really was re-bound mid-copy.
+			if !errors.Is(err, ErrSourceChanged) {
+				t.Fatalf("Prepare with replaced pathname: error %v, want ErrSourceChanged", err)
+			}
+			// The replacement file bound to the pathname was not modified.
+			got, rerr := os.ReadFile(srcPath)
+			if rerr != nil {
+				t.Fatalf("re-reading replaced pathname: %v", rerr)
+			}
+			if !bytes.Equal(got, replacementBytes) {
+				t.Fatal("the replacement bound to the source pathname was modified")
+			}
+			assertNoStagingLeft(t, stateRoot)
+		case mutationPreventedByOS(renameErr):
+			// The OS refused the rebind before Prepare could observe it.
+			if err != nil {
+				t.Fatalf("Prepare after prevented pathname replacement: %v", err)
+			}
+			assertSourceUnchanged(t, srcPath, before, beforeInfo)
+			assertCopyVerified(t, img, digest, length, before)
+			if got, rerr := os.ReadFile(replacement); rerr != nil || !bytes.Equal(got, replacementBytes) {
+				t.Fatalf("replacement file must be untouched where it is; read error %v", rerr)
+			}
+		default:
+			t.Fatalf("binding replacement to source pathname: unexpected error %v", renameErr)
 		}
-		// The replacement file bound to the pathname was not modified.
-		got, err := os.ReadFile(srcPath)
-		if err != nil {
-			t.Fatalf("re-reading replaced pathname: %v", err)
-		}
-		if !bytes.Equal(got, replacementBytes) {
-			t.Fatal("the replacement bound to the source pathname was modified")
-		}
-		assertNoStagingLeft(t, stateRoot)
 		assertDecoys()
 	})
 
@@ -648,25 +680,99 @@ func TestPrepareRejectsSourcePathnameReplacedDuringCopy(t *testing.T) {
 		assertDecoys := decoys(t, stateRoot, versions)
 		srcDir := t.TempDir()
 		srcPath, digest, length := makeSource(t, srcDir, "cercano", 2*copyChunkSize)
+		before, beforeInfo := snapshotSource(t, srcPath)
 		moved := filepath.Join(srcDir, "cercano.gone")
+		var renameErr error
 		testHookChunk = func(copied int64) {
 			if copied == copyChunkSize {
-				if err := os.Rename(srcPath, moved); err != nil {
-					t.Errorf("renaming source pathname away: %v", err)
-				}
+				renameErr = os.Rename(srcPath, moved)
 			}
 		}
 
 		req := validRequest(t, stateRoot, versions, srcPath, digest, length)
-		if _, err := Prepare(context.Background(), req); !errors.Is(err, ErrSourceChanged) {
-			t.Fatalf("Prepare with renamed-away pathname: error %v, want ErrSourceChanged", err)
+		img, err := Prepare(context.Background(), req)
+		switch {
+		case renameErr == nil:
+			// The pathname really was renamed away mid-copy.
+			if !errors.Is(err, ErrSourceChanged) {
+				t.Fatalf("Prepare with renamed-away pathname: error %v, want ErrSourceChanged", err)
+			}
+			if _, serr := os.Stat(srcPath); !os.IsNotExist(serr) {
+				t.Fatalf("original pathname should be gone, stat error: %v", serr)
+			}
+			assertNoStagingLeft(t, stateRoot)
+		case mutationPreventedByOS(renameErr):
+			// The OS kept the pathname bound to the opened original, so the
+			// copy of the unchanged source must have completed and verified.
+			if err != nil {
+				t.Fatalf("Prepare after prevented rename-away: %v", err)
+			}
+			assertSourceUnchanged(t, srcPath, before, beforeInfo)
+			assertCopyVerified(t, img, digest, length, before)
+			if _, serr := os.Stat(moved); !os.IsNotExist(serr) {
+				t.Fatalf("moved pathname should not exist when the rename was prevented, stat error: %v", serr)
+			}
+		default:
+			t.Fatalf("renaming source pathname away: unexpected error %v", renameErr)
 		}
-		if _, err := os.Stat(srcPath); !os.IsNotExist(err) {
-			t.Fatalf("original pathname should be gone, stat error: %v", err)
-		}
-		assertNoStagingLeft(t, stateRoot)
 		assertDecoys()
 	})
+}
+
+// snapshotSource captures the source's content and metadata for later
+// positive proof that an adversarial mutation was prevented.
+func snapshotSource(t *testing.T, srcPath string) ([]byte, os.FileInfo) {
+	t.Helper()
+	content, err := os.ReadFile(srcPath)
+	if err != nil {
+		t.Fatalf("reading source: %v", err)
+	}
+	info, err := os.Stat(srcPath)
+	if err != nil {
+		t.Fatalf("stating source: %v", err)
+	}
+	return content, info
+}
+
+// assertSourceUnchanged proves the source pathname is still bound to the
+// original file: identical content, size and modification time.
+func assertSourceUnchanged(t *testing.T, srcPath string, before []byte, beforeInfo os.FileInfo) {
+	t.Helper()
+	got, err := os.ReadFile(srcPath)
+	if err != nil {
+		t.Fatalf("re-reading source after prevented mutation: %v", err)
+	}
+	if !bytes.Equal(got, before) {
+		t.Fatalf("source content changed despite prevented mutation: read %d bytes, original had %d", len(got), len(before))
+	}
+	info, err := os.Stat(srcPath)
+	if err != nil {
+		t.Fatalf("re-stating source after prevented mutation: %v", err)
+	}
+	if info.Size() != beforeInfo.Size() || !info.ModTime().Equal(beforeInfo.ModTime()) {
+		t.Fatalf("source metadata changed despite prevented mutation: size %d mtime %v, want size %d mtime %v",
+			info.Size(), info.ModTime(), beforeInfo.Size(), beforeInfo.ModTime())
+	}
+}
+
+// assertCopyVerified proves the prepared copy of the unchanged source is
+// intact: the receipt matches the expected digest and length, and the copy
+// on disk matches the source byte for byte.
+func assertCopyVerified(t *testing.T, img *PreparedImage, digest string, length int64, srcContent []byte) {
+	t.Helper()
+	if img == nil {
+		t.Fatal("no prepared image returned after prevented mutation")
+	}
+	if img.SHA256() != digest || img.Length() != length {
+		t.Fatalf("receipt digest/length %s/%d do not match expected %s/%d", img.SHA256(), img.Length(), digest, length)
+	}
+	got, err := os.ReadFile(img.Path())
+	if err != nil {
+		t.Fatalf("reading prepared copy after prevented mutation: %v", err)
+	}
+	if !bytes.Equal(got, srcContent) {
+		t.Fatal("prepared copy content differs from the unchanged source")
+	}
 }
 
 // findStagingDir returns the staging directory the running Prepare created

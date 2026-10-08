@@ -54,12 +54,19 @@ type Request struct {
 }
 
 // PreparedImage is a receipt, not a guarantee that the file can never change.
-// The later execution boundary must revalidate the image before launching it.
+// The later execution boundary must revalidate the image before launching it;
+// Revalidate is that check, and the remembered identities below are what make
+// it prove the receipt still names the objects this preparation created.
 type PreparedImage struct {
 	installID                string
 	operationID              int64
 	path, stagingDir, sha256 string
 	length                   int64
+	// dirInfo and fileInfo remember the ACTUAL prepared identities (via
+	// os.SameFile), not only the paths: revalidation must detect a staging
+	// directory or staged copy that was replaced at the remembered path by
+	// an unrelated object.
+	dirInfo, fileInfo os.FileInfo
 }
 
 func (p *PreparedImage) InstallID() string  { return p.installID }
@@ -199,7 +206,7 @@ func Prepare(ctx context.Context, req Request) (image *PreparedImage, err error)
 	if err = verifyCopy(ctx, owned.path, req.Source.ExpectedSHA256, req.Source.ExpectedLength); err != nil {
 		return nil, err
 	}
-	return &PreparedImage{installID: req.Oneshot.InstallID, operationID: req.Oneshot.OperationID, path: owned.path, stagingDir: dir, sha256: req.Source.ExpectedSHA256, length: copied}, nil
+	return &PreparedImage{installID: req.Oneshot.InstallID, operationID: req.Oneshot.OperationID, path: owned.path, stagingDir: dir, sha256: req.Source.ExpectedSHA256, length: copied, dirInfo: owned.dirInfo, fileInfo: owned.fileInfo}, nil
 }
 func validateRequest(req Request) error {
 	if err := state.ValidateInstallID(req.Oneshot.InstallID); err != nil {

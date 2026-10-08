@@ -110,6 +110,20 @@ def published(version, name, digest):
             'Published checksum sidecar differs from trusted build')
 
 
+def trusted_formula_matches(actual, expected, version):
+    if actual == expected:
+        return True
+    # v0.20.3's immutable build artifact predates the organization transfer.
+    # Accept only the exact former-owner variant of our trusted template;
+    # prepare() still returns the canonical template, never the supplied text.
+    # No other release or formula alteration gets this compatibility exception.
+    if version != '0.20.3':
+        return False
+    legacy = expected.replace('https://github.com/cercano-ai/Cercano',
+                              'https://github.com/bryancostanich/Cercano')
+    return actual == legacy
+
+
 def prepare(version, digest, archive, formula):
     renderer.parse_version(version)
     renderer.parse_digest(digest)
@@ -117,7 +131,8 @@ def prepare(version, digest, archive, formula):
     renderer.validate_archive(archive, version)
     expected = renderer.render(Path(__file__).with_name('cercano.rb.in').read_text(),
                                version, archive.name, digest)
-    require(formula.read_text() == expected, 'CI formula differs from trusted release template')
+    require(trusted_formula_matches(formula.read_text(), expected, version),
+            'CI formula differs from trusted release template')
     return expected
 
 

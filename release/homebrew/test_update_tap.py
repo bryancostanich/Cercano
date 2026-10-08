@@ -114,6 +114,19 @@ class TapUpdateTest(unittest.TestCase):
             self.run_update()
         self.assertEqual(self.writes, [])
 
+    def test_exact_pretransfer_formula_urls_are_recognized(self):
+        legacy = self.text.replace('https://github.com/cercano-ai/Cercano',
+                                   'https://github.com/bryancostanich/Cercano')
+        self.assertTrue(u.trusted_formula_matches(legacy, self.text, '0.20.3'))
+        self.assertFalse(u.trusted_formula_matches(legacy, self.text, '0.20.4'))
+        self.assertFalse(u.trusted_formula_matches(legacy + '\nsystem("unexpected")\n',
+                                                 self.text, '0.20.3'))
+        self.assertFalse(u.trusted_formula_matches(legacy.replace(self.digest, '0' * 64),
+                                                 self.text, '0.20.3'))
+        self.assertFalse(u.trusted_formula_matches(legacy.replace('bryancostanich', 'untrusted'),
+                                                 self.text, '0.20.3'))
+        self.assertTrue(u.trusted_formula_matches(self.text, self.text, self.version))
+
     def test_formula_tampering_refused_before_network(self):
         self.formula.write_text(self.text + '\nsystem("unexpected")\n')
         with self.assertRaisesRegex(u.Failure, 'trusted release template'):

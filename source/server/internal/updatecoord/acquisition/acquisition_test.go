@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -19,14 +20,34 @@ import (
 	"github.com/theupdateframework/go-tuf/v2/metadata"
 )
 
-// fixture is a minimal signed TUF repository served by a local httptest
-// server, following the repository fixture pattern of the approved
-// tuf-proof (efforts/cross-platform-updates/tuf-proof).
+// fixture is a minimal signed TUF repository served by a local httptest TLS
+// server, following the repository fixture pattern of the approved tuf-proof
+// (efforts/cross-platform-updates/tuf-proof).
 type fixture struct {
-	server   *httptest.Server
-	root     []byte // trusted root metadata bytes handed to the client
-	rootPriv ed25519.PrivateKey
-	targets  map[string][]byte
+	timestampOverride atomic.Value // immutable bytes, safe across HTTP handlers
+	makeTimestamp     func(int64) []byte
+	server            *httptest.Server
+	root              []byte // trusted root metadata bytes handed to the client
+	rootPriv          ed25519.PrivateKey
+	targets           map[string][]byte
+	// targetRequests counts requests received for target bytes. Regression
+	// tests assert that digest- and size-refusals happen before any of
+	// these, and that refused redirect targets are never fetched.
+	targetRequests int
+	// onTargetRequest, when set, fully handles one target request and
+	// reports whether it did so; tests use it to serve redirect responses.
+	onTargetRequest func(w http.ResponseWriter, r *http.Request, relPath string) bool
+}
+
+// targetSpec describes one signed target inside a fixture.
+type targetSpec struct {
+	path string
+	data []byte
+	// hashes lists the digest algorithms signed for the target
+	// (default: sha256 only).
+	hashes []string
+	// length, when non-nil, overrides the signed target length.
+	length *int64
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -37,6 +58,14 @@ func newFixture(t *testing.T) *fixture {
 // newFixtureAt builds a signed repository with the given metadata expiry and
 // a per-test tamper hook for the served target bytes.
 func newFixtureAt(t *testing.T, expiry time.Time, tamper func(path string, data []byte) []byte) *fixture {
+	t.Helper()
+	return newFixtureSpecs(t, expiry, tamper,
+		targetSpec{path: "cercano/app/1.0.0.zip", data: []byte("verified update payload 1.0.0")})
+}
+
+// newFixtureSpecs builds a signed repository whose targets are described by
+// specs, including hash-algorithm and signed-length overrides.
+func newFixtureSpecs(t *testing.T, expiry time.Time, tamper func(path string, data []byte) []byte, specs ...targetSpec) *fixture {
 	t.Helper()
 	priv := make([]ed25519.PrivateKey, 4) // root, targets, snapshot, timestamp
 	pub := make([]ed25519.PublicKey, 4)
@@ -66,38 +95,64 @@ func newFixtureAt(t *testing.T, expiry time.Time, tamper func(path string, data 
 	}
 	signMeta(t, root, signer(priv[0]))
 
-	fx := &fixture{
-		rootPriv: priv[0],
-		targets: map[string][]byte{
-			"cercano/app/1.0.0.zip": []byte("verified update payload 1.0.0"),
-		},
-	}
+	fx := &fixture{rootPriv: priv[0], targets: map[string][]byte{}}
 	targetsMeta := metadata.Targets(expiry)
 	targetsMeta.Signed.Version = 1
-	for p, data := range fx.targets {
-		tf, err := metadata.TargetFile().FromBytes(p, data, "sha256")
-		if err != nil {
-			t.Fatalf("target %s: %v", p, err)
+	for _, spec := range specs {
+		data := spec.data
+		if tamper != nil {
+			data = tamper(spec.path, data)
 		}
-		targetsMeta.Signed.Targets[p] = tf
+		hashes := spec.hashes
+		if len(hashes) == 0 {
+			hashes = []string{"sha256"}
+		}
+		tf, err := metadata.TargetFile().FromBytes(spec.path, data, hashes...)
+		if err != nil {
+			t.Fatalf("target %s: %v", spec.path, err)
+		}
+		if spec.length != nil {
+			tf.Length = *spec.length
+		}
+		targetsMeta.Signed.Targets[spec.path] = tf
+		fx.targets[spec.path] = data
 	}
 	signMeta(t, targetsMeta, signer(priv[1]))
-	
+
 	// Create snapshot metadata
 	snapshotMeta := metadata.Snapshot(expiry)
 	snapshotMeta.Signed.Version = 1
 	snapshotMeta.Signed.Meta["targets.json"] = metadata.MetaFile(1)
 	signMeta(t, snapshotMeta, signer(priv[2]))
-	
+
 	// Create timestamp metadata
 	timestampMeta := metadata.Timestamp(expiry)
 	timestampMeta.Signed.Version = 1
 	timestampMeta.Signed.Meta["snapshot.json"] = metadata.MetaFile(1)
 	signMeta(t, timestampMeta, signer(priv[3]))
-	
+	fx.makeTimestamp = func(version int64) []byte {
+		m := metadata.Timestamp(expiry)
+		m.Signed.Version = version
+		m.Signed.Meta["snapshot.json"] = metadata.MetaFile(1)
+		signMeta(t, m, signer(priv[3]))
+		b, e := m.MarshalJSON()
+		if e != nil {
+			t.Fatal(e)
+		}
+		return b
+	}
+
 	// Create a test server
 	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
+		if path == "/metadata/timestamp.json" {
+			if b := fx.timestampOverride.Load(); b != nil {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write(b.([]byte))
+				return
+			}
+		}
+
 		if strings.HasPrefix(path, "/metadata/") {
 			// Serve metadata - handle both versioned and non-versioned paths
 			switch path {
@@ -136,7 +191,12 @@ func newFixtureAt(t *testing.T, expiry time.Time, tamper func(path string, data 
 			// Serve targets - handle both direct and hashed paths
 			targetPath := strings.TrimPrefix(path, "/targets/")
 			t.Logf("Requested target path: %s", targetPath)
-			
+			fx.targetRequests++
+
+			if fx.onTargetRequest != nil && fx.onTargetRequest(w, r, targetPath) {
+				return
+			}
+
 			// Direct path lookup first
 			if data, ok := fx.targets[targetPath]; ok {
 				t.Logf("Serving target directly: %s", targetPath)
@@ -144,7 +204,7 @@ func newFixtureAt(t *testing.T, expiry time.Time, tamper func(path string, data 
 				w.Write(data)
 				return
 			}
-			
+
 			// If direct lookup fails, try to match by content hash
 			for knownPath, data := range fx.targets {
 				hash := sha256sum(data)
@@ -157,20 +217,20 @@ func newFixtureAt(t *testing.T, expiry time.Time, tamper func(path string, data 
 					return
 				}
 			}
-			
+
 			t.Logf("Target not found: %s", targetPath)
 			w.WriteHeader(404)
 		} else {
 			w.WriteHeader(404)
 		}
 	}))
-	
+
 	// Start with TLS to enable HTTPS
 	server.StartTLS()
-	
+
 	// Update URLs to use https
 	server.URL = strings.Replace(server.URL, "http://", "https://", 1)
-	
+
 	fx.server = server
 	rootJSON, _ := root.MarshalJSON()
 	fx.root = rootJSON

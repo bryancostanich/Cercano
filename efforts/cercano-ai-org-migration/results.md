@@ -1,5 +1,8 @@
 # Cercano AI migration results
 
+> **Correction:** `homebrew-tap` was returned to `bryancostanich/homebrew-tap` at the user's direction. It is the personal Lattice tap, not Cercano's canonical publishing destination. The historical results below describe the now-superseded migration assumption. Cercano release and Homebrew publishing are paused pending correction of the standalone tap destination, credentials and documentation. See execution-notes.md.
+
+
 ## Remote ownership and distribution
 
 All seven existing repositories were transferred to https://github.com/cercano-ai with repository identities, branch/tag refs and release records verified immediately after transfer:

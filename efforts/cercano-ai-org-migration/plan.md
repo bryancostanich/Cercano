@@ -38,7 +38,7 @@ Objective: prepare reviewed changes against current upstream before public cutov
 - [ ] Search current tracked source for personal-owner API/download URLs, tap names, Pages URLs, plugin destinations, and absolute development paths; classify live references versus historical documentation.
 - [ ] Update updater/release endpoints and tests to cercano-ai while retaining redirect validation, token confinement, artifact checks, and existing release naming.
 - [ ] Update formula rendering/publishing and workflow destinations to cercano-ai/homebrew-tap; preserve checksums, optimistic locking, and authentication boundaries.
-- [-] Inspect both tap repositories and compare formula history and current contents before selecting the canonical formula; stop if substantive differences require a decision.
+- [x] Inspect both tap repositories and compare formula history and current contents before selecting the canonical formula; stop if substantive differences require a decision.
 - [ ] Preserve and review Lattice cask references and behavior as part of the shared tap transfer.
 - [ ] Prepare transition guidance for users of both personal taps and the dedicated homebrew-cercano repository; do not introduce duplicate independent publishers.
 - [ ] Prepare legacy plugin sync owner changes and required token authorization without removing deprecated plugin support.

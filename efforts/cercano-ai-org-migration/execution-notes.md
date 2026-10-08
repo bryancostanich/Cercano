@@ -77,3 +77,7 @@ Compared current remote tap formula contents. Shared homebrew-tap is version 0.2
 Lattice cask is version 0.8 and references bryancostanich/lattice release artifacts/homepage. Those endpoints must remain unchanged: the Lattice application repository is not being transferred by this effort.
 
 Before implementing tap migration behavior, obtain a decision: preserve the dedicated legacy formula and its existing platform-specific install paths, offering an explicit opt-in migration to the standalone formula only on supported Apple Silicon Macs; or hold the Homebrew cutover until standalone platform parity is available. The first is recommended because it avoids destructive or incompatible implicit upgrades and does not expand this migration into a new platform-release project. This would mean 'existing-installation compatibility' for legacy Intel/Linux means retaining their old artifacts, not promising standalone upgrades. No tap changes, repository transfers, or publication have been performed.
+
+## Legacy compatibility decision resolved by user
+
+User: "this is all new. we dont need to preserve the intel mac stuff. those are super old at this point". Proceed with the canonical standalone formula and current platform requirements; do not build a legacy upgrade bridge or wait for platform parity. Preserve history/artifacts and label the old dedicated tap superseded, without claiming unsupported platforms work. Record this as a spec revision, not a silent relaxation of acceptance criteria. No new publication or deletion authorization is implied.

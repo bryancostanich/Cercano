@@ -69,7 +69,7 @@ Objective: move repository ownership and activate prepared integrations during a
 
 Objective: demonstrate a working delivery path for new and existing users before moving local workspaces. Files: isolated test fixtures/environments, corrected migration source where necessary, and verification notes. Tests: canonical tap installation, existing-tap migration, updater compatibility, release asset integrity, Pages build/deployment, and link/media checks. No product release or destructive host installation changes without separate approval.
 
-- [-] Test canonical tap discovery and fresh Cercano installation in an isolated environment, avoiding modification of the user's active installation.
+- [x] Test canonical tap discovery and fresh Cercano installation in an isolated environment, avoiding modification of the user's active installation.
 - [ ] Exercise an existing bryancostanich/tap installation's transition to cercano-ai/tap and verify upgrade behavior; also document/test the supported path from the dedicated tap where applicable.
 - [ ] Verify Lattice cask availability and referenced artifacts remain intact under the moved shared tap.
 - [ ] Test the updater's new API endpoint and the old endpoint used by already-released clients, including release metadata and representative artifact downloads.

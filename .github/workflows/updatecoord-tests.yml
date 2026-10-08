@@ -76,9 +76,14 @@ jobs:
       - name: Process stop ownership fixtures
         working-directory: source/server
         run: go test -count=1 -timeout=2m -run 'Test.*Stop|Test.*Shutdown' ./cmd/cercano
-      - name: Safe update restart fixtures
+      - name: Homebrew layout and safe restart fixtures
+        if: runner.os != 'Windows'
         working-directory: source/server
         run: go test -count=1 -timeout=2m ./internal/brewrestart
+      - name: Platform-neutral safe-stop client fixtures
+        if: runner.os == 'Windows'
+        working-directory: source/server
+        run: go test -count=1 -timeout=2m -run 'TestSafeStopRequest|TestSafeStopEarlierAlive' ./internal/brewrestart
       - name: Windows launch capability evidence
         if: runner.os == 'Windows'
         working-directory: source/server

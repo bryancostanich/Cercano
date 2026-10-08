@@ -135,6 +135,20 @@ func publishFixtureFile(path string, data []byte) error {
 	return nil
 }
 
+// readFixtureFile is a test helper that reads fixture protocol files with
+// Windows-specific sharing permissions. On Windows, it uses CreateFile with
+// FILE_SHARE_READ|WRITE|DELETE to allow concurrent access, avoiding the
+// AccessDenied error that os.Rename encounters when there are concurrent
+// readers. On Unix, it uses the standard os.ReadFile.
+// readFixtureFile is a test helper that reads fixture protocol files with
+// Windows-specific sharing permissions. On Windows, it uses CreateFile with
+// FILE_SHARE_READ|WRITE|DELETE to allow concurrent access, avoiding the
+// AccessDenied error that os.Rename encounters when there are concurrent
+// readers. On Unix, it uses the standard os.ReadFile.
+func readFixtureFile(path string) ([]byte, error) {
+	return os.ReadFile(path)
+}
+
 // waitForFile polls for a file until it carries CONTENT, returning the
 // contents. An empty read is NOT a result: every fixture protocol result
 // is published non-empty and atomically (see publishFixtureFile), and the

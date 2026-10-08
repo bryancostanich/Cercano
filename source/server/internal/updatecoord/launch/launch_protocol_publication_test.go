@@ -72,7 +72,7 @@ func TestFixtureProtocolPublicationIsAtomicToPollingReader(t *testing.T) {
 				t.Fatalf("publication writer did not finish within 60s")
 			}
 		}
-		if data, err := os.ReadFile(path); err == nil {
+		if data, err := readFixtureFile(path); err == nil {
 			reads++
 			switch {
 			case bytes.Equal(data, payloadA):
@@ -90,7 +90,7 @@ func TestFixtureProtocolPublicationIsAtomicToPollingReader(t *testing.T) {
 	// One read after the writer finished: the final, fully published
 	// state must be the last payload, complete.
 	reads++
-	if data, err := os.ReadFile(path); err != nil {
+	if data, err := readFixtureFile(path); err != nil {
 		t.Fatalf("read final publication: %v", err)
 	} else if !bytes.Equal(data, payloadB) {
 		t.Fatalf("final publication = %d bytes, want the complete last payload (%d bytes)", len(data), len(payloadB))

@@ -166,18 +166,23 @@ func launchEchoOnceThroughOwnedHarness(t *testing.T, stdoutPath, stderrPath stri
 	// cmd.Wait through a channel, so the REAL exit code is available to
 	// every reporting path below and to cleanup.
 	harnessExited := make(chan error, 1)
-	go func() { harnessExited <- harness.Wait() }()
+	done := make(chan struct{})
+	go func() {
+		err := harness.Wait()
+		harnessExited <- err
+		close(done)
+	}()
 	t.Cleanup(func() {
 		// No-op if the harness already exited; otherwise kill THIS
 		// fixture-owned parent only and let the reaper goroutine
 		// collect it. There is exactly one Wait — never a second one
 		// racing it.
 		select {
-		case <-harnessExited:
+		case <-done:
 			return
 		default:
 			_ = harness.Process.Kill()
-			<-harnessExited
+			<-done
 		}
 	})
 	// waitHarness reports the harness parent's REAL exit state with its
@@ -204,7 +209,7 @@ func launchEchoOnceThroughOwnedHarness(t *testing.T, stdoutPath, stderrPath stri
 			// fixture-owned parent and report the anomaly with the
 			// real captured output.
 			_ = harness.Process.Kill()
-			<-harnessExited
+			<-done
 			return fmt.Sprintf("harness-did-not-exit-within-10s-killed harness-stdout=%q harness-stderr=%q",
 				harnessStdout.String(), harnessStderr.String()), false
 		}
@@ -352,4 +357,82 @@ func TestOneShotLaunch_DefaultContextRefusalClassifiedNoChild(t *testing.T) {
 		time.Sleep(25 * time.Millisecond)
 	}
 	t.Errorf("default-context child %d still present after completing", proc.Pid())
+}
+
+// TestHarnessCleanupRegression exercises the fixed harnessExited channel
+// behavior: Cleanup must not wait twice, and bounded process kill/reap
+// must work correctly with multiple consumers.
+func TestHarnessCleanupRegression(t *testing.T) {
+	dir := t.TempDir()
+	resultPath := filepath.Join(dir, "echo-result")
+	exe, err := helperExecutable()
+	if err != nil {
+		t.Fatalf("test binary path: %v", err)
+	}
+	argv := []string{
+		"-launch-testprocess-role=" + helperRoleOwnedEcho,
+		"-launch-testprocess-echo-result=" + resultPath,
+		"-launch-testprocess-echo-stdout=" + filepath.Join(dir, "stdout"),
+		"-launch-testprocess-echo-stderr=" + filepath.Join(dir, "stderr"),
+		"-launch-testprocess-echo-line=fixture-line",
+		"-launch-testprocess-echo-bytes=0",
+	}
+	harness := exec.Command(exe, argv...)
+	harness.Stdout = &strings.Builder{}
+	harness.Stderr = &strings.Builder{}
+	if err := harness.Start(); err != nil {
+		t.Fatalf("starting owned-echo harness: %v", err)
+	}
+
+	// Multiple consumers of the exit channel (simulating the original bug)
+	harnessExited := make(chan error, 1)
+	done := make(chan struct{})
+	go func() {
+		err := harness.Wait()
+		harnessExited <- err
+		close(done)
+	}()
+
+	// First consumer: waitHarness function
+	waitHarness := func() error {
+		select {
+		case werr := <-harnessExited:
+			return werr
+		case <-time.After(5 * time.Second):
+			_ = harness.Process.Kill()
+			<-done
+			return fmt.Errorf("harness did not exit within 5s")
+		}
+	}
+
+	// Second consumer: Cleanup function (the original hang point)
+	t.Cleanup(func() {
+		select {
+		case <-done:
+			return
+		default:
+			_ = harness.Process.Kill()
+			<-done
+		}
+	})
+
+	// Wait for result (normal harness operation)
+	result := ""
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		if data, rerr := os.ReadFile(resultPath); rerr == nil && len(data) > 0 {
+			result = strings.TrimSpace(string(data))
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if result == "" {
+		t.Fatalf("harness published no result within 30s")
+	}
+
+	// Verify harness completed successfully
+	if err := waitHarness(); err != nil {
+		t.Fatalf("harness wait error: %v", err)
+	}
 }

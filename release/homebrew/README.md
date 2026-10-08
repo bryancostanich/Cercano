@@ -43,10 +43,10 @@ Automatic discovery of agents on other ports is not implemented. A nil ownership
 ## Promoting to the tap
 
 `promote_to_tap.py` stages a rendered formula into a local checkout of
-`cercano-ai/homebrew-tap`:
+`cercano-ai/homebrew-cercano`:
 
 ```bash
-python3 release/homebrew/promote_to_tap.py dist/cercano.rb ~/git/homebrew-tap --version 1.2.3
+python3 release/homebrew/promote_to_tap.py dist/cercano.rb ~/git/homebrew-cercano --version 1.2.3
 ```
 
 Promotion is what makes a release reachable by users, so it refuses to run

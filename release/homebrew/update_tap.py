@@ -18,7 +18,7 @@ import urllib.request
 import render_formula as renderer
 from promote_to_tap import read_formula_fields, PromotionError
 
-TAP_PATH = '/repos/cercano-ai/homebrew-tap/contents/Formula/cercano.rb'
+TAP_PATH = '/repos/cercano-ai/homebrew-cercano/contents/Formula/cercano.rb'
 RELEASE_PATH = '/repos/cercano-ai/Cercano/releases/tags/'
 MAX_ARCHIVE = 512 * 1024 * 1024
 

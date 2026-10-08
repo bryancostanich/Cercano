@@ -3,15 +3,15 @@
 Cercano is distributed for **Apple Silicon Macs running macOS 12 (Monterey) or
 later**. Intel Macs are not supported by this release.
 
-> Not yet published. The formula and release pipeline are ready, but no signed
-> release has been published to the tap. These instructions describe the
-> intended experience and will work once a release is published.
+> Publication to the dedicated tap is in progress: the signed v0.20.3 release
+> and the tested formula are ready, but the tap contents and the release
+> pipeline's publishing credential are still being staged. These instructions
+> will work once the tap correction is published.
 
 ## Install
 
 ```bash
-brew tap bryancostanich/tap
-brew install cercano
+brew install cercano-ai/cercano/cercano
 ```
 
 This installs two binaries:

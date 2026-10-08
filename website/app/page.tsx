@@ -129,7 +129,7 @@ export default function Home() {
   };
 
   const copyInstallCommand = async () => {
-    await navigator.clipboard.writeText("brew install cercano-ai/tap/cercano");
+    await navigator.clipboard.writeText("brew install cercano-ai/cercano/cercano");
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1800);
   };
@@ -168,7 +168,7 @@ export default function Home() {
           <div className="hero-aside">
             <p className="lede">Cercano is a premium agent harness for working with frontier and open-weight models—separately or together.</p>
             <a className="command-link" href="#install">
-              <code>brew install cercano-ai/tap/cercano</code>
+              <code>brew install cercano-ai/cercano/cercano</code>
               <span>Install now</span>
             </a>
           </div>
@@ -237,7 +237,7 @@ export default function Home() {
               <span className="availability">Available now</span>
             </div>
             <div className="install-command">
-              <code><span>$</span> brew install cercano-ai/tap/cercano</code>
+              <code><span>$</span> brew install cercano-ai/cercano/cercano</code>
               <button type="button" onClick={copyInstallCommand} aria-label="Copy Homebrew install command">
                 {copied ? "Copied" : "Copy"}
               </button>

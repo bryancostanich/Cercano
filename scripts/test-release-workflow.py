@@ -530,6 +530,27 @@ class TapRecoveryWorkflowTest(unittest.TestCase):
                 self.assertNotIn('gh release create', step['run'])
 
 
+class VerifyPublishingAccessWorkflowTest(unittest.TestCase):
+    """The tap token must be verified against the canonical publishing destination.
+
+    `cercano-ai/homebrew-cercano` is the dedicated standalone tap;
+    `cercano-ai/homebrew-tap` no longer exists as an organization repository and
+    `bryancostanich/homebrew-tap` is the personal Lattice tap. A token verified
+    against the wrong repository would grant the release pipeline write access
+    to nothing (or to the personal tap) while still appearing healthy.
+    """
+
+    def test_tap_token_is_verified_against_the_dedicated_tap(self):
+        path = REPO / '.github/workflows/verify-publishing-access.yml'
+        text = path.read_text()
+        self.assertIn('("TAP_TOKEN", "cercano-ai/homebrew-cercano")', text)
+        self.assertNotIn('cercano-ai/homebrew-tap', text)
+        self.assertNotIn('bryancostanich/homebrew-tap', text)
+        # The plugin token checks must stay present alongside the tap check.
+        for plugin in ("cercano-claude", "cercano-codex", "cercano-gemini"):
+            self.assertIn(f'("PLUGIN_TOKEN", "cercano-ai/{plugin}")', text)
+
+
 class NoAutomaticPublishingTest(unittest.TestCase):
     """No workflow may publish a release without an explicit operator run.
 

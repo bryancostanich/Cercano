@@ -27,7 +27,7 @@ jobs:
 
           opener = urllib.request.build_opener(NoRedirect)
           checks = [
-              ("TAP_TOKEN", "cercano-ai/homebrew-tap"),
+              ("TAP_TOKEN", "cercano-ai/homebrew-cercano"),
               ("PLUGIN_TOKEN", "cercano-ai/cercano-claude"),
               ("PLUGIN_TOKEN", "cercano-ai/cercano-codex"),
               ("PLUGIN_TOKEN", "cercano-ai/cercano-gemini"),

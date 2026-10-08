@@ -199,7 +199,7 @@ networked Gatekeeper assessment, and the clean-Mac rehearsal.
 Publication-enabled runs now finish with **Update Homebrew tap**. This job runs
 only after the release publication job succeeds; rehearsals (`publish=false`)
 never write to the tap. It updates only `Formula/cercano.rb` on
-`cercano-ai/homebrew-tap`'s `main`, with no pull request or approval prompt.
+`cercano-ai/homebrew-cercano`'s `main`, with no pull request or approval prompt.
 
 Before writing, the updater checks the CI archive and regenerated formula,
 then downloads the publicly published macOS archive and its checksum sidecar.
@@ -214,8 +214,8 @@ read/validate attempts, never a force update. Other tap files are untouched.
 Create a **fine-grained personal access token** at
 <https://github.com/settings/personal-access-tokens/new>:
 
-- Resource owner: `bryancostanich`.
-- Repository access: **Only select repositories**, then **homebrew-tap**.
+- Resource owner: `cercano-ai`.
+- Repository access: **Only select repositories**, then **homebrew-cercano**.
 - Repository permission: **Contents: Read and write**. Metadata read access
   is implicit. Do not grant workflow, administration, or all-repository access.
 - Choose an expiration and renew before it expires.

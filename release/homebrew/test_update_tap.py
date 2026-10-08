@@ -14,7 +14,7 @@ import update_tap as u
 
 class TapUpdateTest(unittest.TestCase):
     def test_canonical_organization_endpoints(self):
-        self.assertEqual(u.TAP_PATH, '/repos/cercano-ai/homebrew-tap/contents/Formula/cercano.rb')
+        self.assertEqual(u.TAP_PATH, '/repos/cercano-ai/homebrew-cercano/contents/Formula/cercano.rb')
         self.assertEqual(u.RELEASE_PATH, '/repos/cercano-ai/Cercano/releases/tags/')
 
     def setUp(self):

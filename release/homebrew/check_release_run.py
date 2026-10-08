@@ -6,7 +6,7 @@ import re
 from update_tap import api, Failure, require
 from render_formula import parse_version, ValidationError
 
-BASE = '/repos/bryancostanich/Cercano/'
+BASE = '/repos/cercano-ai/Cercano/'
 
 
 def check(version, run_id):
@@ -23,7 +23,7 @@ def check(version, run_id):
     require(run.get('path') == '.github/workflows/release-macos.yml'
             and run.get('event') == 'workflow_dispatch'
             and run.get('status') == 'completed'
-            and run.get('head_repository', {}).get('full_name') == 'bryancostanich/Cercano',
+            and run.get('head_repository', {}).get('full_name') == 'cercano-ai/Cercano',
             'Not a completed trusted release workflow run')
     data = api('GET', BASE + 'actions/runs/' + run_id + '/jobs?filter=latest&per_page=100', token)
     require(data.get('total_count', 0) <= 100, 'Unexpected job count')

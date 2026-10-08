@@ -8,7 +8,7 @@ test("exports the landing page beneath the Cercano project path", async () => {
   assert.match(html, /Install in one line/);
   assert.match(html, /\/Cercano\/_next\/static\//);
   assert.match(html, /\/Cercano\/videos\/sessions\.mp4/);
-  assert.match(html, /https:\/\/bryancostanich\.github\.io\/Cercano/);
+  assert.match(html, /https:\/\/cercano-ai\.github\.io\/Cercano/);
   assert.doesNotMatch(html, /cercano-ai-agent\.b-c119\.chatgpt\.site/);
 });
 

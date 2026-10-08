@@ -13,6 +13,10 @@ import update_tap as u
 
 
 class TapUpdateTest(unittest.TestCase):
+    def test_canonical_organization_endpoints(self):
+        self.assertEqual(u.TAP_PATH, '/repos/cercano-ai/homebrew-tap/contents/Formula/cercano.rb')
+        self.assertEqual(u.RELEASE_PATH, '/repos/cercano-ai/Cercano/releases/tags/')
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
@@ -43,7 +47,7 @@ class TapUpdateTest(unittest.TestCase):
         self.addCleanup(patch.stopall)
 
     def download(self, url, checksum=False):
-        self.assertTrue(url.startswith('https://github.com/bryancostanich/Cercano/releases/download/v1.2.3/'))
+        self.assertTrue(url.startswith('https://github.com/cercano-ai/Cercano/releases/download/v1.2.3/'))
         return self.digest + '  ' + self.name + '\n' if checksum else self.digest
 
     def api(self, method, path, token, payload=None):

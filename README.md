@@ -171,4 +171,4 @@ feature page for controls and limitations.
 - [Routing guide](docs/cloud-routing.md): task classes, model quality, destinations, and backups.
 - [CLI track](docs/features/cli/README.md): implementation status and outstanding work.
 - [Developer guide](docs/agent/self-dev.md): building, testing, and working on Cercano.
-- [Report a problem](https://github.com/bryancostanich/Cercano/issues): include your version, platform, route/model, and reproduction steps; redact credentials and private content.
+- [Report a problem](https://github.com/cercano-ai/Cercano/issues): include your version, platform, route/model, and reproduction steps; redact credentials and private content.

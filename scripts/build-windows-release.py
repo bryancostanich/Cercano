@@ -76,7 +76,7 @@ Not included or verified:
     floor
   - Models, third-party runtimes, provider credentials, or downloads
 
-Homepage: https://github.com/bryancostanich/Cercano
+Homepage: https://github.com/cercano-ai/Cercano
 """
 
 

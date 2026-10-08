@@ -99,7 +99,7 @@ Notarization is performed as a separate step and is not implied by the
 presence of this file. Models, runtimes and provider credentials are not
 included and are provisioned on first use.
 
-Homepage: https://github.com/bryancostanich/Cercano
+Homepage: https://github.com/cercano-ai/Cercano
 EOF
 chmod 0644 "$STAGE_ROOT/LICENSE" "$STAGE_ROOT/README.txt"
 chmod 0755 "$STAGE_ROOT/bin/cercano" "$STAGE_ROOT/bin/cercano-cli"

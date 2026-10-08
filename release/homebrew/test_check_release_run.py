@@ -9,7 +9,7 @@ class ProvenanceTest(unittest.TestCase):
         self.release = {'tag_name': 'v0.20.3', 'draft': False}
         self.run = {'head_sha': 'source', 'path': '.github/workflows/release-macos.yml',
                     'event': 'workflow_dispatch', 'status': 'completed',
-                    'head_repository': {'full_name': 'bryancostanich/Cercano'}}
+                    'head_repository': {'full_name': 'cercano-ai/Cercano'}}
         self.jobs = {'total_count': 2, 'jobs': [
             {'name': 'Build, sign, notarize and verify', 'conclusion': 'success'},
             {'name': 'Publish to GitHub Releases', 'conclusion': 'success'}]}

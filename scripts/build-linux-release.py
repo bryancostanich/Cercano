@@ -82,7 +82,7 @@ Not included or verified:
     documented distribution support floor
   - Models, third-party runtimes, provider credentials, or downloads
 
-Homepage: https://github.com/bryancostanich/Cercano
+Homepage: https://github.com/cercano-ai/Cercano
 """
 
 

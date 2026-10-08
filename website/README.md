@@ -16,7 +16,7 @@ and `daylight` palettes.
 ## GitHub Pages
 
 `npm run build:pages` generates a static export in `out/`, configured for the
-project URL `https://bryancostanich.github.io/Cercano/`. The export includes the
+project URL `https://cercano-ai.github.io/Cercano/`. The export includes the
 `/Cercano` base path in framework and video URLs.
 
 The repository workflow at `.github/workflows/pages.yml` builds, verifies, and

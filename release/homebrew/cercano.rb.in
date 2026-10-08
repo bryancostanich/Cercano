@@ -2,7 +2,7 @@
 # Use a signed/notarized two-binary archive that includes restart-after-upgrade.
 class Cercano < Formula
   desc "AI-powered development tool with local/cloud model routing"
-  homepage "https://github.com/bryancostanich/Cercano"
+  homepage "https://github.com/cercano-ai/Cercano"
   url "@RELEASE_URL@"
   version "@VERSION@"
   sha256 "@SHA256@"

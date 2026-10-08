@@ -15,7 +15,7 @@ func TestCheckForUpdate_NewerAvailable(t *testing.T) {
 		json.NewEncoder(w).Encode(githubRelease{
 			TagName:    "v0.8.0",
 			Prerelease: false,
-			HTMLURL:    "https://github.com/bryancostanich/Cercano/releases/tag/v0.8.0",
+			HTMLURL:    "https://github.com/cercano-ai/Cercano/releases/tag/v0.8.0",
 		})
 	}))
 	defer srv.Close()
@@ -40,7 +40,7 @@ func TestCheckForUpdate_UpToDate(t *testing.T) {
 		json.NewEncoder(w).Encode(githubRelease{
 			TagName:    "v0.7.0",
 			Prerelease: false,
-			HTMLURL:    "https://github.com/bryancostanich/Cercano/releases/tag/v0.7.0",
+			HTMLURL:    "https://github.com/cercano-ai/Cercano/releases/tag/v0.7.0",
 		})
 	}))
 	defer srv.Close()
@@ -66,7 +66,7 @@ func TestCheckForUpdate_SkipsPrerelease(t *testing.T) {
 		json.NewEncoder(w).Encode(githubRelease{
 			TagName:    "v0.9.0-rc1",
 			Prerelease: true,
-			HTMLURL:    "https://github.com/bryancostanich/Cercano/releases/tag/v0.9.0-rc1",
+			HTMLURL:    "https://github.com/cercano-ai/Cercano/releases/tag/v0.9.0-rc1",
 		})
 	}))
 	defer srv.Close()
@@ -227,5 +227,12 @@ func TestCheckCached_Missing_WritesCache(t *testing.T) {
 
 	if _, err := os.Stat(cachePath); os.IsNotExist(err) {
 		t.Error("expected cache file to be created")
+	}
+}
+
+func TestCanonicalReleaseEndpoint(t *testing.T) {
+	const want = "https://api.github.com/repos/cercano-ai/Cercano/releases/latest"
+	if GitHubReleaseURL != want {
+		t.Fatalf("release endpoint = %q, want %q", GitHubReleaseURL, want)
 	}
 }

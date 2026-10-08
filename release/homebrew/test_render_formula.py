@@ -72,7 +72,7 @@ class RenderFormulaTest(unittest.TestCase):
         archive, digest = write_archive(self.dir)
         self.run_render(archive, digest)
         text = self.output.read_text()
-        self.assertIn(f'url "https://github.com/bryancostanich/Cercano/releases/download/v{VERSION}/{ARCHIVE_NAME}"', text)
+        self.assertIn(f'url "https://github.com/cercano-ai/Cercano/releases/download/v{VERSION}/{ARCHIVE_NAME}"', text)
         self.assertIn(f'version "{VERSION}"', text)
         self.assertIn(f'sha256 "{digest}"', text)
         self.assertNotIn("@", text.split("class Cercano")[1])

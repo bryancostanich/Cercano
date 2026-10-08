@@ -24,7 +24,7 @@ jobs:
       - name: Checkout plugin repo
         uses: actions/checkout@v4
         with:
-          repository: bryancostanich/${{ matrix.repo }}
+          repository: cercano-ai/${{ matrix.repo }}
           path: target
           token: ${{ secrets.PLUGIN_SYNC_TOKEN }}
 
@@ -42,7 +42,7 @@ jobs:
           branch: sync/skills-update
           title: "sync: update skills from main repo"
           body: |
-            Automated skill sync from [cercano/plugins/skills/](https://github.com/bryancostanich/Cercano/tree/main/plugins/skills/).
+            Automated skill sync from [cercano/plugins/skills/](https://github.com/cercano-ai/Cercano/tree/main/plugins/skills/).
 
             Triggered by commit ${{ github.sha }}.
           commit-message: "sync: update skills from main repo"

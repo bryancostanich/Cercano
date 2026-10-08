@@ -62,7 +62,7 @@ class PromoteTest(unittest.TestCase):
 
     def write_formula(self, url=None, version=VERSION, digest=DIGEST, extra=""):
         path = self.dir / "cercano.rb"
-        url = url or f"https://github.com/bryancostanich/Cercano/releases/download/v{version}/cercano-{version}-darwin-arm64.tar.gz"
+        url = url or f"https://github.com/cercano-ai/Cercano/releases/download/v{version}/cercano-{version}-darwin-arm64.tar.gz"
         path.write_text(
             "class Cercano < Formula\n"
             f'  url "{url}"\n'
@@ -136,7 +136,7 @@ class PromoteTest(unittest.TestCase):
                             skip_download=True)
 
     def test_refuses_url_not_matching_version(self):
-        url = "https://github.com/bryancostanich/Cercano/releases/download/v9.9.9/cercano-9.9.9-darwin-arm64.tar.gz"
+        url = "https://github.com/cercano-ai/Cercano/releases/download/v9.9.9/cercano-9.9.9-darwin-arm64.tar.gz"
         self.assert_refused("does not point at", self.write_formula(url=url), self.tap,
                             VERSION, skip_download=True)
 

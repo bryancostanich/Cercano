@@ -199,7 +199,7 @@ networked Gatekeeper assessment, and the clean-Mac rehearsal.
 Publication-enabled runs now finish with **Update Homebrew tap**. This job runs
 only after the release publication job succeeds; rehearsals (`publish=false`)
 never write to the tap. It updates only `Formula/cercano.rb` on
-`bryancostanich/homebrew-tap`'s `main`, with no pull request or approval prompt.
+`cercano-ai/homebrew-tap`'s `main`, with no pull request or approval prompt.
 
 Before writing, the updater checks the CI archive and regenerated formula,
 then downloads the publicly published macOS archive and its checksum sidecar.
@@ -221,7 +221,7 @@ Create a **fine-grained personal access token** at
 - Choose an expiration and renew before it expires.
 
 Add it to Cercano's `release` environment as **HOMEBREW_TAP_TOKEN**:
-<https://github.com/bryancostanich/Cercano/settings/environments>.
+<https://github.com/cercano-ai/Cercano/settings/environments>.
 Enter it directly in GitHub, not chat, source, or a command-line argument.
 The workflow supplies it only to the formula-update step. It uses the normal
 read-only Actions token for release metadata and no credentials for public
@@ -253,7 +253,7 @@ For a release that predates automatic tap updates, run the dedicated recovery
 workflow on current `main`, supplying its successful release run ID:
 
 ```bash
-gh workflow run update-homebrew.yml --repo bryancostanich/Cercano --ref main \
+gh workflow run update-homebrew.yml --repo cercano-ai/Cercano --ref main \
   -f version=0.20.3 -f run_id=36933561441
 ```
 

@@ -15,7 +15,7 @@ import (
 
 const (
 	// GitHubReleaseURL is the API endpoint for the latest release.
-	GitHubReleaseURL = "https://api.github.com/repos/bryancostanich/Cercano/releases/latest"
+	GitHubReleaseURL = "https://api.github.com/repos/cercano-ai/Cercano/releases/latest"
 	// CacheTTL is how long a cached check result is considered fresh.
 	CacheTTL = 24 * time.Hour
 	// HTTPTimeout is the max time to wait for the GitHub API.

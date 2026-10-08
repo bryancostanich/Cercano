@@ -143,7 +143,7 @@ def promote(formula_path, tap_path, expected_version, skip_download=False):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("formula", help="rendered cercano.rb from render_formula.py")
-    parser.add_argument("tap", help="local checkout of bryancostanich/homebrew-tap")
+    parser.add_argument("tap", help="local checkout of cercano-ai/homebrew-tap")
     parser.add_argument("--version", help="expected version, as a cross-check")
     parser.add_argument("--skip-download", action="store_true",
                         help="offline; records the artifact as UNVERIFIED instead of checking it")

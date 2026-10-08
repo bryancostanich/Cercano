@@ -31,11 +31,11 @@ test("renders the Cercano landing page", async () => {
   }
   assert.match(html, /Install Cercano/);
   assert.match(html, /Install in one line/);
-  assert.match(html, /brew install bryancostanich\/tap\/cercano/);
+  assert.match(html, /brew install cercano-ai\/tap\/cercano/);
   assert.match(html, /Homebrew/);
   assert.match(html, /Linux · coming soon/);
   assert.match(html, /Windows · coming soon/);
-  assert.match(html, /href="https:\/\/github\.com\/bryancostanich\/Cercano"[^>]*>Cercano - 100% Free \+ Open<\/a>/);
+  assert.match(html, /href="https:\/\/github\.com\/cercano-ai\/Cercano"[^>]*>Cercano - 100% Free \+ Open<\/a>/);
   assert.match(html, /Switch to (daylight|night) theme/);
   assert.doesNotMatch(html, /codex-preview|Building your site|react-loading-skeleton/);
 });
@@ -53,7 +53,7 @@ test("keeps the TUI palettes and persistent theme behavior", async () => {
   assert.match(css, /--font-mono:\s*var\(--font-plex-mono\)/);
   assert.match(css, /feature-story--visual:nth-child\(odd\)[^{]*\{[^}]*1\.34fr[^}]*\.66fr/s);
   assert.match(page, /localStorage\.setItem\("cercano-theme"/);
-  assert.match(page, /navigator\.clipboard\.writeText\("brew install bryancostanich\/tap\/cercano"\)/);
+  assert.match(page, /navigator\.clipboard\.writeText\("brew install cercano-ai\/tap\/cercano"\)/);
   assert.match(layout, /prefers-color-scheme:\s*dark/);
   assert.match(layout, /IBM_Plex_Mono/);
 });

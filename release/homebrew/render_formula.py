@@ -22,7 +22,7 @@ PLACEHOLDERS = ("@RELEASE_URL@", "@VERSION@", "@SHA256@")
 # Must match scripts/build-macos-unsigned.sh's staging layout.
 EXECUTABLES = ("bin/cercano", "bin/cercano-cli")
 METADATA = ("LICENSE", "README.txt")
-URL_TEMPLATE = "https://github.com/bryancostanich/Cercano/releases/download/v{version}/{name}"
+URL_TEMPLATE = "https://github.com/cercano-ai/Cercano/releases/download/v{version}/{name}"
 VERSION_PATTERN = re.compile(r"\A(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\Z")
 SHA256_PATTERN = re.compile(r"\A[0-9a-f]{64}\Z")
 

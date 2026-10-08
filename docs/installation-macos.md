@@ -3,10 +3,10 @@
 Cercano is distributed for **Apple Silicon Macs running macOS 12 (Monterey) or
 later**. Intel Macs are not supported by this release.
 
-> Publication to the dedicated tap is in progress: the signed v0.20.3 release
-> and the tested formula are ready, but the tap contents and the release
-> pipeline's publishing credential are still being staged. These instructions
-> will work once the tap correction is published.
+The standalone formula is published in the dedicated
+[`cercano-ai/homebrew-cercano`](https://github.com/cercano-ai/homebrew-cercano)
+tap. The personal `bryancostanich/homebrew-tap` remains separate; its Cercano
+formula is deprecated.
 
 ## Install
 

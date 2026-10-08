@@ -207,3 +207,9 @@ Work was staged in isolated worktrees without pushing or merging. The dedicated 
 Core publisher destination, token verification workflow, promote/readme/release-build/install/website command references were updated from `cercano-ai/homebrew-tap`/`cercano-ai/tap` to the canonical dedicated repo and `cercano-ai/cercano/cercano` install command. The v0.20.3-only former-owner template compatibility case, old-updater fixtures, Go module IDs and Lattice URLs were deliberately left unchanged.
 
 Remaining gate: the actual `HOMEBREW_TAP_TOKEN` grant must be re-issued or re-scoped to `cercano-ai/homebrew-cercano` and verified with the read-only verify-publishing-access workflow before release workflow 371451543 and Homebrew publisher 372635319 are re-enabled. No token value was created or accessed, no workflow enabled, no release published, and nothing pushed in this correction; the user must perform the token grant and publication.
+
+## Dedicated tap correction published and verified
+
+User explicitly authorized merge and push. Published core 001609b7, dedicated tap 99fd236, personal README-only ab20039, and plugin README corrections e0babdc/628f23c/58ead77. The personal tap remains bryancostanich/homebrew-tap; no personal formula or Lattice cask changes were made. Standalone uses cercano-ai/homebrew-cercano and brew install cercano-ai/cercano/cercano.
+
+Read-only token check 37836449974 passed against the corrected dedicated repository without needing another token change. Actual recovery run 37836505010 passed using existing v0.20.3 provenance/artifacts and reported Homebrew tap unchanged. Restored the release workflow after that success; all workflows are active. Pages deployment 37836365053 succeeded on 001609b7. Removed the installation guide's now-obsolete publication-pending notice. Earlier paused/pending statements are historical, superseded by this result. No new product release was created.

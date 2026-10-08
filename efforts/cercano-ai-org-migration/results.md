@@ -1,5 +1,7 @@
 # Cercano AI migration results
 
+> **Current status:** The correction is published and verified. Standalone Cercano uses `cercano-ai/homebrew-cercano` (`brew install cercano-ai/cercano/cercano`). The personal Lattice tap is `bryancostanich/homebrew-tap`. Credential check 37836449974 and actual recovery run 37836505010 passed; release and Homebrew publishing are enabled. Earlier pending statements below are historical.
+
 > **Correction:** `homebrew-tap` was returned to `bryancostanich/homebrew-tap` at the user's direction. It is the personal Lattice tap, not Cercano's canonical publishing destination. The historical results below describe the now-superseded migration assumption. Cercano release and Homebrew publishing are paused pending correction of the standalone tap destination, credentials and documentation. See execution-notes.md.
 >
 > **Correction (current):** The user approved `cercano-ai/homebrew-cercano` as the standalone publishing destination; the canonical installation command is `brew install cercano-ai/cercano/cercano`. The dedicated repo's supersession notice is obsolete and its formula/README were staged for replacement in an isolated worktree. The historical `cercano-ai/tap` canonicalization described below is superseded and must not be used. Remaining gate: the actual `HOMEBREW_TAP_TOKEN` grant must be verified against `cercano-ai/homebrew-cercano` (read-only verify-publishing-access workflow) before re-enabling release workflow 371451543 and Homebrew publisher 372635319. See execution-notes.md.

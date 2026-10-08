@@ -68,7 +68,7 @@ Objective: prevent update races and protect active work before implementing file
 
 Objective: turn the versioned-directory experiment into a recoverable installation operation, starting with per-user Windows and then direct Linux. Files: prospective source/server/cmd/cercano-update/ or an approved equivalent helper boundary; source/server/internal/updatecoord/{download,staging,activation,recovery}/; stable launcher entrypoints and fixture binaries. Tests: real locally built binaries, local signed TUF repositories, native filesystem/process probes, fault injection at each durable transition. Code-location and launcher/helper bootstrap details must be reviewed before introducing a new executable contract.
 
-- [ ] Define and approve the stable launcher/helper bootstrap and self-upgrade contract, including who can modify selection and journal files
+- [-] Define and approve the stable launcher/helper bootstrap and self-upgrade contract, including who can modify selection and journal files
 - [ ] Implement bounded verified target acquisition through TUF and strict archive validation before staging
 - [ ] Reject traversal, symlinks/reparse surprises, duplicate or unexpected members, missing binaries, oversized downloads and wrong platform/architecture
 - [ ] Stage agent and client in one complete immutable version directory with safe permissions

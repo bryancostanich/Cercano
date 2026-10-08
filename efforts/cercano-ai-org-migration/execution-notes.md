@@ -121,3 +121,17 @@ Reenabled and dispatched Pages; run 37729733696 succeeded. https://cercano-ai.gi
 Reenabled plugin sync following its read-only credential checks. Pages and plugin sync are now enabled; release workflow 371451543 and Homebrew workflow 372635319 remain disabled pending Homebrew credential repair. User must authorize or replace HOMEBREW_TAP_TOKEN for the new organization, using a repository-scoped token with Contents read/write for cercano-ai/homebrew-tap (and any required organization approval), then update the existing secret in Cercano's release environment. Do not paste values into chat. Re-run the verification workflow before restoring these publishers. Existing metadata check does not claim an actual plugin write or release has been tested.
 
 Local directories remain unmoved. Full isolated installation/upgrade tests and final local snapshot/relocation are still outstanding; the run is not complete.
+
+## Replacement token verified; publishers restored
+
+User confirmed saving the replacement token. Manual non-writing access check run 37730690949 passed. Reenabled release workflow 371451543 and Homebrew workflow 372635319; all previously paused publishers now report active. No credential values were retrieved or exposed. This verifies reported repository write permission, not a new product release or target-content write.
+
+## Isolated installation exposed existing runtime failure
+
+Created an isolated Homebrew prefix, HOME, configuration, cache and logs under the private remote-cutover snapshot's isolated-homebrew-check directory. Copied the installed Homebrew runtime into that private prefix; confirmed brew --prefix matched the isolated path before installation. A bound, non-listening loopback port was placed in the isolated Cercano configuration to avoid contacting the user's running agent. The host Homebrew installation and user config were not modified. Package-manager dependencies were fetched into the isolated tree.
+
+Canonical tap clone/discovery succeeded. brew install fetched the unchanged v0.20.3 artifact, installed both binaries and linked the isolated keg, but returned 1 because restart-after-upgrade failed during process discovery: inspect candidate PID 1494: inspect PID 1494: no such file or directory. Homebrew additionally emitted an error-serialization stack trace and a post_install deprecation warning; these are not evidence of namespace failure.
+
+brew test subsequently passed; codesign --verify --strict passed on both installed binaries. A direct probe of the isolated binary with an explicit bound non-listening loopback endpoint reproduced the same PID inspection failure. ps identifies PID 1494 as an unrelated same-user ChatGPT for Chrome extension-host process. Source inspection shows process discovery skips ESRCH but propagates other inspection errors before determining ownership. No code fix has been applied; further root-cause work is needed before altering this security-sensitive discovery logic. The artifact's verified unchanged hash establishes this is not caused by the namespace patch.
+
+The installer gate is blocked: do not claim a clean fresh install. Ask whether to explicitly accept this existing-release limitation for the ownership migration and track a separate fix, or expand scope to diagnose/fix and authorize a new signed release. A new product release remains prohibited without explicit approval. Local relocation has not started, and the running agent was not restarted.

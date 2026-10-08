@@ -58,7 +58,7 @@ Objective: move repository ownership and activate prepared integrations during a
   - [ ] Stop immediately on an unexpected permission, naming, or transfer-policy result.
 - [ ] Update each existing local repository's origin URL once per shared repository; preserve unrelated remotes and all local refs.
 - [ ] Apply and publish the approved source, workflow, and documentation updates once their destinations exist; reconcile concurrent upstream changes without force-pushing.
-- [-] Reauthorize or restore publishing credentials and environment settings only through approved secret-management paths.
+- [x] Reauthorize or restore publishing credentials and environment settings only through approved secret-management paths.
 - [ ] Publish the dedicated legacy tap's transition guidance without deleting its history or silently archiving it.
 - [ ] Verify plugin synchronization targets and access with a non-destructive check; obtain confirmation before a test that overwrites generated plugin contents.
 - [ ] Verify old GitHub repository and release URLs behave as required; do not recreate repositories at old names.
@@ -69,7 +69,7 @@ Objective: move repository ownership and activate prepared integrations during a
 
 Objective: demonstrate a working delivery path for new and existing users before moving local workspaces. Files: isolated test fixtures/environments, corrected migration source where necessary, and verification notes. Tests: canonical tap installation, existing-tap migration, updater compatibility, release asset integrity, Pages build/deployment, and link/media checks. No product release or destructive host installation changes without separate approval.
 
-- [ ] Test canonical tap discovery and fresh Cercano installation in an isolated environment, avoiding modification of the user's active installation.
+- [-] Test canonical tap discovery and fresh Cercano installation in an isolated environment, avoiding modification of the user's active installation.
 - [ ] Exercise an existing bryancostanich/tap installation's transition to cercano-ai/tap and verify upgrade behavior; also document/test the supported path from the dedicated tap where applicable.
 - [ ] Verify Lattice cask availability and referenced artifacts remain intact under the moved shared tap.
 - [ ] Test the updater's new API endpoint and the old endpoint used by already-released clients, including release metadata and representative artifact downloads.

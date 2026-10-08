@@ -101,3 +101,23 @@ User authorized remote cutover and confirmed no pushes, merges or releases while
 New security finding: destination organization members are bryancostanich and keithballinger; Keith has active member (not owner) role. Organization default repository permission remains read. Cercloud source collaborators still contain only bryancostanich. Transferring Cercloud now would broaden effective private-repository access to Keith, contrary to the existing preservation constraint unless explicitly approved. Stop before transfer or policy change. Options: approve this specific read-access expansion, defer Cercloud while moving public repositories, or explicitly change organization base permission to none (broader policy change requiring its own approval). No workflows were paused and no remote writes occurred.
 
 Fresh private evidence: /Users/bryancostanich/git_repos/cercano-ai-migration-backups/20261008T044239Z-remote-cutover/before.json and org-policy-recheck.json. The user cleanup authorization remains in force; absent old worktrees are not blockers.
+
+## Private access approved
+
+User explicitly confirmed "keith's access is intended" after being informed that the organization read default grants Keith access to transferred Cercloud. The transfer may proceed with Cercloud private and current organization policy unchanged. This approval is specific to the disclosed access consequences; do not grant unrelated additional privileges. Remote transfer/publication coordination authorization remains active; local relocation remains separately gated.
+
+## Remote ownership and publication completed; Homebrew credential blocker
+
+Transferred all seven repositories to cercano-ai. Verified stable repository IDs, private/public visibility, all branch/tag refs and release IDs immediately after each transfer. Cercloud remains private and Keith's approved permission is read. Core has 50 preserved branch/tag refs and 18 preserved releases. Evidence and exact event log are in the private remote-cutover snapshot recorded above.
+
+Paused four publishers after confirming no active runs: Pages, release, Homebrew and plugin sync. Updated origins for the three shared local repositories without moving directories. Rebased core migration patch cleanly over 16 newer upstream commits; reran updater, Python Homebrew, Ruby formula and Pages tests successfully. Did not alter user main or unrelated working files.
+
+Published core namespace migration c46d7e2e and canonical tap 5768ae147191, preserving artifact version/digest and Lattice. Downloaded the new formula URL and verified its SHA-256 against the unchanged formula (42,488,877 bytes). Added legacy-tap supersession guidance in remote commit 68c1d5636de04151b4c100273b856b7f86c5fa22; no existing README was present, and history/formula remained intact.
+
+Published manual read-only credential verification workflow in core commit 5092ec50a4ee. It uses existing stored secrets only, refuses redirects, checks fixed github.com API destinations and never prints token values or writes target repositories. Syntax and mocked success/denial/missing-token tests passed. Run 37729829269 reports all three plugin repositories writable by PLUGIN_SYNC_TOKEN but HTTP 403 for HOMEBREW_TAP_TOKEN against cercano-ai/homebrew-tap. Retained secret storage is verified; Homebrew authorization is not. No scopes or secret values were changed.
+
+Reenabled and dispatched Pages; run 37729733696 succeeded. https://cercano-ai.github.io/Cercano/ responds 200, and all four README video attachments respond 200 as video/mp4. Old and new latest-release API endpoints respond 200; old owner endpoint redirects to the stable repository ID. Attachment issue #35 and environment/repository secret names remain present.
+
+Reenabled plugin sync following its read-only credential checks. Pages and plugin sync are now enabled; release workflow 371451543 and Homebrew workflow 372635319 remain disabled pending Homebrew credential repair. User must authorize or replace HOMEBREW_TAP_TOKEN for the new organization, using a repository-scoped token with Contents read/write for cercano-ai/homebrew-tap (and any required organization approval), then update the existing secret in Cercano's release environment. Do not paste values into chat. Re-run the verification workflow before restoring these publishers. Existing metadata check does not claim an actual plugin write or release has been tested.
+
+Local directories remain unmoved. Full isolated installation/upgrade tests and final local snapshot/relocation are still outstanding; the run is not complete.

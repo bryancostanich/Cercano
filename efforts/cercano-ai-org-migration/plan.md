@@ -51,14 +51,14 @@ Objective: prepare reviewed changes against current upstream before public cutov
 
 Objective: move repository ownership and activate prepared integrations during a controlled window. Files: reviewed migration commits and execution evidence; GitHub settings and remote URLs change only after confirmation. Tests: before/after repository identity and metadata comparison, permissions checks, old/new endpoint probes, workflow configuration checks, and attachment access.
 
-- [-] Present the transfer list, destination names, visibility/access findings, coordinated publication actions, and recovery limits; obtain explicit execution confirmation before transfers and publishing.
+- [x] Present the transfer list, destination names, visibility/access findings, coordinated publication actions, and recovery limits; obtain explicit execution confirmation before transfers and publishing.
 - [ ] Pause affected writers and automated publishing with approval, recording previous settings for restoration.
-- [ ] Transfer existing homebrew-tap, homebrew-cercano, cercano-claude, cercano-codex, cercano-gemini, Cercloud, and Cercano in the dependency-aware order established in Phase 2.
+- [x] Transfer existing homebrew-tap, homebrew-cercano, cercano-claude, cercano-codex, cercano-gemini, Cercloud, and Cercano in the dependency-aware order established in Phase 2.
   - [ ] Verify each transfer completes and retains required history, refs, issues, pull requests, releases, visibility, and access before proceeding.
   - [ ] Stop immediately on an unexpected permission, naming, or transfer-policy result.
 - [ ] Update each existing local repository's origin URL once per shared repository; preserve unrelated remotes and all local refs.
 - [ ] Apply and publish the approved source, workflow, and documentation updates once their destinations exist; reconcile concurrent upstream changes without force-pushing.
-- [ ] Reauthorize or restore publishing credentials and environment settings only through approved secret-management paths.
+- [-] Reauthorize or restore publishing credentials and environment settings only through approved secret-management paths.
 - [ ] Publish the dedicated legacy tap's transition guidance without deleting its history or silently archiving it.
 - [ ] Verify plugin synchronization targets and access with a non-destructive check; obtain confirmation before a test that overwrites generated plugin contents.
 - [ ] Verify old GitHub repository and release URLs behave as required; do not recreate repositories at old names.

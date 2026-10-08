@@ -54,6 +54,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -187,7 +188,8 @@ func TestFixtureProtocolPublicationIsWriteOnceToPollingReader(t *testing.T) {
 		if !info.Mode().IsRegular() {
 			t.Errorf("published file %s mode = %v, want a regular file", paths[i], info.Mode())
 		}
-		if perm := info.Mode().Perm(); perm&0o077 != 0 {
+		// Unix mode bits are not a Windows ACL assertion.
+		if perm := info.Mode().Perm(); runtime.GOOS != "windows" && perm&0o077 != 0 {
 			t.Errorf("published file %s mode = %o, want group/other bits clear (owner-only)", paths[i], perm)
 		}
 	}
@@ -272,7 +274,8 @@ func TestFixtureProtocolPublicationRefusesConflictingValue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat published file: %v", err)
 	}
-	if perm := info.Mode().Perm(); perm&0o077 != 0 {
+	// Unix mode bits are not a Windows ACL assertion.
+	if perm := info.Mode().Perm(); runtime.GOOS != "windows" && perm&0o077 != 0 {
 		t.Errorf("published file mode = %o, want group/other bits clear (owner-only)", perm)
 	}
 	// No temp sibling leaked from the refused attempt.

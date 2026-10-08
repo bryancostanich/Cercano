@@ -233,7 +233,7 @@ func probeCreateProcessFlagVariant(t *testing.T, label string, flags uint32) (ou
 			t.Errorf("DIAGNOSTIC %s: probe child %d exited with an unexpected error: %v", label, pid, waitErr)
 			return "child-exit-error"
 		}
-		data, readErr := os.ReadFile(marker)
+		data, readErr := readFixtureFile(marker)
 		if readErr != nil || string(data) != probeMarkerContent {
 			t.Errorf("DIAGNOSTIC %s: probe child %d exited 0 but its known temp marker is missing (read error %v)", label, pid, readErr)
 			return "marker-missing"

@@ -126,7 +126,7 @@ func runJobObjectFixture(t *testing.T, variant string) {
 	if strings.TrimSpace(marker) != "complete" {
 		t.Fatalf("completion marker = %q", marker)
 	}
-	logData, err := os.ReadFile(childLog)
+	logData, err := readFixtureFile(childLog)
 	if err != nil {
 		t.Fatalf("read child log: %v", err)
 	}

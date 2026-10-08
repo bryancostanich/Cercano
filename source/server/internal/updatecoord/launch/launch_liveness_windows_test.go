@@ -47,7 +47,6 @@ package launch
 
 import (
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -126,7 +125,7 @@ func holdForFixtureRelease() error {
 	}
 	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
-		if data, err := os.ReadFile(*childReleasePath); err == nil && len(data) > 0 {
+		if data, err := readFixtureFile(*childReleasePath); err == nil && len(data) > 0 {
 			return nil
 		}
 		time.Sleep(20 * time.Millisecond)
@@ -144,7 +143,7 @@ func awaitChildParentBound() error {
 	}
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
-		if data, err := os.ReadFile(*parentBoundMarkerPath); err == nil && len(data) > 0 {
+		if data, err := readFixtureFile(*parentBoundMarkerPath); err == nil && len(data) > 0 {
 			return nil
 		}
 		time.Sleep(20 * time.Millisecond)

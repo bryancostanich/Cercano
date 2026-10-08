@@ -11,7 +11,6 @@ package launch
 // process on every path.
 
 import (
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
@@ -113,7 +112,7 @@ func runDetachedSurvivalFixture(t *testing.T, hardKill bool) (childPID int, chil
 	// The child's output must have reached the caller-owned log file after
 	// the parent died; on Unix it also proves the child really holds its
 	// own session.
-	logData, err := os.ReadFile(childLog)
+	logData, err := readFixtureFile(childLog)
 	if err != nil {
 		t.Fatalf("read child log: %v", err)
 	}
@@ -165,14 +164,14 @@ func waitForPidOrStartError(t *testing.T, pidPath, startErrPath string, timeout 
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		if data, err := os.ReadFile(startErrPath); err == nil {
+		if data, err := readFixtureFile(startErrPath); err == nil {
 			report := strings.TrimSpace(string(data))
 			if strings.Contains(report, "code=access-denied") {
 				t.Skipf("host job policy denies the launch even from the owned permissive fixture job; parent-death survival cannot be proven in this environment (report: %s)", report)
 			}
 			t.Fatalf("intermediate parent's Launch was refused (persisted immediately): %s", report)
 		}
-		if data, err := os.ReadFile(pidPath); err == nil {
+		if data, err := readFixtureFile(pidPath); err == nil {
 			return string(data)
 		}
 		time.Sleep(25 * time.Millisecond)
@@ -187,12 +186,12 @@ func waitForCompletion(t *testing.T, path, childLog string, timeout time.Duratio
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		if data, err := os.ReadFile(path); err == nil {
+		if data, err := readFixtureFile(path); err == nil {
 			return string(data)
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
-	logData, _ := os.ReadFile(childLog)
+	logData, _ := readFixtureFile(childLog)
 	t.Fatalf("timed out waiting for %s; child log: %q", path, logData)
 	return ""
 }

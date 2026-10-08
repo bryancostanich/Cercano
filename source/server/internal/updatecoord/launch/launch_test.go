@@ -135,20 +135,6 @@ func publishFixtureFile(path string, data []byte) error {
 	return nil
 }
 
-// readFixtureFile is a test helper that reads fixture protocol files with
-// Windows-specific sharing permissions. On Windows, it uses CreateFile with
-// FILE_SHARE_READ|WRITE|DELETE to allow concurrent access, avoiding the
-// AccessDenied error that os.Rename encounters when there are concurrent
-// readers. On Unix, it uses the standard os.ReadFile.
-// readFixtureFile is a test helper that reads fixture protocol files with
-// Windows-specific sharing permissions. On Windows, it uses CreateFile with
-// FILE_SHARE_READ|WRITE|DELETE to allow concurrent access, avoiding the
-// AccessDenied error that os.Rename encounters when there are concurrent
-// readers. On Unix, it uses the standard os.ReadFile.
-func readFixtureFile(path string) ([]byte, error) {
-	return os.ReadFile(path)
-}
-
 // waitForFile polls for a file until it carries CONTENT, returning the
 // contents. An empty read is NOT a result: every fixture protocol result
 // is published non-empty and atomically (see publishFixtureFile), and the
@@ -162,7 +148,7 @@ func waitForFile(t *testing.T, path string, timeout time.Duration) string {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		if data, err := os.ReadFile(path); err == nil && len(data) > 0 {
+		if data, err := readFixtureFile(path); err == nil && len(data) > 0 {
 			return string(data)
 		}
 		time.Sleep(25 * time.Millisecond)
@@ -206,14 +192,14 @@ func TestOneShotLaunch_WritesToCallerOwnedLogFiles(t *testing.T) {
 	// afterwards is race-free: the output must already be there.
 	launchEchoOnce(t, out, errLog, 0)
 
-	outData, err := os.ReadFile(out)
+	outData, err := readFixtureFile(out)
 	if err != nil {
 		t.Fatalf("read out.log: %v", err)
 	}
 	if !strings.Contains(string(outData), "fixture-line") {
 		t.Errorf("out.log = %q, want it to contain %q", outData, "fixture-line")
 	}
-	errData, err := os.ReadFile(errLog)
+	errData, err := readFixtureFile(errLog)
 	if err != nil {
 		t.Fatalf("read err.log: %v", err)
 	}

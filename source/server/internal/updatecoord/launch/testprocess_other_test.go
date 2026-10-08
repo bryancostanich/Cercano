@@ -17,7 +17,7 @@ func waitForParentGone(expectedParentPID int) error {
 	_ = expectedParentPID
 	deadline := time.Now().Add(60 * time.Second)
 	for time.Now().Before(deadline) {
-		data, err := os.ReadFile(*parentDoneMarkerPath)
+		data, err := readFixtureFile(*parentDoneMarkerPath)
 		if err == nil && len(data) > 0 {
 			time.Sleep(500 * time.Millisecond)
 			return nil

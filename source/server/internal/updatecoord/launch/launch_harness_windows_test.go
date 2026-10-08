@@ -165,11 +165,10 @@ func launchEchoOnceThroughOwnedHarness(t *testing.T, stdoutPath, stderrPath stri
 	// The single reaper of the fixture-owned harness parent: a real
 	// cmd.Wait through a channel, so the REAL exit code is available to
 	// every reporting path below and to cleanup.
-	harnessExited := make(chan error, 1)
+	var harnessErr error
 	done := make(chan struct{})
 	go func() {
-		err := harness.Wait()
-		harnessExited <- err
+		harnessErr = harness.Wait()
 		close(done)
 	}()
 	t.Cleanup(func() {
@@ -191,7 +190,8 @@ func launchEchoOnceThroughOwnedHarness(t *testing.T, stdoutPath, stderrPath stri
 	// is a harness bug that must fail, not pass silently.
 	waitHarness := func() (state string, cleanExit bool) {
 		select {
-		case werr := <-harnessExited:
+		case <-done:
+			werr := harnessErr
 			if werr == nil {
 				return fmt.Sprintf("harness-exit=0 harness-stdout=%q harness-stderr=%q",
 					harnessStdout.String(), harnessStderr.String()), true
@@ -222,7 +222,7 @@ func launchEchoOnceThroughOwnedHarness(t *testing.T, stdoutPath, stderrPath stri
 	result := ""
 	deadline := time.Now().Add(60 * time.Second)
 	for time.Now().Before(deadline) {
-		if data, rerr := os.ReadFile(resultPath); rerr == nil && len(data) > 0 {
+		if data, rerr := readFixtureFile(resultPath); rerr == nil && len(data) > 0 {
 			result = strings.TrimSpace(string(data))
 			break
 		}
@@ -318,7 +318,7 @@ func TestOneShotLaunch_DefaultContextRefusalClassifiedNoChild(t *testing.T) {
 		// milliseconds.
 		deadline := time.Now().Add(2 * time.Second)
 		for time.Now().Before(deadline) {
-			if data, rerr := os.ReadFile(out); rerr == nil && len(data) > 0 {
+			if data, rerr := readFixtureFile(out); rerr == nil && len(data) > 0 {
 				t.Fatalf("a child was started despite the refused launch: log = %q", data)
 			}
 			time.Sleep(25 * time.Millisecond)
@@ -385,18 +385,18 @@ func TestHarnessCleanupRegression(t *testing.T) {
 	}
 
 	// Multiple consumers of the exit channel (simulating the original bug)
-	harnessExited := make(chan error, 1)
+	var harnessErr error
 	done := make(chan struct{})
 	go func() {
-		err := harness.Wait()
-		harnessExited <- err
+		harnessErr = harness.Wait()
 		close(done)
 	}()
 
 	// First consumer: waitHarness function
 	waitHarness := func() error {
 		select {
-		case werr := <-harnessExited:
+		case <-done:
+			werr := harnessErr
 			return werr
 		case <-time.After(5 * time.Second):
 			_ = harness.Process.Kill()
@@ -420,7 +420,7 @@ func TestHarnessCleanupRegression(t *testing.T) {
 	result := ""
 	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
-		if data, rerr := os.ReadFile(resultPath); rerr == nil && len(data) > 0 {
+		if data, rerr := readFixtureFile(resultPath); rerr == nil && len(data) > 0 {
 			result = strings.TrimSpace(string(data))
 			break
 		}

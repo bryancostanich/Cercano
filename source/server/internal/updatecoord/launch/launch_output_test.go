@@ -70,7 +70,7 @@ func TestOneShotLaunch_RejectsSymlinkOutputPath(t *testing.T) {
 		t.Fatalf("process returned alongside error: %v", proc)
 	}
 	// Nothing may have been written through the link.
-	data, err := os.ReadFile(target)
+	data, err := readFixtureFile(target)
 	if err != nil {
 		t.Fatalf("read target: %v", err)
 	}

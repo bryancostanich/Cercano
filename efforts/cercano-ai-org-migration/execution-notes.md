@@ -163,3 +163,11 @@ The staged server/client binaries still exactly match the current source binary 
 A probe `cercano agent --help` was not a help-only command: it attempted server startup and exited because port 50052 was occupied. It did not replace the listener. Startup logs were written; no successful second service was started. Future help inspection must use source or top-level --help rather than assuming subcommand flag behavior.
 
 No local directories have moved and no processes were terminated. This is an external client configuration/reconnection blocker, not a request for renewed transfer or move approval.
+
+## Client launch configuration prepared locally
+
+At user request, inspected the project .mcp.json and found its Cercano command exactly matches the running source-bound server. The parent process is ChatGPT's embedded Codex executable; the user .codex/config.toml has no separate Cercano server definition. This strongly identifies the project config as a relevant launch source, but the next reconnect must verify that the client reloads it rather than retaining cached configuration.
+
+Backed up .mcp.json privately in the remote-cutover snapshot, changed only the Cercano command to stable-runtime/cercano-mcp-handoff, and preserved arguments/environment and all other servers. Wrapper changes cwd to the nonmoving parent directory then execs the byte-identical staged server. JSON structural comparison and sh -n validation passed; wrapper was not launched. This is a temporary local launch override, not a portable project setting for publication. Restore/update it to the relocated permanent path after successful relocation. Do not commit the temporary absolute backup path.
+
+Client reconnect/restart remains required: executing a new stdio server in a tool subprocess cannot attach it to the existing client connection. No source-root server or child processes have been terminated.

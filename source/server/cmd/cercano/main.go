@@ -861,6 +861,17 @@ Flags:
 `
 
 func main() {
+	// Private updater dispatch runs FIRST, before the subcommand switch and
+	// before any config load, DB open, provider, or agent start. Reserved
+	// "__"-prefixed first arguments are always claimed here — including
+	// malformed or unknown spellings — so they can never fall through into
+	// normal startup. (An older binary that lacks this dispatch WOULD treat
+	// such an argument as normal startup, which is exactly why updaters must
+	// never probe an old binary with the private execution flag; probe age
+	// with `cercano version --updater-protocol` instead.)
+	if code, claimed := dispatchPrivateUpdate(os.Args[1:], os.Stdout, os.Stderr, nil); claimed {
+		os.Exit(code)
+	}
 	// Handle subcommands before flag parsing.
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
@@ -886,6 +897,20 @@ func main() {
 			runSetup(installEngine)
 			return
 		case "version":
+			// Updater-protocol capability query: a versioned JSON document
+			// an updater can use to learn whether this binary speaks the
+			// private updater protocol. ONLY the exact single-flag form
+			// triggers it; plain `version` (and any other argument
+			// spelling) keeps its unchanged human output. Older binaries
+			// ignore the extra argument and print plain version instead,
+			// so document absence = no private probing of old binaries.
+			if len(os.Args) == 3 && os.Args[2] == "--updater-protocol" {
+				if err := printUpdaterProtocol(os.Stdout); err != nil {
+					fmt.Fprintf(os.Stderr, "cercano: %v\n", err)
+					os.Exit(1)
+				}
+				return
+			}
 			fmt.Printf("cercano v%s\n", version)
 			return
 		case "stats":

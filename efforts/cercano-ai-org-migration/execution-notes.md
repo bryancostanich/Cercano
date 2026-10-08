@@ -151,3 +151,15 @@ Processes with source-root cwd or loaded files include VS Code Plugin PID 1610, 
 Staged byte-identical copies of both current runtime binaries under the private remote-cutover snapshot/stable-runtime. SHA-256 checked against source; not launched and not substituted into PATH or the active service. This prepares a stable handoff but does not establish that the active agent has switched. Obtain local pause and handoff coordination, then verify the old source-root processes are gone, take the final quiesced snapshot, and relocate/repair Git worktrees. User must approve stopping affected sessions; do not terminate unrelated editors/tools or broaden shutdown scope implicitly.
 
 Local move is blocked at its explicit coordination gate. Remote transfers and publication do not authorize filesystem relocation or process termination by themselves. All source directories remain in their original locations.
+
+## Local pause approved; precise tool-server handoff required
+
+User said "ok, ready", authorizing the coordinated local move window and affected process handoff. Fresh process inspection corrected an earlier assumption: listener PID 51798 on port 50052 is the installed singleton at /Users/bryancostanich/bin/.cercano-libexec/cercano with cwd /Users/bryancostanich. It is already outside the source tree and must not be stopped just for this move.
+
+Source-bound PID 41710 is a separate Cercano tool server parented by ChatGPT, with source-root cwd and MCP-related child processes; another ChatGPT node process also has the old source cwd. This tool-server connection needs a client-side launch configuration change and reconnect before a genuinely quiesced snapshot. Do not assume this is the normal CLI singleton or kill the installed listener.
+
+The staged server/client binaries still exactly match the current source binary hashes. Use the staged server path /Users/bryancostanich/git_repos/cercano-ai-migration-backups/20261008T044239Z-remote-cutover/stable-runtime/cercano with the connector's existing arguments/environment, and a working directory /Users/bryancostanich/git_repos/bryan_costanich (the parent directory is not moving). Reconnect/restart the client so its tools no longer hold the source checkout. Verify fresh process paths after reconnect before final snapshot or moves.
+
+A probe `cercano agent --help` was not a help-only command: it attempted server startup and exited because port 50052 was occupied. It did not replace the listener. Startup logs were written; no successful second service was started. Future help inspection must use source or top-level --help rather than assuming subcommand flag behavior.
+
+No local directories have moved and no processes were terminated. This is an external client configuration/reconnection blocker, not a request for renewed transfer or move approval.

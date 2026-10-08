@@ -3,6 +3,7 @@ package acquisition
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"net/http"
@@ -324,7 +325,7 @@ func TestValidateCacheLayoutEntryCap(t *testing.T) {
 		t.Fatalf("seeding metadata cache dir: %v", err)
 	}
 	for i := 0; i <= maxCacheSubtreeEntries; i++ {
-		if err := os.WriteFile(filepath.Join(metadataDir, "f"+strings.Repeat("x", 4)+string(rune('a'+i%26))+string(rune('0'+i/26))), nil, 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(metadataDir, fmt.Sprintf("f%04x%02x", i, i)), nil, 0o600); err != nil {
 			t.Fatalf("seeding entry %d: %v", i, err)
 		}
 	}

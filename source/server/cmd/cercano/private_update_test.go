@@ -229,18 +229,20 @@ func runMainFixture(t *testing.T, args ...string) (string, string, int) {
 		if i := strings.IndexByte(kv, '='); i >= 0 {
 			key = kv[:i]
 		}
-		switch key {
-		case "HOME", "APPDATA", "LOCALAPPDATA",
-			"XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME":
+		switch strings.ToUpper(key) {
+		case "HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "APPDATA", "LOCALAPPDATA",
+			"XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME":
 		default:
 			env = append(env, kv)
 		}
 	}
 	home := t.TempDir()
 	roots["HOME"] = home
-	env = append(env, "HOME="+home)
+	env = append(env, "HOME="+home, "USERPROFILE="+home)
 	for _, kv := range []struct{ key, sub string }{
 		{"APPDATA", "appdata"},
+		{"LOCALAPPDATA", "localappdata"},
+		{"XDG_STATE_HOME", "xdg-state"},
 		{"XDG_CONFIG_HOME", "xdg-config"},
 		{"XDG_DATA_HOME", "xdg-data"},
 		{"XDG_CACHE_HOME", "xdg-cache"},
@@ -291,7 +293,7 @@ func runMainFixture(t *testing.T, args ...string) (string, string, int) {
 		}
 		// HOME contains the subdirectories we created; only those may exist.
 		for _, e := range entries {
-			if key == "HOME" && (e.Name() == "appdata" || e.Name() == "xdg-config" || e.Name() == "xdg-data" || e.Name() == "xdg-cache") {
+			if key == "HOME" && (e.Name() == "appdata" || e.Name() == "localappdata" || e.Name() == "xdg-state" || e.Name() == "xdg-config" || e.Name() == "xdg-data" || e.Name() == "xdg-cache") {
 				continue
 			}
 			t.Errorf("normal main initialization touched isolated %s: created %s", key, e.Name())

@@ -88,6 +88,9 @@ jobs:
         if: runner.os == 'Windows'
         working-directory: source/server
         run: go test -v -count=1 -timeout=2m -run 'TestOneShotLaunch' ./internal/updatecoord/launch
+      - name: Private updater early-entry fixtures
+        working-directory: source/server
+        run: go test -count=1 -timeout=2m -run 'TestDispatchPrivateUpdate|TestUpdaterProtocol|TestMainSubprocess' ./cmd/cercano
       - name: CLI protocol compatibility compilation
         working-directory: source/clients/cli
         run: go test -run '^$' ./...

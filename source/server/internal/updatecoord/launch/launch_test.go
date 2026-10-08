@@ -4,6 +4,7 @@ package launch
 // Every child is reaped or terminated on every path by these fixtures.
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -96,21 +97,42 @@ func launchEchoOnce(t *testing.T, stdoutPath, stderrPath string, extraBytes int)
 	return pid
 }
 
-// publishFixtureFile atomically publishes a fixture protocol file: the
-// full content is written to a temp file in the SAME directory (same
-// owner, same volume) and then renamed over the destination, so a
-// concurrent reader observes the destination either absent or COMPLETE —
-// never the created-but-empty or partially-written intermediate state.
+// publishFixtureFile publishes a fixture protocol file ONCE: the full
+// content is written to a temp file in the SAME directory (same owner,
+// same volume) and then hard-linked into place. The link is the native
+// create-if-absent primitive — link(2) fails with EEXIST on APFS/ext4,
+// CreateHardLinkW fails with ERROR_FILE_EXISTS on NTFS — so a
+// concurrent reader observes the destination either absent or COMPLETE,
+// never the created-but-empty or partially written intermediate state,
+// and an already-published protocol value is NEVER touched: nothing
+// replaces the destination, so there is no rename-over-destination to
+// be refused by the OS at all.
 //
-// CI run 37701866968 proved the direct os.WriteFile publication races the
-// polling reader: os.WriteFile creates/truncates the destination BEFORE
-// the content write, so waitForFile read the owned-echo harness result
-// as an empty file and TestOneShotLaunch_DiscardedOutputNeverBlocks
-// failed with an EMPTY reason ("owned-echo harness failed: "). Rename
-// over an existing destination is a replace on every supported platform
-// (MoveFileEx(REPLACE_EXISTING) on Windows), and the temp sibling is
-// invisible to every destination poll, so the protocol file appears
-// complete or not at all.
+// CI run 37701866968 proved the direct os.WriteFile publication races
+// the polling reader: os.WriteFile creates/truncates the destination
+// BEFORE the content write, so waitForFile read the owned-echo harness
+// result as an empty file. The temp+rename fix was then proven the
+// wrong shape for this protocol by CI run 37706670877: on Windows the
+// publication stress still hit ACCESS_DENIED replacing a destination
+// the concurrent readers polled, even though the fixture readers open
+// with FILE_SHARE_DELETE. The call-site audit (every marker, pidfile,
+// result and release path below) confirmed the actual contract: each
+// protocol path is published ONCE — the fixtures publish immutable
+// terminal values, not mutable ones — so publication is create-if-absent
+// and the existing destination is never opened, replaced or deleted.
+//
+// Republishing IDENTICAL content is an idempotent replay: the existing
+// value is byte-equal, so it is left untouched and the call succeeds.
+// Republishing DIFFERENT content is a protocol violation and refused —
+// an existing protocol value always wins.
+//
+// TEST FIXTURE PROTOCOL ONLY: this write-once publication is the
+// contract of test fixture protocol files, distinct from the eventual
+// production file activation (atomic replacement of a production file,
+// e.g. on Windows). Production activation is NOT implemented by this
+// helper, and nothing here changes, weakens or promises it. No global
+// policy is involved: the primitive is one native per-call operation on
+// each target filesystem (NTFS, APFS, ext4).
 func publishFixtureFile(path string, data []byte) error {
 	if path == "" {
 		return fmt.Errorf("no protocol path supplied")
@@ -128,9 +150,32 @@ func publishFixtureFile(path string, data []byte) error {
 		_ = os.Remove(tmpName)
 		return fmt.Errorf("writing publish temp file %s: %w", tmpName, err)
 	}
-	if err := os.Rename(tmpName, path); err != nil {
+	// Create-if-absent: the link atomically publishes the COMPLETE temp
+	// content at the destination, or fails because a value is already
+	// there. It can never observe or produce a partial destination.
+	if err := os.Link(tmpName, path); err != nil {
 		_ = os.Remove(tmpName)
+		if _, serr := os.Stat(path); serr == nil {
+			// A protocol value is already published at this path.
+			// Identical content is an idempotent replay (existing
+			// value untouched); different content is refused — never
+			// guessed, the comparison is byte-exact.
+			existing, rerr := os.ReadFile(path)
+			if rerr != nil {
+				return fmt.Errorf("existing protocol file %s unreadable for idempotent-replay comparison: %w", path, rerr)
+			}
+			if bytes.Equal(existing, data) {
+				return nil
+			}
+			return fmt.Errorf("refusing to republish protocol file %s with different content (%d new bytes vs %d published bytes): protocol values are published once and never replaced", path, len(data), len(existing))
+		}
 		return fmt.Errorf("publishing %s: %w", path, err)
+	}
+	// The link succeeded: the destination is complete. The temp name was
+	// only the staging name of the same inode — remove it so no sibling
+	// lingers beside the destination.
+	if err := os.Remove(tmpName); err != nil {
+		return fmt.Errorf("removing publish temp file %s after publication: %w", tmpName, err)
 	}
 	return nil
 }

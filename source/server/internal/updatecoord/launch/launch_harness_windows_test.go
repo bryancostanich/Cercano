@@ -54,13 +54,14 @@ func ownedEchoMain() {
 		os.Exit(3)
 	}
 	writeResult := func(text string) {
-		// Atomic publication (temp + rename; see publishFixtureFile): the
-		// parent polls this file, and CI run 37701866968 proved the direct
-		// os.WriteFile publication races it — the result was read empty
-		// between the create and the content write, and the fixture
-		// failed with an empty reason. A publication failure is reported
-		// on stderr, which the harness parent now captures, so the
-		// outcome is never silently lost.
+		// Write-once atomic publication (complete temp hard-linked into
+		// place; see publishFixtureFile): the parent polls this file,
+		// and CI run 37701866968 proved the direct os.WriteFile
+		// publication races it — the result was read empty between the
+		// create and the content write, and the fixture failed with an
+		// empty reason. A publication failure is reported on stderr,
+		// which the harness parent now captures, so the outcome is
+		// never silently lost.
 		if err := publishFixtureFile(*echoResultPath, []byte(text+"\n")); err != nil {
 			fmt.Fprintf(os.Stderr, "owned-echo: publishing result: %v\n", err)
 		}

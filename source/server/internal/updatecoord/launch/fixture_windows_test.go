@@ -8,7 +8,11 @@ import (
 	"os"
 )
 
-// Fixture protocol readers cooperate with atomic replacement; no production
+// Fixture protocol readers open with every share mode (read, write and
+// delete) so they can never block any filesystem operation the fixture
+// protocol performs; with write-once publication (see
+// publishFixtureFile) nothing ever replaces a published value, so this
+// is belt-and-braces, not a replacement promise. No production
 // file-opening policy is changed by this test helper.
 func readFixtureFile(path string) ([]byte, error) {
 	name, err := windows.UTF16PtrFromString(path)

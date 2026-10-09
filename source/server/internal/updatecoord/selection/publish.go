@@ -178,21 +178,24 @@ var (
 // proven absent) on a re-read taken immediately before staging.
 //
 // The caller must hold the installation exclusion lease across the
-// observe-expect-publish sequence, and that hold is PROVEN, not assumed:
+// observe-expect-publish sequence, and that hold is proven, not assumed:
 // the whole critical section — privdir verification, re-read, staging,
 // commit, durability confirmation — runs inside exclusion.Handle
-// .GuardUpdate, which refuses a nil or zero-value handle, a closed or
-// closing handle, a shared Launch lease, or a handle acquired for a
-// different directory (each refusal is a typed ErrInvalidRequest
-// wrapping the exclusion sentinel, with nothing observed, staged, or
-// committed), and which blocks Close until the section has returned or
-// panicked, so the OS lease cannot be released mid-flight. This function
-// takes no OS lock itself and makes no filesystem-CAS claim against
-// uncooperative writers: the re-read-before-publish check detects
-// cooperating conflicts, and the create path fails rather than clobbering
-// an unexpected file, but an uncooperative writer racing inside the
-// publish window is outside the model and is never silently tolerated
-// by a false "atomic" claim.
+// .GuardUpdate, which refuses a nil or zero-value handle, a nil callback,
+// a closed or closing handle, a shared Launch lease, a handle acquired
+// for a different directory, or a handle whose lock file or directory was
+// renamed or replaced since acquisition (each refusal is a typed
+// ErrInvalidRequest wrapping the exclusion sentinel, with nothing
+// observed, staged, or committed), which serializes guarded uses on one
+// handle so concurrent publishes on the same lease cannot race each
+// other's expected-state check, and which blocks Close until the section
+// has returned or panicked, so the OS lease cannot be released
+// mid-flight. This function takes no OS lock itself and makes no
+// filesystem-CAS claim against uncooperative writers: the
+// re-read-before-publish check detects cooperating conflicts, and the
+// create path fails rather than clobbering an unexpected file, but an
+// uncooperative writer racing inside the publish window is outside the
+// model and is never silently tolerated by a false "atomic" claim.
 //
 // dir must be an already-provisioned private directory: it is classified
 // by privdir.VerifyExisting — the verify-only primitive that refuses an

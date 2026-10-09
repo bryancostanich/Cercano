@@ -303,8 +303,11 @@ func TestPublishRefusesInvalidRequests(t *testing.T) {
 // TestPublishRefusesAbsentDirectoryWithBoundHandle proves the absent
 // publication directory is refused, never provisioned, with the handle
 // correctly bound: the lock is acquired while the directory exists and
-// the directory is then removed, so the only thing Publish can observe is
-// the verify-only privdir classification of an absent path.
+// the directory is then removed. The guarded use re-proves the acquired
+// lock file and directory identity before the callback runs, so the
+// refusal surfaces as the guard's ErrReplacedLock (still wrapping
+// fs.ErrNotExist) classified as ErrInvalidRequest — the absent path is
+// observed, nothing is staged, and nothing is ever provisioned.
 func TestPublishRefusesAbsentDirectoryWithBoundHandle(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("a directory holding an open lock file cannot be removed on Windows")
@@ -315,8 +318,11 @@ func TestPublishRefusesAbsentDirectoryWithBoundHandle(t *testing.T) {
 		t.Skipf("cannot remove the locked fixture directory: %v", err)
 	}
 	_, err := Publish(context.Background(), dir, lock, Expected{Absent: true}, testSelection(1, "1.0.1"))
-	if !errors.Is(err, ErrUnsafeDirectory) {
-		t.Fatalf("Publish(absent dir, bound handle) err = %v; want ErrUnsafeDirectory", err)
+	if !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("Publish(absent dir, bound handle) err = %v; want ErrInvalidRequest refusal", err)
+	}
+	if !errors.Is(err, exclusion.ErrReplacedLock) {
+		t.Fatalf("Publish(absent dir) err = %v; want the guard's ErrReplacedLock refusal", err)
 	}
 	if !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("Publish(absent dir) err = %v; want the refusal to wrap fs.ErrNotExist", err)

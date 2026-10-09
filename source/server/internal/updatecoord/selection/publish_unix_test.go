@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"cercano/source/server/internal/updatecoord/activation"
+	"cercano/source/server/internal/updatecoord/exclusion"
 	"cercano/source/server/internal/updatecoord/privdir"
 )
 
@@ -66,7 +67,11 @@ func TestPublishRefusesPermissiveDirectoryUnchanged(t *testing.T) {
 // TestPublishRefusesSymlinkedDirectoryUnchanged proves a symlinked
 // publication root is refused (never followed, never rewritten) even
 // when the handle is correctly bound to the path: the real directory is
-// moved away and a symlink is left in its place before the publish.
+// moved away and a symlink is left in its place before the publish. The
+// guarded use re-proves the acquired directory identity before the
+// callback runs, so this mid-flight replacement surfaces as the guard's
+// ErrReplacedLock classified as ErrInvalidRequest; the symlink is left
+// exactly as planted and the moved target is untouched.
 func TestPublishRefusesSymlinkedDirectoryUnchanged(t *testing.T) {
 	root := t.TempDir()
 	real := filepath.Join(root, "real")
@@ -83,8 +88,11 @@ func TestPublishRefusesSymlinkedDirectoryUnchanged(t *testing.T) {
 		t.Skipf("cannot create symlink fixture: %v", err)
 	}
 	_, err := Publish(context.Background(), real, lock, Expected{Absent: true}, testSelection(1, "1.0.1"))
-	if !errors.Is(err, ErrUnsafeDirectory) || !errors.Is(err, privdir.ErrUnsafePath) {
-		t.Fatalf("Publish(symlink dir) err = %v; want ErrUnsafeDirectory wrapping privdir.ErrUnsafePath", err)
+	if !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("Publish(symlink dir) err = %v; want ErrInvalidRequest refusal", err)
+	}
+	if !errors.Is(err, exclusion.ErrReplacedLock) {
+		t.Fatalf("Publish(symlink dir) err = %v; want the guard's ErrReplacedLock refusal", err)
 	}
 	if info, lerr := os.Lstat(real); lerr != nil || info.Mode()&os.ModeSymlink == 0 {
 		t.Fatalf("symlink root was followed or rewritten: (%v, %v)", info, lerr)
@@ -99,11 +107,13 @@ func TestPublishRefusesSymlinkedDirectoryUnchanged(t *testing.T) {
 	}
 }
 
-// TestPublishRefusesDirectoryReplacedByRegularFile proves the verify-only
-// classification refuses a publication path that has become a regular
-// file: the handle stays correctly bound (it was acquired when the
-// directory existed), so the refusal is purely privdir's, never a
-// provision attempt.
+// TestPublishRefusesDirectoryReplacedByRegularFile proves a publication
+// path that has become a regular file is refused with nothing rewritten:
+// the handle stays correctly bound (it was acquired when the directory
+// existed), and the guarded use re-proves the acquired directory
+// identity before the callback runs, so the refusal is the guard's
+// ErrReplacedLock classified as ErrInvalidRequest — never a provision
+// attempt and never a write to the impostor entry.
 func TestPublishRefusesDirectoryReplacedByRegularFile(t *testing.T) {
 	dir := newPrivateDir(t)
 	lock := acquireUpdateLock(t, dir)
@@ -115,8 +125,11 @@ func TestPublishRefusesDirectoryReplacedByRegularFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := Publish(context.Background(), dir, lock, Expected{Absent: true}, testSelection(1, "1.0.1"))
-	if !errors.Is(err, ErrUnsafeDirectory) || !errors.Is(err, privdir.ErrNotDirectory) {
-		t.Fatalf("Publish(regular file at dir path) err = %v; want ErrUnsafeDirectory wrapping privdir.ErrNotDirectory", err)
+	if !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("Publish(regular file at dir path) err = %v; want ErrInvalidRequest refusal", err)
+	}
+	if !errors.Is(err, exclusion.ErrReplacedLock) {
+		t.Fatalf("Publish(regular file at dir path) err = %v; want the guard's ErrReplacedLock refusal", err)
 	}
 	if got, rerr := os.ReadFile(dir); rerr != nil || string(got) != "not a directory" {
 		t.Fatalf("entry at the directory path was rewritten or removed: (%q, %v)", got, rerr)

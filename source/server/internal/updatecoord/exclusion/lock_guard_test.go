@@ -2,6 +2,9 @@ package exclusion
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -186,6 +189,285 @@ func TestGuardUpdateCallbackDoesNotOutliveGuard(t *testing.T) {
 	if err := h.GuardUpdate(root, func() error { ran = true; return nil }); !errors.Is(err, ErrClosedHandle) || ran {
 		t.Fatalf("GuardUpdate after Close = (err %v, ran %v); want ErrClosedHandle with no callback", err, ran)
 	}
+}
+
+// TestGuardUpdateSerializesConcurrentUsesOnOneHandle reproduces the
+// overlap bug: two guarded callbacks on the same handle used to run
+// concurrently (a simple counter admitted both), so two callers racing
+// an expected-state check could both observe the old state and the last
+// writer silently won. Now the second callback must not even start
+// until the first has finished.
+func TestGuardUpdateSerializesConcurrentUsesOnOneHandle(t *testing.T) {
+	root := t.TempDir()
+	h := acquire(t, root, Update)
+
+	firstEntered := make(chan struct{})
+	release := make(chan struct{})
+	firstDone := make(chan struct{})
+	go func() {
+		defer close(firstDone)
+		if err := h.GuardUpdate(root, func() error {
+			close(firstEntered)
+			<-release
+			return nil
+		}); err != nil {
+			t.Error(err)
+		}
+	}()
+	<-firstEntered
+
+	secondRan := make(chan struct{})
+	secondDone := make(chan error, 1)
+	go func() {
+		secondDone <- h.GuardUpdate(root, func() error {
+			close(secondRan)
+			return nil
+		})
+	}()
+	// While the first callback holds the guard slot, the second must not
+	// run: overlapping publications on one lease race each other.
+	select {
+	case <-secondRan:
+		t.Fatal("two guarded callbacks overlapped on one handle; uses must serialize")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(release)
+	<-firstDone
+	if err := <-secondDone; err != nil {
+		t.Fatalf("second guarded use err = %v; want nil", err)
+	}
+	select {
+	case <-secondRan:
+	case <-time.After(3 * time.Second):
+		t.Fatal("second guarded use never ran after the first finished")
+	}
+}
+
+// TestClosePendingRefusesQueuedGuardWaiters proves a Close that arrives
+// while a callback runs both blocks on the live callback and refuses the
+// waiters queued behind it: the queued guard fails closed with
+// ErrClosedHandle (its callback never runs), and neither Close nor the
+// waiters deadlock against each other.
+func TestClosePendingRefusesQueuedGuardWaiters(t *testing.T) {
+	root := t.TempDir()
+	h := acquire(t, root, Update)
+
+	inCallback := make(chan struct{})
+	release := make(chan struct{})
+	guardDone := make(chan error, 1)
+	go func() {
+		guardDone <- h.GuardUpdate(root, func() error {
+			close(inCallback)
+			<-release
+			return nil
+		})
+	}()
+	<-inCallback
+
+	waiterStarted := make(chan struct{})
+	waiterDone := make(chan error, 1)
+	go func() {
+		close(waiterStarted)
+		waiterDone <- h.GuardUpdate(root, func() error { return nil })
+	}()
+	<-waiterStarted
+	time.Sleep(10 * time.Millisecond) // let the waiter reach the queue behind the live guard
+
+	closeStarted := make(chan struct{})
+	closeDone := make(chan error, 1)
+	go func() {
+		close(closeStarted)
+		closeDone <- h.Close()
+	}()
+	<-closeStarted
+
+	close(release)
+	if err := <-guardDone; err != nil {
+		t.Fatalf("live guarded use err = %v; want nil", err)
+	}
+	select {
+	case err := <-waiterDone:
+		if !errors.Is(err, ErrClosedHandle) {
+			t.Fatalf("queued waiter err = %v; want ErrClosedHandle", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("queued waiter never returned; a pending Close must refuse waiters, not park them")
+	}
+	select {
+	case err := <-closeDone:
+		if err != nil {
+			t.Fatalf("Close err = %v; want nil", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Close never completed after the live guard returned")
+	}
+}
+
+// TestConcurrentCloseWaitersBlockUntilGuardFinishes proves many
+// concurrent Closes all block while a guarded callback runs, all return
+// once it finishes, and none releases the lease early or reports an
+// error from a race with the others.
+func TestConcurrentCloseWaitersBlockUntilGuardFinishes(t *testing.T) {
+	root := t.TempDir()
+	h := acquire(t, root, Update)
+
+	inCallback := make(chan struct{})
+	release := make(chan struct{})
+	guardDone := make(chan error, 1)
+	go func() {
+		guardDone <- h.GuardUpdate(root, func() error {
+			close(inCallback)
+			<-release
+			return nil
+		})
+	}()
+	<-inCallback
+
+	const waiters = 4
+	closeDone := make(chan error, waiters)
+	for i := 0; i < waiters; i++ {
+		go func() { closeDone <- h.Close() }()
+	}
+	select {
+	case err := <-closeDone:
+		t.Fatalf("a Close returned (%v) while the guarded callback still ran; the lease must stay held", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(release)
+	if err := <-guardDone; err != nil {
+		t.Fatalf("guarded use err = %v; want nil", err)
+	}
+	for i := 0; i < waiters; i++ {
+		select {
+		case err := <-closeDone:
+			if err != nil {
+				t.Fatalf("Close waiter err = %v; want nil", err)
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatal("a concurrent Close waiter never completed")
+		}
+	}
+}
+
+// TestGuardUpdateRefusesNilCallback proves a nil callback is refused as
+// a typed error, not run (and not allowed to panic mid-guard), and the
+// refusal leaves the handle fully usable.
+func TestGuardUpdateRefusesNilCallback(t *testing.T) {
+	root := t.TempDir()
+	h := acquire(t, root, Update)
+	if err := h.GuardUpdate(root, nil); !errors.Is(err, ErrNilCallback) {
+		t.Fatalf("GuardUpdate(nil callback) err = %v; want ErrNilCallback", err)
+	}
+	if err := h.GuardUpdate(root, func() error { return nil }); err != nil {
+		t.Fatalf("GuardUpdate after nil-callback refusal err = %v; want nil (handle must stay usable)", err)
+	}
+}
+
+// TestZeroValueHandleCloseIsSafeAndIdempotent proves closing a
+// zero-value Handle is a safe no-op that never touches an unheld
+// descriptor and stays idempotent, and a nil receiver behaves the same.
+func TestZeroValueHandleCloseIsSafeAndIdempotent(t *testing.T) {
+	var h Handle
+	if err := h.Close(); err != nil {
+		t.Fatalf("Close(zero-value) err = %v; want nil (nothing was ever held)", err)
+	}
+	if err := h.Close(); err != nil {
+		t.Fatalf("second Close(zero-value) err = %v; want nil (idempotent)", err)
+	}
+	if err := h.GuardUpdate("/must/not/run", func() error { return nil }); !errors.Is(err, ErrNilHandle) {
+		t.Fatalf("GuardUpdate(zero-value) err = %v; want ErrNilHandle", err)
+	}
+	var p *Handle
+	if err := p.Close(); err != nil {
+		t.Fatalf("Close(nil) err = %v; want nil", err)
+	}
+}
+
+// TestGuardUpdateRefusesReplacedLockFileOrDirectory proves the identity
+// recheck before every guarded callback: if update.lock or the directory
+// was renamed or replaced while the OS lock keeps pinning the old inode,
+// the guard refuses and the callback never runs. Close afterwards still
+// releases the pinned old-inode lease cleanly.
+func TestGuardUpdateRefusesReplacedLockFileOrDirectory(t *testing.T) {
+	t.Run("replaced update.lock", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("an open locked file cannot be replaced on Windows")
+		}
+		root := t.TempDir()
+		h := acquire(t, root, Update)
+		lockPath := filepath.Join(root, "update.lock")
+		if err := os.Remove(lockPath); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(lockPath, []byte("impostor"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		ran := false
+		err := h.GuardUpdate(root, func() error { ran = true; return nil })
+		if !errors.Is(err, ErrReplacedLock) {
+			t.Fatalf("GuardUpdate(replaced lock file) err = %v; want ErrReplacedLock", err)
+		}
+		if ran {
+			t.Fatal("callback ran on a replaced lock file")
+		}
+		if err := h.Close(); err != nil {
+			t.Fatalf("Close after replaced lock file err = %v; want nil (the pinned inode still releases)", err)
+		}
+	})
+	t.Run("replaced directory", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("a directory holding an open lock file cannot be renamed on Windows")
+		}
+		base := t.TempDir()
+		root := filepath.Join(base, "root")
+		if err := os.Mkdir(root, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		h := acquire(t, root, Update)
+		if err := os.Rename(root, filepath.Join(base, "moved")); err != nil {
+			t.Skipf("cannot move the locked fixture directory: %v", err)
+		}
+		if err := os.Mkdir(root, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		ran := false
+		err := h.GuardUpdate(root, func() error { ran = true; return nil })
+		if !errors.Is(err, ErrReplacedLock) {
+			t.Fatalf("GuardUpdate(replaced directory) err = %v; want ErrReplacedLock", err)
+		}
+		if ran {
+			t.Fatal("callback ran on a replaced directory")
+		}
+		if err := h.Close(); err != nil {
+			t.Fatalf("Close after replaced directory err = %v; want nil", err)
+		}
+	})
+	t.Run("removed directory", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("a directory holding an open lock file cannot be removed on Windows")
+		}
+		root := t.TempDir()
+		h := acquire(t, root, Update)
+		if err := os.RemoveAll(root); err != nil {
+			t.Skipf("cannot remove the locked fixture directory: %v", err)
+		}
+		ran := false
+		err := h.GuardUpdate(root, func() error { ran = true; return nil })
+		if !errors.Is(err, ErrReplacedLock) {
+			t.Fatalf("GuardUpdate(removed directory) err = %v; want ErrReplacedLock", err)
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("GuardUpdate(removed directory) err = %v; want the refusal to wrap fs.ErrNotExist", err)
+		}
+		if ran {
+			t.Fatal("callback ran on a removed directory")
+		}
+		if err := h.Close(); err != nil {
+			t.Fatalf("Close after removed directory err = %v; want nil", err)
+		}
+	})
 }
 
 // TestGuardUpdatePropagatesErrorAndNeverSwallowsPanics proves the

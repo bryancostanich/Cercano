@@ -104,6 +104,8 @@ For self-managed activation, preserve the previous version until health verifica
 
 If initial startup or health verification fails, restore the previous complete version selection and report recovery. Do not retain a permanent rollback cache after successful verification. Delete the superseded version once verified healthy and no process still depends on it. If locked files prevent deletion, record pending cleanup, retry safely later, and show cleanup as pending rather than claiming deletion or force-killing the owner. Never delete the selected version, an active staging operation, or user data.
 
+The user approved extending the existing SQLite updater store for authoritative activation intent and recovery facts. Use additive, validated schema migrations that preserve existing operations and records; do not introduce a separate journal file. A small launcher-readable selection file remains separately reconciled against that journal. Database commits and filesystem selection changes are not one atomic operation. Migration approval covers implementation and isolated verification, not modifications to live installations.
+
 Power loss and process termination must leave a recoverable state. A selection file alone is not proof of a crash-safe transaction on Windows. Define durable journal/selection behavior, single-writer exclusion, startup reconciliation, and cleanup of abandoned stages, then verify them with fault injection and native tests.
 
 ## Trust model

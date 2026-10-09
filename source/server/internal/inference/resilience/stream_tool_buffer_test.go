@@ -2,6 +2,7 @@ package resilience
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -9,6 +10,14 @@ import (
 	"cercano/source/server/internal/llm"
 )
 
+// eventTypes renders a stream's event types for readable failure output.
+func eventTypes(evs []llm.StreamEvent) []string {
+	types := make([]string, len(evs))
+	for i, ev := range evs {
+		types[i] = string(ev.Type)
+	}
+	return types
+}
 // This file pins the tool-only buffering contract of the stream reader:
 // tool-call events are HELD until the response completes (or commits with
 // real content), so a retryable error that kills the stream after tool-only
@@ -243,9 +252,11 @@ func TestStream_ToolOnlySuccessPreservesEventOrder(t *testing.T) {
 }
 
 // Mixed response: tool calls stream FIRST, then text. The buffered tool events
-// must flush ahead of the text in order, and the delivered text closes the
-// retry gate — a later error surfaces, it does not retry.
-func TestStream_ToolThenTextCommitsAndBlocksRetry(t *testing.T) {
+// must flush ahead of the text in order, and the delivered text commits the
+// stream — a later retryable failure now live-restarts the SAME provider once
+// with an explicit in-band notice. The scripted stream fails on every attempt,
+// so the restart exhausts and the original error surfaces.
+func TestStream_ToolThenTextCommitsThenLiveRestarts(t *testing.T) {
 	primary := &fakeProvider{name: "anthropic"}
 	backup := &fakeProvider{name: "openai"}
 	primary.streamOverride = func(context.Context, inference.Call) (inference.Stream, error) {
@@ -266,13 +277,13 @@ func TestStream_ToolThenTextCommitsAndBlocksRetry(t *testing.T) {
 	}
 	evs, err := collectStream(t, r)
 	if err == nil {
-		t.Fatal("delivered text must close the retry gate — wanted surfaced network error")
+		t.Fatal("exhausted live restart must surface the original network error")
 	}
-	if primary.calls != 1 || backup.calls != 0 || len(*slept) != 0 {
-		t.Errorf("calls primary=%d backup=%d sleeps=%v, want no recovery after text", primary.calls, backup.calls, *slept)
+	if primary.calls != 2 || backup.calls != 0 || len(*slept) != 1 {
+		t.Errorf("calls primary=%d backup=%d sleeps=%v, want one same-provider live restart, no failover", primary.calls, backup.calls, *slept)
 	}
-	if len(evs) != 5 {
-		t.Fatalf("events = %+v, want the 4 pre-text events + text delta, nothing else", evs)
+	if len(evs) != 11 {
+		t.Fatalf("events = %v, want dead attempt's 5 committed events + notice + retried attempt's 5 events", eventTypes(evs))
 	}
 	wantTypes := []llm.StreamEventType{
 		llm.EventMessageStart, llm.EventToolUseStart, llm.EventToolUseInputDelta,
@@ -283,18 +294,32 @@ func TestStream_ToolThenTextCommitsAndBlocksRetry(t *testing.T) {
 			t.Errorf("evs[%d] = %s, want %s (buffered tools must flush ahead of the text)", i, evs[i].Type, want)
 		}
 	}
+	if evs[5].Type != llm.EventNotice || !strings.Contains(evs[5].Notice, "restarting the reply") {
+		t.Errorf("evs[5] = %+v, want an explicit mid-answer restart notice", evs[5])
+	}
+	// The retried attempt re-serves its own message from a fresh message_start.
+	for i, want := range wantTypes {
+		if evs[6+i].Type != want {
+			t.Errorf("evs[%d] = %s, want %s from the restarted attempt", 6+i, evs[6+i].Type, want)
+		}
+	}
+	re := gateEvent(events, ActionRetry)
+	if re.Reason != ReasonContentEmitted || !re.Emitted || !re.EmittedText || !re.EmittedToolCall {
+		t.Errorf("retry gate = %+v, want content_emitted with text + tool kinds", re)
+	}
 	se := gateEvent(events, ActionSurface)
-	if se.Reason != ReasonContentEmitted || !se.Emitted || !se.EmittedText || !se.EmittedToolCall {
-		t.Errorf("surface gate = %+v, want content_emitted with text + tool kinds", se)
+	if se.Reason != ReasonRetryLimit+","+ReasonContentEmitted || !se.Emitted || !se.EmittedText || !se.EmittedToolCall {
+		t.Errorf("surface gate = %+v, want retry_limit + content_emitted with text + tool kinds", se)
 	}
 }
 
 // Mixed response with reasoning and an actual answer: buffered tool events
 // and reasoning items flush ahead of the first text delta, which commits the
-// stream and closes the gate — a failure after answer text still surfaces
-// without retry (successful reasoning is delivered, dead-attempt reasoning is
-// not, but no answer text ever goes silently un-retried).
-func TestStream_ToolThenReasoningThenTextCommitsAndBlocksRetry(t *testing.T) {
+// stream. A retryable failure after answer text now live-restarts the SAME
+// provider once; the scripted stream fails on every attempt, so the restart
+// exhausts and the error surfaces. The buffered flush order must hold for
+// every attempt.
+func TestStream_ToolThenReasoningThenTextCommitsThenLiveRestarts(t *testing.T) {
 	primary := &fakeProvider{name: "anthropic"}
 	backup := &fakeProvider{name: "openai"}
 	primary.streamOverride = func(context.Context, inference.Call) (inference.Stream, error) {
@@ -316,13 +341,16 @@ func TestStream_ToolThenReasoningThenTextCommitsAndBlocksRetry(t *testing.T) {
 	}
 	evs, err := collectStream(t, r)
 	if err == nil {
-		t.Fatal("delivered answer text must close the retry gate — wanted surfaced network error")
+		t.Fatal("exhausted live restart must surface the original network error")
 	}
-	if primary.calls != 1 || backup.calls != 0 || len(*slept) != 0 {
-		t.Errorf("calls primary=%d backup=%d sleeps=%v, want no recovery after text", primary.calls, backup.calls, *slept)
+	if primary.calls != 2 || backup.calls != 0 || len(*slept) != 1 {
+		t.Errorf("calls primary=%d backup=%d sleeps=%v, want one same-provider live restart, no failover", primary.calls, backup.calls, *slept)
 	}
-	if len(evs) != 6 || evs[5].Type != llm.EventTextDelta || evs[5].TextDelta != "Paris is sunny" {
-		t.Fatalf("events = %+v, want buffered tools then reasoning then the text delta", evs)
+	if len(evs) != 13 {
+		t.Fatalf("events = %v, want dead attempt's 6 committed events + notice + retried attempt's 6 events", eventTypes(evs))
+	}
+	if evs[5].Type != llm.EventTextDelta || evs[5].TextDelta != "Paris is sunny" {
+		t.Errorf("evs[5] = %+v, want the buffered tools then reasoning then the text delta", evs[5])
 	}
 	if evs[1].ToolUseID != "call-1" {
 		t.Errorf("evs[1] = %+v, want the buffered tool_use_start flushed first", evs[1])
@@ -330,8 +358,18 @@ func TestStream_ToolThenReasoningThenTextCommitsAndBlocksRetry(t *testing.T) {
 	if evs[4].Type != llm.EventReasoning || evs[4].ReasoningID != "rs_1" {
 		t.Errorf("evs[4] = %+v, want the buffered reasoning item flushed ahead of text", evs[4])
 	}
+	if evs[6].Type != llm.EventNotice || !strings.Contains(evs[6].Notice, "restarting the reply") {
+		t.Errorf("evs[6] = %+v, want an explicit mid-answer restart notice", evs[6])
+	}
+	if evs[7].Type != llm.EventMessageStart {
+		t.Errorf("evs[7] = %s, want a fresh message_start from the restarted attempt", evs[7].Type)
+	}
+	re := gateEvent(events, ActionRetry)
+	if re.Reason != ReasonContentEmitted || !re.Emitted || !re.EmittedReasoning || !re.EmittedToolCall || !re.EmittedText {
+		t.Errorf("retry gate = %+v, want content_emitted with reasoning + tool + text kinds", re)
+	}
 	se := gateEvent(events, ActionSurface)
-	if se.Reason != ReasonContentEmitted || !se.Emitted || !se.EmittedReasoning || !se.EmittedToolCall || !se.EmittedText {
-		t.Errorf("surface gate = %+v, want content_emitted with reasoning + tool + text kinds", se)
+	if se.Reason != ReasonRetryLimit+","+ReasonContentEmitted || !se.Emitted || !se.EmittedReasoning || !se.EmittedToolCall || !se.EmittedText {
+		t.Errorf("surface gate = %+v, want retry_limit + content_emitted with reasoning + tool + text kinds", se)
 	}
 }

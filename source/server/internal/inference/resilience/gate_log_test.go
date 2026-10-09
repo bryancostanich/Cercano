@@ -143,6 +143,8 @@ func TestGateLogChatCancellationSurfacesWithReason(t *testing.T) {
 }
 
 func TestGateLogStreamCommittedFailureNamesContentEmitted(t *testing.T) {
+	// Quota is non-retryable, so a committed stream must surface (no restart)
+	// and the gate names BOTH the non-retryable class and the emitted text.
 	stream := &fakeStream{events: []llm.StreamEvent{{Type: llm.EventTextDelta, TextDelta: "partial"}}, err: quotaErr("primary")}
 	primary := &fakeProvider{name: "primary", streamOverride: func(context.Context, inference.Call) (inference.Stream, error) { return stream, nil }}
 	backup := &fakeProvider{name: "backup"}
@@ -162,7 +164,7 @@ func TestGateLogStreamCommittedFailureNamesContentEmitted(t *testing.T) {
 		t.Fatalf("events = %+v, want the stream_live gate only", *events)
 	}
 	ev := (*events)[0]
-	if ev.Action != ActionSurface || ev.Stage != "stream_live" || ev.Reason != ReasonContentEmitted {
+	if ev.Action != ActionSurface || ev.Stage != "stream_live" || ev.Reason != ReasonNonretryable+","+ReasonContentEmitted {
 		t.Fatalf("committed-stream gate = %+v", ev)
 	}
 	if !ev.Emitted || !ev.EmittedText || ev.EmittedReasoning || ev.EmittedToolCall {

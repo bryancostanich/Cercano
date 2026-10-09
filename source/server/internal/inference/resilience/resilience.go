@@ -66,7 +66,7 @@ const (
 	ReasonNotFailoverable     = "not_failoverable"          // class could not plausibly be served elsewhere
 	ReasonAlreadyFailedOver   = "already_failed_over"       // never cascade: the backup's failure is final
 	ReasonAuthFallbackBlocked = "auth_fallback_unavailable" // selected auth fallback cannot serve this request
-	ReasonAuthRecoveryFailed  = "auth_recovery_failed"      // interactive login was attempted and failed
+	ReasonAuthRecoveryFailed = "auth_recovery_failed"      // interactive login was attempted and failed
 )
 
 // Event describes one engine decision, for logging and telemetry. The Notice
@@ -117,6 +117,11 @@ func (e Event) Notice() string {
 	}
 	switch e.Action {
 	case ActionRetry:
+		if e.Emitted {
+			// Mid-answer restart: visible text was interrupted, so say so
+			// explicitly instead of pretending nothing happened.
+			return fmt.Sprintf("%s %s mid-answer — restarting the reply", e.From, what)
+		}
 		return fmt.Sprintf("%s %s — trying once more", e.From, what)
 	case ActionFailover:
 		if e.Class == llm.ErrBusy {
@@ -478,6 +483,15 @@ func (p *Provider) StreamChat(ctx context.Context, req inference.Call) (inferenc
 // consumer to be concatenated with a retry). Text deltas are delivered the
 // moment they flow — they alone commit the stream. After a failover it
 // never cascades.
+//
+// A retryable failure mid-answer — after visible text but before the message
+// completed — restarts the SAME request on the SAME provider once, with an
+// in-band narration announcing the restart. The interrupted text stays
+// visible; the fresh attempt streams its own complete message, and a
+// failover never follows (a different provider's answer would contradict
+// the interrupted text). Once message_stop flowed, the message is complete
+// and nothing may restart: a failure after that point surfaces exactly as
+// any other committed-stream failure.
 type reader struct {
 	ctx context.Context
 	p   *Provider
@@ -519,8 +533,26 @@ type reader struct {
 	// failureLogged guards the post-commit (stream_live) gate log: a failure
 	// on a committed stream is logged once, not once per remaining frame.
 	failureLogged bool
-	retried       bool // the one busy retry has been used
-	failedOver    bool // already on the backup; never cascade
+	// stopped reports that message_stop was delivered: the message
+	// completed, so nothing may restart — a retryable failure after this
+	// point surfaces like any other committed-stream failure.
+	stopped bool
+	retried bool // the one retry — pre-content or mid-answer restart — has been used
+	// freshNeedsStart is set by liveRestart: the retried attempt's stream
+	// has not proven it emits its own message_start. Sloppy adapters may
+	// open the restart without framing, which would leave the consumer's
+	// collector accumulating the interrupted attempt's partial state and
+	// mix dead content into the persisted response. The reader injects a
+	// synthetic message_start ahead of the fresh attempt's first content
+	// frame when the provider fails to emit one (see Next).
+	freshNeedsStart bool
+	// pendingEnd/freshEnd cache a restart stream's end-of-stream signal
+	// while the synthetic message_start is delivered ahead of it (see Next):
+	// the retried attempt may end cleanly without emitting a single frame,
+	// and the consumer's collector must still see the reset frame first.
+	pendingEnd bool
+	freshEnd   llm.StreamEvent
+	failedOver       bool // already on the backup; never cascade
 	authAttempts  map[string]bool
 	terminalErr   error
 	authFallback  bool
@@ -581,15 +613,39 @@ func (r *reader) Next() (llm.StreamEvent, bool, error) {
 			r.queue = r.queue[1:]
 			return ev, true, nil
 		}
+		if r.pendingEnd {
+			// The synthetic message_start ahead of a silently empty retried
+			// stream was delivered; now replay the cached end-of-stream.
+			r.pendingEnd = false
+			return r.freshEnd, false, nil
+		}
 		if r.attempt != nil {
 			act := r.attempt
 			r.attempt = nil
 			inner, err := act()
 			if err != nil {
-				if r.decide("stream_dial", err) {
-					continue
+				if r.emitted {
+					// A mid-answer restart could not even connect: visible
+					// content already flowed, so a failover is never safe (a
+					// backup's fresh answer would contradict the interrupted
+					// text) and the single restart is spent. The restart
+					// narration was already delivered ahead of this dial, so
+					// the failure surfaces — logged once, naming the closed
+					// gates.
+					if !r.failureLogged {
+						r.failureLogged = true
+						reason := ReasonRetryLimit + "," + ReasonContentEmitted
+						if r.ctx.Err() != nil {
+							reason = ReasonCancellation + "," + ReasonContentEmitted
+						}
+						r.gateLog("stream_dial", reason, llm.ClassOf(err), err)
+					}
+					return llm.StreamEvent{}, false, r.failure(err)
 				}
-				return llm.StreamEvent{}, false, r.failure(err)
+				if !r.decide("stream_dial", err) {
+					return llm.StreamEvent{}, false, r.failure(err)
+				}
+				continue
 			}
 			r.inner = inner
 			continue
@@ -609,26 +665,83 @@ func (r *reader) Next() (llm.StreamEvent, bool, error) {
 			return llm.StreamEvent{}, false, r.failure(authErr)
 		}
 		if r.emitted || r.failedOver {
+			// The live-restart replacement for the provider's own framing:
+			// if the retried attempt opens without message_start, inject a
+			// synthetic one ahead of its first content frame so downstream
+			// collectors (llm.CollectStream resets accumulation on a second
+			// message_start) discard the interrupted attempt's partial
+			// message even when the provider never re-frames. A provider
+			// that emits its own message_start clears the watch and this
+			// never fires — no well-behaved stream sees a duplicate frame.
+			if r.freshNeedsStart && err == nil && ok {
+				if ev.Type == llm.EventMessageStart {
+					r.freshNeedsStart = false
+				} else if ev.Type != llm.EventError && ev.Type != llm.EventNotice {
+					r.freshNeedsStart = false
+					// Apply this frame's bookkeeping here: queued events
+					// bypass the emitted-path handling below.
+					r.trackEmittedKind(ev)
+					if ev.Type == llm.EventMessageStop {
+						r.stopped = true
+					}
+					r.queue = append(r.queue,
+						llm.StreamEvent{Type: llm.EventMessageStart}, ev)
+					continue
+				}
+			}
+			if r.freshNeedsStart && err == nil && !ok {
+				// The retried attempt opened cleanly but produced not a
+				// single frame before ending — a silent, empty stream.
+				// There is no first content frame to inject ahead of, so
+				// without this the consumer's collector would never see a
+				// second message_start and its terminal flush would
+				// persist the interrupted attempt's partial state as a
+				// successful response. Deliver the synthetic message_start
+				// first, then replay the cached end-of-stream.
+				r.freshNeedsStart = false
+				r.pendingEnd = true
+				r.freshEnd = ev
+				r.queue = append(r.queue, llm.StreamEvent{Type: llm.EventMessageStart})
+				continue
+			}
 			// Committed frames still count toward the emitted-kind record
 			// (only the first live event went through the switch below).
 			r.trackEmittedKind(ev)
+			if ok && ev.Type == llm.EventMessageStop {
+				// The message completed: a retryable failure after this
+				// point must never restart anything (the restart below is
+				// for interrupted answers only). The error still surfaces —
+				// a completed message does not silence a broken transport.
+				r.stopped = true
+			}
 			if !r.failedOver {
 				r.observeQuota(authErr)
 			}
-			if authErr != nil && !r.failureLogged {
-				// stream_live gate: the stream already committed — content
-				// was delivered and/or the backup was already used — so no
-				// recovery step remains. Log the precise gates that closed;
-				// never the contents that were delivered. Log-only.
-				r.failureLogged = true
-				skip := make([]string, 0, 2)
-				if r.emitted {
-					skip = append(skip, ReasonContentEmitted)
+			if authErr != nil {
+				if !r.stopped && !r.failedOver {
+					// stream_live gate: a mid-answer failure — visible
+					// content flowed, but the message never completed. The
+					// only safe recovery is a single same-provider restart of
+					// the SAME request (liveRestart narrates the restart and
+					// logs the precise gates when even that is closed).
+					if r.liveRestart(authErr) {
+						continue
+					}
+				} else if !r.failureLogged {
+					// No recovery remains here: the message already
+					// completed (or the backup was already used). Log the
+					// precise gates that closed; never the contents that
+					// were delivered. Log-only.
+					r.failureLogged = true
+					skip := make([]string, 0, 2)
+					if r.emitted {
+						skip = append(skip, ReasonContentEmitted)
+					}
+					if r.failedOver {
+						skip = append(skip, ReasonAlreadyFailedOver)
+					}
+					r.gateLog("stream_live", strings.Join(skip, ","), llm.ClassOf(authErr), authErr)
 				}
-				if r.failedOver {
-					skip = append(skip, ReasonAlreadyFailedOver)
-				}
-				r.gateLog("stream_live", strings.Join(skip, ","), llm.ClassOf(authErr), authErr)
 			}
 			if r.authFallback {
 				if err != nil {
@@ -682,6 +795,14 @@ func (r *reader) Next() (llm.StreamEvent, bool, error) {
 			// pre-commit events ahead of it, in order.
 			r.emitted = true
 			r.trackEmittedKind(ev)
+			if ok && ev.Type == llm.EventMessageStop {
+				// The message completed with message_stop as its first
+				// committing event (e.g. tool-only output). From here on
+				// the message is finished: a trailing retryable error must
+				// surface, never restart — same contract the emitted path
+				// enforces when message_stop flows through it.
+				r.stopped = true
+			}
 			if len(r.framing) > 0 || len(r.heldBuf) > 0 {
 				for _, held := range r.heldBuf {
 					r.trackEmittedKind(held)
@@ -705,6 +826,63 @@ func (r *reader) observeQuota(err error) {
 		r.quotaObserved = true
 		r.p.onQuota(r.ctx)
 	}
+}
+
+// liveRestart schedules the single mid-answer restart: after visible content
+// flowed but before the message completed, the only safe recovery is
+// re-serving the SAME request on the SAME provider once. A failover is never
+// safe here — an invisible backup's fresh message would contradict the
+// interrupted text — and a second restart would duplicate it. The queued
+// narration tells the user the reply is restarting BEFORE the wait, so the
+// interruption is explicit rather than silent. When even this last gate is
+// closed (non-retryable class, retry already used, or cancellation), the
+// closed gates are logged with their precise reasons and the failure
+// surfaces.
+func (r *reader) liveRestart(err error) bool {
+	class := llm.ClassOf(err)
+	var skip []string
+	switch {
+	case r.ctx.Err() != nil:
+		skip = append(skip, ReasonCancellation)
+	case !llm.Retryable(class):
+		skip = append(skip, ReasonNonretryable)
+	case r.retried:
+		skip = append(skip, ReasonRetryLimit)
+	}
+	if len(skip) > 0 {
+		skip = append(skip, ReasonContentEmitted)
+		r.gateLog("stream_live", strings.Join(skip, ","), class, err)
+		return false
+	}
+	if r.inner != nil {
+		_ = r.inner.Close()
+		r.inner = nil
+	}
+	r.retried = true
+	p := r.p
+	// Reason records the gate this recovery overcame: the content_emitted
+	// gate that normally closes recovery mid-answer.
+	ev := Event{Action: ActionRetry, Stage: "stream_live", Class: class,
+		Reason: ReasonContentEmitted, From: p.eventFrom(err), To: p.primary.Name(),
+		Wait: p.waitFor(err), Err: err}
+	// gateFields must run BEFORE Notice(): the restart narration is derived
+	// from the emitted-kind flags, so the user sees the explicit
+	// mid-answer-restart wording rather than the generic pre-content line.
+	ev = r.gateFields(ev)
+	p.emit(ev)
+	r.queue = append(r.queue, llm.StreamEvent{Type: llm.EventNotice, Notice: ev.Notice()})
+	// The fresh attempt must restart the consumer's accumulation state.
+	// Well-behaved adapters emit their own message_start; a sloppy one may
+	// not, so Next watches for it and injects a synthetic frame when the
+	// retried stream opens without framing.
+	r.freshNeedsStart = true
+	r.attempt = func() (llm.StreamReader, error) {
+		if !p.sleep(r.ctx, ev.Wait) {
+			return nil, err
+		}
+		return p.primary.StreamChat(r.ctx, r.req)
+	}
+	return true
 }
 
 // decide runs the per-class policy for a pre-content failure. It returns true

@@ -139,19 +139,30 @@ func CollectStream(ctx context.Context, rdr StreamReader, onText func(string), o
 				ReasoningData: ev.ReasoningData,
 			})
 		case EventMessageStart:
-			if ev.Route != nil {
-				out.Route = ev.Route
-				out.Model = ev.Route.Model
-			}
 			if started {
 				// One response == one message. A second message_start means the
 				// stream restarted under us — keep only the newest message.
+				// The interrupted attempt's text, tool fragments, usage
+				// snapshot, and route must never mix into the successful
+				// attempt's response: the resilience engine's mid-answer
+				// restart relies on this reset so the final response
+				// reflects only the successful attempt.
 				fmt.Fprintf(os.Stderr, "[stream-guard] message_start while already accumulating — discarding prior partial message\n")
 				recordStreamAnomaly(ctx, "message_start_discard", streamAnomalySummary(out.Blocks, currentText.String()))
 				currentText.Reset()
 				currentTool = nil
 				toolArgsBuf.Reset()
 				out.Blocks = nil
+				out.Usage = TokenUsage{}
+				out.InputTokens = 0
+				out.OutputTokens = 0
+				out.StopReason = ""
+				out.Route = nil
+				out.Model = ""
+			}
+			if ev.Route != nil {
+				out.Route = ev.Route
+				out.Model = ev.Route.Model
 			}
 			started = true
 			accepting = true

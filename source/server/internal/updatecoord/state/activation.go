@@ -517,6 +517,18 @@ func decodeActivationJournal(data []byte) (ActivationJournal, error) {
 		return j, ErrInvalidRecord
 	}
 	seen := map[string]bool{}
+	requiredFields := map[string]bool{
+		"schema_version":            true,
+		"install_id":                true,
+		"op_id":                     true,
+		"target_version":            true,
+		"staged_version_dir":        true,
+		"verified_artifact_sha256":  true,
+		"prior_selected_version":    true,
+		"prior_selection_generation": true,
+		"prior_selection_digest":    true,
+		"checkpoint":                true,
+	}
 	for scan.More() {
 		tok, err = scan.Token()
 		if err != nil {
@@ -527,10 +539,19 @@ func decodeActivationJournal(data []byte) (ActivationJournal, error) {
 			return j, ErrInvalidRecord
 		}
 		seen[key] = true
+		delete(requiredFields, key)
 		var value json.RawMessage
 		if err = scan.Decode(&value); err != nil {
 			return j, ErrInvalidRecord
 		}
+		// Reject null values for required fields
+		if len(value) == 4 && string(value) == "null" {
+			return j, fmt.Errorf("%w: null value not allowed for field %q", ErrInvalidRecord, key)
+		}
+	}
+	// Enforce exact canonical required field presence before decode
+	if len(requiredFields) > 0 {
+		return j, fmt.Errorf("%w: missing required fields: %v", ErrInvalidRecord, keysToStringSlice(requiredFields))
 	}
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
@@ -547,4 +568,13 @@ func decodeActivationJournal(data []byte) (ActivationJournal, error) {
 		return ActivationJournal{}, err
 	}
 	return j, nil
+}
+
+// keysToStringSlice converts a map of keys to a string slice for error messages.
+func keysToStringSlice(m map[string]bool) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }

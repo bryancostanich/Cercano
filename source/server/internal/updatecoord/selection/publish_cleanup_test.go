@@ -62,6 +62,15 @@ func destAbsent(t *testing.T, dir string) {
 // staging handle is still open must still close the handle (required
 // before the delete, especially on Windows) and clean the owned staging
 // file, with no ErrStagingRetained swallowed or invented.
+//
+// The closed-handle proof is platform-truthful, never a blanket
+// any-error check: the deferred cleanup closed the handle before the
+// operation returned, so Stat on it must report the platform's exact
+// closed-handle error — fs.ErrClosed on Unix, and on Windows the native
+// ERROR_INVALID_HANDLE Windows reports for a dead handle (Windows does
+// not map it to fs.ErrClosed). The positive proofs that the cleanup
+// actually completed (no staging leftovers, destination absent) must
+// accompany it.
 func TestPublishEarlyStagingFailureClosesHandleBeforeCleanup(t *testing.T) {
 	dir := newPrivateDir(t)
 	lock := acquireUpdateLock(t, dir)
@@ -77,8 +86,8 @@ func TestPublishEarlyStagingFailureClosesHandleBeforeCleanup(t *testing.T) {
 	if errors.Is(err, ErrStagingRetained) {
 		t.Fatalf("Publish err = %v; cleanup succeeded, so retention must not be reported", err)
 	}
-	if _, serr := handle.Stat(); !errors.Is(serr, os.ErrClosed) {
-		t.Fatalf("staging handle state after early failure = %v; want closed (ErrClosed)", serr)
+	if _, serr := handle.Stat(); !closedHandleStatErr(serr) {
+		t.Fatalf("staging handle state after early failure = %v; want the platform's exact closed-handle error", serr)
 	}
 	assertNoStagingLeftovers(t, dir)
 	destAbsent(t, dir)
@@ -264,11 +273,17 @@ func TestUpdateStagingAfterCommitProvesBeforeRemoving(t *testing.T) {
 		if _, err := f.Write([]byte("staged")); err != nil {
 			t.Fatal(err)
 		}
-		if err := f.Close(); err != nil {
+		// Pin the owned file's identity from the STILL-OPEN creation
+		// handle, exactly like the production staging pin: on Windows a
+		// path-derived os.Stat FileInfo resolves its file ID lazily by
+		// re-opening the PATH at os.SameFile time, so an identity captured
+		// by path is a promise about the NAME, not the file. The handle's
+		// FileInfo carries the native file ID and is never re-resolved.
+		identity, err := f.Stat()
+		if err != nil {
 			t.Fatal(err)
 		}
-		identity, err := os.Stat(f.Name())
-		if err != nil {
+		if err := f.Close(); err != nil {
 			t.Fatal(err)
 		}
 		if err := updateStagingAfterCommit(dir, f.Name(), identity); err != nil {
@@ -284,9 +299,17 @@ func TestUpdateStagingAfterCommitProvesBeforeRemoving(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		owned.Close()
-		identity, err := os.Stat(owned.Name())
+		// Pin the before-identity from the open creation handle (the
+		// production-faithful pin), never from the path: on Windows an
+		// os.Stat(path) identity captured BEFORE the replacement lazily
+		// resolves to the REPLACEMENT at comparison time, silently
+		// reporting "same inode" and masking the exact name-reuse this
+		// guard exists to catch.
+		identity, err := owned.Stat()
 		if err != nil {
+			t.Fatal(err)
+		}
+		if err := owned.Close(); err != nil {
 			t.Fatal(err)
 		}
 		// A different inode now sits at the staging name (created first,
@@ -328,11 +351,14 @@ func TestStagingCommittedDetectsLinkedDestination(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.Close()
-	staged, err := os.Stat(f.Name())
+	// Handle-pinned staged identity, like the production pin (a
+	// path-derived identity is lazily resolved by the name on Windows
+	// and proves nothing about the file).
+	staged, err := f.Stat()
 	if err != nil {
 		t.Fatal(err)
 	}
+	f.Close()
 	dest := filepath.Join(dir, FileName)
 	if err := os.Link(f.Name(), dest); err != nil {
 		t.Skipf("cannot hardlink fixture: %v", err)
@@ -344,11 +370,11 @@ func TestStagingCommittedDetectsLinkedDestination(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f2.Close()
-	other, err := os.Stat(f2.Name())
+	other, err := f2.Stat() // handle-pinned, like the production pin
 	if err != nil {
 		t.Fatal(err)
 	}
+	f2.Close()
 	if stagingCommitted(dest, other) {
 		t.Fatalf("destination held by a different inode must not count as committed")
 	}

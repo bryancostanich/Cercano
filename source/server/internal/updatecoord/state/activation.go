@@ -91,7 +91,7 @@ const (
 // same-checkpoint re-saves are refused (the store is strictly forward, not
 // idempotent, at a checkpoint).
 var journalCheckpointSuccessors = map[JournalCheckpoint][]JournalCheckpoint{
-	JournalPrepared:        {JournalSwitchIntent, JournalRollbackIntent},
+	JournalPrepared:       {JournalSwitchIntent, JournalRollbackIntent},
 	JournalSwitchIntent:   {JournalSelected, JournalRollbackIntent},
 	JournalSelected:       {JournalHealthVerified, JournalRollbackIntent},
 	JournalHealthVerified: {JournalCleanupPending, JournalComplete},
@@ -449,8 +449,8 @@ func validateActivationJournal(j ActivationJournal, installID string) error {
 	// prior selection there is nothing to restore and this model defines
 	// no separate first-install cancellation checkpoint, so the record is
 	// refused rather than pretending a prior version exists.
-	if j.Checkpoint == JournalRollbackIntent && j.PriorSelectedVersion == "" {
-		return fmt.Errorf("%w: rollback intent requires an explicit prior selection", ErrInvalidRecord)
+	if (j.Checkpoint == JournalRollbackIntent || j.Checkpoint == JournalRestored) && j.PriorSelectedVersion == "" {
+		return fmt.Errorf("%w: rollback or restored state requires an explicit prior selection", ErrInvalidRecord)
 	}
 	return nil
 }
@@ -518,16 +518,16 @@ func decodeActivationJournal(data []byte) (ActivationJournal, error) {
 	}
 	seen := map[string]bool{}
 	requiredFields := map[string]bool{
-		"schema_version":            true,
-		"install_id":                true,
-		"op_id":                     true,
-		"target_version":            true,
-		"staged_version_dir":        true,
-		"verified_artifact_sha256":  true,
-		"prior_selected_version":    true,
+		"schema_version":             true,
+		"install_id":                 true,
+		"op_id":                      true,
+		"target_version":             true,
+		"staged_version_dir":         true,
+		"verified_artifact_sha256":   true,
+		"prior_selected_version":     true,
 		"prior_selection_generation": true,
-		"prior_selection_digest":    true,
-		"checkpoint":                true,
+		"prior_selection_digest":     true,
+		"checkpoint":                 true,
 	}
 	for scan.More() {
 		tok, err = scan.Token()
@@ -545,13 +545,13 @@ func decodeActivationJournal(data []byte) (ActivationJournal, error) {
 			return j, ErrInvalidRecord
 		}
 		// Reject null values for required fields
-		if len(value) == 4 && string(value) == "null" {
+		if bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
 			return j, fmt.Errorf("%w: null value not allowed for field %q", ErrInvalidRecord, key)
 		}
 	}
 	// Enforce exact canonical required field presence before decode
 	if len(requiredFields) > 0 {
-		return j, fmt.Errorf("%w: missing required fields: %v", ErrInvalidRecord, keysToStringSlice(requiredFields))
+		return j, fmt.Errorf("%w: missing required journal fields", ErrInvalidRecord)
 	}
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
@@ -568,13 +568,4 @@ func decodeActivationJournal(data []byte) (ActivationJournal, error) {
 		return ActivationJournal{}, err
 	}
 	return j, nil
-}
-
-// keysToStringSlice converts a map of keys to a string slice for error messages.
-func keysToStringSlice(m map[string]bool) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	return keys
 }

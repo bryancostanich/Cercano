@@ -44,14 +44,23 @@
 //   - No execution, no signature verification (that belongs to the
 //     acquisition boundary), no default paths and no default HOME.
 //   - No RemoveAll anywhere. If staging fails, cleanup removes ONLY the
-//     files and directories this staging itself created, and only when
-//     each object still matches the identity recorded at creation time
-//     (type, permission mode, byte count, and the content hash for
-//     completed files). Unknown, injected or replaced objects are left
-//     untouched, the staging directory is left in place, and the failure is
-//     reported as a *StageError carrying the retained directory and the
-//     retained object paths. Caller files outside the staging directory
-//     are never touched.
+//     files and directories this staging itself created, and only while
+//     each object is still the SAME object it was at creation time:
+//     os.SameFile against the FileInfo identity captured at creation is
+//     the primary proof, followed by a Unix-only permission-mode check,
+//     the recorded byte count and — for completed files — a hash read
+//     bounded to the recorded byte count. A replaced object is retained
+//     even when its replacement is byte-identical or an identical empty
+//     directory. Unknown, injected and replaced objects are left
+//     untouched AND reported, the staging directory is left in place —
+//     and is itself removed only when empty and still the same directory
+//     (same file identity) this staging created — and the failure is
+//     reported as a *StageError wrapping the original error and carrying
+//     the retained directory and the retained object paths. Caller files
+//     outside the staging directory are never touched.
+//   - Permission mode bits are a Unix concept. On Windows, permissions
+//     are ACLs, so no cleanup decision on Windows compares mode bits;
+//     object identity, byte counts and bounded hashes decide there.
 //
 // Caller preconditions (explicit, not checked here):
 //
@@ -80,6 +89,7 @@ import (
 	"io/fs"
 	"math"
 	"os"
+	"runtime"
 	"strings"
 )
 
@@ -119,12 +129,13 @@ type Staged struct {
 }
 
 // StageError reports a failed staging whose cleanup could not be completed
-// safely. Retained lists the member-relative object paths left in place
-// because they no longer matched the identity recorded at creation
-// (unknown, injected or replaced objects) or because removing them failed;
-// StageDir is the retained staging directory itself. The caller decides how
-// to surface and later collect the retained staging; this package never
-// removes anything it did not verifiably create.
+// safely. Retained lists the member-relative object paths left in place:
+// objects that are no longer the ones this staging created (replaced with
+// something else, even byte-identical), objects this staging never created
+// (unknown or injected), and objects whose removal failed. StageDir is the
+// retained staging directory itself. The caller decides how to surface and
+// later collect the retained staging; this package never removes anything
+// it did not verifiably create.
 type StageError struct {
 	// Err is the underlying staging failure.
 	Err error
@@ -207,6 +218,17 @@ func StageFile(ctx context.Context, archivePath, parentPath string, opts Options
 	if err != nil {
 		return nil, fmt.Errorf("archivecheck: creating the exclusive staging directory under %q: %w", parentPath, err)
 	}
+	// Capture the staging directory's creation identity (its FileInfo,
+	// usable with os.SameFile) immediately, so cleanup can never remove a
+	// replacement directory that merely occupies this path after a rename.
+	stageDirInfo, err := os.Lstat(stageDir)
+	if err != nil {
+		// The directory is brand new and empty; removing it cannot touch
+		// any caller object. This is a direct removal of the empty
+		// staging directory, never a RemoveAll.
+		os.Remove(stageDir)
+		return nil, fmt.Errorf("archivecheck: identifying the exclusive staging directory: %w", err)
+	}
 	root, err := os.OpenRoot(stageDir)
 	if err != nil {
 		// The directory is brand new and empty; removing it cannot touch
@@ -222,7 +244,7 @@ func StageFile(ctx context.Context, archivePath, parentPath string, opts Options
 		a = Archive{ReaderAt: bytes.NewReader(snap), Size: int64(len(snap))}
 	}
 	if err := stageExtract(ctx, a, opts, stage, man, root, ledger); err != nil {
-		retained, keepStage := cleanupStaging(root, stageDir, ledger)
+		retained, keepStage := cleanupStaging(root, stageDir, stageDirInfo, ledger)
 		if len(retained) > 0 || keepStage {
 			se := &StageError{Err: err, Retained: retained}
 			if keepStage {
@@ -285,16 +307,26 @@ func validateStageOptions(opts Options, stage StageOptions) error {
 }
 
 // stagedFile records the creation identity of one staged file: the policy
-// mode it was created with, whether the staging actually created it, how
-// many bytes were verifiably written, and — once the member completed — the
-// SHA-256 of those bytes. Cleanup removes a file only if it was created by
-// this staging and still matches this identity.
+// mode it was created with, the FileInfo identity captured through the
+// creation file handle, whether the staging actually created it, how many
+// bytes were verifiably written, and — once the member completed — the
+// SHA-256 of those bytes. Cleanup removes a file only while os.SameFile
+// still proves it is the same object this staging created.
 type stagedFile struct {
 	perm     fs.FileMode
+	identity fs.FileInfo
 	created  bool
 	written  int64
 	complete bool
 	hash     string
+}
+
+// stagedDir records one staged directory: its member path and the FileInfo
+// identity captured at creation, so cleanup removes only that directory
+// object and never a replacement occupying the same path.
+type stagedDir struct {
+	name     string
+	identity fs.FileInfo
 }
 
 // stageLedger records everything this staging created inside the staging
@@ -303,7 +335,7 @@ type stagedFile struct {
 type stageLedger struct {
 	files   map[string]*stagedFile // member path -> creation identity
 	fileOrd []string               // file creation order
-	dirs    []string               // directory creation order, parent first
+	dirs    []stagedDir            // directory creation order, parent first
 	dirSet  map[string]bool
 }
 
@@ -318,8 +350,8 @@ func (l *stageLedger) addFile(name string, perm fs.FileMode) *stagedFile {
 	return rec
 }
 
-func (l *stageLedger) addDir(name string) {
-	l.dirs = append(l.dirs, name)
+func (l *stageLedger) addDir(name string, identity fs.FileInfo) {
+	l.dirs = append(l.dirs, stagedDir{name: name, identity: identity})
 	l.dirSet[name] = true
 }
 
@@ -383,12 +415,19 @@ func (s *staging) ensureDir(name string) error {
 				}
 				return fmt.Errorf("archivecheck: staging: creating directory %q: %w", prefix, err)
 			}
+			// Capture the creation identity before the policy mode is
+			// applied, so cleanup can prove the object at this path is
+			// still this directory (os.SameFile), never a replacement.
+			id, ierr := s.root.Lstat(prefix)
+			if ierr != nil {
+				return fmt.Errorf("archivecheck: staging: identifying directory %q: %w", prefix, ierr)
+			}
 			// Normalize past the process umask so the trusted policy,
 			// not the caller's environment, decides the directory mode.
 			if err := s.root.Chmod(prefix, s.stage.DirMode); err != nil {
 				return fmt.Errorf("archivecheck: staging: setting directory %q mode: %w", prefix, err)
 			}
-			s.ledger.addDir(prefix)
+			s.ledger.addDir(prefix, id)
 		}
 		prefix += "/"
 	}
@@ -426,6 +465,13 @@ func (s *staging) copyMember(ctx context.Context, r io.Reader, name string, decl
 		return fmt.Errorf("archivecheck: staging: creating member file %q exclusively: %w", name, err)
 	}
 	rec.created = true
+	// Capture the creation identity through the open handle, so cleanup can
+	// prove the object at this path is still this file (os.SameFile) and
+	// never deletes an identical replacement.
+	if rec.identity, err = f.Stat(); err != nil {
+		f.Close()
+		return fmt.Errorf("archivecheck: staging: identifying member file %q: %w", name, err)
+	}
 	// Normalize past the process umask through the file handle, so the
 	// trusted policy — not the caller's environment — decides the mode.
 	if err := f.Chmod(perm); err != nil {
@@ -638,17 +684,24 @@ func (s *staging) finish() error {
 }
 
 // cleanupStaging removes, on a failed staging, ONLY what this staging
-// itself created — and only while each object still matches its recorded
-// creation identity. Files must still be regular, non-symlink, with the
-// recorded policy mode and byte count (and, for completed members, the
-// recorded content hash); directories are removed only when empty and only
-// if they are still the directories this staging created. Anything else —
-// unknown, injected or replaced objects, or removals that fail — is left
-// untouched. There is no RemoveAll, and no object outside the staging
-// directory is ever touched. It returns the member-relative retained paths
-// (anything left behind inside the staging directory) and whether the
-// staging directory itself had to be kept.
-func cleanupStaging(root *os.Root, stageDir string, ledger *stageLedger) (retained []string, keepStageDir bool) {
+// itself created — and only while each object is still the SAME object
+// whose FileInfo identity was captured at creation time (os.SameFile is
+// the primary proof, so a replacement is retained even when it is
+// byte-identical or an identical empty directory). Files must also still
+// be regular and non-symlink, carry the recorded byte count, and — for
+// completed members — the recorded content hash, read bounded to the
+// recorded byte count so a file that grew after creation can never turn
+// cleanup into an unbounded read. The permission-mode comparison is
+// Unix-only: Windows permissions are ACLs and mode bits there never decide
+// a cleanup. Unknown, injected or replaced objects, and removals that
+// fail, are left untouched AND reported; there is no RemoveAll, and no
+// object outside the staging directory is ever touched. The staging
+// directory itself is removed only when empty and still the same directory
+// (os.SameFile against the identity captured right after its creation) —
+// never a renamed original's replacement at the same path. It returns the
+// member-relative retained paths (created-but-unremovable, replaced and
+// unknown objects alike) and whether the staging directory had to be kept.
+func cleanupStaging(root *os.Root, stageDir string, stageDirInfo fs.FileInfo, ledger *stageLedger) (retained []string, keepStageDir bool) {
 	retain := func(path string) {
 		retained = append(retained, path)
 	}
@@ -666,10 +719,10 @@ func cleanupStaging(root *os.Root, stageDir string, ledger *stageLedger) (retain
 			retain(name)
 			continue
 		}
-		if !rec.created {
+		if !rec.created || rec.identity == nil {
 			// The path was occupied before staging could create the file
-			// (O_EXCL refused it): an unknown or injected object that is
-			// never ours to remove.
+			// (O_EXCL refused it), or its creation identity is missing:
+			// an object that is never provably ours to remove.
 			retain(name)
 			continue
 		}
@@ -677,17 +730,22 @@ func cleanupStaging(root *os.Root, stageDir string, ledger *stageLedger) (retain
 			retain(name) // replaced by a non-regular object
 			continue
 		}
-		if fi.Mode().Perm() != rec.perm.Perm() {
-			retain(name) // replaced: mode differs from the staging policy
+		if !os.SameFile(rec.identity, fi) {
+			retain(name) // replaced: another object, even byte-identical
+			continue
+		}
+		if runtime.GOOS != "windows" && fi.Mode().Perm() != rec.perm.Perm() {
+			// Unix-only mode-bit check; Windows permissions are ACLs.
+			retain(name)
 			continue
 		}
 		if fi.Size() != rec.written {
-			retain(name) // replaced or rewritten: size differs from the recorded byte count
+			retain(name) // rewritten in place since creation
 			continue
 		}
 		if rec.complete {
-			if digest, ok := hashInRoot(root, name); !ok || digest != rec.hash {
-				retain(name) // replaced: content hash differs from the staged member
+			if digest, ok := hashInRoot(root, name, rec.written); !ok || digest != rec.hash {
+				retain(name) // modified in place since creation
 				continue
 			}
 		}
@@ -696,37 +754,44 @@ func cleanupStaging(root *os.Root, stageDir string, ledger *stageLedger) (retain
 		}
 	}
 	// Directories, children first (creation order is parent-first), each
-	// removed only when it is still this staging's empty directory. A
-	// directory replaced by an identical-mode empty directory cannot be
-	// distinguished at cleanup time; it is empty, never a Follow of a link,
-	// and the staging directory is reported as retained either way when
-	// anything else remains.
+	// removed only while os.SameFile still proves it is this staging's
+	// empty directory — never an identical-mode empty replacement.
 	for i := len(ledger.dirs) - 1; i >= 0; i-- {
-		name := ledger.dirs[i]
-		fi, err := root.Lstat(name)
+		d := ledger.dirs[i]
+		fi, err := root.Lstat(d.name)
 		switch {
 		case err == nil:
 		case errors.Is(err, fs.ErrNotExist):
 			continue
 		default:
-			retain(name)
+			retain(d.name)
 			continue
 		}
 		if fi.Mode()&fs.ModeSymlink != 0 || !fi.IsDir() {
-			retain(name) // replaced by a non-directory object, or a link we never follow
+			retain(d.name) // replaced by a non-directory object, or a link we never follow
 			continue
 		}
-		if err := root.Remove(name); err != nil {
+		if d.identity == nil || !os.SameFile(d.identity, fi) {
+			retain(d.name) // replaced: another directory, even identical and empty
+			continue
+		}
+		if err := root.Remove(d.name); err != nil {
 			// Not an empty directory (or removal refused): preserve it.
-			retain(name)
+			retain(d.name)
 		}
 	}
+	// Anything still present inside the staging root that this staging did
+	// not create is an unknown or injected object: never removed, but
+	// reported so the cleanup report includes every retained object.
+	retained = append(retained, scanUnknownObjects(root, ledger)...)
 	if len(retained) > 0 {
 		return retained, true
 	}
-	// The staging directory itself: only when empty, and only if it is
-	// still the directory this staging created (not a replaced symlink).
-	// This direct removal never recurses into the staging directory.
+	// The staging directory itself: only when empty, and only while it is
+	// still the same directory this staging created (os.SameFile against
+	// the identity captured right after creation) — never a replacement
+	// occupying the path after a rename. This direct removal never
+	// recurses into the staging directory.
 	sfi, err := os.Lstat(stageDir)
 	if err != nil {
 		return nil, !errors.Is(err, fs.ErrNotExist)
@@ -734,24 +799,59 @@ func cleanupStaging(root *os.Root, stageDir string, ledger *stageLedger) (retain
 	if sfi.Mode()&os.ModeSymlink != 0 || !sfi.IsDir() {
 		return nil, true
 	}
+	if stageDirInfo == nil || !os.SameFile(stageDirInfo, sfi) {
+		return nil, true // the name no longer names this staging's directory
+	}
 	if err := os.Remove(stageDir); err != nil {
-		// Something unknown sits directly in the staging directory; leave
-		// the directory for the caller to inspect and report.
+		// Removal failed (a race or a platform refusal): leave the
+		// directory for the caller to inspect and report.
 		return nil, true
 	}
 	return nil, false
 }
 
-// hashInRoot hashes the content of a regular file at name inside root,
-// never following a link that escapes the staging directory.
-func hashInRoot(root *os.Root, name string) (string, bool) {
+// scanUnknownObjects reports, in lexical walk order, every object still
+// present inside the staging root that this staging did not create. It is
+// strictly read-only, never follows symlinks (fs.WalkDir does not descend
+// into them), and exists only so the cleanup report lists unknown
+// retained objects; it never removes anything.
+func scanUnknownObjects(root *os.Root, ledger *stageLedger) []string {
+	var unknown []string
+	_ = fs.WalkDir(root.FS(), ".", func(p string, d fs.DirEntry, err error) error {
+		switch {
+		case err != nil:
+			if p != "." {
+				unknown = append(unknown, p) // uninspectable: retained, never ours
+			}
+			return nil // keep scanning what else is inspectable
+		case p == ".":
+			return nil // the staging directory itself is reported separately
+		case ledger.files[p] != nil || ledger.dirSet[p]:
+			return nil // one of ours (created, or retained in place)
+		default:
+			unknown = append(unknown, p)
+			return nil
+		}
+	})
+	return unknown
+}
+
+// hashInRoot hashes at most max bytes of the content of a regular file at
+// name inside root, never following a link that escapes the staging
+// directory, and reports whether the file still holds exactly the recorded
+// byte count: a file that grew after creation cannot turn this read into
+// an unbounded one.
+func hashInRoot(root *os.Root, name string, max int64) (string, bool) {
 	f, err := root.Open(name)
 	if err != nil {
 		return "", false
 	}
 	defer f.Close()
 	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
+	// The limit of max+1 bytes proves growth past the recorded count
+	// without ever reading more than one byte past it.
+	n, err := io.Copy(h, io.LimitReader(f, max+1))
+	if err != nil || n != max {
 		return "", false
 	}
 	return hex.EncodeToString(h.Sum(nil)), true

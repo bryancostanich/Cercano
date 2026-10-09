@@ -339,13 +339,18 @@ func TestStageOptionsRefusedWhenInconsistent(t *testing.T) {
 }
 
 // newUnitStagingRoot creates an exclusive staging directory under a private
-// parent (like StageFile does) and opens its directory handle for direct
+// parent (like StageFile does), captures its creation identity (for
+// os.SameFile in cleanup) and opens its directory handle for direct
 // stageExtract-level tests that need to inject objects first.
-func newUnitStagingRoot(t *testing.T) (parent, stageDir string, root *os.Root) {
+func newUnitStagingRoot(t *testing.T) (parent, stageDir string, stageDirInfo os.FileInfo, root *os.Root) {
 	t.Helper()
 	parent = t.TempDir()
 	var err error
 	stageDir, err = os.MkdirTemp(parent, "cercano-stage-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stageDirInfo, err = os.Lstat(stageDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -354,7 +359,7 @@ func newUnitStagingRoot(t *testing.T) (parent, stageDir string, root *os.Root) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { root.Close() })
-	return parent, stageDir, root
+	return parent, stageDir, stageDirInfo, root
 }
 
 // stageFixture stages fixture bytes directly through stageExtract (the
@@ -410,7 +415,7 @@ func TestStageCanceledMidCopyCleansUpCreatedFilesAndPreservesUnknownObjects(t *t
 	data := buildZip(t, entries)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	_, stageDir, root := newUnitStagingRoot(t)
+	_, stageDir, stageDirInfo, root := newUnitStagingRoot(t)
 	// Unknown injected objects cleanup must preserve.
 	if err := os.WriteFile(filepath.Join(stageDir, "unknown-file"), []byte("keep-me"), 0o644); err != nil {
 		t.Fatal(err)
@@ -431,7 +436,7 @@ func TestStageCanceledMidCopyCleansUpCreatedFilesAndPreservesUnknownObjects(t *t
 	if len(ledger.fileOrd) == 0 {
 		t.Fatal("expected at least one member file to have been created (and accounted) when cancellation hit")
 	}
-	retained, keepStage := cleanupStaging(root, stageDir, ledger)
+	retained, keepStage := cleanupStaging(root, stageDir, stageDirInfo, ledger)
 	// Everything the staging created is gone — including the partial
 	// member file, whose byte count was accounted.
 	for _, name := range ledger.fileOrd {
@@ -446,10 +451,11 @@ func TestStageCanceledMidCopyCleansUpCreatedFilesAndPreservesUnknownObjects(t *t
 	if fi, err := os.Lstat(filepath.Join(stageDir, "unknown-dir")); err != nil || !fi.IsDir() {
 		t.Errorf("unknown injected directory was not preserved: %v", err)
 	}
-	// The staging directory itself must be reported as retained, because
-	// the preserved unknown objects keep it non-empty.
-	if len(retained) != 0 {
-		t.Errorf("expected no created objects retained, got %v", retained)
+	// The unknown objects are also REPORTED as retained (the cleanup
+	// report includes objects the staging did not create), and the
+	// staging directory itself is kept because they keep it non-empty.
+	if len(retained) != 2 || retained[0] != "unknown-dir" || retained[1] != "unknown-file" {
+		t.Errorf("retained = %v, want the unknown objects [unknown-dir unknown-file] reported", retained)
 	}
 	if !keepStage {
 		t.Error("expected the staging directory to be kept while unknown objects remain in it")
@@ -460,7 +466,7 @@ func TestStageCopyMemberCanceledMidCopyRemovesPartialFile(t *testing.T) {
 	// Deterministic mid-copy cancellation: the member's first read serves
 	// two bytes, then the context is canceled. The partial file is fully
 	// accounted in the ledger and removed by cleanup.
-	_, stageDir, root := newUnitStagingRoot(t)
+	_, stageDir, stageDirInfo, root := newUnitStagingRoot(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	ledger := newStageLedger()
@@ -477,7 +483,7 @@ func TestStageCopyMemberCanceledMidCopyRemovesPartialFile(t *testing.T) {
 	if len(ledger.fileOrd) != 1 || ledger.fileOrd[0] != "cercano" {
 		t.Fatalf("ledger = %v, want the partial member accounted", ledger.fileOrd)
 	}
-	retained, keepStage := cleanupStaging(root, stageDir, ledger)
+	retained, keepStage := cleanupStaging(root, stageDir, stageDirInfo, ledger)
 	if len(retained) != 0 || keepStage {
 		t.Errorf("cleanup retained %v keepStage=%v, want a fully cleaned empty staging directory", retained, keepStage)
 	}
@@ -495,7 +501,7 @@ func TestStageOverwriteForbiddenInjectedFilePreserved(t *testing.T) {
 	})
 	opts := Options{Format: Zip, Layout: Layout{Required: []string{"cercano", "cercano-cli"}}, Bounds: testBounds()}
 	policy := StageOptions{FileMode: 0o644, ExecutableMode: 0o755, DirMode: 0o755, StagingPattern: "s-"}
-	_, stageDir, root := newUnitStagingRoot(t)
+	_, stageDir, stageDirInfo, root := newUnitStagingRoot(t)
 	injected := filepath.Join(stageDir, "cercano-cli")
 	if err := os.WriteFile(injected, []byte("injected-content"), 0o600); err != nil {
 		t.Fatal(err)
@@ -505,7 +511,7 @@ func TestStageOverwriteForbiddenInjectedFilePreserved(t *testing.T) {
 		Archive{ReaderAt: bytes.NewReader(data), Size: int64(len(data))},
 		root)
 	wantError(t, serr, "exclusively")
-	retained, keepStage := cleanupStaging(root, stageDir, ledger)
+	retained, keepStage := cleanupStaging(root, stageDir, stageDirInfo, ledger)
 	if !keepStage {
 		t.Error("staging directory holding a preserved injected object must be kept")
 	}
@@ -540,7 +546,7 @@ func TestStageReplacedDirectoryObjectPreserved(t *testing.T) {
 	data := buildTarGz(t, entries)
 	opts := Options{Format: TarGz, Layout: Layout{Required: []string{"bin/cercano", "bin/cercano-cli"}}, Bounds: testBounds()}
 	policy := StageOptions{FileMode: 0o644, ExecutableMode: 0o755, DirMode: 0o755, StagingPattern: "s-"}
-	_, stageDir, root := newUnitStagingRoot(t)
+	_, stageDir, stageDirInfo, root := newUnitStagingRoot(t)
 	squatter := filepath.Join(stageDir, "bin")
 	if err := os.WriteFile(squatter, []byte("do-not-touch"), 0o644); err != nil {
 		t.Fatal(err)
@@ -550,12 +556,14 @@ func TestStageReplacedDirectoryObjectPreserved(t *testing.T) {
 		Archive{Reader: bytes.NewReader(data)},
 		root)
 	wantError(t, serr, "refusing to overwrite or follow it")
-	retained, keepStage := cleanupStaging(root, stageDir, ledger)
+	retained, keepStage := cleanupStaging(root, stageDir, stageDirInfo, ledger)
 	if !keepStage {
 		t.Error("staging directory holding a preserved squatter object must be kept")
 	}
-	if len(retained) != 0 {
-		t.Errorf("retained = %v, want none from the staging itself (no member file was created)", retained)
+	// The squatter is not a member of the creation ledger, but the
+	// cleanup report must still list it as a retained unknown object.
+	if len(retained) != 1 || retained[0] != "bin" {
+		t.Errorf("retained = %v, want the reported squatter [\"bin\"]", retained)
 	}
 	// The squatter is preserved verbatim.
 	got, err := os.ReadFile(squatter)
@@ -590,7 +598,7 @@ func TestStageSymlinkAtMemberPathNeverFollowedOrOverwritten(t *testing.T) {
 	})
 	opts := Options{Format: Zip, Layout: Layout{Required: []string{"cercano", "cercano-cli"}}, Bounds: testBounds()}
 	policy := StageOptions{FileMode: 0o644, ExecutableMode: 0o755, DirMode: 0o755, StagingPattern: "s-"}
-	_, stageDir, root := newUnitStagingRoot(t)
+	_, stageDir, stageDirInfo, root := newUnitStagingRoot(t)
 	referent := filepath.Join(t.TempDir(), "referent")
 	if err := os.WriteFile(referent, []byte("referent-body"), 0o644); err != nil {
 		t.Fatal(err)
@@ -604,7 +612,7 @@ func TestStageSymlinkAtMemberPathNeverFollowedOrOverwritten(t *testing.T) {
 		Archive{ReaderAt: bytes.NewReader(data), Size: int64(len(data))},
 		root)
 	wantError(t, serr, "exclusively")
-	retained, keepStage := cleanupStaging(root, stageDir, ledger)
+	retained, keepStage := cleanupStaging(root, stageDir, stageDirInfo, ledger)
 	if !keepStage {
 		t.Error("staging directory holding a preserved symlink must be kept")
 	}
@@ -625,7 +633,7 @@ func TestStageBoundsEnforcedAgainDuringCopy(t *testing.T) {
 	// against the bytes it ACTUALLY copies — here a declared 4-byte member
 	// whose stream tries to hand over 6 bytes under a 4-byte total bound.
 	// The partial file is accounted in the ledger and removed by cleanup.
-	_, stageDir, root := newUnitStagingRoot(t)
+	_, stageDir, stageDirInfo, root := newUnitStagingRoot(t)
 	opts := Options{
 		Format: TarGz,
 		Layout: Layout{Required: []string{"small"}},
@@ -650,13 +658,160 @@ func TestStageBoundsEnforcedAgainDuringCopy(t *testing.T) {
 	if len(ledger.fileOrd) != 1 {
 		t.Fatalf("ledger = %v, want the failed member accounted", ledger.fileOrd)
 	}
-	retained, keepStage := cleanupStaging(root, stageDir, ledger)
+	retained, keepStage := cleanupStaging(root, stageDir, stageDirInfo, ledger)
 	if len(retained) != 0 || keepStage {
 		t.Errorf("cleanup retained %v keepStage=%v, want a fully cleaned empty staging directory", retained, keepStage)
 	}
 	if fi, err := os.Lstat(stageDir); err == nil {
 		_ = fi
 		t.Error("staging directory should have been removed once empty")
+	}
+}
+
+func TestCleanupRetainsIdenticalReplacementFile(t *testing.T) {
+	// Identity, not content, decides cleanup: a completed member whose
+	// path is re-occupied by a byte-identical, mode-identical replacement
+	// file must be retained, while the member this staging genuinely
+	// created (here a partial, accounted file) is removed.
+	_, stageDir, stageDirInfo, root := newUnitStagingRoot(t)
+	ctx := context.Background()
+	ledger := newStageLedger()
+	body := "identical-body"
+	sum := sha256.Sum256([]byte(body))
+	s := &staging{
+		opts: Options{Bounds: testBounds()}, stage: stagePolicy(), root: root,
+		expected: map[string]Member{
+			"keep":    {Name: "keep", Size: int64(len(body)), SHA256: hex.EncodeToString(sum[:])},
+			"partial": {Name: "partial", Size: 6, SHA256: hex.EncodeToString(make([]byte, 32))},
+		},
+		v: newValidator(Options{Bounds: testBounds()}), ledger: ledger,
+	}
+	if err := s.copyMember(ctx, strings.NewReader(body), "keep", int64(len(body))); err != nil {
+		t.Fatal(err)
+	}
+	// Replace the completed member with an IDENTICAL file: same bytes,
+	// same policy mode, a different object on disk.
+	p := filepath.Join(stageDir, "keep")
+	if err := os.Remove(p); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(p, 0o644); err != nil { // exact policy mode, past any umask
+		t.Fatal(err)
+	}
+	// A second member stays genuinely ours: partial via mid-copy cancel.
+	pctx, pcancel := context.WithCancel(context.Background())
+	defer pcancel()
+	r := &cancelAfterReader{r: strings.NewReader("abcdef"), after: 2, ctx: pctx, cancel: pcancel}
+	if err := s.copyMember(pctx, r, "partial", 6); err == nil {
+		t.Fatal("expected the partial member copy to fail")
+	}
+	retained, keepStage := cleanupStaging(root, stageDir, stageDirInfo, ledger)
+	if len(retained) != 1 || retained[0] != "keep" {
+		t.Errorf("retained = %v, want the identical replacement [\"keep\"]", retained)
+	}
+	if !keepStage {
+		t.Error("a retained replacement must keep the staging directory in place")
+	}
+	if got, err := os.ReadFile(p); err != nil || string(got) != body {
+		t.Errorf("the identical replacement file was removed or altered: %v %q", err, got)
+	}
+	if _, err := root.Lstat("partial"); err == nil {
+		t.Error("the genuinely created partial member must be removed by cleanup")
+	}
+}
+
+func TestCleanupRetainsIdenticalReplacementDirectory(t *testing.T) {
+	// A created directory whose path is re-occupied by an identical empty
+	// directory (same mode, empty) must be retained; the directory this
+	// staging still provably owns is removed.
+	_, stageDir, stageDirInfo, root := newUnitStagingRoot(t)
+	ledger := newStageLedger()
+	s := &staging{
+		opts: Options{Bounds: testBounds()}, stage: stagePolicy(), root: root,
+		expected: map[string]Member{}, v: newValidator(Options{Bounds: testBounds()}), ledger: ledger,
+	}
+	if err := s.ensureDir("replaced"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ensureDir("ours"); err != nil {
+		t.Fatal(err)
+	}
+	if err := root.Remove("replaced"); err != nil {
+		t.Fatal(err)
+	}
+	if err := root.Mkdir("replaced", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := root.Chmod("replaced", 0o755); err != nil { // identical policy mode
+		t.Fatal(err)
+	}
+	retained, keepStage := cleanupStaging(root, stageDir, stageDirInfo, ledger)
+	if len(retained) != 1 || retained[0] != "replaced" {
+		t.Errorf("retained = %v, want the identical replacement directory [\"replaced\"]", retained)
+	}
+	if !keepStage {
+		t.Error("a retained replacement directory must keep the staging directory in place")
+	}
+	if fi, err := os.Lstat(filepath.Join(stageDir, "replaced")); err != nil || !fi.IsDir() {
+		t.Errorf("the identical replacement directory was removed or altered: %v", err)
+	}
+	if _, err := root.Lstat("ours"); err == nil {
+		t.Error("the genuinely created empty directory must be removed by cleanup")
+	}
+}
+
+func TestCleanupRenamedStagingDirectoryIdentityProtected(t *testing.T) {
+	// The staging directory is renamed away and a fresh replacement sits
+	// at its old name: cleanup must keep the directory reported and never
+	// remove the replacement, because the name no longer carries the
+	// recorded creation identity. If the platform refuses the rename
+	// (e.g. Windows with the open root handle), the protection
+	// assertions still hold for the original directory.
+	parent, stageDir, stageDirInfo, root := newUnitStagingRoot(t)
+	if err := os.WriteFile(filepath.Join(stageDir, "unknown"), []byte("keep-me"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ledger := newStageLedger() // nothing was created by "this staging"
+	renamed := filepath.Join(parent, "renamed-stage")
+	renamedOK := true
+	if err := os.Rename(stageDir, renamed); err != nil {
+		renamedOK = false // the platform keeps the original in place
+	} else if err := os.Mkdir(stageDir, 0o755); err != nil {
+		t.Fatalf("creating the replacement staging directory: %v", err)
+	}
+	retained, keepStage := cleanupStaging(root, stageDir, stageDirInfo, ledger)
+	if !keepStage {
+		t.Error("the staging directory must be kept while retained objects remain in it")
+	}
+	if len(retained) != 1 || retained[0] != "unknown" {
+		t.Errorf("retained = %v, want the reported unknown object [\"unknown\"]", retained)
+	}
+	if renamedOK {
+		// The replacement at the old name survives untouched and empty.
+		fi, err := os.Lstat(stageDir)
+		if err != nil || !fi.IsDir() {
+			t.Fatalf("the replacement staging directory was removed or altered: %v", err)
+		}
+		if os.SameFile(stageDirInfo, fi) {
+			t.Error("a replacement at the staging path must never pass the recorded identity")
+		}
+		es, err := os.ReadDir(stageDir)
+		if err != nil || len(es) != 0 {
+			t.Errorf("the replacement staging directory must stay empty and untouched, got %d entries (%v)", len(es), err)
+		}
+		// The renamed original still holds the unknown object, verbatim.
+		if got, err := os.ReadFile(filepath.Join(renamed, "unknown")); err != nil || string(got) != "keep-me" {
+			t.Errorf("the renamed staging directory was not preserved verbatim: %v %q", err, got)
+		}
+	} else {
+		// Rename refused: the original directory keeps its identity and
+		// content; only the unknown object is reported retained.
+		if got, err := os.ReadFile(filepath.Join(stageDir, "unknown")); err != nil || string(got) != "keep-me" {
+			t.Errorf("the original staging directory was not preserved verbatim: %v %q", err, got)
+		}
 	}
 }
 

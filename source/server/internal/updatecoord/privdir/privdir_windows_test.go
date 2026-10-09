@@ -4,6 +4,7 @@ package privdir
 
 import (
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -225,6 +226,34 @@ func TestEnsureRejectsNonCanonicalPath(t *testing.T) {
 		if _, err := Ensure(p); !errors.Is(err, ErrInvalidPath) {
 			t.Fatalf("Ensure(%q) err = %v; want ErrInvalidPath", p, err)
 		}
+	}
+}
+
+// TestVerifyExistingClassifiesWithoutMutating proves VerifyExisting is
+// verify-only on Windows: it accepts an already-private directory, and
+// refuses a path that does not exist WRAPPING fs.ErrNotExist while
+// never creating it; the existing classification refusals (unsafe ACL,
+// non-directory, reparse point, non-canonical path) are exercised in the
+// Ensure fixtures above, which use the same native primitives.
+func TestVerifyExistingClassifiesWithoutMutating(t *testing.T) {
+	private := filepath.Join(t.TempDir(), "private")
+	if _, err := Ensure(private); err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyExisting(private); err != nil {
+		t.Fatalf("VerifyExisting(private) err = %v; want nil", err)
+	}
+
+	absent := filepath.Join(t.TempDir(), "absent")
+	if err := VerifyExisting(absent); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("VerifyExisting(absent) err = %v; want fs.ErrNotExist", err)
+	}
+	if _, lerr := os.Lstat(absent); !errors.Is(lerr, fs.ErrNotExist) {
+		t.Fatalf("absent path was created by VerifyExisting: %v", lerr)
+	}
+
+	if err := VerifyExisting("relative/dir"); !errors.Is(err, ErrInvalidPath) {
+		t.Fatalf("VerifyExisting(relative) err = %v; want ErrInvalidPath", err)
 	}
 }
 

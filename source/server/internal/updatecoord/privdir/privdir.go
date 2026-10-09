@@ -115,3 +115,19 @@ func Ensure(dir string) (created bool, err error) {
 	}
 	return ensure(dir)
 }
+
+// VerifyExisting is the verify-only counterpart of Ensure: it classifies
+// an EXISTING directory against the same approved private policy without
+// ever creating, chmodding, rewriting or repairing anything. An absent
+// directory is refused (its error wraps fs.ErrNotExist) and never
+// provisioned; an unsafe existing policy is refused unchanged. Callers
+// that must provision use Ensure; callers that must not mutate — a
+// publisher re-verifying the directory it is about to write into — use
+// VerifyExisting so a single call classifies the directory with no
+// exists-then-provision race window at all.
+func VerifyExisting(dir string) error {
+	if !filepath.IsAbs(dir) || filepath.Clean(dir) != dir {
+		return fmt.Errorf("%w: %q is not an absolute, clean path", ErrInvalidPath, dir)
+	}
+	return verifyExistingDir(dir)
+}

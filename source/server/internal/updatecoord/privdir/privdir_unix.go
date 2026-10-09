@@ -30,6 +30,12 @@ func ensure(dir string) (created bool, err error) {
 	return false, nil
 }
 
+// verifyExistingDir is the Unix half of VerifyExisting: pure
+// verification through verifyExistingUnix; nothing is ever created.
+func verifyExistingDir(dir string) error {
+	return verifyExistingUnix(dir)
+}
+
 // verifyExistingUnix verifies an existing directory against the approved
 // per-user policy: owned by the current REAL uid (os.Getuid — never an
 // environment-supplied name), mode 0o7XX (no group or other access) with

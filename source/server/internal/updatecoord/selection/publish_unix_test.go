@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"cercano/source/server/internal/updatecoord/activation"
-	"cercano/source/server/internal/updatecoord/exclusion"
 	"cercano/source/server/internal/updatecoord/privdir"
 )
 
@@ -18,27 +17,30 @@ import (
 // only constructible (and only refused) on Unix here; the same refusals
 // are compile-checked on Windows and exercised by native Windows CI when
 // it exists.
-
-// acquireLockElsewhere returns a REAL held update-exclusion handle on a
-// separate test-owned private directory, for cases where the publication
-// directory itself is unsafe (and therefore cannot host the lock file).
-func acquireLockElsewhere(t *testing.T) *exclusion.Handle {
-	t.Helper()
-	return acquireUpdateLock(t, newPrivateDir(t))
-}
+//
+// Binding note: the exclusion lock file lives INSIDE the publication
+// directory, and the guarded-use API proves the handle was acquired for
+// exactly that directory — so an unsafe publication directory can never
+// be reached through a foreign-bound handle (that is a binding refusal,
+// covered in publish_guard_test.go). Every test below therefore binds
+// the handle while the directory is still safe, and only THEN makes the
+// directory unsafe, which is also the realistic mid-flight corruption
+// the verify-only classification must catch.
 
 // TestPublishRefusesPermissiveDirectoryUnchanged proves an unsafe
-// permission root is refused through the privdir guard and nothing is
-// rewritten or published (the unsafe mode is left exactly as found).
+// permission root is refused through the verify-only privdir
+// classification and nothing is rewritten or published (the unsafe mode
+// is left exactly as found).
 func TestPublishRefusesPermissiveDirectoryUnchanged(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "permissive")
-	if err := os.Mkdir(dir, 0o777); err != nil {
+	if err := os.Mkdir(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
+	// Bind first, while the directory is still safe to lock in.
+	lock := acquireUpdateLock(t, dir)
 	if err := os.Chmod(dir, 0o777); err != nil {
 		t.Fatal(err)
 	}
-	lock := acquireLockElsewhere(t)
 	gen1 := testSelection(1, "1.0.1")
 	fixture := canonicalBytes(t, gen1)
 	if err := os.WriteFile(filepath.Join(dir, FileName), fixture, 0o600); err != nil {
@@ -58,27 +60,66 @@ func TestPublishRefusesPermissiveDirectoryUnchanged(t *testing.T) {
 	if got, rerr := os.ReadFile(filepath.Join(dir, FileName)); rerr != nil || string(got) != string(fixture) {
 		t.Fatalf("destination changed or unreadable: (%q, %v)", got, rerr)
 	}
+	assertNoStagingLeftovers(t, dir)
 }
 
 // TestPublishRefusesSymlinkedDirectoryUnchanged proves a symlinked
-// publication root is refused (never followed, never rewritten).
+// publication root is refused (never followed, never rewritten) even
+// when the handle is correctly bound to the path: the real directory is
+// moved away and a symlink is left in its place before the publish.
 func TestPublishRefusesSymlinkedDirectoryUnchanged(t *testing.T) {
 	root := t.TempDir()
 	real := filepath.Join(root, "real")
 	if _, err := privdir.Ensure(real); err != nil {
 		t.Fatal(err)
 	}
-	link := filepath.Join(root, "link")
-	if err := os.Symlink(real, link); err != nil {
+	// Bind while the path is still the real private directory.
+	lock := acquireUpdateLock(t, real)
+	moved := filepath.Join(root, "moved")
+	if err := os.Rename(real, moved); err != nil {
+		t.Skipf("cannot move the locked fixture directory: %v", err)
+	}
+	if err := os.Symlink(moved, real); err != nil {
 		t.Skipf("cannot create symlink fixture: %v", err)
 	}
-	lock := acquireLockElsewhere(t)
-	_, err := Publish(context.Background(), link, lock, Expected{Absent: true}, testSelection(1, "1.0.1"))
+	_, err := Publish(context.Background(), real, lock, Expected{Absent: true}, testSelection(1, "1.0.1"))
 	if !errors.Is(err, ErrUnsafeDirectory) || !errors.Is(err, privdir.ErrUnsafePath) {
 		t.Fatalf("Publish(symlink dir) err = %v; want ErrUnsafeDirectory wrapping privdir.ErrUnsafePath", err)
 	}
-	if info, lerr := os.Lstat(link); lerr != nil || info.Mode()&os.ModeSymlink == 0 {
+	if info, lerr := os.Lstat(real); lerr != nil || info.Mode()&os.ModeSymlink == 0 {
 		t.Fatalf("symlink root was followed or rewritten: (%v, %v)", info, lerr)
+	}
+	got, rerr := filepath.EvalSymlinks(real)
+	if rerr != nil {
+		t.Fatalf("symlink target became unreadable: %v", rerr)
+	}
+	want, werr := filepath.EvalSymlinks(moved)
+	if werr != nil || got != want {
+		t.Fatalf("symlink target changed: resolved %q; want %q (was %q) left in place", got, want, moved)
+	}
+}
+
+// TestPublishRefusesDirectoryReplacedByRegularFile proves the verify-only
+// classification refuses a publication path that has become a regular
+// file: the handle stays correctly bound (it was acquired when the
+// directory existed), so the refusal is purely privdir's, never a
+// provision attempt.
+func TestPublishRefusesDirectoryReplacedByRegularFile(t *testing.T) {
+	dir := newPrivateDir(t)
+	lock := acquireUpdateLock(t, dir)
+	replaced := filepath.Join(t.TempDir(), "moved-private")
+	if err := os.Rename(dir, replaced); err != nil {
+		t.Skipf("cannot move the locked fixture directory: %v", err)
+	}
+	if err := os.WriteFile(dir, []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Publish(context.Background(), dir, lock, Expected{Absent: true}, testSelection(1, "1.0.1"))
+	if !errors.Is(err, ErrUnsafeDirectory) || !errors.Is(err, privdir.ErrNotDirectory) {
+		t.Fatalf("Publish(regular file at dir path) err = %v; want ErrUnsafeDirectory wrapping privdir.ErrNotDirectory", err)
+	}
+	if got, rerr := os.ReadFile(dir); rerr != nil || string(got) != "not a directory" {
+		t.Fatalf("entry at the directory path was rewritten or removed: (%q, %v)", got, rerr)
 	}
 }
 

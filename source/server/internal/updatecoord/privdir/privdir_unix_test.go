@@ -4,6 +4,7 @@ package privdir
 
 import (
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -102,5 +103,77 @@ func TestEnsureRejectsNonCanonicalPath(t *testing.T) {
 		if _, err := Ensure(p); !errors.Is(err, ErrInvalidPath) {
 			t.Fatalf("Ensure(%q) err = %v; want ErrInvalidPath", p, err)
 		}
+	}
+}
+
+// TestVerifyExistingClassifiesWithoutMutating proves VerifyExisting is
+// verify-only: it accepts an already-private directory, refuses a path
+// that does not exist WRAPPING fs.ErrNotExist while never creating it,
+// and refuses existing unsafe/invalid classifications unchanged, while
+// never writing, chmodding, or creating anything in any case.
+func TestVerifyExistingClassifiesWithoutMutating(t *testing.T) {
+	// Accepted: an already-private directory.
+	private := filepath.Join(t.TempDir(), "private")
+	if _, err := Ensure(private); err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyExisting(private); err != nil {
+		t.Fatalf("VerifyExisting(private) err = %v; want nil", err)
+	}
+	// Refused, never created: an absent path wraps fs.ErrNotExist.
+	absent := filepath.Join(t.TempDir(), "absent")
+	if err := VerifyExisting(absent); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("VerifyExisting(absent) err = %v; want fs.ErrNotExist", err)
+	}
+	if _, lerr := os.Lstat(absent); !errors.Is(lerr, fs.ErrNotExist) {
+		t.Fatalf("absent path was created by VerifyExisting: %v", lerr)
+	}
+	// Refused unchanged: a permissive existing directory.
+	permissive := filepath.Join(t.TempDir(), "permissive")
+	if err := os.Mkdir(permissive, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyExisting(permissive); !errors.Is(err, ErrUnsafeACL) {
+		t.Fatalf("VerifyExisting(permissive) err = %v; want ErrUnsafeACL", err)
+	}
+	info, err := os.Lstat(permissive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o755 {
+		t.Fatalf("mode changed to %o; refused targets must be left unchanged", info.Mode().Perm())
+	}
+	// Refused: existing non-directory sibling.
+	sibling := filepath.Join(t.TempDir(), "sibling")
+	if err := os.WriteFile(sibling, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyExisting(sibling); !errors.Is(err, ErrNotDirectory) {
+		t.Fatalf("VerifyExisting(sibling file) err = %v; want ErrNotDirectory", err)
+	}
+	// Refused: symlink.
+	root := t.TempDir()
+	target := filepath.Join(root, "target")
+	if err := os.Mkdir(target, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("cannot create symlink fixture: %v", err)
+	}
+	if err := VerifyExisting(link); !errors.Is(err, ErrUnsafePath) {
+		t.Fatalf("VerifyExisting(symlink) err = %v; want ErrUnsafePath", err)
+	}
+	// Refused: non-canonical caller-supplied path, no defaults applied.
+	if err := VerifyExisting("relative/dir"); !errors.Is(err, ErrInvalidPath) {
+		t.Fatalf("VerifyExisting(relative) err = %v; want ErrInvalidPath", err)
+	}
+	// Nothing was ever created alongside the tested paths.
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("VerifyExisting created unexpected entries: %q", entries)
 	}
 }

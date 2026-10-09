@@ -5,6 +5,7 @@ package privdir
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -263,6 +264,22 @@ func ensure(dir string) (created bool, err error) {
 	}
 }
 
+// verifyExistingDir is the Windows half of VerifyExisting: capture the
+// real token identity and the approved principal set, then classify the
+// existing directory through the handle-anchored verifier. Nothing is
+// ever created, chmodded or rewritten.
+func verifyExistingDir(dir string) error {
+	id, err := currentIdentity()
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrUnverifiedIdentity, err)
+	}
+	policy, err := newAccessPolicy(id)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrUnverifiedIdentity, err)
+	}
+	return verifyExisting(dir, policy)
+}
+
 // verifyExisting classifies an existing entry through a HANDLE anchored at
 // the path: CreateFile with FILE_FLAG_OPEN_REPARSE_POINT opens a reparse
 // point itself instead of traversing it, and every subsequent query
@@ -301,7 +318,10 @@ func verifyExisting(dir string, policy accessPolicy) error {
 	return policy.verifyDACL(sd)
 }
 
-// openDirectoryHandle opens a handle for READ_CONTROL and attributes.
+// openDirectoryHandle opens a handle for READ_CONTROL and attributes. A
+// missing target (or missing parent) is reported wrapping fs.ErrNotExist
+// so verify-only callers can classify absence without a separate
+// existence probe.
 func openDirectoryHandle(dir string) (windows.Handle, error) {
 	p16, err := windows.UTF16PtrFromString(dir)
 	if err != nil {
@@ -314,6 +334,9 @@ func openDirectoryHandle(dir string) (windows.Handle, error) {
 		windows.FILE_FLAG_BACKUP_SEMANTICS|windows.FILE_FLAG_OPEN_REPARSE_POINT,
 		0)
 	if err != nil {
+		if errors.Is(err, windows.ERROR_FILE_NOT_FOUND) || errors.Is(err, windows.ERROR_PATH_NOT_FOUND) {
+			return 0, fmt.Errorf("privdir: open %q for verification: %w", dir, fs.ErrNotExist)
+		}
 		return 0, fmt.Errorf("privdir: open %q for verification: %w", dir, err)
 	}
 	return handle, nil

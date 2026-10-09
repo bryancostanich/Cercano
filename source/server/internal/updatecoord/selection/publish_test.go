@@ -7,8 +7,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -244,12 +246,15 @@ func TestPublishRefusesInvalidRequests(t *testing.T) {
 	gen1 := testSelection(1, "1.0.1")
 	d1 := writeFixture(t, dir, gen1)
 	gen2 := testSelection(2, "1.0.2")
-	plainFilePath := filepath.Join(t.TempDir(), "not-a-dir")
-	if err := os.WriteFile(plainFilePath, []byte("x"), 0o600); err != nil {
-		t.Fatal(err)
-	}
 	canceled, cancel := context.WithCancel(context.Background())
 	cancel()
+	// The publication directory hosts the exclusion lock file, so a
+	// correctly-bound handle cannot exist for an absent path or a regular
+	// file: those rows would only ever exercise the guarded-use binding
+	// refusal (covered by TestPublishRefusesNonLiveExclusionHandles), not
+	// the privdir classification. The genuinely-bound unsafe-directory
+	// refusals are covered by TestPublishRefusesAbsentDirectoryWith
+	// BoundHandle and the publish_unix_test.go rework.
 	cases := []struct {
 		name     string
 		ctx      context.Context
@@ -262,8 +267,7 @@ func TestPublishRefusesInvalidRequests(t *testing.T) {
 		{"canceled context", canceled, dir, lock, Expected{Absent: true}, gen1, ErrCanceled},
 		{"nil exclusion handle", context.Background(), dir, nil, Expected{Absent: true}, gen1, ErrInvalidRequest},
 		{"relative directory", context.Background(), "relative/dir", lock, Expected{Absent: true}, gen1, ErrInvalidRequest},
-		{"provision refused: absent directory", context.Background(), filepath.Join(t.TempDir(), "missing"), lock, Expected{Absent: true}, gen1, ErrUnsafeDirectory},
-		{"directory is a regular file", context.Background(), plainFilePath, lock, Expected{Absent: true}, gen1, ErrUnsafeDirectory},
+		{"handle not bound to the publication directory", context.Background(), newPrivateDir(t), lock, Expected{Absent: true}, gen1, ErrInvalidRequest},
 		{"invalid next selection", context.Background(), dir, lock, Expected{Absent: true}, func() activation.Selection {
 			bad := gen1
 			bad.SchemaVersion = 99
@@ -293,6 +297,32 @@ func TestPublishRefusesInvalidRequests(t *testing.T) {
 	}
 	if got := readDest(t, dir); string(got) != string(canonicalBytes(t, gen1)) {
 		t.Fatalf("destination changed by refused requests: %q", got)
+	}
+}
+
+// TestPublishRefusesAbsentDirectoryWithBoundHandle proves the absent
+// publication directory is refused, never provisioned, with the handle
+// correctly bound: the lock is acquired while the directory exists and
+// the directory is then removed, so the only thing Publish can observe is
+// the verify-only privdir classification of an absent path.
+func TestPublishRefusesAbsentDirectoryWithBoundHandle(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a directory holding an open lock file cannot be removed on Windows")
+	}
+	dir := newPrivateDir(t)
+	lock := acquireUpdateLock(t, dir)
+	if err := os.RemoveAll(dir); err != nil {
+		t.Skipf("cannot remove the locked fixture directory: %v", err)
+	}
+	_, err := Publish(context.Background(), dir, lock, Expected{Absent: true}, testSelection(1, "1.0.1"))
+	if !errors.Is(err, ErrUnsafeDirectory) {
+		t.Fatalf("Publish(absent dir, bound handle) err = %v; want ErrUnsafeDirectory", err)
+	}
+	if !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("Publish(absent dir) err = %v; want the refusal to wrap fs.ErrNotExist", err)
+	}
+	if _, lerr := os.Lstat(dir); !errors.Is(lerr, fs.ErrNotExist) {
+		t.Fatalf("absent publication directory was provisioned: %v", lerr)
 	}
 }
 

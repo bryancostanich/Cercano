@@ -155,7 +155,7 @@ func noSidecars(t *testing.T, dbPath string) {
 	}
 }
 
-func TestFreshDatabaseInitializesSchema2(t *testing.T) {
+func TestFreshDatabaseInitializesCurrentSchema(t *testing.T) {
 	root := t.TempDir()
 	s, err := Open(root, "test-install")
 	if err != nil {
@@ -168,12 +168,14 @@ func TestFreshDatabaseInitializesSchema2(t *testing.T) {
 	}
 	db := rawDB(t, dbPath)
 	var meta string
-	if err := db.QueryRow(`SELECT value FROM state_meta WHERE key = ?`, metaKeySchemaVersion).Scan(&meta); err != nil || meta != "2" {
+	if err := db.QueryRow(`SELECT value FROM state_meta WHERE key = ?`, metaKeySchemaVersion).Scan(&meta); err != nil || meta != "3" {
 		t.Fatalf("fresh meta schema_version = %q %v", meta, err)
 	}
-	var tables int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='dismissal_records'`).Scan(&tables); err != nil || tables != 1 {
-		t.Fatalf("dismissal_records missing: %d %v", tables, err)
+	for _, table := range []string{"dismissal_records", "activation_journals"} {
+		var tables int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&tables); err != nil || tables != 1 {
+			t.Fatalf("%s missing: %d %v", table, tables, err)
+		}
 	}
 	ctx := context.Background()
 	rev, err := s.SaveDismissalRecord(ctx, 0, policy.Dismissal{
@@ -200,12 +202,16 @@ func TestLegacyV1UpgradesPreservingRecordsCounterAndPolicy(t *testing.T) {
 	}
 	db := rawDB(t, dbPath)
 	var meta string
-	if err := db.QueryRow(`SELECT value FROM state_meta WHERE key = ?`, metaKeySchemaVersion).Scan(&meta); err != nil || meta != "2" {
+	if err := db.QueryRow(`SELECT value FROM state_meta WHERE key = ?`, metaKeySchemaVersion).Scan(&meta); err != nil || meta != "3" {
 		t.Fatalf("meta schema_version after upgrade = %q %v", meta, err)
 	}
 	var dismissed int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM dismissal_records`).Scan(&dismissed); err != nil || dismissed != 0 {
 		t.Fatalf("upgraded dismissal_records not empty: %d %v", dismissed, err)
+	}
+	var journals int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM activation_journals`).Scan(&journals); err != nil || journals != 0 {
+		t.Fatalf("upgraded activation_journals not empty: %d %v", journals, err)
 	}
 
 	// Every legacy operation record, the identifier counter, and the
@@ -255,6 +261,10 @@ func TestMigrationFailureRollsBackSchema1Logically(t *testing.T) {
 	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='dismissal_records'`).Scan(&tables); err != nil || tables != 0 {
 		t.Fatalf("partial dismissal_records survived rollback: %d %v", tables, err)
 	}
+	var journals int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='activation_journals'`).Scan(&journals); err != nil || journals != 0 {
+		t.Fatalf("partial activation_journals survived rollback: %d %v", journals, err)
+	}
 	var ops, next int64
 	if err := db.QueryRow(`SELECT COUNT(*), (SELECT next_op_id FROM install_state) FROM operation_records`).Scan(&ops, &next); err != nil || ops != 1 || next != 2 {
 		t.Fatalf("legacy data changed: ops=%d next=%d %v", ops, next, err)
@@ -277,7 +287,7 @@ func TestMigrationFailureRollsBackSchema1Logically(t *testing.T) {
 	}
 }
 
-func TestConcurrentLegacyOpensBothSucceedAtVersion2(t *testing.T) {
+func TestConcurrentLegacyOpensBothSucceedAtCurrentSchema(t *testing.T) {
 	root := t.TempDir()
 	dbPath := legacyV1Database(t, root, "test-install")
 
@@ -307,12 +317,14 @@ func TestConcurrentLegacyOpensBothSucceedAtVersion2(t *testing.T) {
 	}
 	db := rawDB(t, dbPath)
 	var meta string
-	if err := db.QueryRow(`SELECT value FROM state_meta WHERE key = ?`, metaKeySchemaVersion).Scan(&meta); err != nil || meta != "2" {
+	if err := db.QueryRow(`SELECT value FROM state_meta WHERE key = ?`, metaKeySchemaVersion).Scan(&meta); err != nil || meta != "3" {
 		t.Fatalf("meta schema_version after concurrent upgrade = %q %v", meta, err)
 	}
-	var dismissalTables int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='dismissal_records'`).Scan(&dismissalTables); err != nil || dismissalTables != 1 {
-		t.Fatalf("dismissal_records created %d times", dismissalTables)
+	for _, table := range []string{"dismissal_records", "activation_journals"} {
+		var n int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&n); err != nil || n != 1 {
+			t.Fatalf("%s created %d times", table, n)
+		}
 	}
 	// Both handles are usable against the upgraded database.
 	ctx := context.Background()
@@ -325,13 +337,16 @@ func TestConcurrentLegacyOpensBothSucceedAtVersion2(t *testing.T) {
 	}
 }
 
-func TestFutureSchema3UnchangedWithoutSidecarsOrPermissionEdits(t *testing.T) {
+func TestFutureSchemaUnchangedWithoutSidecarsOrPermissionEdits(t *testing.T) {
 	root := t.TempDir()
 	dbPath := legacyV1Database(t, root, "test-install")
 	// Advance the fixture to a future version the way a NEWER build would:
-	// current tables, user_version 3.
+	// current tables, user_version one past the version this build supports.
 	db := rawDB(t, dbPath)
 	if _, err := db.Exec(schema2AddendumSQL); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(schema3AddendumSQL); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(fmt.Sprintf("PRAGMA user_version = %d;", SchemaVersion+1)); err != nil {

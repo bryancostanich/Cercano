@@ -15,19 +15,28 @@ import (
 // is read or written.
 const AppID = 0x4352434E // 'C','R','C','N'
 
-// SchemaVersion is the recognized schema version. Version 2 adds the
-// dedicated dismissal_records table. Version 1 databases — and ONLY
-// version-1 databases — are upgraded in one immediate transaction inside
-// Open after full revalidation; the exact legacy schema-1 definition is
-// preserved for that validation and is never treated as an unknown/empty
-// database or overwritten by guessing. A database with any other
-// user_version (including a future one) is refused without modification,
-// and no destructive migration or reset exists.
-const SchemaVersion = 2
+// SchemaVersion is the recognized schema version. Version 3 adds ONLY the
+// activation_journals table — the first ADDITIVE step of the approved
+// SQLite activation-journal slice, mirroring the operation-record pattern
+// (keyed by operation identifier, installation-bound, revisioned, strict
+// JSON) so the next slice can attach a journal API without another schema
+// step; no journal write/read API or live data exists yet. Older
+// databases — version 1 and version 2, and ONLY those — are upgraded in
+// one immediate transaction inside Open after full revalidation: a
+// validated schema-1 database chains sequentially through every
+// intermediate version to the current one, and a validated schema-2
+// database takes the remaining single step. The exact legacy schema-1 and
+// schema-2 definitions are preserved for that validation and are never
+// treated as an unknown/empty database or overwritten by guessing. A
+// database with any other user_version (including a future one) is
+// refused without modification, and no destructive migration, table
+// drop, or reset exists.
+const SchemaVersion = 3
 
-// LegacySchemaVersion is the schema version this package recognized before
-// dismissal persistence. It is the only older version a database may carry
-// to be upgraded.
+// LegacySchemaVersion is the OLDEST schema version a database may carry to
+// be upgraded. Every version from here up to (but not including)
+// SchemaVersion is recognized, validated against its own exact table set,
+// and upgraded additively.
 const LegacySchemaVersion = 1
 
 // meta keys stored in state_meta and validated on every open.
@@ -57,6 +66,19 @@ var schema2Tables = map[string]bool{
 	"operation_records": true,
 	"policy_records":    true,
 	"dismissal_records": true,
+}
+
+// schema3Tables is the exact table set of schema version 3: the version-2
+// tables plus the activation_journals table. The same exactness rules
+// apply: a database claiming version 3 must contain exactly these tables
+// or it is refused as partial, corrupt, foreign, or future.
+var schema3Tables = map[string]bool{
+	"state_meta":         true,
+	"install_state":      true,
+	"operation_records":  true,
+	"policy_records":     true,
+	"dismissal_records":  true,
+	"activation_journals": true,
 }
 
 // schema1SQL is the version-1 schema, byte-for-byte the definition this
@@ -108,13 +130,47 @@ CREATE TABLE dismissal_records (
 ) WITHOUT ROWID;
 `
 
+// schema3AddendumSQL is the ONLY schema change from version 2 to version 3:
+// the activation_journals table, the first ADDITIVE step of the approved
+// SQLite activation-journal slice. It deliberately mirrors the
+// operation_records pattern — keyed by operation identifier, bound to one
+// installation, per-row revision for future compare-and-save journal writes,
+// and a strict canonical JSON payload column — so journals ride the same
+// storage discipline as operation records. The journal payload format is
+// NOT defined by this slice and no journal write/read API exists yet: the
+// table is created empty and migration merely adds it.
+const schema3AddendumSQL = `
+CREATE TABLE activation_journals (
+  op_id        INTEGER PRIMARY KEY,
+  install_id   TEXT NOT NULL,
+  revision     INTEGER NOT NULL,
+  journal_json TEXT NOT NULL
+);
+`
+
+// schemaAddendumSQL returns the ONLY DDL the single migration step from the
+// given recognized version adds. Steps are additive: they append new
+// objects and never redefine or drop a version-1 or version-2 object.
+func schemaAddendumSQL(from int64) string {
+	switch from {
+	case 1:
+		return schema2AddendumSQL
+	case 2:
+		return schema3AddendumSQL
+	default:
+		return ""
+	}
+}
+
 // schemaSQLFor returns the full DDL text of a recognized schema version.
 func schemaSQLFor(version int64) string {
 	switch version {
-	case LegacySchemaVersion:
+	case 1:
 		return schema1SQL
-	case SchemaVersion:
+	case 2:
 		return schema1SQL + schema2AddendumSQL
+	case 3:
+		return schema1SQL + schema2AddendumSQL + schema3AddendumSQL
 	default:
 		return ""
 	}
@@ -123,17 +179,19 @@ func schemaSQLFor(version int64) string {
 // tablesFor returns the exact table set of a recognized schema version.
 func tablesFor(version int64) map[string]bool {
 	switch version {
-	case LegacySchemaVersion:
+	case 1:
 		return schema1Tables
-	case SchemaVersion:
+	case 2:
 		return schema2Tables
+	case 3:
+		return schema3Tables
 	default:
 		return nil
 	}
 }
 
 // initNewDB initializes a brand-new exclusively created database as a
-// recognized version-2 updater state database for installID, in ONE
+// recognized current-schema updater state database for installID, in ONE
 // transaction: schema, application_id, user_version, the meta rows, and the
 // install counter row either all commit or none do. It is never run
 // against a database that already has content.
@@ -191,14 +249,15 @@ func exec(ctx context.Context, db dbtx, query string) error {
 
 // validateExistingDB checks that an existing database is a dedicated,
 // recognized updater state database bound to installID. The WHOLE
-// recognized schema for the database's own version is validated: a
-// version-1 database must match the exact legacy schema-1 definition and a
-// version-2 database must match the exact version-2 definition — same
-// version with unknown/extra/missing/altered objects is refused. It is
-// strictly read-only: no write and no journal pragma runs before it
-// succeeds. Every anomaly is a typed refusal — foreign, future, corrupt, or
-// identity mismatch — and none of them modifies the file or resets
-// anything.
+// recognized schema for the database's own version is validated: each
+// recognized version (1, 2, or 3) must match the exact definition for
+// that version — same version with unknown/extra/missing/altered objects
+// is refused. The exact legacy schema-1 and schema-2 definitions are
+// preserved verbatim, so an older database is never treated as an unknown
+// or empty one. It is strictly read-only: no write and no journal pragma
+// runs before it succeeds. Every anomaly is a typed refusal — foreign,
+// future, corrupt, or identity mismatch — and none of them modifies the
+// file or resets anything.
 func validateExistingDB(ctx context.Context, db dbtx, installID string) error {
 	var appid int64
 	if err := db.QueryRowContext(ctx, "PRAGMA application_id").Scan(&appid); err != nil {
@@ -335,29 +394,39 @@ func readSchemaVersion(ctx context.Context, db dbtx) (int64, error) {
 	return version, nil
 }
 
-// migrationFault is a white-box test hook invoked inside the version-1 to
-// version-2 migration transaction immediately before COMMIT; a non-nil
-// error forces a rollback, proving the upgrade is atomic. It is nil in
-// production and never set outside this package's tests.
+// migrationFault is a white-box test hook invoked inside the migration
+// transaction immediately BEFORE each step's state_meta schema-version
+// update commits; a non-nil error forces a rollback of the whole
+// transaction — the step's DDL and user_version bump roll back together
+// with the metadata update, proving no partial table or partial version
+// can ever survive a failed migration. It is nil in production and never
+// set outside this package's tests.
 var migrationFault func() error
 
-// migrateSchema1To2 upgrades a legitimate version-1 database to version 2.
-// It MUST run on the writable connection that will perform the upgrade: the
-// whole operation — revalidation of the exact legacy schema under the SAME
-// connection, creation of the additive dismissal_records table, the
-// user_version bump, and the state_meta schema_version update — happens in
-// ONE BEGIN IMMEDIATE transaction, so every existing operation record,
-// identifier counter, and delegation record is retained unchanged and a
-// failure leaves the database logically still a complete version-1
-// database.
+// migrateLegacySchema upgrades a legitimate OLDER database to the current
+// schema version. It MUST run on the writable connection that will perform
+// the upgrade. The whole operation — revalidation of the exact schema for
+// the database's own version under the SAME connection, then one
+// ADDITIVE step per intermediate version — happens in ONE BEGIN IMMEDIATE
+// transaction: a validated version-1 database chains SEQUENTIALLY through
+// version 2 to version 3, and a validated version-2 database takes the
+// remaining single step. Every step only appends new objects (no version-1
+// or version-2 object is ever redefined, recreated, or dropped) and moves
+// the user_version and the state_meta schema_version marker together, so
+// every existing operation record, identifier counter, delegation record,
+// and dismissal record is retained unchanged and a failure at ANY point
+// leaves the database logically still the complete version it started as.
 //
 // Concurrent safety: the write lock is taken up front with the same bounded
-// busy retry as every other write. A second handle that opens while another
-// is upgrading simply waits; when it revalidates inside its own transaction
-// it observes version 2 and commits a no-op. A database that is not a
-// fully valid version 1 (or already 2) database at that point is refused —
-// there is no guessing, no reset, and no destructive migration.
-func migrateSchema1To2(ctx context.Context, conn *sql.Conn, installID string) error {
+// busy retry as every other write, and the version is RE-READ under that
+// lock — a second handle that opens while another is upgrading simply
+// waits and then observes the finished upgrade, revalidates the
+// now-current schema, and commits a no-op. A version newer than this
+// build supports (a concurrent process from a newer build) rolls back and
+// is refused as a future schema without a single write; anything else
+// unexpected is refused — there is no guessing, no reset, and no
+// destructive migration.
+func migrateLegacySchema(ctx context.Context, conn *sql.Conn, installID string) error {
 	if err := beginImmediate(ctx, conn); err != nil {
 		return fmt.Errorf("state: begin migration transaction: %w", err)
 	}
@@ -374,15 +443,16 @@ func migrateSchema1To2(ctx context.Context, conn *sql.Conn, installID string) er
 		return nil
 	}
 
-	// Revalidate under the SAME connection, holding the write lock, so the
-	// schema this transaction upgrades cannot change underneath it.
+	// Re-read the version under the write lock: a concurrent opener may
+	// have completed (or, from a newer build, advanced) the upgrade while
+	// this handle was waiting for the lock.
 	version, err := readSchemaVersion(ctx, conn)
 	if err != nil {
 		rollback()
 		return err
 	}
-	switch version {
-	case SchemaVersion:
+	switch {
+	case version == SchemaVersion:
 		// A version number alone is not proof of a legitimate concurrent
 		// upgrade. Revalidate layout and identity under this write lock too.
 		if err := validateExistingDB(ctx, conn, installID); err != nil {
@@ -390,45 +460,60 @@ func migrateSchema1To2(ctx context.Context, conn *sql.Conn, installID string) er
 			return err
 		}
 		return commit()
-	case LegacySchemaVersion:
+	case version >= LegacySchemaVersion && version < SchemaVersion:
+		// Revalidate the exact schema — table set, DDL, application
+		// identity, installation identity, and the strict meta rows —
+		// under the SAME connection holding the write lock, so the schema
+		// this transaction upgrades cannot change underneath it.
 		if err := validateExistingDB(ctx, conn, installID); err != nil {
 			rollback()
 			return err
 		}
 	default:
 		rollback()
+		if version > SchemaVersion {
+			return fmt.Errorf("%w: user_version %d > supported %d", ErrFutureSchema, version, SchemaVersion)
+		}
 		return fmt.Errorf("%w: user_version %d", ErrForeignDatabase, version)
 	}
 
-	if err := exec(ctx, conn, schema2AddendumSQL); err != nil {
-		rollback()
-		return fmt.Errorf("state: create dismissal_records: %w", err)
-	}
-	if err := exec(ctx, conn, fmt.Sprintf("PRAGMA user_version = %d;", SchemaVersion)); err != nil {
-		rollback()
-		return fmt.Errorf("state: bump user_version: %w", err)
-	}
-	res, err := conn.ExecContext(ctx,
-		`UPDATE state_meta SET value = ? WHERE key = ? AND value = ?`,
-		fmt.Sprint(SchemaVersion), metaKeySchemaVersion, fmt.Sprint(LegacySchemaVersion))
-	if err != nil {
-		rollback()
-		return fmt.Errorf("state: update schema_version meta: %w", err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		rollback()
-		return fmt.Errorf("state: update schema_version meta: %w", err)
-	}
-	if n != 1 {
-		rollback()
-		return fmt.Errorf("%w: schema_version meta row missing", ErrCorruptDatabase)
-	}
-	// Test-injection point for the atomic-rollback proof; nil in production.
-	if migrationFault != nil {
-		if ferr := migrationFault(); ferr != nil {
+	// Sequential additive steps through every intermediate version; the
+	// chain commits atomically as a whole or not at all.
+	for from := version; from < SchemaVersion; from++ {
+		to := from + 1
+		if err := exec(ctx, conn, schemaAddendumSQL(from)); err != nil {
 			rollback()
-			return ferr
+			return fmt.Errorf("state: apply schema %d addendum: %w", to, err)
+		}
+		if err := exec(ctx, conn, fmt.Sprintf("PRAGMA user_version = %d;", to)); err != nil {
+			rollback()
+			return fmt.Errorf("state: bump user_version to %d: %w", to, err)
+		}
+		// Test-injection point for the atomic-rollback proof; nil in
+		// production. The fault lands immediately BEFORE this step's
+		// metadata-version update commits, so a rollback must also erase
+		// the step's DDL and user_version bump.
+		if migrationFault != nil {
+			if ferr := migrationFault(); ferr != nil {
+				rollback()
+				return ferr
+			}
+		}
+		res, err := conn.ExecContext(ctx,
+			`UPDATE state_meta SET value = ? WHERE key = ? AND value = ?`,
+			fmt.Sprint(to), metaKeySchemaVersion, fmt.Sprint(from))
+		if err != nil {
+			rollback()
+			return fmt.Errorf("state: update schema_version meta to %d: %w", to, err)
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			rollback()
+			return fmt.Errorf("state: update schema_version meta to %d: %w", to, err)
+		}
+		if n != 1 {
+			rollback()
+			return fmt.Errorf("%w: schema_version meta row did not move from %d", ErrCorruptDatabase, from)
 		}
 	}
 	return commit()

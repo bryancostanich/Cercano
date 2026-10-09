@@ -60,19 +60,25 @@ func worker(t *testing.T, ctx context.Context, root, mode, ready string) *subpro
 	return cmd
 }
 func TestConcurrentProcessesAllocateDistinctPersistentIDs(t *testing.T) {
-	testConcurrentAllocation(t, false)
+	testConcurrentAllocation(t, 0)
 }
 func TestConcurrentProcessesUpgradeLegacyWithoutLosingIDs(t *testing.T) {
-	testConcurrentAllocation(t, true)
+	testConcurrentAllocation(t, LegacySchemaVersion)
 }
-func testConcurrentAllocation(t *testing.T, legacy bool) {
+func TestConcurrentProcessesUpgradeSchema2WithoutLosingIDs(t *testing.T) {
+	testConcurrentAllocation(t, 2)
+}
+func testConcurrentAllocation(t *testing.T, legacyVersion int64) {
 	t.Helper()
 	root := t.TempDir()
 	var s *Store
 	var e error
-	if legacy {
+	switch legacyVersion {
+	case LegacySchemaVersion:
 		legacyV1Database(t, root, "test-install")
-	} else {
+	case 2:
+		legacyV2Database(t, root, "test-install")
+	default:
 		s, e = Open(root, "test-install")
 		if e != nil {
 			t.Fatal(e)
@@ -128,7 +134,7 @@ func testConcurrentAllocation(t *testing.T, legacy bool) {
 	}
 	defer s.Close()
 	expectedNext := int64(25)
-	if legacy {
+	if legacyVersion > 0 {
 		// The legacy fixture already owns operation ID 1; workers must not reuse it.
 		expectedNext++
 		if seen[1] {

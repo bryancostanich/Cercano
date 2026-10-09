@@ -21,7 +21,8 @@ func TestConcurrentUpgradeNoopRevalidatesCurrentIdentity(t *testing.T) {
 		t.Fatal(e)
 	}
 	defer conn.Close()
-	if e = migrateSchema1To2(ctx, conn, "test-install"); !errors.Is(e, ErrInstallIDMismatch) {
+	// The no-op branch of the migration must not skip identity validation.
+	if e = migrateLegacySchema(ctx, conn, "test-install"); !errors.Is(e, ErrInstallIDMismatch) {
 		t.Fatalf("already-upgraded branch bypassed identity validation: %v", e)
 	}
 }

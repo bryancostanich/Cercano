@@ -79,15 +79,18 @@ type Store struct {
 // An existing database is validated as the dedicated, recognized updater
 // schema (application_id, user_version, exact table set for the database's
 // own version, and meta-bound installID) BEFORE any write or journal pragma
-// touches it. A legitimate legacy schema-1 database is upgraded in ONE
-// immediate transaction to the current version (additive dismissal_records
-// table plus the recorded version) with every existing operation record,
-// identifier counter, and delegation record retained; the upgrade is
-// revalidated under the same connection and is safe against a concurrent
-// handle performing the same upgrade. Foreign, future, corrupt, or
-// identity-mismatched databases are refused without modification; there is
-// no reset and no destructive migration. A brand-new (absent) database is
-// initialized as the recognized current schema version in one transaction.
+// touches it. A legitimate older database is upgraded in ONE immediate
+// transaction to the current version: a validated schema-1 database chains
+// sequentially through schema 2 to the current version, and a validated
+// schema-2 database takes the remaining single ADDITIVE step (the
+// activation_journals table plus the recorded version) with every existing
+// operation record, identifier counter, delegation record, and dismissal
+// record retained; the upgrade is revalidated under the same connection and
+// is safe against a concurrent handle performing the same upgrade. Foreign,
+// future, corrupt, or identity-mismatched databases are refused without
+// modification; there is no reset and no destructive migration. A brand-new
+// (absent) database is initialized as the recognized current schema version
+// in one transaction.
 //
 // Open never reads the user's real environment: stateRoot and installID
 // must come from the caller (tests use temporary directories).
@@ -159,19 +162,23 @@ func openAttempt(parent context.Context, stateRoot, installID string) (*Store, e
 
 	if existing {
 		// An existing database is either the recognized current version or
-		// the exact legacy schema-1 version this package historically
-		// wrote. Version 1 upgrades here — and ONLY here — in ONE
-		// immediate transaction revalidated under this same connection,
-		// which is safe against a concurrent handle performing the same
-		// upgrade. Every other database stays refused without
-		// modification; there is no reset and no destructive migration.
+		// an older version this package historically wrote (currently
+		// schema 1 and schema 2). Those upgrade here — and ONLY here — in
+		// ONE immediate transaction revalidated under this same connection:
+		// a validated version-1 database chains sequentially through
+		// version 2 to the current version, and a validated version-2
+		// database takes the remaining single ADDITIVE step. The migration
+		// re-reads the version under the write lock, which is safe against
+		// a concurrent handle performing the same upgrade. Every other
+		// database stays refused without modification; there is no reset
+		// and no destructive migration.
 		conn, cerr := db.Conn(ctx)
 		if cerr != nil {
 			return fail(fmt.Errorf("state: connect: %w", cerr))
 		}
 		version, verr := readSchemaVersion(ctx, conn)
-		if verr == nil && version == LegacySchemaVersion {
-			verr = migrateSchema1To2(ctx, conn, installID)
+		if verr == nil && version >= LegacySchemaVersion && version < SchemaVersion {
+			verr = migrateLegacySchema(ctx, conn, installID)
 		} else if verr == nil {
 			// Validate on the SAME connection this handle already holds;
 			// the pool is pinned to one connection.

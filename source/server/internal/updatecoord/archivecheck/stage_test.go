@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -107,7 +108,7 @@ func assertStagedTree(t *testing.T, st *Staged) {
 		if err != nil || !fi.IsDir() {
 			t.Fatalf("staged directory %q missing: %v", d, err)
 		}
-		if fi.Mode().Perm() != 0o755 {
+		if runtime.GOOS != "windows" && fi.Mode().Perm() != 0o755 {
 			t.Errorf("staged directory %q mode = %v, want 0755", d, fi.Mode().Perm())
 		}
 	}
@@ -524,7 +525,7 @@ func TestStageOverwriteForbiddenInjectedFilePreserved(t *testing.T) {
 		t.Errorf("injected file was not preserved verbatim: %v %q", err, got)
 	}
 	fi, err := os.Lstat(injected)
-	if err != nil || fi.Mode().Perm() != 0o600 {
+	if err != nil || (runtime.GOOS != "windows" && fi.Mode().Perm() != 0o600) {
 		t.Errorf("injected file was modified: %v %v", err, fi)
 	}
 	// The member the staging DID create is removed by cleanup.

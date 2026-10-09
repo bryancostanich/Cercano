@@ -28,6 +28,15 @@
 // any future extraction must independently revalidate these same member
 // rules and bounds against the bytes it actually reads and must not treat
 // a preflight pass as permission to materialize anything.
+//
+// Names use one portable namespace contract, applied identically to the
+// trusted layout and to archive entries: valid UTF-8 only, no
+// Windows-invalid characters (< > | ? * "), no reserved device names
+// (including the superscript-digit COM¹/COM²/COM³ and LPT forms), at most
+// one trailing slash on directory names, and no two names that fold equal
+// under Unicode simple case folding (strings.EqualFold's equivalence, e.g.
+// Greek sigma σ/ς/Σ) may coexist as members, implicit parent directories,
+// or a file/directory pair — order never matters.
 package archivecheck
 
 import (
@@ -45,6 +54,8 @@ import (
 	"math"
 	"os"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // Format identifies the archive container. It is explicit caller input; the
@@ -328,7 +339,33 @@ func validateOptionValues(opts Options) error {
 			return fmt.Errorf("archivecheck: Layout.Root: %w", err)
 		}
 	}
-	seen := map[string]bool{}
+	// The layout must be internally consistent across its whole portable
+	// namespace: the root directory, every Required/Optional member and
+	// every implicit parent directory those members force. Two names that
+	// fold to the same key (strings.EqualFold's simple Unicode case
+	// folding), or one name that must be both a file and a directory, make
+	// the layout ambiguous on case-insensitive filesystems (Windows,
+	// macOS) and are refused regardless of declaration order.
+	nsSeen := map[string]string{} // fold key -> exact first-seen name
+	nsKind := map[string]bool{}   // fold key -> name is a directory
+	addNS := func(name string, isDir bool) error {
+		key := foldKey(name)
+		if prev, dup := nsSeen[key]; dup {
+			switch {
+			case prev == name && isDir && nsKind[key]:
+				return nil // the same implicit parent, legitimately shared
+			case prev == name && !isDir && !nsKind[key]:
+				return fmt.Errorf("archivecheck: Layout contains duplicate member %q", name)
+			case nsKind[key] != isDir:
+				return fmt.Errorf("archivecheck: Layout uses %q and %q as both a regular file and a directory", name, prev)
+			default:
+				return fmt.Errorf("archivecheck: Layout contains case-colliding names %q and %q", name, prev)
+			}
+		}
+		nsSeen[key] = name
+		nsKind[key] = isDir
+		return nil
+	}
 	for _, role := range []struct {
 		name  string
 		names []string
@@ -337,22 +374,37 @@ func validateOptionValues(opts Options) error {
 			if err := validateEntryName(n, false); err != nil {
 				return fmt.Errorf("archivecheck: Layout.%s %q: %w", role.name, n, err)
 			}
-			key := strings.ToLower(n)
-			if seen[key] {
-				return fmt.Errorf("archivecheck: Layout contains duplicate or case-colliding member %q", n)
+			full := joinRoot(l.Root, n)
+			if err := addNS(full, false); err != nil {
+				return fmt.Errorf("archivecheck: Layout.%s %q: %w", role.name, n, err)
 			}
-			seen[key] = true
+			// Every ancestor directory of a member is part of the namespace.
+			for d := full; ; {
+				i := strings.LastIndexByte(d, '/')
+				if i < 0 {
+					break
+				}
+				d = d[:i]
+				if err := addNS(d, true); err != nil {
+					return fmt.Errorf("archivecheck: Layout.%s %q: %w", role.name, n, err)
+				}
+			}
 		}
 	}
 	return nil
 }
 
-// validateEntryName accepts only a relative, slash-separated member name with
-// no cross-platform ambiguity. It rejects: empty names, absolute paths,
-// empty, "." and ".." segments, backslashes, colons (drive letters and NTFS
-// alternate data streams), control bytes, Windows reserved device names in
-// any segment, and segments ending in a dot or space. Directory names may
-// carry one trailing slash, which is trimmed before validation.
+// validateEntryName accepts only a relative, slash-separated member name
+// with no cross-platform ambiguity. It rejects: empty names, absolute
+// paths, names that are not valid UTF-8 (Go's range-over-string decodes
+// bad bytes to RuneError, which would otherwise be silently accepted),
+// empty, "." and ".." segments, backslashes, colons (drive letters and
+// NTFS alternate data streams), the characters < > | ? * and " that
+// Windows refuses, control bytes, Windows reserved device names in any
+// segment, and segments ending in a dot or space. Directory names may
+// carry at most ONE trailing slash, which is trimmed before validation; a
+// second trailing slash is refused instead of being trimmed into
+// acceptance.
 func validateEntryName(name string, isDir bool) error {
 	if isDir {
 		name = strings.TrimSuffix(name, "/")
@@ -360,14 +412,23 @@ func validateEntryName(name string, isDir bool) error {
 	if name == "" {
 		return errors.New("empty member name")
 	}
+	if !utf8.ValidString(name) {
+		return fmt.Errorf("member name %q is not valid UTF-8", name)
+	}
 	if strings.HasPrefix(name, "/") {
 		return fmt.Errorf("member name %q must be relative", name)
+	}
+	if strings.HasSuffix(name, "/") {
+		return fmt.Errorf("member name %q carries more than one trailing slash", name)
 	}
 	if strings.ContainsRune(name, '\\') {
 		return fmt.Errorf("member name %q must not contain a backslash", name)
 	}
 	if strings.ContainsRune(name, ':') {
 		return fmt.Errorf("member name %q must not contain a colon (drive-letter or alternate-data-stream ambiguity)", name)
+	}
+	if strings.ContainsAny(name, `<>|?*"`) {
+		return fmt.Errorf("member name %q contains a Windows-invalid character (< > | ? * \")", name)
 	}
 	for _, r := range name {
 		if r < 0x20 || r == 0x7f {
@@ -380,18 +441,67 @@ func validateEntryName(name string, isDir bool) error {
 			return fmt.Errorf("member name %q must not contain empty or traversal segments", name)
 		case strings.HasSuffix(seg, ".") || strings.HasSuffix(seg, " "):
 			return fmt.Errorf("member name %q has a segment ending in a dot or space, which Windows strips", name)
-		case windowsReserved[strings.ToLower(strings.SplitN(seg, ".", 2)[0])]:
+		case windowsReserved[foldKey(strings.SplitN(seg, ".", 2)[0])]:
 			return fmt.Errorf("member name %q uses the Windows reserved device name %q", name, seg)
 		}
 	}
 	return nil
 }
 
+// maxFoldOrbit bounds each rune's case-fold orbit traversal. Real Unicode
+// orbits are tiny (never more than a handful of runes), so the bound is
+// purely defensive.
+const maxFoldOrbit = 64
+
+// foldKey returns a canonical case-folding key for name: each rune maps to
+// the smallest rune of its unicode.SimpleFold orbit, which yields exactly
+// the strings.EqualFold equivalence classes. This catches the Unicode
+// folds strings.ToLower misses (Greek sigma σ/ς/Σ, long s ſ, Kelvin sign
+// K) without disallowing legitimate non-ASCII names. The per-rune
+// traversal is bounded by maxFoldOrbit; invalid UTF-8 must be rejected
+// before names ever reach this (range would decode bad bytes to
+// RuneError and conflate distinct names).
+func foldKey(name string) string {
+	var b strings.Builder
+	b.Grow(len(name))
+	for _, r := range name {
+		b.WriteRune(foldRune(r))
+	}
+	return b.String()
+}
+
+func foldRune(r rune) rune {
+	start, min := r, r
+	for i := 0; i < maxFoldOrbit; i++ {
+		r = unicode.SimpleFold(r)
+		if r == start {
+			return min
+		}
+		if r < min {
+			min = r
+		}
+	}
+	return min
+}
+
+// windowsReserved lists the device names Windows refuses as file or
+// directory names in any case and regardless of an extension, stored as
+// fold keys so lookups match across the full EqualFold equivalence.
 var windowsReserved = func() map[string]bool {
-	m := map[string]bool{"con": true, "prn": true, "aux": true, "nul": true, "conin$": true, "conout$": true}
+	names := map[string]bool{"con": true, "prn": true, "aux": true, "nul": true, "conin$": true, "conout$": true}
 	for i := 1; i <= 9; i++ {
-		m[fmt.Sprintf("com%d", i)] = true
-		m[fmt.Sprintf("lpt%d", i)] = true
+		names[fmt.Sprintf("com%d", i)] = true
+		names[fmt.Sprintf("lpt%d", i)] = true
+	}
+	// Recent Windows also reserves the superscript-digit device forms
+	// COM¹/COM²/COM³ and LPT¹/LPT²/LPT³ (U+00B9, U+00B2, U+00B3).
+	for _, sup := range []string{"\u00b9", "\u00b2", "\u00b3"} {
+		names["com"+sup] = true
+		names["lpt"+sup] = true
+	}
+	m := make(map[string]bool, len(names))
+	for n := range names {
+		m[foldKey(n)] = true
 	}
 	return m
 }()
@@ -402,8 +512,8 @@ type validator struct {
 	opts  Options
 	files map[string]bool   // allowed regular-file member names
 	dirs  map[string]bool   // permitted directory names (needed parent paths only)
-	seen  map[string]string // lower-cased member name -> exact first-seen name
-	kind  map[string]bool   // lower-cased member name -> is directory
+	seen  map[string]string // fold key -> exact first-seen name
+	kind  map[string]bool   // fold key -> is directory
 	found map[string]bool   // required files encountered
 	count int
 	total int64 // decompressed bytes read so far
@@ -433,6 +543,7 @@ func newValidator(opts Options) *validator {
 }
 
 func joinRoot(root, name string) string {
+	root = strings.TrimSuffix(root, "/") // a single trailing slash is legal, "//" is not
 	if root == "" {
 		return name
 	}
@@ -455,13 +566,15 @@ func (v *validator) entry(name string, isDir bool) error {
 	if strings.HasSuffix(name, "/") && !isDir {
 		return fmt.Errorf("archivecheck: member %q: a file entry must not have a directory name", name)
 	}
-	if isDir {
-		name = strings.TrimSuffix(name, "/")
-	}
+	// Validate BEFORE trimming so a second trailing slash cannot be
+	// trimmed into acceptance.
 	if err := validateEntryName(name, isDir); err != nil {
 		return fmt.Errorf("archivecheck: member %q: %w", name, err)
 	}
-	key := strings.ToLower(name)
+	if isDir {
+		name = strings.TrimSuffix(name, "/")
+	}
+	key := foldKey(name)
 	if prev, dup := v.seen[key]; dup {
 		if prev == name && v.kind[key] == isDir {
 			return fmt.Errorf("archivecheck: member %q: duplicate member", name)

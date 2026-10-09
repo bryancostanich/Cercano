@@ -219,7 +219,7 @@ func (s *Store) SaveActivationJournal(ctx context.Context, expectedRevision int6
 	if expectedRevision < 0 || expectedRevision == math.MaxInt64 {
 		return 0, fmt.Errorf("%w: invalid expected revision", ErrInvalidRecord)
 	}
-	if err := validateActivationJournal(j, s.installID); err != nil {
+	if err := ValidateActivationJournal(j, s.installID); err != nil {
 		return 0, err
 	}
 	payload, err := json.Marshal(j)
@@ -396,15 +396,17 @@ func (s *Store) LoadActivationJournal(ctx context.Context, opID int64) (Activati
 	return j, revision, nil
 }
 
-// validateActivationJournal performs the full structural validation of a
-// journal against the store's installation before any write: exact schema
-// version, positive operation ID, installation binding, bounded valid
-// target version, a RELATIVE staged-directory identifier, a lowercase-hex
-// SHA-256 verified artifact, an explicit (never guessed) prior-selection
-// block, a known checkpoint, and — because restore without a prior
-// selection would pretend a prior version exists — rollback intent only
-// with an explicit prior selection.
-func validateActivationJournal(j ActivationJournal, installID string) error {
+// ValidateActivationJournal performs the full structural validation of a
+// journal against the store's installation: exact schema version, positive
+// operation ID, installation binding, bounded valid target version, a
+// RELATIVE staged-directory identifier, a lowercase-hex SHA-256 verified
+// artifact, an explicit (never guessed) prior-selection block, a known
+// checkpoint, and — because restore without a prior selection would pretend
+// a prior version exists — rollback intent only with an explicit prior
+// selection. It is exported so the activation reconciliation package can
+// validate a loaded journal against its own recorded installation binding
+// without duplicating these rules.
+func ValidateActivationJournal(j ActivationJournal, installID string) error {
 	if j.SchemaVersion != ActivationJournalSchemaVersion {
 		return fmt.Errorf("%w: schema version %d, want %d", ErrInvalidRecord, j.SchemaVersion, ActivationJournalSchemaVersion)
 	}
@@ -414,13 +416,13 @@ func validateActivationJournal(j ActivationJournal, installID string) error {
 	if j.OpID <= 0 {
 		return fmt.Errorf("%w: operation id must be positive", ErrInvalidRecord)
 	}
-	if err := validateVersionString(j.TargetVersion); err != nil {
+	if err := ValidateVersionString(j.TargetVersion); err != nil {
 		return fmt.Errorf("%w: target version: %v", ErrInvalidRecord, err)
 	}
-	if err := validateStagedRelativeIdentifier(j.StagedVersionDir); err != nil {
+	if err := ValidateStagedRelativeIdentifier(j.StagedVersionDir); err != nil {
 		return err
 	}
-	if !isLowerHexSHA256(j.VerifiedArtifactSHA256) {
+	if !IsLowerHexSHA256(j.VerifiedArtifactSHA256) {
 		return fmt.Errorf("%w: verified artifact digest must be a 64-character lowercase hex SHA-256", ErrInvalidRecord)
 	}
 	// The prior-selection block is explicit, never guessed. With no prior
@@ -432,13 +434,13 @@ func validateActivationJournal(j ActivationJournal, installID string) error {
 			return fmt.Errorf("%w: prior selection without a version must be explicitly none (generation 0, empty digest)", ErrInvalidRecord)
 		}
 	} else {
-		if err := validateVersionString(j.PriorSelectedVersion); err != nil {
+		if err := ValidateVersionString(j.PriorSelectedVersion); err != nil {
 			return fmt.Errorf("%w: prior selected version: %v", ErrInvalidRecord, err)
 		}
 		if j.PriorSelectionGeneration < 1 {
 			return fmt.Errorf("%w: prior selection generation must be positive, not guessed", ErrInvalidRecord)
 		}
-		if !isLowerHexSHA256(j.PriorSelectionDigest) {
+		if !IsLowerHexSHA256(j.PriorSelectionDigest) {
 			return fmt.Errorf("%w: prior selection digest must be a 64-character lowercase hex SHA-256", ErrInvalidRecord)
 		}
 	}
@@ -455,21 +457,23 @@ func validateActivationJournal(j ActivationJournal, installID string) error {
 	return nil
 }
 
-// validateVersionString applies the same version-string rules the
-// operation record uses: valid UTF-8, bounded, nonempty after trimming,
-// and free of NUL bytes.
-func validateVersionString(v string) error {
+// ValidateVersionString applies the same version-string rules the
+// operation record uses: valid UTF-8, bounded, nonempty after trimming, and
+// free of NUL bytes. Exported for the activation selection reader, which
+// applies the identical rule.
+func ValidateVersionString(v string) error {
 	if !utf8.ValidString(v) || len(v) > maxActivationVersionBytes || strings.TrimSpace(v) == "" || strings.ContainsRune(v, 0) {
 		return errors.New("empty or invalid version string")
 	}
 	return nil
 }
 
-// validateStagedRelativeIdentifier enforces that the staged version
+// ValidateStagedRelativeIdentifier enforces that the staged version
 // directory is a RELATIVE IDENTIFIER only: never absolute, never a Windows
 // drive path, never a backslash path, never empty, `.`, or `..` components.
-// The value is never opened as a path by this package.
-func validateStagedRelativeIdentifier(id string) error {
+// The value is never opened as a path by this package. Exported for the
+// activation selection reader, which applies the identical rule.
+func ValidateStagedRelativeIdentifier(id string) error {
 	if id == "" || !utf8.ValidString(id) || len(id) > maxActivationVersionBytes || strings.ContainsRune(id, 0) || strings.TrimSpace(id) == "" {
 		return fmt.Errorf("%w: staged version directory identifier is empty or invalid", ErrInvalidRecord)
 	}
@@ -484,9 +488,11 @@ func validateStagedRelativeIdentifier(id string) error {
 	return nil
 }
 
-// isLowerHexSHA256 reports whether s is exactly 64 lowercase hexadecimal
+// IsLowerHexSHA256 reports whether s is exactly 64 lowercase hexadecimal
 // characters — the canonical textual SHA-256 digest this package stores.
-func isLowerHexSHA256(s string) bool {
+// Exported for the activation selection reader, which applies the
+// identical rule.
+func IsLowerHexSHA256(s string) bool {
 	if len(s) != 64 {
 		return false
 	}
@@ -564,7 +570,7 @@ func decodeActivationJournal(data []byte) (ActivationJournal, error) {
 		}
 		return ActivationJournal{}, errors.New("trailing data")
 	}
-	if err := validateActivationJournal(j, j.InstallID); err != nil {
+	if err := ValidateActivationJournal(j, j.InstallID); err != nil {
 		return ActivationJournal{}, err
 	}
 	return j, nil

@@ -529,7 +529,7 @@ func journalAt(t *testing.T, s *Store, cp JournalCheckpoint) (ActivationJournal,
 func TestActivationJournalTransitionLegalityTable(t *testing.T) {
 	ctx := context.Background()
 	legal := map[JournalCheckpoint][]JournalCheckpoint{
-		JournalPrepared:        {JournalSwitchIntent, JournalRollbackIntent},
+		JournalPrepared:       {JournalSwitchIntent, JournalRollbackIntent},
 		JournalSwitchIntent:   {JournalSelected, JournalRollbackIntent},
 		JournalSelected:       {JournalHealthVerified, JournalRollbackIntent},
 		JournalHealthVerified: {JournalCleanupPending, JournalComplete},

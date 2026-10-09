@@ -10,8 +10,11 @@
 // package performs no signature or publisher verification. The caller may
 // bind the inspected bytes to the already-verified acquisition receipt via
 // Options.Identity (exact archive length and whole-archive SHA-256);
-// PreflightFile re-hashes the bytes it actually opens against it, which is
-// an integrity binding, never publisher authentication. The expected layout
+// PreflightFile takes ONE bounded immutable in-memory snapshot of the
+// opened file, hashes that snapshot against the receipt and parses the
+// exact same snapshot bytes, so the receipt digest always binds the
+// parsed bytes. That is an integrity binding, never publisher
+// authentication. The expected layout
 // comes only from the trusted caller (build/publish configuration), never
 // from the archive; nothing is inferred from PATH, platform or environment,
 // and no member filename is ever interpreted as a program or argument.
@@ -59,8 +62,9 @@ const (
 // Layout is the trusted caller's explicit expected member set, derived from
 // the actual build scripts — never discovered from the archive itself.
 type Layout struct {
-	// Root is the single expected top-level directory name, or "" when the
-	// archive has no root directory (e.g. "cercano-1.2.3-darwin-arm64-unsigned").
+	// Root is the single expected top-level directory name (e.g.
+	// "cercano-1.2.3-darwin-arm64-unsigned"), or "" when the archive has no
+	// root directory and its members appear at the archive's top level.
 	Root string
 	// Required are regular files that must be present, e.g. the agent and
 	// CLI entrypoints "bin/cercano" and "bin/cercano-cli". It must not be empty.
@@ -101,9 +105,9 @@ type Options struct {
 	// already-verified acquisition receipt: the exact archive length and
 	// the raw whole-archive SHA-256 that the acquisition boundary verified
 	// against signed TUF metadata. It is used only by PreflightFile to
-	// re-hash the bytes actually opened; Check ignores it because its
-	// bytes arrive already bound by the caller. Binding is integrity, not
-	// publisher authentication.
+	// re-hash the one immutable snapshot taken of the bytes actually
+	// opened; Check ignores it because its bytes arrive already bound by
+	// the caller. Binding is integrity, not publisher authentication.
 	Identity *Identity
 }
 
@@ -122,11 +126,14 @@ type Identity struct {
 // PreflightFile inspects a caller-provided, already-verified local archive
 // file. archivePath must be an existing regular file that is not a symlink;
 // the path itself (not a parent) is checked, because the caller provisions
-// the private directory holding it. When opts.Identity is set, the bytes of
-// the file actually opened are streamed, hashed and size-compared against
-// the verified receipt before the structure is checked, so the inspected
-// bytes are exactly the receipt's bytes. The file is opened read-only and
-// is never modified.
+// the private directory holding it. The file's bytes are read ONCE into a
+// bounded immutable in-memory snapshot (a hard finite allocation ceiling is
+// checked before any allocation), and that exact snapshot is hashed,
+// size-compared against the verified receipt and structurally parsed, so
+// the receipt digest always binds the parsed bytes even if the file changes
+// on disk afterwards. The file is opened read-only and is never modified;
+// the snapshot is never written anywhere and nothing is extracted or
+// executed.
 func PreflightFile(ctx context.Context, archivePath string, opts Options) (*Manifest, error) {
 	if ctx == nil {
 		return nil, errors.New("archivecheck: context is required")
@@ -153,7 +160,7 @@ func PreflightFile(ctx context.Context, archivePath string, opts Options) (*Mani
 	}
 	defer f.Close()
 	// Stat the open descriptor, not the pre-open path: every check below
-	// then describes the bytes actually being read, not a snapshot.
+	// then describes the file actually being opened.
 	sfi, err := f.Stat()
 	if err != nil {
 		return nil, fmt.Errorf("archivecheck: archive %q: %w", archivePath, err)
@@ -165,33 +172,91 @@ func PreflightFile(ctx context.Context, archivePath string, opts Options) (*Mani
 		return nil, fmt.Errorf("archivecheck: archive size %d exceeds MaxCompressedBytes %d",
 			sfi.Size(), opts.Bounds.MaxCompressedBytes)
 	}
+	// One immutable snapshot binds the receipt digest to the parsed bytes:
+	// hashing and structural checking consume the exact same bytes, and
+	// the file is never re-read afterwards.
+	return preflightSnapshot(ctx, f, sfi.Size(), opts)
+}
+
+// snapshotBytesCeiling is the hard finite allocation ceiling on the
+// immutable in-memory archive snapshot PreflightFile takes. The stat'ed
+// length is checked against it BEFORE any allocation: caller bounds alone
+// are not trusted for allocation, so a MaxCompressedBytes near
+// math.MaxInt64 can never become an attempted huge allocation. It mirrors
+// the acquisition boundary's hard target cap, so no archive a verified
+// receipt could legitimately authorize is refused by it.
+const snapshotBytesCeiling = 256 << 20
+
+// preflightSnapshot binds the receipt digest to the parsed bytes. It takes
+// ONE bounded immutable in-memory snapshot of exactly size bytes from ra,
+// length-checks and hashes that snapshot against opts.Identity when set,
+// and parses the exact same snapshot bytes. Nothing is written, extracted
+// or executed; a source that serves different bytes per call (or a file
+// changed on disk between passes) can never make the digest bind bytes
+// other than the ones parsed, because there is no second pass.
+func preflightSnapshot(ctx context.Context, ra io.ReaderAt, size int64, opts Options) (*Manifest, error) {
 	if id := opts.Identity; id != nil {
 		if id.Length < 0 || len(id.SHA256) != sha256.Size {
 			return nil, errors.New("archivecheck: Identity must carry an exact non-negative length and a raw 32-byte SHA-256")
 		}
-		if sfi.Size() != id.Length {
+		if size != id.Length {
 			return nil, fmt.Errorf("archivecheck: archive is %d bytes but the verified receipt authorizes %d bytes",
-				sfi.Size(), id.Length)
-		}
-		h := sha256.New()
-		// Bounded by the receipt length already compared against the open
-		// file's size; a file that grows mid-read is refused by the limit.
-		if _, err = io.Copy(h, &ctxLimitedReader{ctx: ctx, r: f, max: id.Length}); err != nil {
-			return nil, fmt.Errorf("archivecheck: hashing archive %q failed: %w", archivePath, err)
-		}
-		if !bytes.Equal(h.Sum(nil), id.SHA256) {
-			return nil, fmt.Errorf("archivecheck: archive bytes do not match the SHA-256 of the verified receipt")
-		}
-		if _, err = f.Seek(0, io.SeekStart); err != nil {
-			return nil, fmt.Errorf("archivecheck: archive %q: %w", archivePath, err)
+				size, id.Length)
 		}
 	}
+	snap, err := snapshotReaderAt(ctx, ra, size)
+	if err != nil {
+		return nil, err
+	}
+	if id := opts.Identity; id != nil {
+		sum := sha256.Sum256(snap)
+		if !bytes.Equal(sum[:], id.SHA256) {
+			return nil, errors.New("archivecheck: archive bytes do not match the SHA-256 of the verified receipt")
+		}
+	}
+	// Both formats parse the immutable snapshot; the parse never touches
+	// the mutable source again.
+	br := bytes.NewReader(snap)
 	if opts.Format == Zip {
-		return Check(ctx, Archive{ReaderAt: f, Size: sfi.Size()}, opts)
+		return Check(ctx, Archive{ReaderAt: br, Size: int64(len(snap))}, opts)
 	}
-	// The structural pass reads exactly the hashed bytes: the section
-	// reader caps the stream at the open descriptor's size.
-	return Check(ctx, Archive{Reader: io.NewSectionReader(f, 0, sfi.Size())}, opts)
+	return Check(ctx, Archive{Reader: br}, opts)
+}
+
+// snapshotReaderAt reads exactly size bytes from ra into one immutable
+// in-memory snapshot. size is checked against the hard allocation ceiling
+// BEFORE any allocation and before any byte is read; the read then runs in
+// small bounded chunks that honor ctx cancellation, consumes exactly the
+// advertised length (never a byte past it) and refuses a source providing
+// fewer bytes than it advertised.
+func snapshotReaderAt(ctx context.Context, ra io.ReaderAt, size int64) ([]byte, error) {
+	if size < 0 || size > snapshotBytesCeiling {
+		return nil, fmt.Errorf("archivecheck: archive length %d is negative or exceeds the immutable-snapshot ceiling %d",
+			size, snapshotBytesCeiling)
+	}
+	snap := make([]byte, size)
+	const chunk = 64 << 10 // small chunks keep cancellation checks frequent
+	for off := int64(0); off < size; {
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("archivecheck: taking the archive snapshot: %w", err)
+		}
+		end := off + chunk
+		if end > size {
+			end = size
+		}
+		n, err := ra.ReadAt(snap[off:end], off)
+		off += int64(n)
+		if err == io.EOF && off < size {
+			return nil, errors.New("archivecheck: archive provided fewer bytes than its length; truncated input is refused")
+		}
+		if err != nil && err != io.EOF {
+			return nil, fmt.Errorf("archivecheck: reading the archive snapshot failed: %w", err)
+		}
+		if n == 0 && err == nil {
+			return nil, errors.New("archivecheck: archive source stalled while snapshotting")
+		}
+	}
+	return snap, nil
 }
 
 // Member is one validated regular-file member. Name is the archive-internal
@@ -256,8 +321,12 @@ func validateOptionValues(opts Options) error {
 	if len(l.Required) == 0 {
 		return errors.New("archivecheck: Layout.Required must name the required agent and CLI members")
 	}
-	if err := validateEntryName(l.Root, true); err != nil {
-		return fmt.Errorf("archivecheck: Layout.Root: %w", err)
+	// Root "" is the documented no-root layout: members then appear at the
+	// archive's top level, so it is the one legal empty directory name.
+	if l.Root != "" {
+		if err := validateEntryName(l.Root, true); err != nil {
+			return fmt.Errorf("archivecheck: Layout.Root: %w", err)
+		}
 	}
 	seen := map[string]bool{}
 	for _, role := range []struct {

@@ -241,6 +241,41 @@ func TestOptionalMembersMayBeAbsent(t *testing.T) {
 	}
 }
 
+// TestEmptyRootLayoutAccepted is the regression for Layout.Root == "": the
+// documented no-root layout, whose required members appear at the
+// archive's top level, must work — and a rooted archive must not satisfy
+// it.
+func TestEmptyRootLayoutAccepted(t *testing.T) {
+	noRoot := Layout{Root: "", Required: []string{"bin/cercano", "bin/cercano-cli"}}
+	opts := Options{Format: TarGz, Layout: noRoot, Bounds: testBounds()}
+	entries := []tarEntry{
+		{name: "bin/", typ: tar.TypeDir, mode: 0o755},
+		{name: "bin/cercano", body: agentBody, typ: tar.TypeReg, mode: 0o755},
+		{name: "bin/cercano-cli", body: cliBody, typ: tar.TypeReg, mode: 0o755},
+	}
+	man, err := checkTarGzFixture(t, buildTarGz(t, entries), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(man.Members) != 2 {
+		t.Fatalf("manifest members = %d, want 2", len(man.Members))
+	}
+
+	zopts := Options{Format: Zip, Layout: noRoot, Bounds: testBounds()}
+	zentries := []zipEntry{
+		{name: "bin/", mode: fs.ModeDir | 0o755},
+		{name: "bin/cercano", body: agentBody, mode: 0o755},
+		{name: "bin/cercano-cli", body: cliBody, mode: 0o755},
+	}
+	if _, err = checkZipFixture(t, buildZip(t, zentries), zopts); err != nil {
+		t.Fatal(err)
+	}
+
+	// A rooted archive does not satisfy the no-root layout.
+	_, err = checkTarGzFixture(t, buildTarGz(t, goodTarEntries()), opts)
+	wantError(t, err, "allowed only for needed parent paths")
+}
+
 func TestMissingRequiredMemberRejected(t *testing.T) {
 	entries := []tarEntry{}
 	for _, e := range goodTarEntries() {

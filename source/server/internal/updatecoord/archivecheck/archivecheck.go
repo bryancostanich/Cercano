@@ -39,6 +39,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	"os"
 	"strings"
 )
@@ -248,7 +249,7 @@ func validateOptionValues(opts Options) error {
 		return fmt.Errorf("archivecheck: format must be an explicit TarGz or Zip, not %d", opts.Format)
 	}
 	b := opts.Bounds
-	if b.MaxMembers <= 0 || b.MaxCompressedBytes <= 0 || b.MaxUncompressedBytes <= 0 || b.MaxMemberBytes <= 0 {
+	if b.MaxMembers <= 0 || b.MaxCompressedBytes <= 0 || b.MaxCompressedBytes == math.MaxInt64 || b.MaxUncompressedBytes <= 0 || b.MaxMemberBytes <= 0 {
 		return errors.New("archivecheck: every bound must be a positive finite value; there are no defaults")
 	}
 	l := opts.Layout
@@ -419,7 +420,10 @@ func (v *validator) entry(name string, isDir bool) error {
 // declared size against the actual bytes.
 func (v *validator) readMember(ctx context.Context, r io.Reader, name string, declared int64) (Member, error) {
 	b := v.opts.Bounds
-	if declared < 0 || declared > b.MaxMemberBytes || v.total+declared > b.MaxUncompressedBytes {
+	// Overflow-safe: v.total never exceeds MaxUncompressedBytes, so the
+	// remaining budget is computed by subtraction, never by addition that
+	// could wrap near math.MaxInt64.
+	if declared < 0 || declared > b.MaxMemberBytes || b.MaxUncompressedBytes-v.total < declared {
 		return Member{}, fmt.Errorf("archivecheck: member %q: declared size %d exceeds the member or total uncompressed bounds", name, declared)
 	}
 	h := sha256.New()
@@ -431,12 +435,13 @@ func (v *validator) readMember(ctx context.Context, r io.Reader, name string, de
 		}
 		n, err := r.Read(buf)
 		if n > 0 {
+			// Check before accumulating so no sum can ever wrap.
+			if actual > b.MaxMemberBytes-int64(n) || b.MaxUncompressedBytes-v.total < int64(n) {
+				return Member{}, fmt.Errorf("archivecheck: member %q: content exceeds the member or total uncompressed bounds", name)
+			}
 			actual += int64(n)
 			v.total += int64(n)
 			h.Write(buf[:n])
-			if actual > b.MaxMemberBytes || v.total > b.MaxUncompressedBytes {
-				return Member{}, fmt.Errorf("archivecheck: member %q: content exceeds the member or total uncompressed bounds", name)
-			}
 		}
 		if err == io.EOF {
 			break
@@ -476,12 +481,19 @@ func (l *ctxLimitedReader) Read(p []byte) (int, error) {
 	if err := l.ctx.Err(); err != nil {
 		return 0, err
 	}
-	limit := l.max + 1
-	if l.n >= limit {
+	if l.n > l.max {
 		return 0, fmt.Errorf("archivecheck: compressed stream exceeds MaxCompressedBytes %d", l.max)
 	}
-	if int64(len(p)) > limit-l.n {
-		p = p[:limit-l.n]
+	// One byte past max stays readable so a strict overflow is detected
+	// instead of being truncated into acceptance. rem+1 is computed as a
+	// guarded increment so a MaxCompressedBytes of math.MaxInt64 cannot
+	// overflow into a negative limit.
+	rem := l.max - l.n // in [0, math.MaxInt64]
+	if rem < math.MaxInt64 {
+		rem++
+	}
+	if int64(len(p)) > rem {
+		p = p[:rem]
 	}
 	n, err := l.r.Read(p)
 	l.n += int64(n)
@@ -509,26 +521,35 @@ func (l *ctxLimitedReaderAt) ReadAt(p []byte, off int64) (int, error) {
 	return l.ra.ReadAt(p, off)
 }
 
-// checkTarGz validates a gzip-compressed tar archive.
+// checkTarGz validates a gzip-compressed tar archive. The stdlib tar reader
+// does the parsing (no handrolled tar parser); the tarMeter around it bounds
+// and proves the framing, and proves the end-of-archive marker before the
+// truncated forms of io.EOF are accepted.
 func checkTarGz(ctx context.Context, r io.Reader, opts Options) (*Manifest, error) {
+	maxStream, framingBudget, err := decompressedStreamCaps(opts.Bounds)
+	if err != nil {
+		return nil, err
+	}
 	gz, err := gzip.NewReader(&ctxLimitedReader{ctx: ctx, r: r, max: opts.Bounds.MaxCompressedBytes})
 	if err != nil {
 		return nil, fmt.Errorf("archivecheck: not a valid gzip archive: %w", err)
 	}
 	defer gz.Close()
-	// The tail tracker sees every decompressed byte archive/tar pulls —
-	// including read-ahead buffered inside archive/tar that a post-EOF
-	// drain would never observe — so content hidden after the tar
-	// end-of-archive marker is detected instead of silently skipped.
-	tail := &tarTail{r: gz}
-	tr := tar.NewReader(tail)
 	v := newValidator(opts)
+	meter := &tarMeter{r: gz, v: v, maxStream: maxStream, framingBudget: framingBudget, tailNZ: -1}
+	tr := tar.NewReader(meter)
+	var lastSize int64 // declared size of the last accepted member
 	for {
 		if err = ctx.Err(); err != nil {
 			return nil, fmt.Errorf("archivecheck: %w", err)
 		}
 		hdr, err := tr.Next()
 		if err == io.EOF {
+			// archive/tar also returns io.EOF when the stream simply ends
+			// (no marker, or only one marker block); prove the marker.
+			if perr := meter.proveEndMarker(lastSize); perr != nil {
+				return nil, perr
+			}
 			break
 		}
 		if err != nil {
@@ -545,83 +566,189 @@ func checkTarGz(ctx context.Context, r io.Reader, opts Options) (*Manifest, erro
 			if err = v.entry(hdr.Name, true); err != nil {
 				return nil, err
 			}
+			// Directory entries carry no data section.
+			meter.dataEnd = meter.n
+			lastSize = 0
 		case tar.TypeReg:
 			if err = v.entry(hdr.Name, false); err != nil {
 				return nil, err
 			}
-			m, rerr := v.readMember(ctx, tr, hdr.Name, hdr.Size)
+			member, rerr := v.readMember(ctx, tr, hdr.Name, hdr.Size)
 			if rerr != nil {
 				return nil, rerr
 			}
-			v.man.Members = append(v.man.Members, m)
+			v.man.Members = append(v.man.Members, member)
+			meter.dataEnd = meter.n
+			lastSize = hdr.Size
 		default:
 			return nil, fmt.Errorf("archivecheck: member %q: entry type %q is not a regular file or directory; links, devices and FIFOs are refused", hdr.Name, rune(hdr.Typeflag))
 		}
 	}
-	if err = tail.requireEndMarker(); err != nil {
-		return nil, err
-	}
-	// archive/tar stops at the two-block end-of-archive marker, which
-	// normally leaves the gzip trailer unread: compress/gzip verifies the
-	// CRC-32 and ISIZE trailer only when the stream is read to EOF.
-	// Draining the remainder enforces that trailer, refuses non-NUL bytes
-	// past the marker, and is itself bounded.
-	if err = drainGzipTail(ctx, gz); err != nil {
+	// archive/tar stops at the end-of-archive marker, which normally leaves
+	// the gzip trailer unread: compress/gzip verifies the CRC-32/ISIZE
+	// trailer only when the stream is read to EOF. Draining the remainder
+	// enforces that trailer, refuses non-NUL bytes past the marker (a
+	// hidden second payload, including one concatenated as a second gzip
+	// member) and trailing NUL runs beyond maxTrailingPadding.
+	if err = drainGzipTail(ctx, meter); err != nil {
 		return nil, err
 	}
 	return v.finish()
 }
 
-// tarTail wraps the decompressed stream, tracking the total bytes read and
-// the position of the last non-zero byte, so the archive can be proven to
-// end with the 1024-byte end-of-archive marker followed by nothing but NUL
-// padding.
-type tarTail struct {
-	r      io.Reader
-	n      int64
-	lastNZ int64 // index of the last non-zero byte; -1 when none
+// Tar framing constants. They bound the decompressed bytes archive/tar may
+// consume for framing — headers, PAX/GNU extension content, padding and the
+// end-of-archive marker — in addition to member payloads, and define the
+// exact padding limit enforced after the marker.
+const (
+	// tarBlockSize is the 512-byte tar block size.
+	tarBlockSize = 512
+	// eoaMarkerLen is the length of the two-block NUL end-of-archive marker
+	// that POSIX requires after the last member.
+	eoaMarkerLen = 2 * tarBlockSize
+	// maxSpecialFileSize mirrors the stdlib archive/tar cap on PAX/GNU
+	// extension ("special file") content: stdlib refuses to buffer more, so
+	// budgeting per-member framing at this scale cannot be turned into an
+	// unbounded allocation by a header bomb.
+	maxSpecialFileSize = 1 << 20
+	// perMemberFraming is the decompressed framing allowance per member: its
+	// 512-byte header block, at most one extension header block plus
+	// maxSpecialFileSize bytes of PAX/GNU extension content, up to two
+	// block-padding runs, and slack.
+	perMemberFraming = maxSpecialFileSize + 8*tarBlockSize
+	// maxTrailingPadding is the EXACT padding limit after the end-of-archive
+	// marker: conforming tar writers pad the archive to at most one
+	// 10240-byte record, so 64 KiB (65536 bytes) of trailing NUL is a
+	// generous ceiling. Anything longer, or any non-NUL byte there, is
+	// treated as hidden content and refused.
+	maxTrailingPadding = 64 << 10
+	// framingSlack covers the accounting lag between the meter counting a
+	// returned chunk and readMember counting the same chunk as payload; the
+	// framing share briefly appears up to one read chunk larger.
+	framingSlack = 64 << 10
+)
+
+// decompressedStreamCaps derives, from the caller's bounds, the cap on the
+// TOTAL decompressed stream (member payloads plus headers, PAX/GNU
+// metadata, padding and the marker — everything archive/tar pulls) and the
+// framing share of that cap. Every sum is computed with overflow checks;
+// combinations that would wrap int64 are refused up front rather than
+// mis-enforced.
+func decompressedStreamCaps(b Bounds) (maxStream, framingBudget int64, err error) {
+	if int64(b.MaxMembers) > math.MaxInt64/perMemberFraming {
+		return 0, 0, fmt.Errorf("archivecheck: MaxMembers %d is too large for the per-member framing budget", b.MaxMembers)
+	}
+	framingBudget = int64(b.MaxMembers)*perMemberFraming + eoaMarkerLen + maxTrailingPadding + framingSlack
+	if framingBudget < 0 || framingBudget > math.MaxInt64-1-b.MaxUncompressedBytes {
+		return 0, 0, errors.New("archivecheck: MaxUncompressedBytes plus the framing budget overflows; refusing")
+	}
+	return b.MaxUncompressedBytes + framingBudget, framingBudget, nil
 }
 
-func (t *tarTail) Read(p []byte) (int, error) {
-	n, err := t.r.Read(p)
+// tarMeter instruments the decompressed stream that archive/tar consumes. It
+// counts EVERY decompressed byte — headers, PAX/GNU extension content,
+// padding and the marker, not only member payloads — enforcing the total
+// stream cap and the framing budget WHILE reading, so header and metadata
+// bombs fail before the stdlib buffers them. It also records where the last
+// accepted member's data section ended and the last non-NUL byte from there
+// on, which is what turns archive/tar's io.EOF into an actual end-of-archive
+// proof (see proveEndMarker); no tar framing is parsed by hand.
+type tarMeter struct {
+	r             io.Reader
+	v             *validator
+	maxStream     int64
+	framingBudget int64
+
+	n       int64 // total decompressed bytes observed
+	dataEnd int64 // stream position just past the last accepted member's data
+	tailNZ  int64 // last non-NUL position at/after dataEnd; -1 when none
+	ended   bool  // the decompressed stream reached EOF
+}
+
+// Read enforces the total decompressed cap and the framing budget on every
+// byte archive/tar pulls, and tracks the non-NUL tail after the last
+// member. It never truncates: one byte past the cap stays readable so an
+// oversized stream is refused rather than accepted as a prefix.
+func (m *tarMeter) Read(p []byte) (int, error) {
+	if m.n > m.maxStream {
+		return 0, fmt.Errorf("archivecheck: decompressed stream exceeds the total bound %d (member payloads plus bounded framing)", m.maxStream)
+	}
+	rem := m.maxStream + 1 - m.n // safe: caps guarantee maxStream < math.MaxInt64
+	if int64(len(p)) > rem {
+		p = p[:rem]
+	}
+	n, err := m.r.Read(p)
+	m.n += int64(n)
+	if m.n > m.maxStream {
+		return n, fmt.Errorf("archivecheck: decompressed stream exceeds the total bound %d (member payloads plus bounded framing)", m.maxStream)
+	}
+	if m.n-m.v.total > m.framingBudget {
+		return n, fmt.Errorf("archivecheck: tar framing (headers, PAX/GNU metadata or padding) exceeds the budget %d", m.framingBudget)
+	}
+	start := m.n - int64(n)
 	for i := 0; i < n; i++ {
-		if p[i] != 0 {
-			t.lastNZ = t.n + int64(i)
+		if p[i] != 0 && start+int64(i) >= m.dataEnd {
+			m.tailNZ = start + int64(i)
 		}
 	}
-	t.n += int64(n)
+	if err == io.EOF {
+		m.ended = true
+	}
 	return n, err
 }
 
-// requireEndMarker refuses a decompressed stream that does not end with the
-// two zero blocks of the tar end-of-archive marker: a shorter zero run means
-// the archive is truncated or carries hidden content past its end.
-func (t *tarTail) requireEndMarker() error {
-	if t.n-(t.lastNZ+1) < 1024 {
-		return errors.New("archivecheck: tar stream does not end with the two-block end-of-archive marker; hidden or truncated content past the archive end is refused")
+// blockPadding is the tar block padding following a data section of size.
+func blockPadding(size int64) int64 {
+	if rem := size % tarBlockSize; rem != 0 {
+		return tarBlockSize - rem
+	}
+	return 0
+}
+
+// proveEndMarker turns archive/tar's io.EOF into an actual end-of-archive
+// proof. archive/tar returns io.EOF not only for the genuine two-block NUL
+// marker but also for a stream that merely ends — with no marker at all, or
+// with only one marker block — and it stops reading at the marker, so a
+// trailing-1024-zero heuristic can mistake a zero-ending member payload for
+// the marker and hide truncation. The meter instead knows the exact stream
+// position where the last accepted member's data section ended, so the
+// marker must start exactly at dataEnd+blockPadding(lastSize); stdlib itself
+// verified that both marker blocks are NUL before returning io.EOF. The
+// proof therefore refuses: any non-NUL byte between the last member and the
+// marker (smuggled or concatenated hidden entries), a stream that already
+// ended with fewer than the full 1024-byte marker, and a stream that ended
+// with more than maxTrailingPadding trailing NULs. When the stream has not
+// ended, the remaining tail is proven NUL and bounded by drainGzipTail.
+func (m *tarMeter) proveEndMarker(lastSize int64) error {
+	markerStart := m.dataEnd + blockPadding(lastSize)
+	if m.tailNZ >= markerStart {
+		return errors.New("archivecheck: non-NUL bytes follow the last member before the end-of-archive marker; hidden content past the archive end is refused")
+	}
+	if m.ended {
+		if m.n < markerStart+eoaMarkerLen {
+			return errors.New("archivecheck: tar stream ends without the full two-block end-of-archive marker; missing, one-block or truncated markers are refused")
+		}
+		if m.n-markerStart-eoaMarkerLen > maxTrailingPadding {
+			return fmt.Errorf("archivecheck: gzip stream carries more than %d bytes past the tar end-of-archive marker", maxTrailingPadding)
+		}
 	}
 	return nil
 }
 
-// maxTrailingPadding bounds the decompressed bytes that may trail the tar
-// end-of-archive marker. Conforming writers pad to at most one 10240-byte
-// record; 64 KiB is a generous ceiling, and anything larger is treated as
-// hidden content, not padding.
-const maxTrailingPadding = 64 << 10
-
-// drainGzipTail reads the gzip stream to its end, forcing compress/gzip to
-// verify the CRC-32/ISIZE trailer, and refuses any non-NUL byte or any
-// trailing run longer than maxTrailingPadding: tar stops at the
-// end-of-archive marker, so a second payload hidden after it (including in
-// a concatenated gzip member) must be refused rather than silently skipped.
-func drainGzipTail(ctx context.Context, gz *gzip.Reader) error {
+// drainGzipTail reads the gzip stream past the marker to its end, forcing
+// compress/gzip to verify the CRC-32/ISIZE trailer (it only does so when the
+// stream reaches EOF, even when every tar entry already parsed), and
+// refuses any non-NUL byte — a second payload hidden after the marker,
+// including one smuggled in a concatenated gzip member — and any trailing
+// NUL run longer than maxTrailingPadding.
+func drainGzipTail(ctx context.Context, m *tarMeter) error {
 	buf := make([]byte, 4*1024)
 	var total int64
 	for {
 		if err := ctx.Err(); err != nil {
 			return fmt.Errorf("archivecheck: %w", err)
 		}
-		n, err := gz.Read(buf)
+		n, err := m.Read(buf)
 		total += int64(n)
 		if total > maxTrailingPadding {
 			return fmt.Errorf("archivecheck: gzip stream carries more than %d bytes past the tar end-of-archive marker", maxTrailingPadding)
@@ -647,8 +774,13 @@ func checkZip(ctx context.Context, a Archive, opts Options) (*Manifest, error) {
 	if err != nil {
 		return nil, fmt.Errorf("archivecheck: zip central directory rejected: %w", err)
 	}
+	// Overflow-safe accumulation: a declared size above math.MaxInt64 or a
+	// running sum that would wrap is refused instead of silently accepted.
 	var declaredCompressed int64
 	for _, f := range zr.File {
+		if f.CompressedSize64 > math.MaxInt64 || declaredCompressed > math.MaxInt64-int64(f.CompressedSize64) {
+			return nil, fmt.Errorf("archivecheck: zip members declare compressed sizes above MaxCompressedBytes %d", opts.Bounds.MaxCompressedBytes)
+		}
 		declaredCompressed += int64(f.CompressedSize64)
 	}
 	if declaredCompressed > opts.Bounds.MaxCompressedBytes {

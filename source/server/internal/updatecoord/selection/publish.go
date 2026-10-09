@@ -221,19 +221,7 @@ var (
 // is never swallowed.
 func Publish(ctx context.Context, dir string, lock *exclusion.Handle, expected Expected, next activation.Selection) (Result, error) {
 	var zero Result
-	if ctx == nil {
-		return zero, fmt.Errorf("%w: nil context", ErrInvalidRequest)
-	}
-	if err := ctx.Err(); err != nil {
-		return zero, errors.Join(ErrCanceled, err)
-	}
-	if strings.ContainsRune(dir, 0) || !filepath.IsAbs(dir) || filepath.Clean(dir) != dir {
-		return zero, fmt.Errorf("%w: directory must be an explicit cleaned absolute path", ErrInvalidRequest)
-	}
-	if err := next.Validate(); err != nil {
-		return zero, fmt.Errorf("%w: new selection: %w", ErrInvalidRequest, err)
-	}
-	if err := validateExpected(expected, next); err != nil {
+	if err := validatePublishRequest(ctx, dir, expected, next); err != nil {
 		return zero, err
 	}
 
@@ -259,6 +247,56 @@ func Publish(ctx context.Context, dir string, lock *exclusion.Handle, expected E
 		return res, gerr
 	}
 	return res, nil
+}
+
+// validatePublishRequest performs the request-shaped checks shared by every
+// publication entry point: a live context, an explicit cleaned absolute
+// directory, a valid next descriptor, and exactly one consistent
+// expectation form. It performs no I/O.
+func validatePublishRequest(ctx context.Context, dir string, expected Expected, next activation.Selection) error {
+	if ctx == nil {
+		return fmt.Errorf("%w: nil context", ErrInvalidRequest)
+	}
+	if err := ctx.Err(); err != nil {
+		return errors.Join(ErrCanceled, err)
+	}
+	if strings.ContainsRune(dir, 0) || !filepath.IsAbs(dir) || filepath.Clean(dir) != dir {
+		return fmt.Errorf("%w: directory must be an explicit cleaned absolute path", ErrInvalidRequest)
+	}
+	if err := next.Validate(); err != nil {
+		return fmt.Errorf("%w: new selection: %w", ErrInvalidRequest, err)
+	}
+	return validateExpected(expected, next)
+}
+
+// PublishHoldingGuard is the SAME observe-stage-commit critical section as
+// Publish, for a caller that ALREADY holds the exclusion guard.
+//
+// The caller must have invoked — and still be inside —
+// exclusion.Handle.GuardUpdate for EXACTLY dir on an exclusive Update-mode
+// handle acquired for that directory, and that one guard must cover the
+// caller's entire transaction (durable intent, this publication, and the
+// durable acknowledgement). This function takes NO OS lock and performs NO
+// guarded-use proof of its own: running it outside a live guard for exactly
+// dir forfeits every safety property Publish provides. It exists so a
+// composing transaction never nests GuardUpdate inside GuardUpdate — the
+// guard serializes on one handle and a nested call on the same handle
+// would deadlock against itself — while keeping exactly one guard over the
+// whole intent-publish-acknowledge sequence.
+//
+// The request validation (context, directory form, descriptors, single
+// expectation form) is identical to Publish; everything the guarded core
+// does — privdir verification of the directory, the re-read conflict
+// check, staging, the platform commit, and the durability confirmation —
+// is identical too. Every failure category (typed pre-commit errors with
+// nothing changed, and CommitDurabilityUncertain with the commit never
+// rolled back) is reported exactly as Publish reports it.
+func PublishHoldingGuard(ctx context.Context, dir string, expected Expected, next activation.Selection) (Result, error) {
+	var zero Result
+	if err := validatePublishRequest(ctx, dir, expected, next); err != nil {
+		return zero, err
+	}
+	return publishGuarded(ctx, dir, expected, next)
 }
 
 // publishGuarded is the whole observe-stage-commit critical section. It

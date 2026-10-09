@@ -12,6 +12,8 @@ package worker_test
 //   - a different conversation gets its own worker (spawn increments).
 
 import (
+	"cercano/source/server/internal/managedsettings"
+	"cercano/source/server/internal/managedsettings/settingstest"
 	"context"
 	"encoding/json"
 	"net"
@@ -29,6 +31,7 @@ import (
 	cfgsvc "cercano/source/server/internal/hostsvc/config"
 	providers "cercano/source/server/internal/hostsvc/providers"
 	"cercano/source/server/internal/llm"
+	"cercano/source/server/internal/modelpolicy"
 	"cercano/source/server/internal/runner"
 	"cercano/source/server/internal/secrets"
 	"cercano/source/server/internal/worker"
@@ -198,5 +201,34 @@ func TestPool_DifferentConversationsGetOwnWorker(t *testing.T) {
 	}
 	if got := atomic.LoadInt32(&spawns); got != 2 {
 		t.Fatalf("two conversations should spawn two workers: spawns = %d, want 2", got)
+	}
+}
+
+// A process that has installed the enterprise guard must not be reused after
+// explicit return to standalone mode. Both mode transitions get fresh workers.
+func TestPoolReplacesWorkerWhenEnterpriseModeChanges(t *testing.T) {
+	var spawns atomic.Int32
+	spawn := func(_ context.Context, _ string, _ uint64) (*worker.WorkerHandleForTest, error) {
+		spawns.Add(1)
+		conn, stop := bufconnWorkerConn(t, "echo")
+		t.Cleanup(stop)
+		return worker.HandleFromConn(conn), nil
+	}
+	cfgSvc := cfgsvc.New("", config.Config{LocusMode: "open_primary"}, secrets.NewMemory())
+	r := worker.NewWorkerRunnerWithPoolSpawnForTest(&recordingHistory{}, cfgSvc, newTestBroker(), newHostSecrets(nil), spawn)
+	for i, managed := range []bool{false, false, true, true, false, false} {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if managed {
+			ctx = managedsettings.WithSnapshot(ctx, settingstest.Snapshot("test-org", "1", "Review carefully."))
+			ctx = modelpolicy.WithAuthority(ctx, modelpolicy.AuthorizeFunc(func(context.Context, modelpolicy.Attempt) error { return nil }))
+		}
+		_, err := r.RunTurn(ctx, runner.Request{ConversationID: "same-conversation", Gen: uint64(i + 1), Input: "hello"}, nil, nil, nil)
+		cancel()
+		if err != nil {
+			t.Fatalf("turn %d: %v", i, err)
+		}
+	}
+	if spawns.Load() != 3 {
+		t.Fatalf("mode transitions reused guarded worker: spawns=%d", spawns.Load())
 	}
 }

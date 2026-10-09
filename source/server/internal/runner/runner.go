@@ -52,7 +52,14 @@ type ToolSvc interface {
 // plan's load-bearing decision).
 type Request struct {
 	// ChatRoute is a per-turn snapshot; changes made by tools apply next turn.
-	ChatRoute      *chatroute.Route
+	// Under enterprise managed routing it is validated as an explicit session
+	// choice (profile+model identity) and honored only if policy permits.
+	ChatRoute *chatroute.Route
+	// ModelOverride is an explicit per-turn choice; managed routing validates it.
+	// It takes precedence over the session ChatRoute for the model only, per the
+	// existing contract, and is rejected (never silently remapped) when policy
+	// forbids it.
+	ModelOverride  string
 	DebugMode      bool
 	AuthRecovery   llm.AuthRequester
 	ConversationID string

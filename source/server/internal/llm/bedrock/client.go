@@ -3,14 +3,17 @@ package bedrock
 import (
 	"context"
 	"fmt"
+	"net/http"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
 
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
+	"cercano/source/server/internal/modelpolicy"
 	"cercano/source/server/internal/usage"
 )
 
@@ -50,12 +53,31 @@ func NewClient(cfg Config) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("bedrock: load AWS config: %w", err)
 	}
+	var policyClientErr error
 	api := bedrockruntime.NewFromConfig(awsCfg, func(o *bedrockruntime.Options) {
+		// Wrap only model-serving traffic, not the AWS credential-provider chain.
+		o.HTTPClient, policyClientErr = policyHTTPClient(o.HTTPClient)
 		if cfg.BaseURL != "" {
 			o.BaseEndpoint = aws.String(cfg.BaseURL)
 		}
 	})
+	if policyClientErr != nil {
+		return nil, policyClientErr
+	}
 	return &Client{api: api, model: cfg.Model}, nil
+}
+
+// Preserve AWS's CA bundle, dialer, timeouts and standalone redirect behavior.
+// This runs after the SDK resolves its HTTP defaults, rather than replacing them.
+func policyHTTPClient(base bedrockruntime.HTTPClient) (*http.Client, error) {
+	if buildable, ok := base.(*awshttp.BuildableClient); ok {
+		base = buildable.Freeze()
+	}
+	client, ok := base.(*http.Client)
+	if !ok {
+		return nil, fmt.Errorf("bedrock: unsupported HTTP client for model authorization")
+	}
+	return modelpolicy.Client(client, "bedrock", "external", modelpolicy.Bedrock), nil
 }
 
 func (c *Client) Name() string { return "bedrock" }

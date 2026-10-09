@@ -3,6 +3,7 @@ package ui
 import (
 	"cercano/source/clients/cli/internal/form"
 	"cercano/source/server/pkg/agentclient"
+	"cercano/source/server/pkg/config"
 )
 
 // fallbackClaudeModels is the curated static catalog rendered when the live
@@ -15,14 +16,11 @@ import (
 //
 // Update in tandem when Anthropic promotes new default models.
 func fallbackClaudeModels() []agentclient.CloudModelInfo {
-	return []agentclient.CloudModelInfo{
-		{ID: "claude-fable-5", DisplayName: "Claude Fable 5 (most capable)"},
-		{ID: "claude-opus-5", DisplayName: "Claude Opus 5 (latest)"},
-		{ID: "claude-opus-4-7", DisplayName: "Claude Opus 4.7"},
-		{ID: "claude-sonnet-4-6", DisplayName: "Claude Sonnet 4.6 (balanced)"},
-		{ID: "claude-sonnet-4-5", DisplayName: "Claude Sonnet 4.5"},
-		{ID: "claude-haiku-4-5-20251001", DisplayName: "Claude Haiku 4.5 (fastest)"},
+	out := []agentclient.CloudModelInfo{}
+	for _, m := range config.ClaudeModelChoices() {
+		out = append(out, agentclient.CloudModelInfo{ID: m.ID, DisplayName: m.DisplayName})
 	}
+	return out
 }
 
 // modelOptionsFromCatalog turns a []CloudModelInfo into form.Options for a

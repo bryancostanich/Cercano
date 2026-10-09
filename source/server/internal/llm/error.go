@@ -98,6 +98,12 @@ func ClassOf(err error) ErrorClass {
 	if err == nil {
 		return ""
 	}
+	// Adapters may wrap transport errors as network errors. Enterprise denials
+	// remain terminal through those wrappers and must never trigger fallback.
+	var denied interface{ EnterprisePolicyDenied() bool }
+	if errors.As(err, &denied) && denied.EnterprisePolicyDenied() {
+		return ErrPermission
+	}
 	var e *Error
 	if errors.As(err, &e) {
 		return e.Class

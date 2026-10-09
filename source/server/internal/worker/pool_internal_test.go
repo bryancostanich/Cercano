@@ -19,6 +19,8 @@ import (
 	"testing"
 	"time"
 
+	"cercano/source/server/internal/modelpolicy"
+
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials/insecure"
@@ -438,4 +440,23 @@ func TestPool_Shutdown_DrainsAllWorkers(t *testing.T) {
 
 	// Idempotent: a second Shutdown must not panic (closeOnce guards the done chan).
 	p.Shutdown()
+}
+
+func TestPoolModeChangeKillsWarmWorkerThatRacedWithSpawn(t *testing.T) {
+	var killed atomic.Int32
+	displaced := &workerHandle{onKill: func() { killed.Add(1) }}
+	fresh := &workerHandle{}
+	var pool *workerPool
+	pool = newWorkerPool(func(context.Context, string, uint64) (*workerHandle, error) {
+		pool.mu.Lock()
+		pool.byConv["conversation"] = &pooledEntry{handle: displaced, managed: false, inUse: false}
+		pool.mu.Unlock()
+		return fresh, nil
+	})
+	defer pool.Shutdown()
+	ctx := modelpolicy.WithAuthority(context.Background(), modelpolicy.AuthorizeFunc(func(context.Context, modelpolicy.Attempt) error { return nil }))
+	got, err := pool.Acquire(ctx, "conversation", 1)
+	if err != nil || got != fresh || killed.Load() != 1 {
+		t.Fatalf("mode-change race leaked old worker: fresh=%v killed=%d err=%v", got == fresh, killed.Load(), err)
+	}
 }

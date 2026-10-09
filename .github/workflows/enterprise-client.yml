@@ -1,0 +1,97 @@
+name: Enterprise client
+
+on:
+  pull_request:
+    paths:
+      - 'source/server/internal/enterprise/**'
+      - 'source/server/internal/gitflow/**'
+      - 'source/server/internal/modelpolicy/**'
+      - 'source/server/internal/managedsettings/**'
+      - 'source/server/internal/managedrouting/**'
+      - 'source/server/internal/cloudfactory/**'
+      - 'source/server/internal/hostsvc/providers/**'
+      - 'source/server/internal/hostsvc/persistence/**'
+      - 'source/server/internal/contextedit/**'
+      - 'source/server/internal/dispatch/**'
+      - 'source/server/internal/loopcompact/**'
+      - 'source/server/internal/loop/**'
+      - 'source/server/internal/usage/**'
+      - 'source/server/internal/capabilities/**'
+      - 'source/server/internal/hostsvc/tools/**'
+      - 'source/server/internal/runner/**'
+      - 'source/server/internal/broker/**'
+      - 'source/server/internal/server/**'
+      - 'source/server/internal/mcp/**'
+      - 'source/server/internal/agent/**'
+      - 'source/server/internal/llm/**'
+      - 'source/server/internal/engine/**'
+      - 'source/server/internal/localruntime/**'
+      - 'source/server/internal/worker/**'
+      - 'source/server/internal/inference/**'
+      - 'source/proto/**'
+      - 'source/server/pkg/proto/**'
+      - 'source/server/cmd/cercano/**'
+      - 'source/server/go.mod'
+      - 'source/server/go.sum'
+      - '.github/workflows/enterprise-client.yml'
+  push:
+    paths:
+      - 'source/server/internal/enterprise/**'
+      - 'source/server/internal/gitflow/**'
+      - 'source/server/internal/modelpolicy/**'
+      - 'source/server/internal/managedsettings/**'
+      - 'source/server/internal/managedrouting/**'
+      - 'source/server/internal/cloudfactory/**'
+      - 'source/server/internal/hostsvc/providers/**'
+      - 'source/server/internal/hostsvc/persistence/**'
+      - 'source/server/internal/contextedit/**'
+      - 'source/server/internal/dispatch/**'
+      - 'source/server/internal/loopcompact/**'
+      - 'source/server/internal/loop/**'
+      - 'source/server/internal/usage/**'
+      - 'source/server/internal/capabilities/**'
+      - 'source/server/internal/hostsvc/tools/**'
+      - 'source/server/internal/runner/**'
+      - 'source/server/internal/broker/**'
+      - 'source/server/internal/server/**'
+      - 'source/server/internal/mcp/**'
+      - 'source/server/internal/agent/**'
+      - 'source/server/internal/llm/**'
+      - 'source/server/internal/engine/**'
+      - 'source/server/internal/localruntime/**'
+      - 'source/server/internal/worker/**'
+      - 'source/server/internal/inference/**'
+      - 'source/proto/**'
+      - 'source/server/pkg/proto/**'
+      - 'source/server/cmd/cercano/**'
+      - 'source/server/go.mod'
+      - 'source/server/go.sum'
+      - '.github/workflows/enterprise-client.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  connection-and-enforcement:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: source/server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: source/server/go.mod
+          cache-dependency-path: source/server/go.sum
+      - name: Compile the cross-repository workflow harness
+        run: go test -tags=enterprise_demo ./internal/server -run '^$'
+      - name: Verify lossless stream delivery
+        run: go test -race ./internal/broker
+      - run: go test -race ./internal/enterprise ./internal/modelpolicy ./internal/managedsettings/... ./internal/managedrouting ./internal/cloudfactory ./internal/hostsvc/providers ./internal/hostsvc/persistence ./internal/contextedit ./internal/dispatch ./internal/loopcompact ./internal/loop/... ./internal/usage ./internal/capabilities/builtins ./internal/hostsvc/tools ./internal/runner ./internal/server ./internal/mcp ./internal/agent ./internal/llm/... ./internal/engine/... ./internal/localruntime/... ./internal/worker ./internal/inference/... ./cmd/cercano
+      - run: go vet ./internal/enterprise ./internal/modelpolicy ./internal/managedsettings/... ./internal/managedrouting ./internal/cloudfactory ./internal/hostsvc/providers ./internal/hostsvc/persistence ./internal/contextedit ./internal/dispatch ./internal/loopcompact ./internal/loop/... ./internal/usage ./internal/capabilities/builtins ./internal/hostsvc/tools ./internal/runner ./internal/server ./internal/mcp ./internal/agent ./internal/llm/... ./internal/engine/... ./internal/localruntime/... ./internal/worker ./cmd/cercano
+      - name: Verify the complete client suite
+        run: go test ./... -count=1
+      - run: go build ./cmd/cercano

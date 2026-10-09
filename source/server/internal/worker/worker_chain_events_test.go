@@ -60,11 +60,41 @@ func TestWorkerChainEvents_LogOutput(t *testing.T) {
 		"text=true",
 		"reasoning=false",
 		"tool=true",
-		"primary unreachable — trying once more",
+		// Emitted=true means visible content was interrupted mid-answer: the
+		// notice must announce the same-model restart, not a plain retry.
+		"primary unreachable mid-answer — restarting the reply",
 		"connection failed",
 	}
 
 	for _, field := range requiredFields {
+		if !strings.Contains(logOutput, field) {
+			t.Errorf("Log output missing required field: %s\nFull log output: %s", field, logOutput)
+		}
+	}
+}
+
+// TestWorkerChainEvents_FreshRetryNotice keeps the pre-content retry wording:
+// with nothing emitted yet, the same-provider retry is announced plainly.
+func TestWorkerChainEvents_FreshRetryNotice(t *testing.T) {
+	var buf bytes.Buffer
+
+	originalOutput := log.Writer()
+	log.SetOutput(&buf)
+	defer log.SetOutput(originalOutput)
+
+	event := resilience.Event{
+		Action: resilience.ActionRetry,
+		Stage:  "stream_dial",
+		Class:  llm.ErrNetwork,
+		From:   "primary",
+		Emitted: false,
+		Err:    &testError{"connection failed"},
+	}
+
+	workerChainEvents(pkgcfg.DestinationPrimary)(event)
+
+	logOutput := buf.String()
+	for _, field := range []string{"primary unreachable — trying once more", "connection failed"} {
 		if !strings.Contains(logOutput, field) {
 			t.Errorf("Log output missing required field: %s\nFull log output: %s", field, logOutput)
 		}

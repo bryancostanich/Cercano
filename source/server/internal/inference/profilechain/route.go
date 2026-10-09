@@ -10,6 +10,12 @@ import (
 	"fmt"
 )
 
+// WithRoute attaches discovered model metadata and per-attempt accounting to a
+// single adapter without adding profile backups or model-tier substitutions.
+func WithRoute(provider inference.Provider, profile, destination string) inference.Provider {
+	return &routeProvider{Provider: provider, profile: profile, destination: destination}
+}
+
 type routeProvider struct {
 	inference.Provider
 	profile, destination string

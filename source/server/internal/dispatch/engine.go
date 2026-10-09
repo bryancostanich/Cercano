@@ -13,6 +13,7 @@ import (
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/locus"
+	"cercano/source/server/internal/managedrouting"
 	"cercano/source/server/internal/modelbudget"
 	"cercano/source/server/internal/usage"
 	"cercano/source/server/pkg/config"
@@ -51,6 +52,8 @@ type Spec struct {
 	ModelOverride       string // advisory model name within locus bounds
 	// DisableThinking is a one-shot generation policy, not a global setting.
 	DisableThinking bool
+	// MaxTokens bounds a one-shot response; zero retains the provider default.
+	MaxTokens int
 
 	// Tier names the model-taxonomy tier this dispatch runs on. Empty
 	// defaults by role: RoleMain → everyday, RoleCoproc → fast_light_text.
@@ -90,8 +93,8 @@ type Spec struct {
 	// call) for this dispatch. 0 resolves the class default from the routing
 	// assignment's cost tier (CostTier.DispatchTokenBudget);
 	// config.UnlimitedDispatchTokenBudget disables the cap explicitly.
-	TokenBudget int
-	FallbackTier  config.Tier // per-invocation override fallback intent
+	TokenBudget  int
+	FallbackTier config.Tier // per-invocation override fallback intent
 }
 
 // Result holds the outcome of a dispatched call.
@@ -205,7 +208,7 @@ func dispatchTarget(ctx context.Context, sel inference.Selection, tier config.Ti
 // runtime-confirmed Local capacity before the caller builds its prompt.
 func (e *Engine) PreparedTarget(ctx context.Context, spec Spec) (modelbudget.Target, error) {
 	candidates, mode := e.routingSnapshot()
-	sel, tier, model, err := e.resolve(spec, mode, candidates)
+	sel, tier, model, _, err := e.resolveForContext(ctx, spec, mode, candidates)
 	if err != nil {
 		return modelbudget.Target{}, err
 	}
@@ -239,17 +242,20 @@ func (e *Engine) Dispatch(ctx context.Context, spec Spec) (Result, error) {
 	spec = defaultTask(spec)
 	// 1. Select provider via locus (providers resolved fresh each dispatch).
 	candidates, mode := e.routingSnapshot()
-	sel, tier, model, err := e.resolve(spec, mode, candidates)
+	ctx = managedrouting.PinCandidates(ctx, candidates)
+	sel, tier, model, managed, err := e.resolveForContext(ctx, spec, mode, candidates)
 	if err != nil {
 		return Result{}, err
 	}
 	spec.Tier = tier
-	if spec.ModelOverride != "" {
+	if spec.ModelOverride != "" && !managed {
 		spec.FallbackTier = tier
 		spec.Tier = ""
 	}
 
-	sel = e.startupFallback(sel, candidates, mode, spec, tier)
+	if !managed {
+		sel = e.startupFallback(sel, candidates, mode, spec, tier)
+	}
 
 	// 3a. Agentic: delegate to the installed runner (lives in internal/server
 	// to avoid an import cycle with internal/agent).
@@ -257,7 +263,12 @@ func (e *Engine) Dispatch(ctx context.Context, spec Spec) (Result, error) {
 		if e.agenticRunner == nil {
 			return Result{}, errors.New("dispatch: agentic runner not configured")
 		}
-		spec.TokenBudget = e.resolveTokenBudget(spec)
+		if managed && spec.TokenBudget == 0 {
+			quality, _ := config.CostTierForCapability(tier)
+			spec.TokenBudget = quality.DispatchTokenBudget()
+		} else {
+			spec.TokenBudget = e.resolveTokenBudget(spec)
+		}
 		result, err := e.agenticRunner(ctx, spec, sel, model)
 		current, servedModel := CurrentRoute(sel, model)
 		if current.IsCloud != sel.IsCloud {
@@ -288,6 +299,7 @@ func (e *Engine) Dispatch(ctx context.Context, spec Spec) (Result, error) {
 	// 4. Build chat request.
 	req := llm.ChatRequest{
 		Model:           model,
+		MaxTokens:       spec.MaxTokens,
 		Tier:            string(spec.Tier),
 		FallbackTier:    string(spec.FallbackTier),
 		System:          spec.System,
@@ -317,6 +329,9 @@ func (e *Engine) Dispatch(ctx context.Context, spec Spec) (Result, error) {
 	if resp.Route != nil {
 		route = *resp.Route
 		servedProvider = route.Provider
+		if managed && route.Destination != "" {
+			sel.IsCloud = route.Destination != "local"
+		}
 	}
 	if spec.RecordUsage && e.usageSink != nil {
 		e.usageSink(usage.Usage{
@@ -387,6 +402,24 @@ func (e *Engine) resolveTokenBudget(spec Spec) int {
 		assignment = e.taskAssignment(spec.RoutingTask)
 	}
 	return assignment.Quality.DispatchTokenBudget()
+}
+
+// resolveForContext applies the pinned enterprise layer before personal routing.
+func (e *Engine) resolveForContext(ctx context.Context, spec Spec, mode locus.Mode, candidates inference.Tiers) (inference.Selection, config.Tier, string, bool, error) {
+	if spec.LocalOffload && spec.RoutingTask != "" {
+		return inference.Selection{}, "", "", false, fmt.Errorf("dispatch: local offload cannot carry a task assignment")
+	}
+	normalized := defaultTask(spec)
+	task := normalized.RoutingTask
+	if normalized.LocalOffload {
+		task = config.TaskDispatch
+	}
+	selected, assignment, model, managed, err := managedrouting.Select(ctx, task, candidates, managedrouting.Request{Model: spec.ModelOverride, Tier: spec.Tier, LocalOnly: spec.LocalOffload})
+	if managed {
+		return selected, assignment.Quality.CapabilityTier(), model, true, err
+	}
+	selected, tier, model, err := e.resolve(spec, mode, candidates)
+	return selected, tier, model, false, err
 }
 
 func (e *Engine) resolve(spec Spec, mode locus.Mode, candidates inference.Tiers) (inference.Selection, config.Tier, string, error) {

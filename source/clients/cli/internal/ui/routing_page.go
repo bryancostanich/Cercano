@@ -41,15 +41,7 @@ func (sp *settingsPage) refreshRoutingModelTiers() {
 	sp.routingDirty = !reflect.DeepEqual(sp.routingDraft, saved)
 }
 
-func qualityLabel(q config.CostTier) string {
-	if q == config.CostEconomy {
-		return "Light"
-	}
-	if q == config.CostStandard {
-		return "Standard"
-	}
-	return "Premium"
-}
+func qualityLabel(q config.CostTier) string { return q.Label() }
 func (sp *settingsPage) routingConfig() config.Config {
 	sp.ensureRoutingDraft()
 	a := sp.routingDraft
@@ -59,17 +51,7 @@ func (sp *settingsPage) routingConfig() config.Config {
 	}
 	return c
 }
-func destinationLabel(d config.Destination) string {
-	switch d {
-	case config.DestinationPrimary:
-		return "Primary"
-	case config.DestinationSecondary:
-		return "Secondary"
-	case config.DestinationLocal:
-		return "Local"
-	}
-	return string(d)
-}
+func destinationLabel(d config.Destination) string { return d.Label() }
 func taskChoiceOptions(values []form.Option, current, defaultValue string) []form.Option {
 	options := append([]form.Option(nil), values...)
 	for i := range options {

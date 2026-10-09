@@ -1185,6 +1185,9 @@ message ListSkillsRequest {}
 message SkillInfo {
   string name = 1;          // Skill name (matches directory name)
   string description = 2;   // What the skill does and when to use it
+  string source = 3;        // builtin or enterprise
+  string version = 4;       // assigned version, or bundled
+  string display_name = 5;  // human-readable title; name remains the lookup ID
 }
 
 // Response containing available skills.
@@ -1201,6 +1204,8 @@ message GetSkillRequest {
 message GetSkillResponse {
   string name = 1;        // Skill name
   string content = 2;     // Full SKILL.md file content
+  string source = 3;
+  string version = 4;
 }
 
 // Permission-mode RPCs let the CLI's slash commands (/strict, /permissive,
@@ -1624,6 +1629,13 @@ service Worker {
   // PersistTurn, TurnDone, TurnError).
   rpc RunTurn (stream HostToWorker) returns (stream WorkerToHost) {}
   rpc RunTurnWithAuthentication (stream HostToWorker) returns (stream WorkerToHost) {}
+  // Managed turns require this RPC; hosts never downgrade to an older protocol.
+  rpc RunManagedTurn (stream HostToWorker) returns (stream WorkerToHost) {}
+  // Settings-aware hosts require this method; older workers must not silently
+  // ignore pinned defaults or skills carried in StartTurn.
+  rpc RunManagedTurnWithSettings (stream HostToWorker) returns (stream WorkerToHost) {}
+  // Also preserves and validates explicit per-turn model selection.
+  rpc RunManagedTurnWithSelection (stream HostToWorker) returns (stream WorkerToHost) {}
 }
 
 // HostToWorker is the host→worker envelope.
@@ -1636,12 +1648,13 @@ message HostToWorker {
     OpenInferenceEvent     open_event       = 5;
     SessionProfileResponse profile_response = 6;
     WorkerAuthenticationResponse auth_response = 7;
- RuntimeRestartToolResponse runtime_response = 8;
+    RuntimeRestartToolResponse runtime_response = 8;
     McpCallResponse        mcp_response     = 9;
     PermissionUpdate       perm_update      = 10;
     AutonomyLedgerResponse autonomy_response = 11;
     DispatchEventResponse  dispatch_event_response = 12;
     SessionModelResponse session_model_response = 13;
+    WorkerModelAuthorizationResponse model_authorization_response = 14;
   }
 }
 
@@ -1670,11 +1683,12 @@ message WorkerToHost {
     SessionProfileRequest    profile_request = 9;
  RuntimeRequestAccounting request_accounting = 10;
     WorkerAuthenticationRequest auth_request = 11;
- RuntimeRestartToolRequest runtime_request = 12;
+    RuntimeRestartToolRequest runtime_request = 12;
     McpCallRequest           mcp_request     = 13;
     AutonomyLedgerRequest    autonomy_request = 14;
     DispatchEventRequest     dispatch_event  = 15;
     SessionModelRequest session_model_request = 16;
+    WorkerModelAuthorizationRequest model_authorization_request = 17;
   }
 }
 
@@ -1692,7 +1706,7 @@ message StartTurn {
   repeated LLMMessage history          = 7;
   string              project_context  = 8;
   bool debug_mode = 10;
- string              permission_mode  = 9; // host's mode: "strict"|"permissive"|"bypass" — worker gating MUST match the host, never default
+  string              permission_mode  = 9; // host's mode: "strict"|"permissive"|"bypass" — worker gating MUST match the host, never default
   // Host-side MCP tools advertised to this turn, and the host's MCP allowlist
   // patterns. Both are host-owned state the worker must never re-derive: the
   // worker has no MCP connections and no access to permissions.yaml, so an
@@ -1709,6 +1723,23 @@ message StartTurn {
   // (the content carries the host marker), so no provider sees a mid-history
   // system message.
   string input_role = 15;
+  bool enterprise_managed = 16; // must agree with RunManagedTurn
+  bytes enterprise_settings_json = 17; // pinned policy/defaults and complete skills, never credentials
+  string model_override = 18; // explicit request intent, never permission to exceed policy
+}
+
+// Only physical route metadata crosses this authorization boundary. No prompt,
+// model output, provider credentials, or enterprise credentials are included.
+message WorkerModelAuthorizationRequest {
+  uint64 id = 1;
+  string provider = 2;
+  string endpoint = 3;
+  string model = 4;
+  string placement = 5;
+}
+message WorkerModelAuthorizationResponse {
+  uint64 id = 1;
+  bool allowed = 2; // absent, unmatched, timed-out, or disconnected means denied
 }
 
 // LLMMessage is the wire form of llm.Message. Serialization uses the same
@@ -1848,6 +1879,7 @@ message TurnDone {
 // TurnError signals a failed turn.
 message TurnError {
   string message = 1;
+  bool enterprise_policy_denied = 2;
 }
 
 // Cancel asks the worker to abort the current turn.
@@ -2025,6 +2057,7 @@ message OpenInferenceEvent {
   uint64 id = 1;
   int64 context_tokens = 5;
   string context_instance_id = 6;
+  bool enterprise_policy_denied = 7;
   oneof kind {
     LLMStreamEvent event = 2;
     string         error = 3;
@@ -2399,3 +2432,42 @@ message SessionModelRequest {
  string work_dir = 6;
 }
 message SessionModelResponse { string id = 1; bytes result_json = 2; string error = 3; }
+
+// Enterprise controls belong to the running host. They never expose credentials
+// to a client or worker. This service is available only over a local connection.
+service Enterprise {
+  rpc Login(EnterpriseLoginRequest) returns (EnterpriseStatus);
+  rpc GetStatus(EnterpriseControlRequest) returns (EnterpriseStatus);
+  rpc Synchronize(EnterpriseControlRequest) returns (EnterpriseStatus);
+  rpc GetPolicy(EnterpriseControlRequest) returns (EnterprisePolicy);
+  rpc Logout(EnterpriseControlRequest) returns (EnterpriseStatus);
+  rpc UseStandalone(EnterpriseControlRequest) returns (EnterpriseStatus);
+}
+message EnterpriseLoginRequest {
+  string server = 1;
+  string organization_id = 2;
+}
+message EnterpriseControlRequest {}
+message EnterpriseStatus {
+  bool managed = 1;
+  bool enforcement_active = 2;
+  bool connected = 3;
+  bool usable = 4;
+  string organization_id = 5;
+  string host_id = 6;
+  int64 revision = 7;
+  string valid_until = 8;
+  string error = 9;
+  bool changing = 10;
+  // Display metadata from the last applied policy response. Never grants access.
+  bool membership_known = 11;
+  string organization_name = 12;
+  string team_id = 13;
+  string team_name = 14;
+}
+
+// A read-only snapshot from the host's currently usable, verified bundle.
+// Does not include credentials and does not authorize future model requests.
+message EnterprisePolicy {
+  bytes policy_json = 1;
+}

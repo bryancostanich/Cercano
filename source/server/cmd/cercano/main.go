@@ -36,6 +36,7 @@ import (
 	llamaengine "cercano/source/server/internal/engine/llamaserver"
 	mistralengine "cercano/source/server/internal/engine/mistralrs"
 	"cercano/source/server/internal/engine/ollama"
+	"cercano/source/server/internal/enterprise"
 	"cercano/source/server/internal/inference"
 	ollamallm "cercano/source/server/internal/llm/ollama"
 	"cercano/source/server/internal/localruntime"
@@ -48,6 +49,7 @@ import (
 	mcpserver "cercano/source/server/internal/mcp"
 	mcphost "cercano/source/server/internal/mcp_host"
 	"cercano/source/server/internal/modelcatalog"
+	"cercano/source/server/internal/modelpolicy"
 	"cercano/source/server/internal/ollamacatalog"
 	"cercano/source/server/internal/openmodels"
 	"cercano/source/server/internal/protocols"
@@ -196,6 +198,19 @@ const drainGrace = 10 * time.Minute
 // events may be nil (MCP embedded mode opens no log); a nil writer makes
 // durable runtime-event recording a no-op rather than a crash.
 func startGRPCServer(cfg config.Config, bindAddr string, events *crashlog.Writer) (string, func(), error) {
+	enterpriseHost, err := newEnterpriseHost()
+	if err != nil {
+		return "", nil, err
+	}
+	restorePolicy := modelpolicy.Install(enterpriseHost)
+	started := false
+	defer func() {
+		if !started {
+			enterpriseHost.Close()
+			restorePolicy()
+		}
+	}()
+
 	if warn := ollamaStartupWarning(checkOllama, cfg.OllamaURL); warn != "" {
 		fmt.Fprintln(os.Stderr, warn)
 	}
@@ -300,6 +315,12 @@ func startGRPCServer(cfg config.Config, bindAddr string, events *crashlog.Writer
 			recapModel = id
 		}
 		recapComplete := func(ctx context.Context, prompt string) (string, error) {
+			scoped, finish, err := enterpriseHost.Begin(ctx)
+			if err != nil {
+				return "", err
+			}
+			defer finish()
+			ctx = scoped
 			req := &agent.Request{Input: prompt}
 			if recapModel != "" {
 				req.ModelOverride = recapModel
@@ -327,6 +348,7 @@ func startGRPCServer(cfg config.Config, bindAddr string, events *crashlog.Writer
 		// store-backed generator for main turns and the inline compactor for
 		// sub-agent dispatches below share the resulting seams.
 		loopDeps := loopcompact.WiringDeps{
+			BeginWork: enterpriseHost.Begin,
 			Cfg:       cfg,
 			ChatModel: openChatModel(cfg),
 			Candidates: func() inference.Tiers {
@@ -390,8 +412,8 @@ func startGRPCServer(cfg config.Config, bindAddr string, events *crashlog.Writer
 		grpc.MaxRecvMsgSize(maxGRPCMessageBytes),
 		// Recover handler panics so one bad RPC returns codes.Internal instead of
 		// crashing the singleton agent and dropping every client's stream.
-		grpc.ChainUnaryInterceptor(server.RecoveryUnaryInterceptor()),
-		grpc.ChainStreamInterceptor(server.RecoveryStreamInterceptor()),
+		grpc.ChainUnaryInterceptor(server.RecoveryUnaryInterceptor(), enterpriseHost.UnaryInterceptor()),
+		grpc.ChainStreamInterceptor(server.RecoveryStreamInterceptor(), enterpriseHost.StreamInterceptor()),
 	)
 	srv := server.NewServer(orchestrator, lazyRouter, coordinator, cloudFactory, registry)
 	srv.SetBuildVersion(version)
@@ -622,6 +644,7 @@ func startGRPCServer(cfg config.Config, bindAddr string, events *crashlog.Writer
 	srv.SelectExecutionMode()
 
 	proto.RegisterAgentServer(s, srv)
+	proto.RegisterEnterpriseServer(s, enterprise.NewRPCServer(enterpriseHost, openEnterpriseBrowser))
 
 	go func() {
 		if err := s.Serve(lis); err != nil {
@@ -630,6 +653,8 @@ func startGRPCServer(cfg config.Config, bindAddr string, events *crashlog.Writer
 	}()
 
 	cleanup := func() {
+		defer restorePolicy()
+		defer enterpriseHost.Close()
 		// Drain before teardown: in-flight turns still need the MCP manager
 		// and providers, so those stop only after the streams finish. The
 		// standing SubscribeEvents streams must end first or GracefulStop
@@ -669,6 +694,7 @@ func startGRPCServer(cfg config.Config, bindAddr string, events *crashlog.Writer
 		}
 	}
 
+	started = true
 	return lis.Addr().String(), cleanup, nil
 }
 
@@ -844,6 +870,14 @@ func main() {
 	// Handle subcommands before flag parsing.
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
+		case "enterprise":
+			ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+			defer cancel()
+			if err := enterpriseCommand(ctx, os.Args[2:], os.Stdout); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+			return
 		case "restart-after-upgrade":
 			// Homebrew post-install entrypoint. No normal startup, model probing,
 			// or automatic agent launch occurs before ownership verification.

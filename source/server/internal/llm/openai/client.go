@@ -13,15 +13,21 @@ import (
 
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
+	"cercano/source/server/internal/modelpolicy"
 	"cercano/source/server/internal/usage"
 )
 
 // Config holds the OpenAI client configuration.
 type Config struct {
-	BaseURL string
-	APIKey  string
-	Model   string
-	Backend string // selects per-backend quirks; empty → defensive default
+	// PolicyProvider/PolicyPlacement identify an explicit local runtime using
+	// this wire format. Empty values mean the external OpenAI-compatible lane.
+	PolicyProvider  string
+	PolicyPlacement string
+	PolicyModel     modelpolicy.ModelResolver
+	BaseURL         string
+	APIKey          string
+	Model           string
+	Backend         string // selects per-backend quirks; empty → defensive default
 	// AccountingProfile is the cloud profile's name, used as accounting
 	// metadata only — never for routing or quirks. It labels attempts from
 	// custom OpenAI-compatible endpoints (DeepInfra, Together, …) that carry
@@ -67,7 +73,14 @@ func NewClient(cfg Config) *Client {
 		c.BaseURL = cfg.BaseURL
 	}
 	q := quirksFor(cfg.Backend)
-	c.HTTPClient = &normalizingDoer{next: &http.Client{}, quirks: q, onHTTPError: cfg.OnHTTPError}
+	provider, placement := cfg.PolicyProvider, cfg.PolicyPlacement
+	if provider == "" {
+		provider = "openai"
+	}
+	if placement == "" {
+		placement = "external"
+	}
+	c.HTTPClient = &normalizingDoer{next: modelpolicy.Client(&http.Client{}, provider, placement, modelpolicy.OpenAI, cfg.PolicyModel), quirks: q, onHTTPError: cfg.OnHTTPError}
 	return &Client{accountingProvider: accountingProvider, api: goopenai.NewClientWithConfig(c), model: cfg.Model, backend: cfg.Backend, quirks: q, supportsVision: cfg.SupportsVision}
 }
 

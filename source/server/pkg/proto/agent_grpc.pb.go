@@ -3350,9 +3350,12 @@ var Agent_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	Worker_Accounting_FullMethodName                = "/agent.Worker/Accounting"
-	Worker_RunTurn_FullMethodName                   = "/agent.Worker/RunTurn"
-	Worker_RunTurnWithAuthentication_FullMethodName = "/agent.Worker/RunTurnWithAuthentication"
+	Worker_Accounting_FullMethodName                  = "/agent.Worker/Accounting"
+	Worker_RunTurn_FullMethodName                     = "/agent.Worker/RunTurn"
+	Worker_RunTurnWithAuthentication_FullMethodName   = "/agent.Worker/RunTurnWithAuthentication"
+	Worker_RunManagedTurn_FullMethodName              = "/agent.Worker/RunManagedTurn"
+	Worker_RunManagedTurnWithSettings_FullMethodName  = "/agent.Worker/RunManagedTurnWithSettings"
+	Worker_RunManagedTurnWithSelection_FullMethodName = "/agent.Worker/RunManagedTurnWithSelection"
 )
 
 // WorkerClient is the client API for Worker service.
@@ -3370,6 +3373,13 @@ type WorkerClient interface {
 	// PersistTurn, TurnDone, TurnError).
 	RunTurn(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[HostToWorker, WorkerToHost], error)
 	RunTurnWithAuthentication(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[HostToWorker, WorkerToHost], error)
+	// Managed turns require this RPC; hosts never downgrade to an older protocol.
+	RunManagedTurn(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[HostToWorker, WorkerToHost], error)
+	// Settings-aware hosts require this method; older workers must not silently
+	// ignore pinned defaults or skills carried in StartTurn.
+	RunManagedTurnWithSettings(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[HostToWorker, WorkerToHost], error)
+	// Also preserves and validates explicit per-turn model selection.
+	RunManagedTurnWithSelection(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[HostToWorker, WorkerToHost], error)
 }
 
 type workerClient struct {
@@ -3419,6 +3429,45 @@ func (c *workerClient) RunTurnWithAuthentication(ctx context.Context, opts ...gr
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Worker_RunTurnWithAuthenticationClient = grpc.BidiStreamingClient[HostToWorker, WorkerToHost]
 
+func (c *workerClient) RunManagedTurn(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[HostToWorker, WorkerToHost], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &Worker_ServiceDesc.Streams[3], Worker_RunManagedTurn_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[HostToWorker, WorkerToHost]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Worker_RunManagedTurnClient = grpc.BidiStreamingClient[HostToWorker, WorkerToHost]
+
+func (c *workerClient) RunManagedTurnWithSettings(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[HostToWorker, WorkerToHost], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &Worker_ServiceDesc.Streams[4], Worker_RunManagedTurnWithSettings_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[HostToWorker, WorkerToHost]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Worker_RunManagedTurnWithSettingsClient = grpc.BidiStreamingClient[HostToWorker, WorkerToHost]
+
+func (c *workerClient) RunManagedTurnWithSelection(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[HostToWorker, WorkerToHost], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &Worker_ServiceDesc.Streams[5], Worker_RunManagedTurnWithSelection_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[HostToWorker, WorkerToHost]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Worker_RunManagedTurnWithSelectionClient = grpc.BidiStreamingClient[HostToWorker, WorkerToHost]
+
 // WorkerServer is the server API for Worker service.
 // All implementations must embed UnimplementedWorkerServer
 // for forward compatibility.
@@ -3434,6 +3483,13 @@ type WorkerServer interface {
 	// PersistTurn, TurnDone, TurnError).
 	RunTurn(grpc.BidiStreamingServer[HostToWorker, WorkerToHost]) error
 	RunTurnWithAuthentication(grpc.BidiStreamingServer[HostToWorker, WorkerToHost]) error
+	// Managed turns require this RPC; hosts never downgrade to an older protocol.
+	RunManagedTurn(grpc.BidiStreamingServer[HostToWorker, WorkerToHost]) error
+	// Settings-aware hosts require this method; older workers must not silently
+	// ignore pinned defaults or skills carried in StartTurn.
+	RunManagedTurnWithSettings(grpc.BidiStreamingServer[HostToWorker, WorkerToHost]) error
+	// Also preserves and validates explicit per-turn model selection.
+	RunManagedTurnWithSelection(grpc.BidiStreamingServer[HostToWorker, WorkerToHost]) error
 	mustEmbedUnimplementedWorkerServer()
 }
 
@@ -3452,6 +3508,15 @@ func (UnimplementedWorkerServer) RunTurn(grpc.BidiStreamingServer[HostToWorker, 
 }
 func (UnimplementedWorkerServer) RunTurnWithAuthentication(grpc.BidiStreamingServer[HostToWorker, WorkerToHost]) error {
 	return status.Error(codes.Unimplemented, "method RunTurnWithAuthentication not implemented")
+}
+func (UnimplementedWorkerServer) RunManagedTurn(grpc.BidiStreamingServer[HostToWorker, WorkerToHost]) error {
+	return status.Error(codes.Unimplemented, "method RunManagedTurn not implemented")
+}
+func (UnimplementedWorkerServer) RunManagedTurnWithSettings(grpc.BidiStreamingServer[HostToWorker, WorkerToHost]) error {
+	return status.Error(codes.Unimplemented, "method RunManagedTurnWithSettings not implemented")
+}
+func (UnimplementedWorkerServer) RunManagedTurnWithSelection(grpc.BidiStreamingServer[HostToWorker, WorkerToHost]) error {
+	return status.Error(codes.Unimplemented, "method RunManagedTurnWithSelection not implemented")
 }
 func (UnimplementedWorkerServer) mustEmbedUnimplementedWorkerServer() {}
 func (UnimplementedWorkerServer) testEmbeddedByValue()                {}
@@ -3495,6 +3560,27 @@ func _Worker_RunTurnWithAuthentication_Handler(srv interface{}, stream grpc.Serv
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Worker_RunTurnWithAuthenticationServer = grpc.BidiStreamingServer[HostToWorker, WorkerToHost]
 
+func _Worker_RunManagedTurn_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(WorkerServer).RunManagedTurn(&grpc.GenericServerStream[HostToWorker, WorkerToHost]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Worker_RunManagedTurnServer = grpc.BidiStreamingServer[HostToWorker, WorkerToHost]
+
+func _Worker_RunManagedTurnWithSettings_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(WorkerServer).RunManagedTurnWithSettings(&grpc.GenericServerStream[HostToWorker, WorkerToHost]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Worker_RunManagedTurnWithSettingsServer = grpc.BidiStreamingServer[HostToWorker, WorkerToHost]
+
+func _Worker_RunManagedTurnWithSelection_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(WorkerServer).RunManagedTurnWithSelection(&grpc.GenericServerStream[HostToWorker, WorkerToHost]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Worker_RunManagedTurnWithSelectionServer = grpc.BidiStreamingServer[HostToWorker, WorkerToHost]
+
 // Worker_ServiceDesc is the grpc.ServiceDesc for Worker service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -3521,6 +3607,322 @@ var Worker_ServiceDesc = grpc.ServiceDesc{
 			ServerStreams: true,
 			ClientStreams: true,
 		},
+		{
+			StreamName:    "RunManagedTurn",
+			Handler:       _Worker_RunManagedTurn_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
+		{
+			StreamName:    "RunManagedTurnWithSettings",
+			Handler:       _Worker_RunManagedTurnWithSettings_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
+		{
+			StreamName:    "RunManagedTurnWithSelection",
+			Handler:       _Worker_RunManagedTurnWithSelection_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
 	},
+	Metadata: "agent.proto",
+}
+
+const (
+	Enterprise_Login_FullMethodName         = "/agent.Enterprise/Login"
+	Enterprise_GetStatus_FullMethodName     = "/agent.Enterprise/GetStatus"
+	Enterprise_Synchronize_FullMethodName   = "/agent.Enterprise/Synchronize"
+	Enterprise_GetPolicy_FullMethodName     = "/agent.Enterprise/GetPolicy"
+	Enterprise_Logout_FullMethodName        = "/agent.Enterprise/Logout"
+	Enterprise_UseStandalone_FullMethodName = "/agent.Enterprise/UseStandalone"
+)
+
+// EnterpriseClient is the client API for Enterprise service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// Enterprise controls belong to the running host. They never expose credentials
+// to a client or worker. This service is available only over a local connection.
+type EnterpriseClient interface {
+	Login(ctx context.Context, in *EnterpriseLoginRequest, opts ...grpc.CallOption) (*EnterpriseStatus, error)
+	GetStatus(ctx context.Context, in *EnterpriseControlRequest, opts ...grpc.CallOption) (*EnterpriseStatus, error)
+	Synchronize(ctx context.Context, in *EnterpriseControlRequest, opts ...grpc.CallOption) (*EnterpriseStatus, error)
+	GetPolicy(ctx context.Context, in *EnterpriseControlRequest, opts ...grpc.CallOption) (*EnterprisePolicy, error)
+	Logout(ctx context.Context, in *EnterpriseControlRequest, opts ...grpc.CallOption) (*EnterpriseStatus, error)
+	UseStandalone(ctx context.Context, in *EnterpriseControlRequest, opts ...grpc.CallOption) (*EnterpriseStatus, error)
+}
+
+type enterpriseClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewEnterpriseClient(cc grpc.ClientConnInterface) EnterpriseClient {
+	return &enterpriseClient{cc}
+}
+
+func (c *enterpriseClient) Login(ctx context.Context, in *EnterpriseLoginRequest, opts ...grpc.CallOption) (*EnterpriseStatus, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(EnterpriseStatus)
+	err := c.cc.Invoke(ctx, Enterprise_Login_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *enterpriseClient) GetStatus(ctx context.Context, in *EnterpriseControlRequest, opts ...grpc.CallOption) (*EnterpriseStatus, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(EnterpriseStatus)
+	err := c.cc.Invoke(ctx, Enterprise_GetStatus_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *enterpriseClient) Synchronize(ctx context.Context, in *EnterpriseControlRequest, opts ...grpc.CallOption) (*EnterpriseStatus, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(EnterpriseStatus)
+	err := c.cc.Invoke(ctx, Enterprise_Synchronize_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *enterpriseClient) GetPolicy(ctx context.Context, in *EnterpriseControlRequest, opts ...grpc.CallOption) (*EnterprisePolicy, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(EnterprisePolicy)
+	err := c.cc.Invoke(ctx, Enterprise_GetPolicy_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *enterpriseClient) Logout(ctx context.Context, in *EnterpriseControlRequest, opts ...grpc.CallOption) (*EnterpriseStatus, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(EnterpriseStatus)
+	err := c.cc.Invoke(ctx, Enterprise_Logout_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *enterpriseClient) UseStandalone(ctx context.Context, in *EnterpriseControlRequest, opts ...grpc.CallOption) (*EnterpriseStatus, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(EnterpriseStatus)
+	err := c.cc.Invoke(ctx, Enterprise_UseStandalone_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// EnterpriseServer is the server API for Enterprise service.
+// All implementations must embed UnimplementedEnterpriseServer
+// for forward compatibility.
+//
+// Enterprise controls belong to the running host. They never expose credentials
+// to a client or worker. This service is available only over a local connection.
+type EnterpriseServer interface {
+	Login(context.Context, *EnterpriseLoginRequest) (*EnterpriseStatus, error)
+	GetStatus(context.Context, *EnterpriseControlRequest) (*EnterpriseStatus, error)
+	Synchronize(context.Context, *EnterpriseControlRequest) (*EnterpriseStatus, error)
+	GetPolicy(context.Context, *EnterpriseControlRequest) (*EnterprisePolicy, error)
+	Logout(context.Context, *EnterpriseControlRequest) (*EnterpriseStatus, error)
+	UseStandalone(context.Context, *EnterpriseControlRequest) (*EnterpriseStatus, error)
+	mustEmbedUnimplementedEnterpriseServer()
+}
+
+// UnimplementedEnterpriseServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedEnterpriseServer struct{}
+
+func (UnimplementedEnterpriseServer) Login(context.Context, *EnterpriseLoginRequest) (*EnterpriseStatus, error) {
+	return nil, status.Error(codes.Unimplemented, "method Login not implemented")
+}
+func (UnimplementedEnterpriseServer) GetStatus(context.Context, *EnterpriseControlRequest) (*EnterpriseStatus, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetStatus not implemented")
+}
+func (UnimplementedEnterpriseServer) Synchronize(context.Context, *EnterpriseControlRequest) (*EnterpriseStatus, error) {
+	return nil, status.Error(codes.Unimplemented, "method Synchronize not implemented")
+}
+func (UnimplementedEnterpriseServer) GetPolicy(context.Context, *EnterpriseControlRequest) (*EnterprisePolicy, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetPolicy not implemented")
+}
+func (UnimplementedEnterpriseServer) Logout(context.Context, *EnterpriseControlRequest) (*EnterpriseStatus, error) {
+	return nil, status.Error(codes.Unimplemented, "method Logout not implemented")
+}
+func (UnimplementedEnterpriseServer) UseStandalone(context.Context, *EnterpriseControlRequest) (*EnterpriseStatus, error) {
+	return nil, status.Error(codes.Unimplemented, "method UseStandalone not implemented")
+}
+func (UnimplementedEnterpriseServer) mustEmbedUnimplementedEnterpriseServer() {}
+func (UnimplementedEnterpriseServer) testEmbeddedByValue()                    {}
+
+// UnsafeEnterpriseServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to EnterpriseServer will
+// result in compilation errors.
+type UnsafeEnterpriseServer interface {
+	mustEmbedUnimplementedEnterpriseServer()
+}
+
+func RegisterEnterpriseServer(s grpc.ServiceRegistrar, srv EnterpriseServer) {
+	// If the following call panics, it indicates UnimplementedEnterpriseServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&Enterprise_ServiceDesc, srv)
+}
+
+func _Enterprise_Login_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(EnterpriseLoginRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(EnterpriseServer).Login(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Enterprise_Login_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(EnterpriseServer).Login(ctx, req.(*EnterpriseLoginRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Enterprise_GetStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(EnterpriseControlRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(EnterpriseServer).GetStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Enterprise_GetStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(EnterpriseServer).GetStatus(ctx, req.(*EnterpriseControlRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Enterprise_Synchronize_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(EnterpriseControlRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(EnterpriseServer).Synchronize(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Enterprise_Synchronize_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(EnterpriseServer).Synchronize(ctx, req.(*EnterpriseControlRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Enterprise_GetPolicy_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(EnterpriseControlRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(EnterpriseServer).GetPolicy(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Enterprise_GetPolicy_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(EnterpriseServer).GetPolicy(ctx, req.(*EnterpriseControlRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Enterprise_Logout_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(EnterpriseControlRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(EnterpriseServer).Logout(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Enterprise_Logout_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(EnterpriseServer).Logout(ctx, req.(*EnterpriseControlRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Enterprise_UseStandalone_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(EnterpriseControlRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(EnterpriseServer).UseStandalone(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Enterprise_UseStandalone_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(EnterpriseServer).UseStandalone(ctx, req.(*EnterpriseControlRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// Enterprise_ServiceDesc is the grpc.ServiceDesc for Enterprise service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var Enterprise_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "agent.Enterprise",
+	HandlerType: (*EnterpriseServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "Login",
+			Handler:    _Enterprise_Login_Handler,
+		},
+		{
+			MethodName: "GetStatus",
+			Handler:    _Enterprise_GetStatus_Handler,
+		},
+		{
+			MethodName: "Synchronize",
+			Handler:    _Enterprise_Synchronize_Handler,
+		},
+		{
+			MethodName: "GetPolicy",
+			Handler:    _Enterprise_GetPolicy_Handler,
+		},
+		{
+			MethodName: "Logout",
+			Handler:    _Enterprise_Logout_Handler,
+		},
+		{
+			MethodName: "UseStandalone",
+			Handler:    _Enterprise_UseStandalone_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
 	Metadata: "agent.proto",
 }

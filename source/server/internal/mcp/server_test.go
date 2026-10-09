@@ -1508,3 +1508,23 @@ func (m *mockAgentClient) UpdateRoutingAssignments(context.Context, *proto.Updat
 func (m *mockAgentClient) ResetSetup(context.Context, *proto.ResetSetupRequest, ...grpc.CallOption) (*proto.ResetSetupResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "setup reset is not an MCP tool")
 }
+
+func TestCercanoSkillsEnterpriseMetadata(t *testing.T) {
+	mock := &mockAgentClient{skillsResp: &proto.ListSkillsResponse{Skills: []*proto.SkillInfo{{Name: "enterprise/company-a/review", Source: "enterprise", Version: "7", Description: "Review changes."}}}, getSkillResp: &proto.GetSkillResponse{Name: "enterprise/company-a/review", Source: "enterprise", Version: "7", Content: "Review migration rollback."}}
+	s := NewServer(mock)
+	for _, action := range []string{"list", "get"} {
+		result, _, err := s.handleSkills(context.Background(), nil, SkillsRequest{Action: action, Name: "enterprise/company-a/review"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		text := result.Content[0].(*gomcp.TextContent).Text
+		for _, want := range []string{"enterprise/company-a/review", "Source: enterprise; version: 7"} {
+			if !strings.Contains(text, want) {
+				t.Fatalf("missing %q in %q", want, text)
+			}
+		}
+		if action == "get" && !strings.Contains(text, "Review migration rollback.") {
+			t.Fatal("missing skill body")
+		}
+	}
+}

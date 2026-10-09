@@ -4,12 +4,27 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"cercano/source/server/internal/modelpolicy"
 )
 
 var sampleTurns = []TurnSummary{
 	{ID: "a", Role: "user", Kind: "text", Preview: "let's debug the panic"},
 	{ID: "b", Role: "assistant", Kind: "text", Preview: "the nil deref is in foo()"},
 	{ID: "c", Role: "user", Kind: "text", Preview: "now design the API"},
+}
+
+func TestPropose_PolicyDenialNeverFallsBack(t *testing.T) {
+	denial := modelpolicy.Deny(modelpolicy.Attempt{}, "route revoked")
+	cloudCalls := 0
+	cloud := func(context.Context, string) (string, error) {
+		cloudCalls++
+		return `{"delete_ids":["a"],"rationale":"unexpected fallback"}`, nil
+	}
+	_, err := Propose(t.Context(), "drop the debugging", sampleTurns, fixed("", denial), cloud)
+	if !modelpolicy.IsDenial(err) || cloudCalls != 0 {
+		t.Fatalf("policy denial must be terminal: err=%v cloud calls=%d", err, cloudCalls)
+	}
 }
 
 func fixed(out string, err error) CompleteFunc {
@@ -19,17 +34,23 @@ func fixed(out string, err error) CompleteFunc {
 func TestPropose_ValidJSON(t *testing.T) {
 	local := fixed(`{"delete_ids":["a","b"],"rationale":"removed the debugging tangent"}`, nil)
 	p, err := Propose(context.Background(), "drop the debugging", sampleTurns, local, nil)
-	if err != nil { t.Fatalf("Propose: %v", err) }
+	if err != nil {
+		t.Fatalf("Propose: %v", err)
+	}
 	if len(p.DeleteIDs) != 2 || p.DeleteIDs[0] != "a" || p.DeleteIDs[1] != "b" {
 		t.Errorf("delete_ids = %v", p.DeleteIDs)
 	}
-	if p.Rationale == "" { t.Error("missing rationale") }
+	if p.Rationale == "" {
+		t.Error("missing rationale")
+	}
 }
 
 func TestPropose_DropsHallucinatedID(t *testing.T) {
 	local := fixed(`{"delete_ids":["a","zzz"],"rationale":"x"}`, nil)
 	p, err := Propose(context.Background(), "i", sampleTurns, local, nil)
-	if err != nil { t.Fatalf("Propose: %v", err) }
+	if err != nil {
+		t.Fatalf("Propose: %v", err)
+	}
 	if len(p.DeleteIDs) != 1 || p.DeleteIDs[0] != "a" {
 		t.Errorf("expected only real id [a], got %v", p.DeleteIDs)
 	}

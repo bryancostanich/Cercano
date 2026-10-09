@@ -8,6 +8,7 @@ import (
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/llm/openai"
+	"cercano/source/server/internal/localruntime"
 )
 
 // LLMProvider adapts the mistral.rs runtime to the native inference.Provider
@@ -63,6 +64,10 @@ func (p *LLMProvider) clientFor(ctx context.Context, req llm.ChatRequest) (*open
 		req.MaxTokens = engine.DefaultMaxTokens
 	}
 	c := openai.NewClient(openai.Config{
+		PolicyProvider: "mistralrs", PolicyPlacement: "local",
+		PolicyModel: func(ctx context.Context, endpoint, wireModel string) (string, error) {
+			return localruntime.ModelAtEndpoint(ctx, p.eng.Manager, runtimeName, endpoint)
+		},
 		BaseURL: strings.TrimRight(endpoint, "/") + "/v1",
 		Model:   model,
 		Backend: "mistralrs",

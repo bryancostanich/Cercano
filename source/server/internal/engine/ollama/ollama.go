@@ -8,11 +8,13 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
 
 	"cercano/source/server/internal/engine"
+	"cercano/source/server/internal/modelpolicy"
 )
 
 // OllamaEngine implements InferenceEngine and EmbeddingService using the Ollama HTTP API.
@@ -128,7 +130,7 @@ func (e *OllamaEngine) pingOllama(ctx context.Context, baseURL string) bool {
 		return false
 	}
 
-	resp, err := e.Client.Do(req)
+	resp, err := e.policyClient(req.URL).Do(req)
 	if err != nil {
 		return false
 	}
@@ -147,7 +149,7 @@ func (e *OllamaEngine) ListModels(ctx context.Context) ([]engine.ModelInfo, erro
 	if err != nil {
 		return nil, err
 	}
-	resp, err := e.Client.Do(req)
+	resp, err := e.policyClient(req.URL).Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -196,7 +198,7 @@ func (e *OllamaEngine) Complete(ctx context.Context, model, prompt, systemPrompt
 		return engine.CompletionResult{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := e.Client.Do(req)
+	resp, err := e.policyClient(req.URL).Do(req)
 	if err != nil {
 		return engine.CompletionResult{}, err
 	}
@@ -246,7 +248,7 @@ func (e *OllamaEngine) CompleteStream(ctx context.Context, model, prompt, system
 		return engine.CompletionResult{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := e.Client.Do(req)
+	resp, err := e.policyClient(req.URL).Do(req)
 	if err != nil {
 		return engine.CompletionResult{}, err
 	}
@@ -303,7 +305,7 @@ func (e *OllamaEngine) Embed(ctx context.Context, model, text string) ([]float64
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := e.Client.Do(req)
+	resp, err := e.policyClient(req.URL).Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -356,7 +358,7 @@ func (e *OllamaEngine) ChatWithTools(ctx context.Context, req engine.ChatRequest
 		return engine.ChatResponse{}, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	resp, err := e.Client.Do(httpReq)
+	resp, err := e.policyClient(httpReq.URL).Do(httpReq)
 	if err != nil {
 		log.Printf("ollama-chat: HTTP error after %s: %v", time.Since(startReq), err)
 		return engine.ChatResponse{}, err
@@ -451,4 +453,8 @@ func (e *OllamaEngine) ChatWithTools(ctx context.Context, req engine.ChatRequest
 		InputTokens:  promptEvalCount,
 		OutputTokens: evalCount,
 	}, nil
+}
+
+func (e *OllamaEngine) policyClient(endpoint *url.URL) *http.Client {
+	return modelpolicy.Client(e.Client, "ollama", modelpolicy.Placement(endpoint), modelpolicy.Ollama)
 }

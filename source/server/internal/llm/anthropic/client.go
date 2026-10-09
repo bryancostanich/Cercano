@@ -11,6 +11,7 @@ import (
 
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
+	"cercano/source/server/internal/modelpolicy"
 	"cercano/source/server/internal/usage"
 )
 
@@ -85,13 +86,10 @@ func NewClient(cfg Config) *Client {
 	if cfg.BaseURL != "" {
 		opts = append(opts, option.WithBaseURL(cfg.BaseURL))
 	}
-	opts = append(opts, option.WithHTTPClient(&http.Client{
-		Transport: &authRoundTripper{
-			base: http.DefaultTransport,
-			ua:   cfg.UserAgent,
-			auth: authenticatorForRoute(cfg),
-		},
-	}))
+	httpClient := modelpolicy.Client(&http.Client{}, "anthropic", "external", modelpolicy.Anthropic)
+	// Authorize after credential refresh, immediately before the physical send.
+	httpClient.Transport = &authRoundTripper{base: httpClient.Transport, ua: cfg.UserAgent, auth: authenticatorForRoute(cfg)}
+	opts = append(opts, option.WithHTTPClient(httpClient))
 	c := sdk.NewClient(opts...)
 	return &Client{cfg: cfg, sdk: &c, systemPrefix: systemPrefixForRoute(cfg.Route)}
 }

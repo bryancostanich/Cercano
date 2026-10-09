@@ -30,6 +30,8 @@ import (
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/locus"
+	"cercano/source/server/internal/managedsettings"
+	"cercano/source/server/internal/modelpolicy"
 	"cercano/source/server/internal/modelwindow"
 	"cercano/source/server/internal/requestassembly"
 	"cercano/source/server/internal/retention"
@@ -180,8 +182,8 @@ type svc struct {
 	// Used by AssembleHistory for hard-override limit calculation.
 	activeCloudModel func() string
 
-	// engine returns the dispatch engine for SuggestNextPrompt.
-	// May return nil (suggest degrades to empty response).
+	// engine routes suggestions and managed context edits. Missing engines make
+	// suggestions empty and managed edits fail closed.
 	engine func() *dispatch.Engine
 
 	// openTurnRunner returns the current open turn runner for ProposeContextEdit.
@@ -218,7 +220,7 @@ type svc struct {
 //   - cfgSvc: config service; AssembleHistory reads compaction settings from it.
 //   - primaryModel: func returning the primary model name (for GetContextUsage denominator).
 //   - activeCloudModel: func returning the active cloud model (for AssembleHistory hard-override).
-//   - engine: func returning the dispatch engine (for SuggestNextPrompt); may return nil.
+//   - engine: func returning the dispatch engine (suggestions and managed context edits); may return nil.
 //   - openTurnRunner: func returning the current open turn runner (for ProposeContextEdit); may return nil.
 //   - cloudProvider: func returning the cloud LLM provider (for ProposeContextEdit); may return nil.
 //   - cloudModel: func returning the active cloud model string (for ProposeContextEdit); may return "".
@@ -1312,6 +1314,35 @@ func (x *svc) ProposeContextEdit(ctx context.Context, req *proto.ProposeContextE
 		summaries = append(summaries, contextedit.TurnSummary{
 			ID: ct.GetId(), Role: ct.GetRole(), Kind: ct.GetKind(), Preview: ct.GetPreview(),
 		})
+	}
+
+	// Context editing curates conversation context, so managed work follows the
+	// Compaction assignment. Give the parser one managed completion path: only
+	// that route chain may choose fallbacks, never the personal local/cloud pair.
+	// Check process authority too so a lost snapshot cannot restore personal routing.
+	_, pinned := managedsettings.FromContext(ctx)
+	if pinned || modelpolicy.Managed(ctx) {
+		if x.engine == nil {
+			return nil, fmt.Errorf("managed context editing requires the dispatch engine")
+		}
+		e := x.engine()
+		if e == nil {
+			return nil, fmt.Errorf("managed context editing requires the dispatch engine")
+		}
+		complete := func(c context.Context, prompt string) (string, error) {
+			result, err := e.Dispatch(c, dispatch.Spec{
+				Mode: dispatch.OneShot, Role: dispatch.RoleCoproc,
+				RoutingTask: config.TaskCompaction, Prompt: prompt,
+				MaxTokens:      1024,
+				ConversationID: convID, Source: "context_edit", RecordUsage: true,
+			})
+			return result.Text, err
+		}
+		p, err := contextedit.Propose(ctx, req.GetInstruction(), summaries, complete, nil)
+		if err != nil {
+			return nil, err
+		}
+		return &proto.ProposeContextEditResponse{DeleteIds: p.DeleteIDs, Rationale: p.Rationale}, nil
 	}
 
 	var local, cloud contextedit.CompleteFunc

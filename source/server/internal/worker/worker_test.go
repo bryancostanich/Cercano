@@ -3,6 +3,7 @@ package worker_test
 import (
 	"cercano/source/server/internal/modelmetadata"
 	"context"
+	v1 "github.com/bryancostanich/Cercano/source/enterpriseapi/v1"
 	"net"
 	"testing"
 	"time"
@@ -280,7 +281,11 @@ func TestWorkerServer_RunTurn_NoHalfCloseNoDeadlock(t *testing.T) {
 	_ = stream.CloseSend() // only now, after the terminal message
 }
 
-func (f *fakeResolver) Candidates() inference.Tiers { return inference.Tiers{} }
+func (f *fakeResolver) Candidates() inference.Tiers {
+	return inference.Tiers{ManagedRoute: func(_ context.Context, route v1.Route, _ config.Destination) (inference.Candidate, error) {
+		return inference.Candidate{Provider: f.prov, IsCloud: route.Placement == "external"}, nil
+	}}
+}
 
 func (f *fakeResolver) SetProfileModelEvidence(func(config.CloudProfile, string) modelmetadata.Evidence) {
 }

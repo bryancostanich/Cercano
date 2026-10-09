@@ -1,0 +1,43 @@
+name: Enterprise editor catalog
+on:
+  pull_request:
+    paths:
+      - 'source/server/internal/cloudcatalog/**'
+      - 'source/server/internal/cloudfactory/**'
+      - 'source/server/internal/localruntime/**/catalog.json'
+      - 'source/server/pkg/config/**'
+      - 'source/server/internal/catalogexport/**'
+      - 'source/server/cmd/export-enterprise-catalog/**'
+      - 'source/enterpriseapi/catalog/**'
+      - 'source/clients/cli/internal/ui/routing_page*'
+      - 'source/clients/cli/internal/ui/cloud_models*'
+      - '.github/workflows/enterprise-catalog.yml'
+  push:
+    paths:
+      - 'source/server/internal/cloudcatalog/**'
+      - 'source/server/internal/cloudfactory/**'
+      - 'source/server/internal/localruntime/**/catalog.json'
+      - 'source/server/pkg/config/**'
+      - 'source/server/internal/catalogexport/**'
+      - 'source/server/cmd/export-enterprise-catalog/**'
+      - 'source/enterpriseapi/catalog/**'
+      - 'source/clients/cli/internal/ui/routing_page*'
+      - 'source/clients/cli/internal/ui/cloud_models*'
+      - '.github/workflows/enterprise-catalog.yml'
+permissions:
+  contents: read
+jobs:
+  catalog:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: source/server/go.mod
+          cache-dependency-path: source/server/go.sum
+      - run: go test -race ./internal/catalogexport ./pkg/config
+        working-directory: source/server
+      - run: go run ./cmd/export-enterprise-catalog --check
+        working-directory: source/server
+      - run: go test ./internal/ui -run 'Routing|ConfigTab|CompactionRouting|CloudModel|FallbackClaude' -count=1
+        working-directory: source/clients/cli

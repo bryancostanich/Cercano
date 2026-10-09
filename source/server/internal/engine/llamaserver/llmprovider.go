@@ -96,6 +96,10 @@ func (p *LLMProvider) clientFor(ctx context.Context, req llm.ChatRequest) (*open
 	// false, so image blocks are stripped rather than sent to a server that
 	// would 500 on "image input is not supported".
 	c := openai.NewClient(openai.Config{
+		PolicyProvider: "llama_server", PolicyPlacement: "local",
+		PolicyModel: func(ctx context.Context, endpoint, wireModel string) (string, error) {
+			return localruntime.ModelAtEndpoint(ctx, p.eng.Manager, runtimeName, endpoint)
+		},
 		BaseURL:        strings.TrimRight(endpoint, "/") + "/v1",
 		Model:          model,
 		Backend:        "llama_server",

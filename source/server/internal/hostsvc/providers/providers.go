@@ -10,9 +10,11 @@ package providers
 
 import (
 	"cercano/source/server/internal/chatroute"
+	"cercano/source/server/internal/managedrouting"
 	"cercano/source/server/internal/modelmetadata"
 	"cercano/source/server/internal/reasoningexperiment"
 	"context"
+	v1 "github.com/bryancostanich/Cercano/source/enterpriseapi/v1"
 	"log"
 	"sync"
 	"sync/atomic"
@@ -448,7 +450,12 @@ func (p *service) Candidates() inference.Tiers {
 		}
 		return ""
 	}
-	return inference.Tiers{Mode: mode, ModelFor: modelFor, OpenReady: func(model string) bool { return dispatch.OpenModelReadyFor(c, model) }, Cloud: primary, Open: p.Open(), TaskFor: c.TaskAssignment, ResolveDestination: c.ResolveDestination, Destinations: map[cfg.Destination]inference.Candidate{
+	open := p.Open()
+	return inference.Tiers{DeveloperConfig: &c, WrapManagedMain: func(provider inference.Provider, isCloud bool) inference.Provider {
+		return usage.Wrap(provider, "main", isCloud, p.usageSink)
+	}, ManagedRoute: func(ctx context.Context, route v1.Route, destination cfg.Destination) (inference.Candidate, error) {
+		return managedrouting.BindRoute(ctx, c, route, destination, open, p.buildProfile)
+	}, Mode: mode, ModelFor: modelFor, OpenReady: func(model string) bool { return dispatch.OpenModelReadyFor(c, model) }, Cloud: primary, Open: p.Open(), TaskFor: c.TaskAssignment, ResolveDestination: c.ResolveDestination, Destinations: map[cfg.Destination]inference.Candidate{
 		cfg.DestinationPrimary:   {Provider: primary, Profile: c.ActiveCloudProfile, IsCloud: true},
 		cfg.DestinationSecondary: {Provider: secondary, Profile: c.SecondaryCloudProfile, IsCloud: true},
 	}}

@@ -394,30 +394,26 @@ func (m *InMemoryManager) DownloadModel(ctx context.Context, req DownloadRequest
 	model.DownloadTotalBytes = total
 	downloadCtx, cancel := context.WithCancel(context.Background())
 	job := &downloadJob{cancel: cancel}
-	// Claim the download slot atomically. The pre-check at the top of the
-	// function races the slow findDownloadModel gap (it may run Inventory), so
-	// re-check under the lock, keyed by the resolved model.ID: whoever registers
-	// the job first wins; a concurrent caller finds the existing "downloading"
-	// record and spawns nothing, so two goroutines never write the same .part
-	// file or clobber each other's cancelable job. We register the cancel job
-	// under this same lock so a racing CancelDownload can find it, then drive
-	// the guarded transition into Downloading (the sole writer of m.downloads,
-	// which validates the move and fires observers).
+	// Claim the job and publish Downloading in the same critical section. A
+	// separate state setter leaves a window where a second caller sees the
+	// old state and starts another writer against the same .part file.
 	m.mu.Lock()
-	if existing, ok := m.downloads[model.ID]; ok && existing.DownloadState == Downloading {
+	if existing, ok := m.downloads[model.ID]; ok && (existing.DownloadState == Downloading || m.downloadJobs[model.ID] != nil) {
 		m.mu.Unlock()
 		cancel()
 		return &existing, nil
 	}
-	m.downloadJobs[model.ID] = job
+	model, event, transitionErr := m.setDownloadStateLocked(model, Downloading, "")
+	if transitionErr == nil {
+		m.downloadJobs[model.ID] = job
+	}
 	m.mu.Unlock()
-	model = m.setDownloadState(model, Downloading, "")
-	if model.DownloadState != Downloading {
-		// The guard refused the transition (e.g. an unexpected current state);
-		// undo the job registration and report the current record.
-		m.clearDownloadJob(model.ID, job)
+	if transitionErr != nil {
+		cancel()
+		m.logDownloadTransitionError(model, transitionErr)
 		return &model, nil
 	}
+	m.notifyDownload(event)
 	m.WriteLog(LogEntry{
 		Source:  "cercano.runtime.download",
 		Level:   "info",
@@ -628,7 +624,7 @@ func (m *InMemoryManager) storeDownload(model ModelRecord) {
 	m.downloads[model.ID] = model
 }
 
-// setDownloadState is the single guarded funnel for every DownloadState change.
+// setDownloadState applies the guarded transition and notifies observers.
 // It validates the move against the transition table (logging and refusing an
 // illegal move rather than corrupting the machine), writes the record, and
 // notifies observers. errText is stored on the record and carried in the event
@@ -640,32 +636,44 @@ func (m *InMemoryManager) storeDownload(model ModelRecord) {
 // etc.) with DownloadState already set to the target.
 func (m *InMemoryManager) setDownloadState(model ModelRecord, next DownloadState, errText string) ModelRecord {
 	m.mu.Lock()
+	model, event, err := m.setDownloadStateLocked(model, next, errText)
+	m.mu.Unlock()
+	if err != nil {
+		m.logDownloadTransitionError(model, err)
+		return model
+	}
+	m.notifyDownload(event)
+	return model
+}
+
+// setDownloadStateLocked is the common transition guard. The caller holds m.mu
+// and delivers the event after unlocking, so observers can safely read state.
+func (m *InMemoryManager) setDownloadStateLocked(model ModelRecord, next DownloadState, errText string) (ModelRecord, DownloadEvent, error) {
 	prev := DownloadNotStarted
-	if existing, ok := m.downloads[model.ID]; ok {
+	existing, ok := m.downloads[model.ID]
+	if ok {
 		prev = existing.DownloadState
 	}
 	if !prev.CanTransitionTo(next) {
-		m.mu.Unlock()
 		err := illegalTransition{kind: "download", from: prev.String(), to: next.String()}
-		m.WriteLog(LogEntry{
-			Source:  "cercano.runtime.download",
-			Level:   "error",
-			ModelID: model.ID,
-			Message: err.Error() + " (refused for " + model.DisplayName + ")",
-		})
-		// Return the unchanged current record; the machine is left intact.
-		if existing, ok := m.download(model.ID); ok {
-			return existing
+		if ok {
+			model = existing
 		}
-		return model
+		return model, DownloadEvent{}, err
 	}
 	model.DownloadState = next
 	model.DownloadError = errText
 	m.downloads[model.ID] = model
-	m.mu.Unlock()
+	return model, DownloadEvent{Model: model, Prev: prev, Next: next, Err: errText}, nil
+}
 
-	m.notifyDownload(DownloadEvent{Model: model, Prev: prev, Next: next, Err: errText})
-	return model
+func (m *InMemoryManager) logDownloadTransitionError(model ModelRecord, err error) {
+	m.WriteLog(LogEntry{
+		Source:  "cercano.runtime.download",
+		Level:   "error",
+		ModelID: model.ID,
+		Message: err.Error() + " (refused for " + model.DisplayName + ")",
+	})
 }
 
 func (m *InMemoryManager) clearDownloadJob(modelID string, job *downloadJob) {

@@ -35,9 +35,10 @@ const subChanCap = 64 // buffered subscriber channel capacity; drop-on-full if f
 // All fields are guarded by Broker.mu except the channels, which are written
 // under mu and read by the drain goroutine.
 type losslessSub struct {
-	queue  []losslessItem // events and ordered delivery barriers
-	notify chan struct{}  // non-blocking signal that queue has new items (cap 1)
-	done   chan struct{}  // closed by detach; tells drain goroutine to exit
+	queue     []losslessItem // events and ordered delivery barriers; append under mu, pop by drain goroutine
+	notify    chan struct{}  // non-blocking signal that queue has new items (cap 1)
+	done      chan struct{}  // closed by detach; tells drain goroutine to exit
+	finishing bool           // registration removed; close output after delivering the queue
 }
 
 type losslessItem struct {
@@ -294,7 +295,7 @@ func (b *Broker) Attach(conv string) (replay []runner.Event, ch <-chan runner.Ev
 // The caller MUST call detach() when done to release the goroutine and the
 // subscriber registration.
 func (b *Broker) AttachLossless(conv string) (replay []runner.Event, ch <-chan runner.Event, detach func()) {
-	replay, ch, _, detach = b.AttachLosslessWithBarrier(conv)
+	replay, ch, _, _, detach = b.AttachLosslessWithBarrierAndFinish(conv)
 	return
 }
 
@@ -303,6 +304,28 @@ func (b *Broker) AttachLossless(conv string) (replay []runner.Event, ch <-chan r
 // Callers must continue consuming ch while waiting, then drain its buffered tail.
 // A cancelled/detached subscription need not acknowledge pending barriers.
 func (b *Broker) AttachLosslessWithBarrier(conv string) (replay []runner.Event, ch <-chan runner.Event, barrier func() <-chan struct{}, detach func()) {
+	replay, ch, barrier, _, detach = b.AttachLosslessWithBarrierAndFinish(conv)
+	return
+}
+
+// AttachLosslessWithFinish adds a graceful delivery boundary. After the producer
+// stops publishing, finish removes this subscription and closes ch only after
+// its entire queue is delivered. The consumer must keep reading until ch closes.
+// detach remains mandatory and aborts promptly if the consumer disconnects.
+func (b *Broker) AttachLosslessWithFinish(conv string) (replay []runner.Event, ch <-chan runner.Event, finish, detach func()) {
+	replay, ch, _, finish, detach = b.AttachLosslessWithBarrierAndFinish(conv)
+	return
+}
+
+// AttachLosslessWithBarrierAndFinish combines both delivery boundaries in ONE
+// subscription: barrier fences preserve ordered delivery (they close only after
+// all earlier publications have been forwarded to ch, so a consumer that keeps
+// reading can drain the buffered tail afterwards), while finish seals the queue
+// at producer end (it removes the registration and closes ch only after the
+// entire queue is delivered). Barriers are per-acknowledgement fences and never
+// end the subscription; finish is called once at end of stream. A detached
+// subscription cancels pending barriers (best-effort tail delivery only).
+func (b *Broker) AttachLosslessWithBarrierAndFinish(conv string) (replay []runner.Event, ch <-chan runner.Event, barrier func() <-chan struct{}, finish, detach func()) {
 	b.mu.Lock()
 	cs := b.convLocked(conv)
 
@@ -350,6 +373,7 @@ func (b *Broker) AttachLosslessWithBarrier(conv string) (replay []runner.Event, 
 				b.mu.Lock()
 				items := ls.queue
 				ls.queue = nil
+				finishing := ls.finishing
 				b.mu.Unlock()
 				// Forward, but honor done on every send: if the consumer stops
 				// reading out (e.g. stream.Send error) and later detaches, a bare
@@ -366,9 +390,24 @@ func (b *Broker) AttachLosslessWithBarrier(conv string) (replay []runner.Event, 
 						return
 					}
 				}
+				if finishing {
+					return
+				}
 			}
 		}
 	}()
+	finish = func() {
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		if cs2, ok := b.convs[conv]; ok {
+			delete(cs2.lsubs, id)
+		}
+		ls.finishing = true
+		select {
+		case ls.notify <- struct{}{}:
+		default:
+		}
+	}
 
 	var detachOnce sync.Once
 	detach = func() {
@@ -397,5 +436,5 @@ func (b *Broker) AttachLosslessWithBarrier(conv string) (replay []runner.Event, 
 		b.mu.Unlock()
 		return ack
 	}
-	return replay, out, barrier, detach
+	return replay, out, barrier, finish, detach
 }

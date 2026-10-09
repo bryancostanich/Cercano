@@ -17,6 +17,7 @@ import (
 	"cercano/source/server/internal/failurelog"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/localruntime"
+	"cercano/source/server/internal/modelpolicy"
 )
 
 const runtimeName = "llama_server"
@@ -138,7 +139,9 @@ func (e *Engine) Embed(ctx context.Context, model, text string) ([]float64, erro
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := e.httpClient().Do(req)
+	resp, err := modelpolicy.Client(e.httpClient(), "llama_server", "local", modelpolicy.OpenAI, func(ctx context.Context, endpoint, wireModel string) (string, error) {
+		return localruntime.ModelAtEndpoint(ctx, e.Manager, runtimeName, endpoint)
+	}).Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -243,7 +246,9 @@ func (e *Engine) chat(ctx context.Context, model string, messages []openAIMessag
 	if stream {
 		req.Header.Set("Accept", "text/event-stream")
 	}
-	resp, err := e.httpClient().Do(req)
+	resp, err := modelpolicy.Client(e.httpClient(), "llama_server", "local", modelpolicy.OpenAI, func(ctx context.Context, endpoint, wireModel string) (string, error) {
+		return localruntime.ModelAtEndpoint(ctx, e.Manager, runtimeName, endpoint)
+	}).Do(req)
 	if err != nil {
 		return chatResult{}, err
 	}

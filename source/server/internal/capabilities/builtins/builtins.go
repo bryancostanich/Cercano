@@ -38,6 +38,7 @@ func Register(reg *capabilities.Registry) {
 	reg.MustRegister(GitInfo())
 	reg.MustRegister(GitLog())
 	reg.MustRegister(GetProtocol())
+	reg.MustRegister(GetSharedSkill())
 	reg.MustRegister(Summarize())
 	reg.MustRegister(Extract())
 	reg.MustRegister(Classify())

@@ -116,7 +116,7 @@ func TestRoutingFailedSaveAndUnavailableAgentRetainDraft(t *testing.T) {
 		t.Fatal("discard after save restored old baseline")
 	}
 }
-func TestRoutingNavigationCancellationAndEighthTab(t *testing.T) {
+func TestRoutingNavigationCancellationAndNinthTab(t *testing.T) {
 	sp := draftTestPage()
 	sp.scope = scopeRouting
 	sp.onCommit("routing-task-review-quality", "economy")
@@ -129,11 +129,11 @@ func TestRoutingNavigationCancellationAndEighthTab(t *testing.T) {
 	if m.configSurface.active != configTabRouting || !sp.routingDirty {
 		t.Fatal("cancel lost Routing draft")
 	}
-	// The eighth keyboard destination remains addressable; do not build it
+	// The ninth keyboard destination remains addressable; do not build it
 	// while a dirty page still owns navigation.
-	m, _, _ = m.handleConfigSurfaceKey(tea.KeyPressMsg{Code: '8', Text: "8"})
+	m, _, _ = m.handleConfigSurfaceKey(tea.KeyPressMsg{Code: '9', Text: "9"})
 	if m.configSurface.pendingTab == nil || *m.configSurface.pendingTab != configTabContext {
-		t.Fatal("eighth tab navigation missing")
+		t.Fatal("ninth tab navigation missing")
 	}
 }
 

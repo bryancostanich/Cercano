@@ -3,7 +3,9 @@
 package llamaserver
 
 import (
+	"os"
 	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -63,12 +65,21 @@ func TestKillProcessWithResult_EscalatesAndConfirmsAfterSIGKILL(t *testing.T) {
 	// process group must still kill it and then confirm the recorded PID
 	// disappeared. Avoid a shell loop here: the loop's child can receive
 	// the group SIGTERM and make the shell exit before escalation.
-	cmd := startProcessGroup(t, "/usr/bin/perl", "-e", "$SIG{TERM}=sub{}; while (1) { sleep 1 }")
+	ready := filepath.Join(t.TempDir(), "signal-handler-ready")
+	cmd := startProcessGroup(t, "/usr/bin/perl", "-e", `$SIG{TERM}=sub{}; open(my $ready, ">", $ARGV[0]) or die $!; close($ready); while (1) { sleep 1 }`, ready)
 	wait := waitOwnedProcess(cmd)
-	// Give the interpreter time to install the signal handler. Without
-	// this, the test races and SIGTERM can land before Perl has decided
-	// to ignore it.
-	time.Sleep(50 * time.Millisecond)
+	// Wait for evidence that the child installed its handler. A fixed sleep can
+	// expire before an interpreter is scheduled on a busy CI runner.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := os.Stat(ready); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("child did not install its signal handler")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 
 	res, err := killProcessWithResult(cmd.Process)
 	if err != nil {

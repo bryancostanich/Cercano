@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -49,16 +50,18 @@ func TestOllamaEngine_FallbackLogic(t *testing.T) {
 }
 
 func TestOllamaEngine_HealthMonitor(t *testing.T) {
-	var primaryRequests, fallbackRequests int
+	var primaryHealthy atomic.Bool
 
 	primarySrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		primaryRequests++
+		if primaryHealthy.Load() {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer primarySrv.Close()
 
 	fallbackSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fallbackRequests++
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer fallbackSrv.Close()
@@ -79,9 +82,7 @@ func TestOllamaEngine_HealthMonitor(t *testing.T) {
 	}
 
 	// Now make primary healthy
-	primarySrv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
+	primaryHealthy.Store(true)
 
 	// Wait for health monitor to recover
 	time.Sleep(100 * time.Millisecond)

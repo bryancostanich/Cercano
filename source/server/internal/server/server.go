@@ -1045,6 +1045,12 @@ func (s *Server) SetCompactionGenerator(g *compactiongen.Generator) {
 
 // NewServer creates a new Agent gRPC server.
 func NewServer(a *agent.Agent, router RouterCloudUpdater, coordinator *loop.ADKCoordinator, cloudFactory agent.CloudFactory, registry *engine.EngineRegistry) *Server {
+	return newServerWithLogs(a, router, coordinator, cloudFactory, registry, "", "")
+}
+
+// Explicit paths let embedded hosts and integration tests isolate diagnostic
+// output without changing the user's home directory or normal server defaults.
+func newServerWithLogs(a *agent.Agent, router RouterCloudUpdater, coordinator *loop.ADKCoordinator, cloudFactory agent.CloudFactory, registry *engine.EngineRegistry, routingPath, failurePath string) *Server {
 	cfgService := cfgsvc.New("", config.Config{}, nil)
 	// The single effective-open-model resolver: overrides from config, defaults
 	// from the per-runtime catalog by RAM. Every collaborator that needs the
@@ -1052,11 +1058,11 @@ func NewServer(a *agent.Agent, router RouterCloudUpdater, coordinator *loop.ADKC
 	openModelsResolver := openmodels.New(cfgService, catalogdefaults.ForRuntime,
 		func() uint64 { return uint64(sysram.Total()) })
 	rtSvc := runtimessvc.New(cfgService, openModelsResolver)
-	routeLog, err := routinglog.NewWriter("")
+	routeLog, err := routinglog.NewWriter(routingPath)
 	if err != nil {
 		log.Printf("[routing] open log: %v", err)
 	}
-	failureLog, err := failurelog.NewWriter("")
+	failureLog, err := failurelog.NewWriter(failurePath)
 	if err != nil {
 		log.Printf("[failures] open log: %v", err)
 	}
@@ -1081,6 +1087,7 @@ func NewServer(a *agent.Agent, router RouterCloudUpdater, coordinator *loop.ADKC
 	s.providerSvc.SetProfileModelEvidence(s.profileModelEvidence)
 	// The live meter denominator must track the same capacity the turn used.
 	s.agent.SetContextWindowResolver(s.cloudContextWindow)
+	s.agent.SetManagedCandidates(s.DispatchCandidates)
 	// Build the shared vision-as-tool store and service. Cloud vision is preferred
 	// whenever the current locus permits cloud; open_only remains a hard no-cloud
 	// boundary. The local/open vision lane remains wired as fallback so images can
@@ -3292,7 +3299,11 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 	// The initiator uses AttachLossless (not Attach) because its stream is the
 	// turn's authoritative output: every event must arrive, even if stream.Send
 	// is momentarily slow. Passive Task-4 attachers use Attach (drop-on-full).
-	replay, ch, deliveryBarrier, detach := s.turnBroker.AttachLosslessWithBarrier(convID)
+	// One subscription carries BOTH delivery boundaries: the per-turn barrier
+	// fences ordered delivery after each RunTurn, and finishDelivery seals the
+	// queue once at request end (never per-turn, so autonomous continuation
+	// turns keep the live subscription).
+	replay, ch, deliveryBarrier, finishDelivery, detach := s.turnBroker.AttachLosslessWithBarrierAndFinish(convID)
 	defer detach()
 
 	// requester gates a W/X permission prompt: blocks until the client responds
@@ -3359,6 +3370,8 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 	// explicit message: this is the resume signal. The run stayed "running"
 	// while paused; clearing the blocker lets the host chain turns again.
 	s.clearAutonomyBlockerAtRequestStart(ctx, convID)
+	// The per-turn runnersvc.Request is built inside the loop below (each turn
+	// gets the latest session chat route and the request's model_override).
 
 	// Host-managed autonomous continuation state (see autonomy_continuation.go).
 	// prevRun/havePrevRun is the ledger snapshot taken before the upcoming turn;
@@ -3404,6 +3417,11 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 			WorkDir:        req.GetWorkDir(),
 			DebugMode:      req.GetDebugMode(),
 			Gen:            turnGen,
+			// Explicit per-request model intent. Unmanaged: honored as a plain
+			// model override (main semantics). Managed routing validates it
+			// against the enterprise policy in the runner — forbidden choices
+			// fail the turn with the policy's denial, never a silent fallback.
+			ModelOverride: req.GetModelOverride(),
 		}
 		images = nil // attachments apply to the user's turn only
 
@@ -3511,7 +3529,9 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 
 		// Drain any events still buffered in ch after the turn completed. This
 		// ensures trailing events (e.g. a final tool-exec-complete published just
-		// before RunTurn returned) are not dropped.
+		// before RunTurn returned) are not dropped. This is the PER-TURN drain
+		// only — the request-end finishDelivery() seal happens further below,
+		// once, right before the request's terminal FinalResponse.
 	drainLoop:
 		for {
 			select {
@@ -3537,8 +3557,19 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 
 		// If the runner returned a synthetic locus-error FinalText (no real loop
 		// ran), wrap it in a FinalResponse and exit.  The runner signals this by
-		// returning a non-empty FinalText with no Model set.
+		// returning a non-empty FinalText with no Model set. This is a request
+		// end: seal the lossless subscription and deliver its entire remaining
+		// queue BEFORE the terminal FinalResponse — an empty channel does not
+		// mean the broker's forwarding queue is empty (enterprise finish seal;
+		// harmless when nothing is queued).
 		if tr.result.Model == "" {
+			finishDelivery()
+			for ev := range ch {
+				workMonitor.Observe(ev)
+				if err := sendRunnerEvent(stream, ev); err != nil {
+					return err
+				}
+			}
 			return stream.Send(&proto.StreamProcessResponse{
 				Payload: &proto.StreamProcessResponse_FinalResponse{
 					FinalResponse: &proto.ProcessRequestResponse{Output: tr.result.FinalText},
@@ -3561,7 +3592,40 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 		// Accept/DeclineRollover RPCs. Fully off unless configured.
 		s.maybeOfferRollover(stream.Context(), convID, stream)
 
-		// Send the final response.
+		// ── Autonomous continuation gate ────────────────────────────────────
+		// After a normal successful turn, decide from durable structured state
+		// (autonomy_continuation.go) whether to chain another turn. Stop
+		// conditions: turn error/cancellation (handled above), run no longer
+		// "running" (completed/abandoned/review_pending), no active run, turn
+		// superseded by a newer user message, stream canceled, or the bounded
+		// no-progress safeguard. Progress is durable-first (ledger content),
+		// with real tool work (workMonitor, autonomy_work.go) as the fallback
+		// signal. Never parse model prose. Evaluated BEFORE the response send
+		// so a request-ending turn can seal delivery first (pure evaluation:
+		// no durable side effects, no stream sends).
+		gate := s.evaluateAutonomyContinuation(ctx, convID, turnGen, turn+1, prevRun, havePrevRun, workMonitor, &noProgress)
+
+		if !gate.cont {
+			// Request end. Seal the lossless subscription (enterprise finish
+			// semantics) and deliver its ENTIRE remaining queue before the
+			// terminal FinalResponse: an empty channel does not mean the
+			// broker's forwarding queue is empty, so no event can be lost
+			// between the last turn and the client's completion. finish is
+			// called exactly once at request end — never per-turn — so
+			// subsequent autonomous turns keep the live subscription (their
+			// ordered delivery is fenced by the per-turn barrier above).
+			finishDelivery()
+			for ev := range ch {
+				workMonitor.Observe(ev)
+				if err := sendRunnerEvent(stream, ev); err != nil {
+					return err
+				}
+			}
+		}
+
+		// Send the final response. Every turn — including each intermediate
+		// turn of an autonomous chain — terminates its output with a
+		// FinalResponse on this stream, preserving main's semantics.
 		if err := stream.Send(&proto.StreamProcessResponse{
 			Payload: &proto.StreamProcessResponse_FinalResponse{
 				FinalResponse: &proto.ProcessRequestResponse{
@@ -3578,16 +3642,6 @@ func (s *Server) streamProcessRequestWithToolLoop(req *proto.ProcessRequestReque
 			return err
 		}
 
-		// ── Autonomous continuation gate ────────────────────────────────────
-		// After a normal successful turn, decide from durable structured state
-		// (autonomy_continuation.go) whether to chain another turn. Stop
-		// conditions: turn error/cancellation (handled above), run no longer
-		// "running" (completed/abandoned/review_pending), no active run, turn
-		// superseded by a newer user message, stream canceled, or the bounded
-		// no-progress safeguard. Progress is durable-first (ledger content),
-		// with real tool work (workMonitor, autonomy_work.go) as the fallback
-		// signal. Never parse model prose.
-		gate := s.evaluateAutonomyContinuation(ctx, convID, turnGen, turn+1, prevRun, havePrevRun, workMonitor, &noProgress)
 		if !gate.cont {
 			// Removed generic "autonomous continuation ended — waiting for human input" message.
 			// Preserve structured notices (e.g., no-progress safeguard) and explicit blocker handling.

@@ -326,8 +326,10 @@ func TestRegistry_RegisterUnregisterRoundTrip(t *testing.T) {
 func TestStartProcess_RegistersAndUnregistersPID(t *testing.T) {
 	dir := t.TempDir()
 	p := &Provider{
-		running:  map[string]*managedInstance{},
-		registry: &pidRegistry{dir: dir},
+		running:      map[string]*managedInstance{},
+		registry:     &pidRegistry{dir: dir},
+		totalRAM:     func() int64 { return 64 << 30 },
+		nonEvictable: func() (int64, bool) { return 1 << 30, true },
 	}
 	p.running["inst"] = &managedInstance{
 		plannedContext: PlannedContext{Tokens: 8192, Source: "config"},

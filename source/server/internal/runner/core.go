@@ -16,11 +16,15 @@ import (
 
 	"cercano/source/server/internal/agent"
 	"cercano/source/server/internal/agenttools"
+	"cercano/source/server/internal/cloudfactory"
 	"cercano/source/server/internal/contextmeter"
 	"cercano/source/server/internal/failurelog"
 	"cercano/source/server/internal/inference"
 	"cercano/source/server/internal/llm"
 	"cercano/source/server/internal/locus"
+	"cercano/source/server/internal/managedrouting"
+	"cercano/source/server/internal/managedsettings"
+	"cercano/source/server/internal/modelpolicy"
 	"cercano/source/server/internal/modelwindow"
 	"cercano/source/server/internal/protocols"
 	"cercano/source/server/internal/requestassembly"
@@ -53,6 +57,36 @@ func (c *Core) logFailure(event string, fields failurelog.Event) {
 		return
 	}
 	c.d.FailureLog.Log(event, fields)
+}
+
+// authorizeSessionRoute validates an explicit session chat route against the
+// active enterprise policy BEFORE the turn runs. The full physical identity —
+// provider, endpoint, model and placement — must be in the administrator's
+// allow-list; a matching model name on a different endpoint or account is not
+// permission. An allowed choice is honored exactly; a forbidden one is denied
+// with the policy's reason. There is no fallback: the caller surfaces this
+// denial to the user as a hard turn failure. Unmanaged routing never calls this
+// (modelpolicy.Check is a no-op without an authority), and the transport-level
+// Check at send time remains the final authorization boundary.
+func (c *Core) authorizeSessionRoute(ctx context.Context, route chatroute.Route) error {
+	if c.d.Config == nil {
+		return fmt.Errorf("session chat override %s / %s cannot be validated: configuration unavailable", route.Profile, route.Model)
+	}
+	profile, err := chatroute.ProfileFor(c.d.Config.Get(), route)
+	if err != nil {
+		return err
+	}
+	provider, endpoint, err := cloudfactory.PhysicalEndpoint(ctx, profile)
+	if err != nil {
+		return err
+	}
+	attempt := modelpolicy.Attempt{
+		Provider:  provider,
+		Endpoint:  endpoint,
+		Model:     route.Model,
+		Placement: "external", // session routes are cloud profiles by definition
+	}
+	return modelpolicy.Check(ctx, attempt)
 }
 
 func mainFailureFields(req Request, scope, provider, model string, isCloud bool, err error) failurelog.Event {
@@ -277,18 +311,55 @@ func (c *Core) RunTurn(
 	var provider inference.Provider
 	var isCloud, fellBack bool
 	var err error
+	var managed bool
+	var managedModel string
+	candidates := c.d.Providers.Candidates()
+	ctx = managedrouting.PinCandidates(ctx, candidates)
 	if req.ChatRoute != nil {
+		// Explicit session choice (profile + model identity). Under managed
+		// routing the FULL physical identity is validated up front — not just
+		// the model string, which could otherwise land on the wrong account:
+		// an allowed choice is honored exactly, a forbidden one is a clear
+		// denial, and there is never a silent fallback to another route.
 		resolver, ok := c.d.Providers.(chatroute.Resolver)
 		if !ok {
 			return Result{}, fmt.Errorf("session chat overrides unavailable")
 		}
-		provider, err = resolver.ResolveChatRoute(ctx, *req.ChatRoute)
+		route := *req.ChatRoute
+		if req.ModelOverride != "" {
+			// Explicit per-request override wins for the model (per-request
+			// contract); the combined identity is still validated as a whole.
+			route.Model = req.ModelOverride
+		}
+		managed = modelpolicy.Managed(ctx)
+		if managed {
+			if perr := c.authorizeSessionRoute(ctx, route); perr != nil {
+				c.logRoute("turn.select_error", routinglog.Event{
+					"conversation_id": req.ConversationID,
+					"error":           perr.Error(),
+				})
+				return Result{}, perr
+			}
+		}
+		provider, err = resolver.ResolveChatRoute(ctx, route)
 		isCloud = true
+		managedModel = route.Model
 		if err != nil {
 			return Result{}, err
 		}
 	} else {
-		provider, isCloud, fellBack, err = c.d.Providers.Main()
+		var selected inference.Selection
+		var managedAssignment config.TaskAssignment
+		selected, managedAssignment, managedModel, managed, err = managedrouting.Select(ctx, config.TaskChat, candidates, managedrouting.Request{Model: req.ModelOverride})
+		if managed {
+			provider, isCloud, fellBack = selected.Provider, selected.IsCloud, selected.FellBack
+			assignment = managedAssignment
+			if err == nil && candidates.WrapManagedMain != nil {
+				provider = candidates.WrapManagedMain(provider, isCloud)
+			}
+		} else {
+			provider, isCloud, fellBack, err = c.d.Providers.Main()
+		}
 	}
 	if err != nil {
 		c.logRoute("turn.select_error", routinglog.Event{
@@ -301,6 +372,9 @@ func (c *Core) RunTurn(
 			"error_class":     errClassString(err),
 			"message":         failurelog.SanitizeMessage(errorString(err)),
 		})
+		if managed {
+			return Result{}, err
+		}
 		// *_only mode with its required tier unavailable — return a synthetic
 		// result so the host can send a terminal FinalResponse.
 		return Result{FinalText: "Locus: " + err.Error()}, nil
@@ -308,7 +382,10 @@ func (c *Core) RunTurn(
 	if chosen, ok := inference.TaskAssignmentFor(provider, config.TaskChat); ok {
 		assignment = chosen
 	}
-	selectedModel := c.d.Providers.MainModel(isCloud)
+	selectedModel := managedModel
+	if !managed {
+		selectedModel = c.d.Providers.MainModel(isCloud)
+	}
 	if bound, ok := inference.TaskModelFor(provider); ok {
 		selectedModel = bound
 	}
@@ -367,7 +444,7 @@ func (c *Core) RunTurn(
 	if effective, ok := inference.TaskDestination(provider); ok {
 		destination = effective
 	}
-	if req.ChatRoute != nil || destination != config.DestinationPrimary {
+	if req.ChatRoute != nil || managed || destination != config.DestinationPrimary {
 		fbProv = nil
 	}
 	fallbackModel := c.d.Providers.MainModel(fbCloud)
@@ -699,6 +776,9 @@ func (c *Core) RunTurn(
 	reportedProvider := provider.Name()
 	if result.Route != nil {
 		reportedProvider = result.Route.Provider
+		if managed && result.Route.Destination != "" {
+			isCloud = result.Route.Destination != "local"
+		}
 	}
 	return Result{
 		FinalText:    result.FinalText,
@@ -758,7 +838,7 @@ func (c *Core) runLoop(
 		Images:               req.Images,
 		Model:                model,
 		Tier:                 tier,
-		System:               BuildSystemPrompt(c.d, req.WorkDir, profile),
+		System:               BuildSystemPrompt(c.d, req.WorkDir, profile) + managedsettings.SkillPrompt(ctx),
 		WorkDir:              req.WorkDir,
 		ConversationID:       req.ConversationID,
 		VisionStore:          c.d.VisionStore,

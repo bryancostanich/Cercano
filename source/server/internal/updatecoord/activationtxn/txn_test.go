@@ -79,13 +79,16 @@ type fixture struct {
 func newFixtureNoJournal(t *testing.T) *fixture {
 	t.Helper()
 	root := t.TempDir()
-	dir := filepath.Join(root, "publication")
-	if _, err := privdir.Ensure(dir); err != nil {
-		t.Fatalf("privdir.Ensure: %v", err)
-	}
 	store, err := state.Open(root, testInstall)
 	if err != nil {
 		t.Fatalf("state.Open: %v", err)
+	}
+	// The publication directory is the STORE's own directory — the same
+	// strict store==lease==publication identity the oneshot architecture
+	// acquires its lease on. The transaction refuses any other directory.
+	dir := store.Directory()
+	if _, err := privdir.Ensure(dir); err != nil {
+		t.Fatalf("privdir.Ensure: %v", err)
 	}
 	snap, err := state.NewAdapter(store).Start(context.Background(), testTarget)
 	if err != nil {
@@ -274,13 +277,17 @@ func TestSwitchFirstInstallPublishesThenAcknowledges(t *testing.T) {
 	}
 	// The staged version directory is a recorded IDENTIFIER only: the
 	// switch never installs, creates, moves, or renames anything for it.
-	// (The exclusion lease's own update.lock also lives here.)
+	// (The store's own state database and the exclusion lease's own
+	// update.lock also live in this directory.)
 	entries, err := os.ReadDir(f.dir)
 	if err != nil {
 		t.Fatalf("read publication directory: %v", err)
 	}
 	for _, e := range entries {
-		if e.Name() != selection.FileName && e.Name() != "update.lock" {
+		switch {
+		case e.Name() == selection.FileName, e.Name() == "update.lock",
+			e.Name() == "state.db", e.Name() == "state.db-wal", e.Name() == "state.db-shm":
+		default:
 			t.Fatalf("unexpected publication directory entry %q", e.Name())
 		}
 	}
@@ -585,14 +592,58 @@ func TestSwitchForeignLeaseAndForeignDirectoryRefuse(t *testing.T) {
 	f.requireJournal(state.JournalPrepared, 1)
 	f.requireSelectionAbsent()
 
-	// A directory that is not the lease's own is refused the same way.
+	// A directory that is not the STORE's own is refused by the strict
+	// store/directory association check (here it is also not the lease's
+	// own, so the association refusal fires first — with nothing
+	// written either way).
 	req = f.request()
 	req.Directory = otherDir
 	_, err = Switch(context.Background(), req)
-	if !errors.Is(err, ErrInvalidRequest) || !errors.Is(err, exclusion.ErrForeignDirectory) {
-		t.Fatalf("err %v, want ErrInvalidRequest wrapping ErrForeignDirectory", err)
+	if !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("err %v, want ErrInvalidRequest for the non-store directory", err)
 	}
 	f.requireJournal(state.JournalPrepared, 1)
+	f.requireSelectionAbsent()
+}
+
+// TestSwitchWrongStoreDirectoryAssociationRefusesBeforeJournalWrite is the
+// regression for the store-versus-directory association hole: TWO REAL
+// installations. Store A holds the operation and journal; the request
+// instead names store B's own private directory with a lease legitimately
+// held for exactly that directory. Both the lease and the directory are
+// individually valid, so before the fix the transaction happily published
+// store A's operation into store B's installation directory. The
+// transaction must refuse BEFORE any journal write, with nothing published
+// into either directory.
+func TestSwitchWrongStoreDirectoryAssociationRefusesBeforeJournalWrite(t *testing.T) {
+	f := newFixture(t, false)
+
+	// A second, REAL installation: its own store, its own private
+	// managed directory, and a legitimately held exclusive lease for it.
+	rootB := t.TempDir()
+	storeB, err := state.Open(rootB, "other-install")
+	if err != nil {
+		t.Fatalf("state.Open(second install): %v", err)
+	}
+	defer storeB.Close() //nolint:errcheck // test cleanup
+	dirB := storeB.Directory()
+	lockB, err := exclusion.Acquire(context.Background(), dirB, exclusion.Update)
+	if err != nil {
+		t.Fatalf("acquire second install lease: %v", err)
+	}
+	defer lockB.Close() //nolint:errcheck // test cleanup
+
+	// Store A's journal + operation, store B's directory + lease: the
+	// wrong association must refuse before any journal write.
+	req := Request{Store: f.store, Directory: dirB, Lock: lockB, OpID: f.opID}
+	_, err = Switch(context.Background(), req)
+	if !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("err %v, want ErrInvalidRequest for the wrong store/directory association", err)
+	}
+	f.requireJournal(state.JournalPrepared, 1)
+	if _, lerr := os.Lstat(filepath.Join(dirB, selection.FileName)); !errors.Is(lerr, fs.ErrNotExist) {
+		t.Fatalf("selection appeared in the foreign store's directory: %v", lerr)
+	}
 	f.requireSelectionAbsent()
 }
 

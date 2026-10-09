@@ -73,11 +73,11 @@ var schema2Tables = map[string]bool{
 // apply: a database claiming version 3 must contain exactly these tables
 // or it is refused as partial, corrupt, foreign, or future.
 var schema3Tables = map[string]bool{
-	"state_meta":         true,
-	"install_state":      true,
-	"operation_records":  true,
-	"policy_records":     true,
-	"dismissal_records":  true,
+	"state_meta":          true,
+	"install_state":       true,
+	"operation_records":   true,
+	"policy_records":      true,
+	"dismissal_records":   true,
 	"activation_journals": true,
 }
 

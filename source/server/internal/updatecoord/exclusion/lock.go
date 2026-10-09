@@ -50,6 +50,15 @@ var (
 	// the OS lock keeps pinning the old inode), so the pathname world
 	// cannot prove the lease a guarded use is about to rely on.
 	ErrReplacedLock = errors.New("exclusion: lock file or directory no longer matches acquisition")
+	// ErrExpiredSession: the GuardSession capability's minting
+	// GuardUpdateSession callback has already returned (or the session
+	// was never minted), so the copy in hand proves nothing — not even a
+	// copy taken while the session was live.
+	ErrExpiredSession = errors.New("exclusion: guard session is expired")
+	// ErrSessionBusy: another publication already holds the live guard
+	// session's single publication claim, so a second concurrent use of
+	// the session is refused rather than allowed to race it.
+	ErrSessionBusy = errors.New("exclusion: guard session publication claim is busy")
 )
 
 // Handle owns one acquired OS lock. Close is idempotent. Process death releases
@@ -73,6 +82,16 @@ type Handle struct {
 	cond      *sync.Cond
 	guardBusy bool // a GuardUpdate callback currently holds this handle's guard slot
 	closeWait bool // Close requested: new guards are refused from here
+
+	// Guard-session state, guarded by mu. sessionID names the CURRENT
+	// live guard callback (0 when none): copies of a minted GuardSession
+	// validate against it, so every copy expires the moment that
+	// callback returns. sessionBusy is the live session's single
+	// publication claim, so concurrent uses of session copies cannot race
+	// each other.
+	guardSeq    uint64 // minted session ids, strictly increasing
+	sessionID   uint64
+	sessionBusy bool
 }
 
 // Close releases the lock. It is idempotent, and a second call returns the
@@ -138,7 +157,7 @@ func (h *Handle) GuardUpdate(directory string, fn func() error) error {
 	if fn == nil {
 		return fmt.Errorf("%w", ErrNilCallback)
 	}
-	if err := h.beginGuard(directory); err != nil {
+	if _, err := h.beginGuard(directory); err != nil {
 		return err
 	}
 	defer h.endGuard()
@@ -146,6 +165,93 @@ func (h *Handle) GuardUpdate(directory string, fn func() error) error {
 		return err
 	}
 	return fn()
+}
+
+// GuardSession is the callback-scoped guard capability minted by
+// GuardUpdateSession: an unforgeable proof (unexported fields, a zero
+// value proves nothing) that its minting callback is the handle's CURRENT
+// live exclusive guard for exactly one directory. It is validated at use
+// time against the handle's live state, so a session — and every copy of
+// it — expires the moment the minting callback returns (normally or by
+// panic). ClaimPublication is its only use.
+//
+// This is a capability boundary for cooperating compiled code (the Go
+// type system makes the token impossible to forge or outlive), not a
+// security sandbox: no claim is made against hostile same-user code, which
+// can always touch the locked directory's files directly.
+type GuardSession struct {
+	handle *Handle
+	id     uint64
+}
+
+// GuardUpdateSession is GuardUpdate with a minted GuardSession capability
+// handed to the callback: same refusals, same serialization, same
+// Close-pinning, same lease-identity re-proof — only the callback shape
+// differs. The capability lets a called package prove, at use time, that
+// the caller's guard is live and bound to the exact directory, replacing
+// the trust-a-comment contract of exported holding-guard entry points. fn
+// runs with the session; when fn returns or panics, the session and every
+// copy of it expire.
+func (h *Handle) GuardUpdateSession(directory string, fn func(guard GuardSession) error) error {
+	if h == nil || h.file == nil {
+		return fmt.Errorf("%w", ErrNilHandle)
+	}
+	if fn == nil {
+		return fmt.Errorf("%w", ErrNilCallback)
+	}
+	id, err := h.beginGuard(directory)
+	if err != nil {
+		return err
+	}
+	defer h.endGuard()
+	if err := h.verifyLeaseIdentity(); err != nil {
+		return err
+	}
+	return fn(GuardSession{handle: h, id: id})
+}
+
+// ClaimPublication proves, at use time, that g is its handle's CURRENT live
+// guard session minted for EXACTLY directory, and exclusively claims it
+// for one publication at a time. Validation is always against the
+// handle's live state: an expired session (the minting callback already
+// returned — including any copy of it), a zero-value or nil-handle
+// session, a session used for another directory, a session on a handle
+// whose Close is pending, or a second concurrent claim of the same live
+// session is refused. The returned release ends the claim; calling it
+// more than once is a safe no-op.
+func (g GuardSession) ClaimPublication(directory string) (release func(), err error) {
+	h := g.handle
+	if h == nil || h.file == nil {
+		return nil, fmt.Errorf("%w", ErrNilHandle)
+	}
+	h.mu.Lock()
+	var refusal error
+	switch {
+	case h.sessionID == 0 || h.sessionID != g.id:
+		refusal = fmt.Errorf("%w: session %d, live session %d", ErrExpiredSession, g.id, h.sessionID)
+	case h.closeWait:
+		refusal = fmt.Errorf("%w", ErrClosedHandle)
+	case directory == "" || directory != h.directory:
+		refusal = fmt.Errorf("%w: bound to %q, requested %q", ErrForeignDirectory, h.directory, directory)
+	case h.sessionBusy:
+		refusal = fmt.Errorf("%w", ErrSessionBusy)
+	default:
+		h.sessionBusy = true
+	}
+	h.mu.Unlock()
+	if refusal != nil {
+		return nil, refusal
+	}
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			h.mu.Lock()
+			if h.sessionID == g.id {
+				h.sessionBusy = false
+			}
+			h.mu.Unlock()
+		})
+	}, nil
 }
 
 // verifyLeaseIdentity re-proves, right before a guarded callback runs, that
@@ -179,26 +285,26 @@ func (h *Handle) verifyLeaseIdentity() error {
 	return nil
 }
 
-func (h *Handle) beginGuard(directory string) error {
+func (h *Handle) beginGuard(directory string) (session uint64, err error) {
 	if h == nil || h.file == nil {
-		return fmt.Errorf("%w", ErrNilHandle)
+		return 0, fmt.Errorf("%w", ErrNilHandle)
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	switch {
 	case h.closeWait:
-		return fmt.Errorf("%w", ErrClosedHandle)
+		return 0, fmt.Errorf("%w", ErrClosedHandle)
 	case h.mode != Update:
-		return fmt.Errorf("%w", ErrSharedHandle)
+		return 0, fmt.Errorf("%w", ErrSharedHandle)
 	case directory == "" || directory != h.directory:
-		return fmt.Errorf("%w: bound to %q, requested %q", ErrForeignDirectory, h.directory, directory)
+		return 0, fmt.Errorf("%w: bound to %q, requested %q", ErrForeignDirectory, h.directory, directory)
 	}
 	// Guarded uses serialize on this handle. A queued waiter is refused
 	// as soon as Close is pending, so Close never waits behind a guard
 	// that will never run and no deadlock can form.
 	for h.guardBusy {
 		if h.closeWait {
-			return fmt.Errorf("%w", ErrClosedHandle)
+			return 0, fmt.Errorf("%w", ErrClosedHandle)
 		}
 		if h.cond == nil {
 			h.cond = sync.NewCond(&h.mu)
@@ -206,14 +312,22 @@ func (h *Handle) beginGuard(directory string) error {
 		h.cond.Wait()
 	}
 	if h.closeWait {
-		return fmt.Errorf("%w", ErrClosedHandle)
+		return 0, fmt.Errorf("%w", ErrClosedHandle)
 	}
 	h.guardBusy = true
-	return nil
+	// Mint the session id AFTER winning the guard slot: the id names the
+	// CURRENT live callback, and endGuard clears it so every minted
+	// session (and every copy of it) expires when the callback returns.
+	h.guardSeq++
+	h.sessionID = h.guardSeq
+	h.sessionBusy = false
+	return h.sessionID, nil
 }
 
 func (h *Handle) endGuard() {
 	h.mu.Lock()
+	h.sessionID = 0
+	h.sessionBusy = false
 	h.guardBusy = false
 	if h.cond != nil {
 		h.cond.Broadcast()

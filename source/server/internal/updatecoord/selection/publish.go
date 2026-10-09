@@ -269,41 +269,55 @@ func validatePublishRequest(ctx context.Context, dir string, expected Expected, 
 	return validateExpected(expected, next)
 }
 
-// PublishHoldingGuard is the SAME observe-stage-commit critical section as
-// Publish, for a caller that ALREADY holds the exclusion guard.
+// PublishGuarded is the SAME observe-stage-commit critical section as
+// Publish, for a caller that ALREADY holds the exclusion guard: it
+// requires the guard capability minted by exclusion.Handle.GuardUpdateSession
+// for EXACTLY dir and validates it at use time (the session must be the
+// handle's CURRENT live guard, minted for this directory), so the lease
+// is proven by an unforgeable, callback-scoped capability — never by a
+// caller's assertion or a comment. The capability is claimed exclusively
+// for one publication at a time, so concurrent uses of one session's
+// copies serialize-or-refuse through ErrSessionBusy and can never race
+// each other. The capability expires with its minting callback, copies
+// included, so nothing here is valid outside a live guard.
 //
-// The caller must have invoked — and still be inside —
-// exclusion.Handle.GuardUpdate for EXACTLY dir on an exclusive Update-mode
-// handle acquired for that directory, and that one guard must cover the
-// caller's entire transaction (durable intent, this publication, and the
-// durable acknowledgement). This function takes NO OS lock and performs NO
-// guarded-use proof of its own: running it outside a live guard for exactly
-// dir forfeits every safety property Publish provides. It exists so a
-// composing transaction never nests GuardUpdate inside GuardUpdate — the
-// guard serializes on one handle and a nested call on the same handle
-// would deadlock against itself — while keeping exactly one guard over the
-// whole intent-publish-acknowledge sequence.
+// The caller's one guard must cover the caller's entire transaction
+// (durable intent, this publication, and the durable acknowledgement).
+// This function takes NO OS lock and performs NO guarded-use proof of its
+// own: it exists so a composing transaction never nests GuardUpdate
+// inside GuardUpdate — the guard serializes on one handle and a nested
+// call on the same handle would deadlock against itself — while keeping
+// exactly one guard over the whole intent-publish-acknowledge sequence.
 //
 // The request validation (context, directory form, descriptors, single
-// expectation form) is identical to Publish; everything the guarded core
-// does — privdir verification of the directory, the re-read conflict
-// check, staging, the platform commit, and the durability confirmation —
-// is identical too. Every failure category (typed pre-commit errors with
-// nothing changed, and CommitDurabilityUncertain with the commit never
-// rolled back) is reported exactly as Publish reports it.
-func PublishHoldingGuard(ctx context.Context, dir string, expected Expected, next activation.Selection) (Result, error) {
+// expectation form) is identical to Publish; everything the unguarded
+// core does — privdir verification of the directory, the re-read
+// conflict check, staging, the platform commit, and the durability
+// confirmation — is identical too. Every failure category (typed
+// pre-commit errors with nothing changed, and CommitDurabilityUncertain
+// with the commit never rolled back) is reported exactly as Publish
+// reports it. A refused capability is a typed ErrInvalidRequest wrapping
+// the exclusion sentinel, with nothing observed, staged, or committed.
+func PublishGuarded(ctx context.Context, guard exclusion.GuardSession, dir string, expected Expected, next activation.Selection) (Result, error) {
 	var zero Result
 	if err := validatePublishRequest(ctx, dir, expected, next); err != nil {
 		return zero, err
 	}
+	release, err := guard.ClaimPublication(dir)
+	if err != nil {
+		return zero, fmt.Errorf("%w: %w", ErrInvalidRequest, err)
+	}
+	defer release()
 	return publishGuarded(ctx, dir, expected, next)
 }
 
 // publishGuarded is the whole observe-stage-commit critical section. It
-// runs ONLY inside exclusion.Handle.GuardUpdate, which has already proven
-// the caller's live exclusive Update lease for exactly dir and pinned
-// Close until it returns, and it starts by re-classifying dir with the
-// verify-only privdir primitive so nothing is ever provisioned here.
+// runs ONLY inside exclusion.Handle.GuardUpdate (or the GuardUpdateSession
+// callback that minted the capability PublishGuarded validated), which has
+// already proven the caller's live exclusive Update lease for exactly dir
+// and pinned Close until it returns, and it starts by re-classifying dir
+// with the verify-only privdir primitive so nothing is ever provisioned
+// here.
 func publishGuarded(ctx context.Context, dir string, expected Expected, next activation.Selection) (res Result, err error) {
 	var zero Result
 	dest := filepath.Join(dir, FileName)

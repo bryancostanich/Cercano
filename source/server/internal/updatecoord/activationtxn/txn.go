@@ -5,78 +5,24 @@
 // pure reconciler (the activation package) into a single lease-guarded,
 // intent-before-effect protocol.
 //
-// Scope discipline. This package is an ORCHESTRATOR, not a new primitive.
-// It performs no artifact verification (the journal's staged identifier
-// and verified digest are caller-proven, immutable facts recorded when the
-// journal was prepared — arbitrary paths or commands are never accepted
-// here), no health probing (a result reports that health verification is
-// the next step; it never reports a health boolean), no completion, no
-// rollback, no restore, no cleanup, no delete, no process stop, and no
-// live-version rename. Everything it writes is a journal checkpoint
-// advance or a selection publication through the existing primitives.
-//
-// Explicitness. Every authority is named per request: the open store, the
-// publication directory (used exactly as given; no default or live
-// location), the HELD exclusive update lease (this package acquires no OS
-// lock itself — it only proves the caller's), and the operation ID. The
-// current operation and the journal are re-read FRESH inside that lease,
-// so nothing observed before the lease was held licenses a write.
-//
-// One guard, no nesting. The whole critical section — re-read of the
-// journal, durable switch-intent record, publication, target readback, and
-// durable selected acknowledgement — runs inside ONE
-// exclusion.Handle.GuardUpdate callback on the caller's held lease for
-// exactly the publication directory. The selection publisher guards
-// ITSELF in its public Publish entry point, so this transaction uses the
-// package's holding-guard core (selection.PublishHoldingGuard): nesting
-// GuardUpdate inside GuardUpdate on the same handle would deadlock
-// against the guard's own serialization, and one guard covering
-// intent + publish + acknowledge is precisely the safety property wanted
-// (Close cannot release the lease mid-transaction, and no fresh-lease gap
-// opens between the intent record and the publication).
-//
-// Lock ordering. Only one ordering exists here: exclusion lease guard →
-// store transaction. Store writes happen inside the guard and each store
-// call opens and commits its own short BEGIN IMMEDIATE transaction; the
-// store never touches the exclusion lock, so no cycle can form and the
-// lease is never waited on while a store write transaction is open.
-//
-// Receipt versus journal: the prior-selection binding. The journal's
-// prior-selection block deliberately records only the prior's version,
-// generation, and artifact digest (the reconciler's prior binding is
-// PARTIAL by design: the prior's staged identifier and the raw bytes of
-// the prior file are NOT journal facts). The publication expectation,
-// however, must bind the COMPLETE prior descriptor plus the SHA-256 of
-// the prior file's raw bytes. The caller therefore supplies a PriorReceipt
-// — the complete, already-trusted prior descriptor together with its raw
-// file digest, captured when the caller observed the prior under the same
-// cooperative protocol — and this transaction binds it to the journal
-// field by field (installation, prior version, prior generation, and the
-// receipt's artifact digest equal to the journal's recorded
-// prior-selection digest). The receipt's staged identifier and raw digest
-// are NOT journal facts; they are bound to the LIVE file by the
-// publisher's own re-read, which runs under the same guard and requires
-// the observed bytes to decode to EXACTLY the receipt descriptor and to
-// hash to EXACTLY the receipt digest. The journal thus binds the
-// identifying facts, the live file binds the remaining ones, and the
-// transaction never invents a journal field the reconciler does not
-// define. No prior restore happens in this slice, but the prior binding
-// is complete for the publisher's expectation regardless.
-//
-// Intent before effect, and recovery. The switch-intent checkpoint is
-// saved DURABLY before the publication runs, and the selected checkpoint
-// is acknowledged ONLY after the actual selection file read back under the
-// lease matches the ENTIRE trusted target descriptor. Cancellation,
-// transport, or commit-durability uncertainty therefore always leaves a
-// RECONCILABLE journal: the persisted checkpoint names the durable intent
-// and the reconciler classifies the observed file against it. Reentry
-// rules: prepared (or switch-intent) with the prior still active may
-// (re)publish; switch-intent with the target already active acknowledges
-// WITHOUT a second file write; selected with the target active is an
-// idempotent return whose result names health verification as the next
-// step; anything ambiguous, mismatched, or beyond this transaction's
-// checkpoints is REFUSED with nothing written — never a fake completion,
-// health claim, rollback, or delete.
+// Contract: Switch runs the whole critical section — journal re-read,
+// durable switch-intent, publication, target readback, durable selected
+// acknowledgement — inside ONE exclusion.Handle.GuardUpdateSession on the
+// caller's HELD exclusive update lease for EXACTLY req.Directory, which
+// must be the STORE's own directory (req.Store.Directory()): the oneshot
+// architecture acquires the lease on the store directory, so a request
+// naming a different — even a valid private — directory is a wrong
+// installation association and is refused before any observation or write.
+// The publication runs under the SAME guard through
+// selection.PublishGuarded, which proves the live, directory-bound guard
+// via the minted, callback-scoped capability (never a caller assertion);
+// no nested self-guard exists and no fresh-lease gap opens between intent
+// and effect. The target is derived entirely from the journal's immutable
+// facts; every reentry is classified by the reconciler first; anything
+// ambiguous, mismatched, foreign, or beyond this transaction's checkpoints
+// is refused with NOTHING written. No health probing, completion,
+// rollback, restore, cleanup, or delete is performed or faked here; the
+// journal is left reconcilable on every failure path.
 package activationtxn
 
 import (
@@ -216,17 +162,22 @@ var (
 // caller's HELD exclusive update lease: re-read the current operation and
 // journal inside the lease, durably record switch-intent BEFORE any
 // publication (unless it is already recorded or later), publish the target
-// selection through the holding-guard core of the selection package, read
-// the actual file back, and durably acknowledge selected ONLY when the
-// readback matches the entire trusted target descriptor.
+// selection through the selection package's capability-validated guarded
+// entry point, read the actual file back, and durably acknowledge
+// selected ONLY when the readback matches the entire trusted target
+// descriptor.
 //
-// The whole critical section runs inside one exclusion.Handle.GuardUpdate
-// on req.Lock for exactly req.Directory: the lease is proven (never faked
-// from a nil handle), Close is pinned until the transaction returns, and
-// no fresh-lease gap opens between the intent record and the publication
-// — the selection publication itself runs under the SAME guard via
-// selection.PublishHoldingGuard rather than a nested self-guard, which
-// would deadlock against the guard's serialization.
+// The whole critical section runs inside one
+// exclusion.Handle.GuardUpdateSession on req.Lock for exactly
+// req.Directory, which must be the store's own directory
+// (req.Store.Directory()) — the installation association the existing
+// oneshot architecture already establishes (store directory == lease
+// directory == publication directory). The guard session capability
+// minted there is passed to selection.PublishGuarded, which validates it
+// against the handle's live state, so the publication is proven — not
+// assumed — to run under the caller's live, directory-bound lease; no
+// nested self-guard exists (which would deadlock) and Close is pinned
+// until the transaction returns.
 //
 // Every reentry is classified by the reconciler first: prepared or
 // switch-intent with the prior (or an explicit first-install absence)
@@ -241,8 +192,9 @@ var (
 // Cancellation and commit uncertainty are always reconcilable: the journal
 // names durable intent (prepared, switch-intent, or selected) and the
 // caller re-runs Switch or reconciles. The error of a refused guarded use
-// (nil, closed, shared, foreign, or replaced lease) is a typed
-// ErrInvalidRequest wrapping the exclusion sentinel, with nothing run.
+// (nil, closed, shared, foreign, or replaced lease, or a wrong
+// store/directory association) is a typed ErrInvalidRequest wrapping the
+// exclusion sentinel, with nothing run or written.
 func Switch(ctx context.Context, req Request) (Result, error) {
 	if ctx == nil {
 		return Result{}, fmt.Errorf("%w: nil context", ErrInvalidRequest)
@@ -254,9 +206,9 @@ func Switch(ctx context.Context, req Request) (Result, error) {
 		ran bool
 		res Result
 	)
-	gerr := req.Lock.GuardUpdate(req.Directory, func() error {
+	gerr := req.Lock.GuardUpdateSession(req.Directory, func(guard exclusion.GuardSession) error {
 		ran = true
-		r, rerr := runGuarded(ctx, req)
+		r, rerr := runGuarded(ctx, req, guard)
 		res = r
 		return rerr
 	})
@@ -270,7 +222,9 @@ func Switch(ctx context.Context, req Request) (Result, error) {
 }
 
 // validateRequest checks the request's shape. It dereferences nothing:
-// the lease is proven only through GuardUpdate, which refuses nil handles.
+// the lease is proven only through GuardUpdateSession, which refuses nil
+// handles. The store/directory association is proven against the store's
+// own recorded directory — never trusted from the caller's string.
 func validateRequest(req Request) error {
 	if req.Store == nil {
 		return fmt.Errorf("%w: store must be named explicitly", ErrInvalidRequest)
@@ -284,13 +238,23 @@ func validateRequest(req Request) error {
 	if strings.ContainsRune(req.Directory, 0) || !filepath.IsAbs(req.Directory) || filepath.Clean(req.Directory) != req.Directory {
 		return fmt.Errorf("%w: directory must be an explicit cleaned absolute path", ErrInvalidRequest)
 	}
+	// Installation association: the publication directory must be the
+	// STORE's own directory, exactly as the store recorded it at Open
+	// time (the same strict identity the oneshot architecture acquires
+	// its lease on). Without this proof a caller holding one
+	// installation's lease could publish another store's operation into
+	// any other valid private directory.
+	if req.Directory != req.Store.Directory() {
+		return fmt.Errorf("%w: directory %q is not the store's own state directory %q", ErrInvalidRequest, req.Directory, req.Store.Directory())
+	}
 	return nil
 }
 
 // runGuarded is the transaction body. It runs ONLY inside the caller-held
 // exclusion guard for req.Directory, so every read and write below is
-// covered by the one lease.
-func runGuarded(ctx context.Context, req Request) (Result, error) {
+// covered by the one lease; guard is the capability minted by that
+// GuardUpdateSession call and is validated again by the publisher.
+func runGuarded(ctx context.Context, req Request, guard exclusion.GuardSession) (Result, error) {
 	// Authority: the named operation must be the installation's CURRENT
 	// operation, re-read inside the lease — never a stale or superseded
 	// one, and never a writer that pre-dates the lease.
@@ -354,7 +318,7 @@ func runGuarded(ctx context.Context, req Request) (Result, error) {
 		if err != nil {
 			return Result{}, err
 		}
-		return publishAndAcknowledge(ctx, req, intent, intentRev, expected, target)
+		return publishAndAcknowledge(ctx, req, guard, intent, intentRev, expected, target)
 
 	case state.JournalSwitchIntent:
 		switch decision.Action {
@@ -370,7 +334,7 @@ func runGuarded(ctx context.Context, req Request) (Result, error) {
 			if err != nil {
 				return Result{}, err
 			}
-			return publishAndAcknowledge(ctx, req, journal, revision, expected, target)
+			return publishAndAcknowledge(ctx, req, guard, journal, revision, expected, target)
 		default:
 			return Result{}, refuseDecision(decision)
 		}
@@ -456,11 +420,13 @@ func expectedPrior(req Request, journal state.ActivationJournal) (selection.Expe
 }
 
 // publishAndAcknowledge publishes the target under the SAME guard (never a
-// nested self-guard) and then acknowledges. The journal is already at
-// switch-intent, so every failure below leaves a reconcilable journal and
-// never a fake completion.
-func publishAndAcknowledge(ctx context.Context, req Request, journal state.ActivationJournal, revision int64, expected selection.Expected, target activation.Selection) (Result, error) {
-	pub, perr := selection.PublishHoldingGuard(ctx, req.Directory, expected, target)
+// nested self-guard): the minted guard capability is re-validated by
+// selection.PublishGuarded against the handle's live state, proving the
+// publication runs under the caller's live, directory-bound lease. The
+// journal is already at switch-intent, so every failure below leaves a
+// reconcilable journal and never a fake completion.
+func publishAndAcknowledge(ctx context.Context, req Request, guard exclusion.GuardSession, journal state.ActivationJournal, revision int64, expected selection.Expected, target activation.Selection) (Result, error) {
+	pub, perr := selection.PublishGuarded(ctx, guard, req.Directory, expected, target)
 	if perr != nil {
 		// Pre-commit refusal: the destination is unchanged and the journal
 		// stays at switch-intent — the prior (or absence) is still

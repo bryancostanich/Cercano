@@ -134,6 +134,44 @@ type Identity struct {
 	SHA256 []byte
 }
 
+// openVerifiedArchive validates archivePath as the already-verified archive
+// input — an existing regular file that is not a symlink (the path itself,
+// not a parent, because the caller provisions the private directory holding
+// it) — and returns it open read-only together with its stat'ed size, which
+// is checked against the caller's compressed bound before the caller takes
+// the immutable snapshot. The file is never modified by the caller.
+func openVerifiedArchive(archivePath string, maxCompressedBytes int64) (*os.File, int64, error) {
+	fi, err := os.Lstat(archivePath)
+	if err != nil {
+		return nil, 0, fmt.Errorf("archivecheck: archive %q: %w", archivePath, err)
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		return nil, 0, fmt.Errorf("archivecheck: archive %q is a symlink; the verified archive itself must be a regular file", archivePath)
+	}
+	if !fi.Mode().IsRegular() {
+		return nil, 0, fmt.Errorf("archivecheck: archive %q is not a regular file", archivePath)
+	}
+	f, err := os.Open(archivePath)
+	if err != nil {
+		return nil, 0, fmt.Errorf("archivecheck: archive %q: %w", archivePath, err)
+	}
+	sfi, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return nil, 0, fmt.Errorf("archivecheck: archive %q: %w", archivePath, err)
+	}
+	if !sfi.Mode().IsRegular() {
+		f.Close()
+		return nil, 0, fmt.Errorf("archivecheck: archive %q is not a regular file", archivePath)
+	}
+	if sfi.Size() > maxCompressedBytes {
+		f.Close()
+		return nil, 0, fmt.Errorf("archivecheck: archive size %d exceeds MaxCompressedBytes %d",
+			sfi.Size(), maxCompressedBytes)
+	}
+	return f, sfi.Size(), nil
+}
+
 // PreflightFile inspects a caller-provided, already-verified local archive
 // file. archivePath must be an existing regular file that is not a symlink;
 // the path itself (not a parent) is checked, because the caller provisions
@@ -155,38 +193,16 @@ func PreflightFile(ctx context.Context, archivePath string, opts Options) (*Mani
 	if err := validateOptionValues(opts); err != nil {
 		return nil, err
 	}
-	fi, err := os.Lstat(archivePath)
+	f, size, err := openVerifiedArchive(archivePath, opts.Bounds.MaxCompressedBytes)
 	if err != nil {
-		return nil, fmt.Errorf("archivecheck: archive %q: %w", archivePath, err)
-	}
-	if fi.Mode()&os.ModeSymlink != 0 {
-		return nil, fmt.Errorf("archivecheck: archive %q is a symlink; the verified archive itself must be a regular file", archivePath)
-	}
-	if !fi.Mode().IsRegular() {
-		return nil, fmt.Errorf("archivecheck: archive %q is not a regular file", archivePath)
-	}
-	f, err := os.Open(archivePath)
-	if err != nil {
-		return nil, fmt.Errorf("archivecheck: archive %q: %w", archivePath, err)
+		return nil, err
 	}
 	defer f.Close()
-	// Stat the open descriptor, not the pre-open path: every check below
-	// then describes the file actually being opened.
-	sfi, err := f.Stat()
-	if err != nil {
-		return nil, fmt.Errorf("archivecheck: archive %q: %w", archivePath, err)
-	}
-	if !sfi.Mode().IsRegular() {
-		return nil, fmt.Errorf("archivecheck: archive %q is not a regular file", archivePath)
-	}
-	if sfi.Size() > opts.Bounds.MaxCompressedBytes {
-		return nil, fmt.Errorf("archivecheck: archive size %d exceeds MaxCompressedBytes %d",
-			sfi.Size(), opts.Bounds.MaxCompressedBytes)
-	}
 	// One immutable snapshot binds the receipt digest to the parsed bytes:
 	// hashing and structural checking consume the exact same bytes, and
 	// the file is never re-read afterwards.
-	return preflightSnapshot(ctx, f, sfi.Size(), opts)
+	_, man, err := preflightSnapshot(ctx, f, size, opts)
+	return man, err
 }
 
 // snapshotBytesCeiling is the hard finite allocation ceiling on the
@@ -201,37 +217,46 @@ const snapshotBytesCeiling = 256 << 20
 // preflightSnapshot binds the receipt digest to the parsed bytes. It takes
 // ONE bounded immutable in-memory snapshot of exactly size bytes from ra,
 // length-checks and hashes that snapshot against opts.Identity when set,
-// and parses the exact same snapshot bytes. Nothing is written, extracted
-// or executed; a source that serves different bytes per call (or a file
-// changed on disk between passes) can never make the digest bind bytes
-// other than the ones parsed, because there is no second pass.
-func preflightSnapshot(ctx context.Context, ra io.ReaderAt, size int64, opts Options) (*Manifest, error) {
+// and parses the exact same snapshot bytes, which are then RETURNED so the
+// caller (staging) can consume the same immutable bytes without ever
+// reopening the mutable on-disk file. Nothing is written, extracted
+// or executed here; a source that serves different bytes per call (or a
+// file changed on disk between passes) can never make the digest bind bytes
+// other than the ones parsed, because there is no second pass over the
+// file.
+func preflightSnapshot(ctx context.Context, ra io.ReaderAt, size int64, opts Options) ([]byte, *Manifest, error) {
 	if id := opts.Identity; id != nil {
 		if id.Length < 0 || len(id.SHA256) != sha256.Size {
-			return nil, errors.New("archivecheck: Identity must carry an exact non-negative length and a raw 32-byte SHA-256")
+			return nil, nil, errors.New("archivecheck: Identity must carry an exact non-negative length and a raw 32-byte SHA-256")
 		}
 		if size != id.Length {
-			return nil, fmt.Errorf("archivecheck: archive is %d bytes but the verified receipt authorizes %d bytes",
+			return nil, nil, fmt.Errorf("archivecheck: archive is %d bytes but the verified receipt authorizes %d bytes",
 				size, id.Length)
 		}
 	}
 	snap, err := snapshotReaderAt(ctx, ra, size)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if id := opts.Identity; id != nil {
 		sum := sha256.Sum256(snap)
 		if !bytes.Equal(sum[:], id.SHA256) {
-			return nil, errors.New("archivecheck: archive bytes do not match the SHA-256 of the verified receipt")
+			return nil, nil, errors.New("archivecheck: archive bytes do not match the SHA-256 of the verified receipt")
 		}
 	}
 	// Both formats parse the immutable snapshot; the parse never touches
 	// the mutable source again.
 	br := bytes.NewReader(snap)
+	var man *Manifest
 	if opts.Format == Zip {
-		return Check(ctx, Archive{ReaderAt: br, Size: int64(len(snap))}, opts)
+		man, err = Check(ctx, Archive{ReaderAt: br, Size: int64(len(snap))}, opts)
+	} else {
+		man, err = Check(ctx, Archive{Reader: br}, opts)
 	}
-	return Check(ctx, Archive{Reader: br}, opts)
+	if err != nil {
+		return nil, nil, err
+	}
+	return snap, man, nil
 }
 
 // snapshotReaderAt reads exactly size bytes from ra into one immutable

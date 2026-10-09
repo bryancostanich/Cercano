@@ -134,9 +134,12 @@ func TestPreflightSnapshotHashesAndParsesSameImmutableBytes(t *testing.T) {
 	bOpts.Identity = &Identity{Length: int64(len(b)), SHA256: bSum[:]}
 
 	rec := &recordingReaderAt{ra: &swappingReaderAt{first: a, second: b}}
-	man, err := preflightSnapshot(context.Background(), rec, int64(len(a)), aOpts)
+	snap, man, err := preflightSnapshot(context.Background(), rec, int64(len(a)), aOpts)
 	if err != nil {
 		t.Fatalf("preflight of the snapshotted archive A failed: %v", err)
+	}
+	if len(snap) != len(a) {
+		t.Fatalf("snapshot is %d bytes, want the archive's %d", len(snap), len(a))
 	}
 	for _, m := range man.Members {
 		if m.Name == testRoot+"/bin/cercano" && m.SHA256 != memberDigest(t, "agent-binary-bytes") {
@@ -150,7 +153,7 @@ func TestPreflightSnapshotHashesAndParsesSameImmutableBytes(t *testing.T) {
 	// The same mutable source serving B while being snapshotted must be
 	// refused under A's receipt: the digest binds the parsed bytes.
 	rec = &recordingReaderAt{ra: &swappingReaderAt{first: b, second: a}}
-	_, err = preflightSnapshot(context.Background(), rec, int64(len(a)), aOpts)
+	_, _, err = preflightSnapshot(context.Background(), rec, int64(len(a)), aOpts)
 	wantError(t, err, "do not match the SHA-256")
 }
 
@@ -179,9 +182,12 @@ func TestPreflightSnapshotBindsTarGzToo(t *testing.T) {
 	aOpts := tarOpts()
 	aOpts.Identity = &Identity{Length: int64(len(a)), SHA256: aSum[:]}
 	rec := &recordingReaderAt{ra: &swappingReaderAt{first: a, second: b}}
-	man, err := preflightSnapshot(context.Background(), rec, int64(len(a)), aOpts)
+	snap, man, err := preflightSnapshot(context.Background(), rec, int64(len(a)), aOpts)
 	if err != nil {
 		t.Fatalf("preflight of the snapshotted archive A failed: %v", err)
+	}
+	if len(snap) != len(a) {
+		t.Fatalf("snapshot is %d bytes, want the archive's %d", len(snap), len(a))
 	}
 	for _, m := range man.Members {
 		if m.Name == testRoot+"/bin/cercano" && m.SHA256 != memberDigest(t, "agent-binary-bytes") {
@@ -208,7 +214,7 @@ func TestSnapshotRefusesOversizedAdvertisedLengthBeforeReadAt(t *testing.T) {
 
 		// The same refusal holds through the full preflight composition.
 		rec = &recordingReaderAt{ra: bytes.NewReader(nil)}
-		_, err = preflightSnapshot(context.Background(), rec, size, zipOpts())
+		_, _, err = preflightSnapshot(context.Background(), rec, size, zipOpts())
 		wantError(t, err, "exceeds the immutable-snapshot ceiling")
 		if rec.calls != 0 {
 			t.Fatalf("advertised length %d via preflight: %d ReadAt calls before the ceiling refusal", size, rec.calls)

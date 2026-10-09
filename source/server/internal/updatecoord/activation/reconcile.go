@@ -7,12 +7,15 @@ import (
 	"cercano/source/server/internal/updatecoord/state"
 )
 
-// ObservedState classifies what was observed about the selection file.
-// Absent is a first-class state, distinct from unreadable and malformed.
+// ObservedState classifies one observation of the selection file. The zero
+// value is ObservedUnknown: an observation nobody classified proves nothing.
+// Absent is a first-class state, distinct from unreadable and malformed,
+// and is produced only by Observe classifying the reader's absent result.
 type ObservedState int
 
 const (
-	ObservedAbsent ObservedState = iota
+	ObservedUnknown ObservedState = iota
+	ObservedAbsent
 	ObservedUnreadable
 	ObservedMalformed
 	ObservedPresent
@@ -34,15 +37,15 @@ func (o ObservedState) String() string {
 }
 
 // Observed is one observation of the selection file: a classification and,
-// only when present, the validated descriptor.
+// only when present, the descriptor.
 type Observed struct {
 	State     ObservedState
 	Selection *Selection
 }
 
-// Observe classifies a ReadSelection result into the typed observation
-// reconciliation consumes, so the executor never string-matches errors. An
-// unexpected error classifies as unreadable (refuse automatic changes).
+// Observe classifies a ReadSelection result so the executor never
+// string-matches errors. An unexpected error classifies as unreadable:
+// untrustworthy observations refuse automatic changes.
 func Observe(sel Selection, err error) Observed {
 	switch {
 	case err == nil:
@@ -59,49 +62,46 @@ func Observe(sel Selection, err error) Observed {
 	}
 }
 
-// ProvenFacts carries only externally PROVEN facts the caller has already
-// established. Every field defaults to "unproven": a false never means
-// healthy or verified, it means UNKNOWN, and an unknown fact never licenses
-// an automatic change.
+// ProvenFacts carries only externally PROVEN facts. Every field defaults to
+// "unproven": a false means unknown, never healthy or verified, and an
+// unknown fact never licenses an automatic change.
 type ProvenFacts struct {
-	// HealthFailed reports a PROVEN failure of the target's
-	// post-switch health verification (for example, an externally run
-	// startup/health check that failed). False means no proven failure,
-	// never a proven success — health SUCCESS is only ever taken from the
-	// journal's health-verified checkpoint.
+	// HealthFailed reports a proven failure of the target's post-switch
+	// health verification. False means no proven failure, never a proven
+	// success; health success comes only from the journal's
+	// health-verified checkpoint.
 	HealthFailed bool
 }
 
-// Action is the typed next safe action for the executor. It is a decision,
-// not an effect: this package performs nothing.
+// Action is the typed next safe action for the executor: a decision, not an
+// effect. This package performs nothing.
 type Action string
 
 const (
-	// ActionBeforeSwitch: unchanged. The observed selection is exactly the
-	// journal's pre-switch expectation (the recorded prior selection, or
-	// no selection for an explicit first install). The executor may
-	// proceed with the recorded switch when it chooses; nothing needs
-	// recovering.
+	// ActionBeforeSwitch: the observed selection is exactly the journal's
+	// pre-switch expectation (the recorded prior selection, or no
+	// selection for an explicit first install); the recorded switch may
+	// proceed.
 	ActionBeforeSwitch Action = "before-switch"
-	// ActionTargetAwaitHealth: the target selection is proven active; the
-	// next step is health verification. This is proven by the SELECTION
-	// FILE, never inferred from a pointer or version alone.
+	// ActionTargetAwaitHealth: the target selection is proven active (by
+	// the selection file, never inferred from a pointer or version); the
+	// next step is health verification.
 	ActionTargetAwaitHealth Action = "target-selected-await-health"
-	// ActionCleanupPermitted: the journal records health VERIFIED for the
-	// active target selection, so the superseded version may be cleaned
-	// up. Cleanup is licensed only by the durable health-verified (or the
-	// later cleanup-pending) checkpoint — never by the pointer or version.
+	// ActionCleanupPermitted: the journal records health verified for the
+	// active target; the superseded version may be cleaned up. Licensed
+	// only by the durable health-verified (or cleanup-pending)
+	// checkpoint, never by the pointer or version.
 	ActionCleanupPermitted Action = "cleanup-permitted"
 	// ActionRestorePrior: the recorded prior selection must be kept or
-	// restored (and the journal driven down the restore path). This
-	// action is only ever returned for an EXPLICIT prior selection; there
-	// is no pretending a prior version exists for a first install.
+	// restored. Signals the need for the exact prior proof only; it is
+	// returned solely for an explicit recorded prior selection and never
+	// licenses guessing a path or inventing a prior version.
 	ActionRestorePrior Action = "restore-prior-needed"
 	// ActionCompleteConsistent: the journal is complete (or restored) and
-	// the observed selection agrees with its final state. Nothing to do.
+	// the observed selection agrees with its final state.
 	ActionCompleteConsistent Action = "complete-consistent"
-	// ActionAmbiguous: no automatic change is proven safe. A human (or an
-	// explicit recovery decision) must resolve the situation.
+	// ActionAmbiguous: no automatic change is proven safe; a human or an
+	// explicit recovery decision must resolve.
 	ActionAmbiguous Action = "ambiguity-manual-recovery"
 )
 
@@ -109,30 +109,32 @@ const (
 type Reason string
 
 const (
-	ReasonFirstInstallBeforeSwitch       Reason = "first-install-before-switch"
-	ReasonPriorSelectionActive           Reason = "prior-selection-still-active"
-	ReasonTargetSelectedAwaitHealth      Reason = "target-selected-await-health"
-	ReasonHealthVerifiedCleanupPermitted Reason = "health-verified-cleanup-permitted"
-	ReasonCleanupPendingRetry            Reason = "cleanup-pending-retry"
-	ReasonCompleteConsistent             Reason = "complete-consistent"
-	ReasonRestoredConsistent             Reason = "restored-consistent"
-	ReasonRestoreCommittedNotEffective   Reason = "restore-committed-not-effective"
-	ReasonRestoreEffective               Reason = "restore-already-effective"
-	ReasonHealthFailedRestorePrior       Reason = "health-failed-restore-prior"
-	ReasonJournalInvalid                 Reason = "journal-invalid"
-	ReasonSelectionUnreadable            Reason = "selection-unreadable"
-	ReasonSelectionMalformed             Reason = "selection-malformed"
+	ReasonFirstInstallBeforeSwitch        Reason = "first-install-before-switch"
+	ReasonPriorSelectionActive            Reason = "prior-selection-still-active"
+	ReasonTargetSelectedAwaitHealth       Reason = "target-selected-await-health"
+	ReasonHealthVerifiedCleanupPermitted  Reason = "health-verified-cleanup-permitted"
+	ReasonCleanupPendingRetry             Reason = "cleanup-pending-retry"
+	ReasonCompleteConsistent              Reason = "complete-consistent"
+	ReasonRestoredConsistent              Reason = "restored-consistent"
+	ReasonRestoreCommittedNotEffective    Reason = "restore-committed-not-effective"
+	ReasonRestoreEffective                Reason = "restore-already-effective"
+	ReasonHealthFailedRestorePrior        Reason = "health-failed-restore-prior"
+	ReasonJournalInvalid                  Reason = "journal-invalid"
+	ReasonObservationUnclassified         Reason = "observation-unclassified"
+	ReasonSelectionUnreadable             Reason = "selection-unreadable"
+	ReasonSelectionMalformed              Reason = "selection-malformed"
 	ReasonSelectionMissing               Reason = "selection-missing"
-	ReasonForeignInstallation            Reason = "foreign-installation"
-	ReasonSelectionUnrelated             Reason = "selection-unrelated"
-	ReasonFutureGeneration               Reason = "future-generation"
+	ReasonForeignInstallation             Reason = "foreign-installation"
+	ReasonSelectionUnrelated              Reason = "selection-unrelated"
+	ReasonTargetWithoutSwitchIntent       Reason = "target-selection-without-switch-intent"
+	ReasonFutureGeneration                Reason = "future-generation"
 	ReasonGenerationMismatch             Reason = "generation-mismatch"
-	ReasonDigestMismatch                 Reason = "digest-mismatch"
+	ReasonDigestMismatch                  Reason = "digest-mismatch"
 	ReasonStageIdentifierMismatch        Reason = "stage-identifier-mismatch"
-	ReasonSelectedNotEffective           Reason = "switch-recorded-but-not-effective"
-	ReasonRestoreRecordedButTargetActive Reason = "restore-recorded-but-target-active"
-	ReasonHealthFailedNoPrior            Reason = "health-failed-no-prior-selection"
-	ReasonContradictoryFacts             Reason = "contradictory-facts"
+	ReasonSelectedNotEffective            Reason = "switch-recorded-but-not-effective"
+	ReasonRestoreRecordedButTargetActive  Reason = "restore-recorded-but-target-active"
+	ReasonHealthFailedNoPrior             Reason = "health-failed-no-prior-selection"
+	ReasonContradictoryFacts              Reason = "contradictory-facts"
 )
 
 // Result is the typed decision: the next safe action and why.
@@ -143,42 +145,37 @@ type Result struct {
 
 func ambiguous(reason Reason) Result { return Result{ActionAmbiguous, reason} }
 
-// Reconcile is a PURE function over a validated activation journal, one
-// observation of the selection file, and externally proven facts. It
-// returns the typed next safe action and reason. It reads nothing, writes
-// nothing, and never mutates its inputs.
+// Reconcile is a pure function over a validated activation journal, one
+// observation of the selection file, and externally proven facts. It reads
+// nothing, writes nothing, never mutates its inputs, and returns the typed
+// next safe action.
 //
-// Contract and limits:
+// Contract:
 //
-//   - The journal must be a journal the state package validated
-//     (LoadActivationJournal's product); it is revalidated against its own
-//     recorded installation binding here, and anything invalid is
+//   - The journal must be the state package's validated product, including
+//     its self-declared installation binding; anything invalid is
 //     ambiguity, never an automatic change.
-//   - Health success is ONLY the journal's health-verified-or-later
-//     checkpoint; it is never inferred from the selection pointing at the
-//     target. Restore is ONLY the explicit prior selection (recorded by the
-//     journal) — never from a checkpoint alone, and a first install
-//     (explicit prior-none) never pretends a prior version exists.
-//   - A selection matching the TARGET is bound to every journal fact the
-//     journal records (installation, version, staged identifier, verified
-//     digest) and to the NEXT generation after the recorded prior
-//     generation. Anything unclassifiable, mismatched, or carrying a
-//     future generation (beyond the recorded prior generation's successor)
-//     is ambiguity: unproven facts refuse automatic changes. No new
-//     journal fields are invented to make an ambiguous case decidable.
-//   - The prior selection's own staged identifier is NOT a recorded journal
-//     fact; prior matching binds installation, version, generation, and
-//     digest only.
+//   - The observation must be classified by Observe. An unclassified
+//     observation is unknown; a present descriptor must re-pass
+//     Selection.Validate before any matching, so a future or malformed
+//     descriptor that merely names the target's fields authorizes nothing.
+//   - The switch is intent-before-effect: the journal's switch-intent
+//     checkpoint precedes the selection change, so a target selection
+//     observed at the prepared checkpoint is an effect without intent —
+//     ambiguity, not the health, cleanup, or restore path. The legal
+//     recovery (switch-intent or later) is preserved.
+//   - Health success is only the journal's health-verified-or-later
+//     checkpoint, never inferred from the selection file. Restore targets
+//     only the journal's explicit recorded prior selection; the prior's
+//     staged identifier is not a journal fact, and no journal field is
+//     invented to make an ambiguous case decidable.
 func Reconcile(journal state.ActivationJournal, observed Observed, facts ProvenFacts) Result {
-	// The journal must be exactly what the state package validates —
-	// including its self-declared installation binding — or nothing is
-	// proven and every path below stays closed.
 	if err := state.ValidateActivationJournal(journal, journal.InstallID); err != nil {
 		return ambiguous(ReasonJournalInvalid)
 	}
-	// The installation identifier itself must be the safe opaque component
-	// the store enforces; a self-consistent but malformed binding is not a
-	// validated journal.
+	// The installation identifier must also be the safe opaque component
+	// the store enforces; a self-consistent but malformed binding is not
+	// a validated journal.
 	if err := state.ValidateInstallID(journal.InstallID); err != nil {
 		return ambiguous(ReasonJournalInvalid)
 	}
@@ -186,9 +183,10 @@ func Reconcile(journal state.ActivationJournal, observed Observed, facts ProvenF
 	case ObservedAbsent:
 		return reconcileAbsent(journal)
 	case ObservedPresent:
-		if observed.Selection == nil {
-			// Defensive: a present state without a descriptor is a
-			// caller bug, treated as malformed.
+		// A present descriptor is trusted only if it is a valid one;
+		// matching journal fields is meaningless for a future or
+		// malformed descriptor.
+		if observed.Selection == nil || observed.Selection.Validate() != nil {
 			return ambiguous(ReasonSelectionMalformed)
 		}
 		return reconcilePresent(journal, *observed.Selection, facts)
@@ -197,7 +195,9 @@ func Reconcile(journal state.ActivationJournal, observed Observed, facts ProvenF
 	case ObservedMalformed:
 		return ambiguous(ReasonSelectionMalformed)
 	default:
-		return ambiguous(ReasonSelectionUnreadable)
+		// ObservedUnknown (the zero value) or anything else: nobody
+		// classified this observation, so nothing is proven.
+		return ambiguous(ReasonObservationUnclassified)
 	}
 }
 
@@ -206,10 +206,9 @@ func Reconcile(journal state.ActivationJournal, observed Observed, facts ProvenF
 func hasPrior(j state.ActivationJournal) bool { return j.PriorSelectedVersion != "" }
 
 // matchesTarget binds the observed selection to the journal's TARGET
-// selection: same installation, target version, staged identifier, and
-// verified artifact digest, at the successor generation of the recorded
-// prior generation. A prior generation at the int64 bound cannot have a
-// successor and simply never matches.
+// selection: same installation, target version, staged identifier, verified
+// digest, at the successor generation of the recorded prior generation. A
+// prior generation at the int64 bound has no successor and never matches.
 func matchesTarget(j state.ActivationJournal, s Selection) bool {
 	if j.PriorSelectionGeneration == math.MaxInt64 {
 		return false
@@ -222,8 +221,9 @@ func matchesTarget(j state.ActivationJournal, s Selection) bool {
 }
 
 // matchesPrior binds the observed selection to the journal's recorded PRIOR
-// selection: same installation, version, generation, and artifact digest.
-// False when the journal records no explicit prior selection.
+// selection: same installation, version, generation, and digest. The
+// prior's staged identifier is NOT a recorded journal fact, so this is a
+// partial binding by definition. False when no explicit prior is recorded.
 func matchesPrior(j state.ActivationJournal, s Selection) bool {
 	if !hasPrior(j) {
 		return false
@@ -235,9 +235,8 @@ func matchesPrior(j state.ActivationJournal, s Selection) bool {
 }
 
 // reconcileAbsent decides for an ABSENT selection. With an explicit prior
-// selection recorded, absence is never benign — the prior selection must
-// exist — so only an explicit first install before its first switch
-// continues; everything past the pre-switch checkpoints is ambiguity.
+// selection recorded the prior must exist, so absence is never benign;
+// only an explicit first install before its first switch continues.
 func reconcileAbsent(j state.ActivationJournal) Result {
 	if hasPrior(j) {
 		return ambiguous(ReasonSelectionMissing)
@@ -252,7 +251,7 @@ func reconcileAbsent(j state.ActivationJournal) Result {
 	}
 }
 
-// reconcilePresent decides for a PRESENT validated selection.
+// reconcilePresent decides for a PRESENT, already re-validated selection.
 func reconcilePresent(j state.ActivationJournal, s Selection, facts ProvenFacts) Result {
 	if s.InstallID != j.InstallID {
 		return ambiguous(ReasonForeignInstallation)
@@ -266,19 +265,16 @@ func reconcilePresent(j state.ActivationJournal, s Selection, facts ProvenFacts)
 	return ambiguous(mismatchReason(j, s))
 }
 
-// mismatchReason explains a present selection that matches neither the
-// target nor the recorded prior: a version-near miss is given its precise
-// mismatch reason (a FUTURE generation above all others); anything else is
-// unrelated. All of them refuse automatic changes.
+// mismatchReason explains a present selection matching neither target nor
+// prior: a version-near miss gets its precise reason, anything else is
+// unrelated. Every case refuses automatic changes.
 func mismatchReason(j state.ActivationJournal, s Selection) Reason {
 	switch s.SelectedVersion {
 	case j.TargetVersion:
 		// The version is the target but some binding fact is wrong. A
-		// generation ABOVE the recorded successor generation is future;
-		// anything else generation-wise is a plain mismatch. (A prior
-		// generation at the int64 bound has no successor, so every
-		// observed generation is a mismatch.) With the generation right,
-		// the remaining misses are the staged identifier and the digest.
+		// generation ABOVE the recorded successor is future; anything
+		// else is a mismatch. With the generation right, the remaining
+		// misses are the staged identifier and the digest.
 		if j.PriorSelectionGeneration != math.MaxInt64 && s.Generation > j.PriorSelectionGeneration+1 {
 			return ReasonFutureGeneration
 		}
@@ -290,8 +286,7 @@ func mismatchReason(j state.ActivationJournal, s Selection) Reason {
 		}
 		return ReasonDigestMismatch
 	case j.PriorSelectedVersion:
-		// Near-miss on the prior: the prior identity is exactly what the
-		// journal recorded.
+		// Near-miss on the prior identity the journal recorded.
 		if s.Generation != j.PriorSelectionGeneration {
 			return ReasonGenerationMismatch
 		}
@@ -302,31 +297,37 @@ func mismatchReason(j state.ActivationJournal, s Selection) Reason {
 }
 
 // reconcileTarget decides when the observed selection IS the target. The
-// selection file is proof the switch took effect, but NEVER proof of
-// health: only the journal's health-verified-or-later checkpoint licenses
-// cleanup, and a PROVEN health failure routes to the explicit restore path
-// only while no durable record contradicts it.
+// selection file proves the switch took effect, never health: only the
+// journal's health-verified-or-later checkpoint licenses cleanup, and a
+// proven health failure routes to the explicit restore path only while no
+// durable record contradicts it.
 func reconcileTarget(j state.ActivationJournal, facts ProvenFacts) Result {
 	switch j.Checkpoint {
-	case state.JournalPrepared, state.JournalSwitchIntent, state.JournalSelected:
+	case state.JournalPrepared:
+		// The switch is write-intent-before-effect: the durable
+		// switch-intent checkpoint must precede the selection change. A
+		// target selection while the journal is still at prepared is an
+		// effect without recorded intent — ambiguity, never the health,
+		// cleanup, or restore path, whatever the facts say.
+		return ambiguous(ReasonTargetWithoutSwitchIntent)
+	case state.JournalSwitchIntent, state.JournalSelected:
 		if facts.HealthFailed {
-			// The target is proven bad before any verified-health record
-			// exists. Restoring requires an explicit prior selection; a
-			// failed first install has nothing to restore and must not
-			// pretend one exists.
+			// The target is proven bad before any verified-health record.
+			// Restoring requires an explicit prior selection; a failed
+			// first install has nothing to restore.
 			if hasPrior(j) {
 				return Result{ActionRestorePrior, ReasonHealthFailedRestorePrior}
 			}
 			return ambiguous(ReasonHealthFailedNoPrior)
 		}
 		// The file is the stronger evidence: the target is selected, so
-		// the next step is health verification (and the journal may be
+		// the next step is health verification (the journal may be
 		// advanced to selected by the executor).
 		return Result{ActionTargetAwaitHealth, ReasonTargetSelectedAwaitHealth}
 	case state.JournalHealthVerified, state.JournalCleanupPending, state.JournalComplete:
 		if facts.HealthFailed {
 			// A durable verified-health record contradicted by a proven
-			// failure is a contradiction; a human decides.
+			// failure: a human decides.
 			return ambiguous(ReasonContradictoryFacts)
 		}
 		switch j.Checkpoint {
@@ -338,14 +339,12 @@ func reconcileTarget(j state.ActivationJournal, facts ProvenFacts) Result {
 			return Result{ActionCompleteConsistent, ReasonCompleteConsistent}
 		}
 	case state.JournalRollbackIntent:
-		// The restore is committed but has NOT taken effect: the target is
-		// still the active selection. Restore is needed; the restore is
-		// NOT inferred from the checkpoint — the file proves the restore
-		// is still outstanding.
+		// The restore is committed but has not taken effect; the file
+		// proves the restore is still outstanding.
 		return Result{ActionRestorePrior, ReasonRestoreCommittedNotEffective}
 	case state.JournalRestored:
 		// The journal claims the restore completed, but the file still
-		// points at the target: contradiction, no automatic resolution.
+		// points at the target: contradiction.
 		return ambiguous(ReasonRestoreRecordedButTargetActive)
 	default:
 		return ambiguous(ReasonJournalInvalid)
@@ -353,17 +352,16 @@ func reconcileTarget(j state.ActivationJournal, facts ProvenFacts) Result {
 }
 
 // reconcilePriorObserved decides when the observed selection IS the
-// recorded prior. The restore target must never be invented: it is
-// exactly the journal's explicit prior selection.
+// recorded prior. The restore target is exactly the journal's explicit
+// prior selection, never invented.
 func reconcilePriorObserved(j state.ActivationJournal, facts ProvenFacts) Result {
 	switch j.Checkpoint {
 	case state.JournalPrepared, state.JournalSwitchIntent:
-		// The switch has not been committed: the prior selection being
-		// active is simply unchanged.
+		// The switch has not been committed: the prior being active is
+		// simply unchanged.
 		if facts.HealthFailed {
-			// A proven health failure with no committed switch is a
-			// contradiction (health verification happens after the
-			// switch); refuse automatic changes.
+			// Health verification happens after the switch; a proven
+			// failure before any committed switch is a contradiction.
 			return ambiguous(ReasonContradictoryFacts)
 		}
 		return Result{ActionBeforeSwitch, ReasonPriorSelectionActive}
@@ -375,13 +373,10 @@ func reconcilePriorObserved(j state.ActivationJournal, facts ProvenFacts) Result
 			return Result{ActionRestorePrior, ReasonRestoreEffective}
 		}
 		// The journal claims the switch was committed but the file never
-		// moved: the claim is not effective. No health inference, no
-		// automatic change.
+		// moved: the claim is not effective.
 		return ambiguous(ReasonSelectedNotEffective)
 	case state.JournalHealthVerified, state.JournalCleanupPending, state.JournalComplete:
 		if facts.HealthFailed {
-			// A durable verified-health record contradicted by a proven
-			// failure is a contradiction; a human decides.
 			return ambiguous(ReasonContradictoryFacts)
 		}
 		// Verified-health claims about a target that is NOT the active
@@ -389,12 +384,9 @@ func reconcilePriorObserved(j state.ActivationJournal, facts ProvenFacts) Result
 		return ambiguous(ReasonSelectedNotEffective)
 	case state.JournalRollbackIntent:
 		// The restore is committed and the file proves it already took
-		// effect: the executor commits the restored checkpoint. The
-		// restore was never inferred from the checkpoint alone.
+		// effect; the executor commits the restored checkpoint.
 		return Result{ActionRestorePrior, ReasonRestoreEffective}
 	case state.JournalRestored:
-		// Journal and file agree the prior is restored: consistent and
-		// complete.
 		return Result{ActionCompleteConsistent, ReasonRestoredConsistent}
 	default:
 		return ambiguous(ReasonJournalInvalid)

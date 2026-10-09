@@ -110,7 +110,9 @@ func TestReconcileTableWithPriorSelection(t *testing.T) {
 	// want[checkpoint][case] = (action, reason). Unlisted combinations are
 	// ambiguous/manual-recovery with the case's default reason.
 	wantTarget := map[state.JournalCheckpoint]Result{
-		state.JournalPrepared:       {ActionTargetAwaitHealth, ReasonTargetSelectedAwaitHealth},
+		// Prepared + target is an effect without the durable switch
+		// intent: ambiguity, never the health/cleanup/restore path.
+		state.JournalPrepared:       {ActionAmbiguous, ReasonTargetWithoutSwitchIntent},
 		state.JournalSwitchIntent:   {ActionTargetAwaitHealth, ReasonTargetSelectedAwaitHealth},
 		state.JournalSelected:       {ActionTargetAwaitHealth, ReasonTargetSelectedAwaitHealth},
 		state.JournalHealthVerified: {ActionCleanupPermitted, ReasonHealthVerifiedCleanupPermitted},
@@ -181,7 +183,9 @@ func TestReconcileTableFirstInstall(t *testing.T) {
 	}
 	// With prior generation 0, the target's expected generation is 1.
 	wantTarget := map[state.JournalCheckpoint]Result{
-		state.JournalPrepared:       {ActionTargetAwaitHealth, ReasonTargetSelectedAwaitHealth},
+		// Prepared + target is an effect without the durable switch
+		// intent: ambiguity, never the health/cleanup/restore path.
+		state.JournalPrepared:       {ActionAmbiguous, ReasonTargetWithoutSwitchIntent},
 		state.JournalSwitchIntent:   {ActionTargetAwaitHealth, ReasonTargetSelectedAwaitHealth},
 		state.JournalSelected:       {ActionTargetAwaitHealth, ReasonTargetSelectedAwaitHealth},
 		state.JournalHealthVerified: {ActionCleanupPermitted, ReasonHealthVerifiedCleanupPermitted},
@@ -234,9 +238,10 @@ func TestReconcileTableFirstInstall(t *testing.T) {
 
 // TestReconcileProvenHealthFailure covers the externally proven
 // health-failure fact. A failure routes to the explicit restore path ONLY
-// before any durable verified-health record; a failure contradicting the
-// verified-health checkpoints is manual recovery, and a failed first
-// install has nothing to restore.
+// between the durable switch intent and any verified-health record (a
+// failure at prepared is moot: the target selection there is an effect
+// without intent); a failure contradicting the verified-health checkpoints
+// is manual recovery, and a failed first install has nothing to restore.
 func TestReconcileProvenHealthFailure(t *testing.T) {
 	// The successor-generation target matching each journal's prior.
 	targetForPrior := present(targetSelection())
@@ -249,10 +254,13 @@ func TestReconcileProvenHealthFailure(t *testing.T) {
 	}{
 		// A file-proven target selection plus a proven health failure is
 		// consistent with a crash after the switch but before the
-		// journal's checkpoint caught up: restore the explicit prior.
+		// journal's checkpoint caught up: restore the explicit prior —
+		// but only once the durable switch intent exists. At prepared
+		// the target selection is an effect without intent: ambiguity
+		// regardless of the failure fact.
 		{checkpoint: state.JournalPrepared,
-			wantPrior: Result{ActionRestorePrior, ReasonHealthFailedRestorePrior},
-			wantNone:  Result{ActionAmbiguous, ReasonHealthFailedNoPrior}},
+			wantPrior: Result{ActionAmbiguous, ReasonTargetWithoutSwitchIntent},
+			wantNone:  Result{ActionAmbiguous, ReasonTargetWithoutSwitchIntent}},
 		{checkpoint: state.JournalSwitchIntent,
 			wantPrior: Result{ActionRestorePrior, ReasonHealthFailedRestorePrior},
 			wantNone:  Result{ActionAmbiguous, ReasonHealthFailedNoPrior}},

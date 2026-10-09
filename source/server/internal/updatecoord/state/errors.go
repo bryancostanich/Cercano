@@ -45,4 +45,10 @@ var (
 	ErrRecordNotFound = errors.New("state: record not found")
 	// ErrInvalidRecord: the record failed validation before any write.
 	ErrInvalidRecord = errors.New("state: invalid record")
+	// ErrNotCurrentOperation: the named operation is not this
+	// installation's CURRENT operation — the record with the highest
+	// persisted operation ID. A stale or superseded writer cannot attach or
+	// advance any state that claims to describe the installation's live
+	// operation.
+	ErrNotCurrentOperation = errors.New("state: operation is not the current operation")
 )

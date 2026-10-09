@@ -93,8 +93,12 @@ func assertStagedTree(t *testing.T, st *Staged) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if fi.Mode() != w.mode {
-			t.Errorf("staged member %q mode = %v, want the policy mode %v (never the archive's bits)", w.rel, fi.Mode(), w.mode)
+		// Mode bits are a Unix concept (Windows permissions are ACLs, and
+		// Lstat never reports the policy mode there): the policy-mode
+		// check is POSIX-only, while the content, hash, regular-file and
+		// identity checks above and below hold on every OS.
+		if runtime.GOOS != "windows" && fi.Mode().Perm() != w.mode {
+			t.Errorf("staged member %q mode = %v, want the policy mode %v (never the archive's bits)", w.rel, fi.Mode().Perm(), w.mode)
 		}
 		sum := sha256.Sum256(data)
 		m := manByName[strings.ReplaceAll(w.rel, string(filepath.Separator), "/")]
@@ -673,7 +677,14 @@ func TestCleanupRetainsIdenticalReplacementFile(t *testing.T) {
 	// Identity, not content, decides cleanup: a completed member whose
 	// path is re-occupied by a byte-identical, mode-identical replacement
 	// file must be retained, while the member this staging genuinely
-	// created (here a partial, accounted file) is removed.
+	// created (here a partial, accounted file) is removed. The pinned
+	// creation handle is what makes the identity proof safe: it keeps the
+	// original file's inode alive, so the replacement can never carry the
+	// recycled original identity (the inode ABA problem). On Windows the
+	// same pin positively PREVENTS the replacement outright — the open
+	// creation handle refuses the removal (or holds the name
+	// delete-pending so no replacement can be created) — and the test
+	// asserts that OS-level prevention instead of skipping.
 	_, stageDir, stageDirInfo, root := newUnitStagingRoot(t)
 	ctx := context.Background()
 	ledger := newStageLedger()
@@ -693,13 +704,18 @@ func TestCleanupRetainsIdenticalReplacementFile(t *testing.T) {
 	// Replace the completed member with an IDENTICAL file: same bytes,
 	// same policy mode, a different object on disk.
 	p := filepath.Join(stageDir, "keep")
+	swapped := true
 	if err := os.Remove(p); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chmod(p, 0o644); err != nil { // exact policy mode, past any umask
+		if runtime.GOOS != "windows" {
+			t.Fatalf("removing the pinned member file: %v", err)
+		}
+		swapped = false // positive OS prevention: the pinned creation handle refused the removal
+	} else if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		if runtime.GOOS != "windows" {
+			t.Fatalf("recreating the member file: %v", err)
+		}
+		swapped = false // the pinned handle holds the name delete-pending: no replacement can be created
+	} else if err := os.Chmod(p, 0o644); err != nil { // exact policy mode, past any umask
 		t.Fatal(err)
 	}
 	// A second member stays genuinely ours: partial via mid-copy cancel.
@@ -710,24 +726,59 @@ func TestCleanupRetainsIdenticalReplacementFile(t *testing.T) {
 		t.Fatal("expected the partial member copy to fail")
 	}
 	retained, keepStage := cleanupStaging(root, stageDir, stageDirInfo, ledger)
-	if len(retained) != 1 || retained[0] != "keep" {
-		t.Errorf("retained = %v, want the identical replacement [\"keep\"]", retained)
+	if swapped {
+		// The replacement is not our object: retained, never removed.
+		if len(retained) != 1 || retained[0] != "keep" {
+			t.Errorf("retained = %v, want the identical replacement [\"keep\"]", retained)
+		}
+		if !keepStage {
+			t.Error("a retained replacement must keep the staging directory in place")
+		}
+		if got, err := os.ReadFile(p); err != nil || string(got) != body {
+			t.Errorf("the identical replacement file was removed or altered: %v %q", err, got)
+		}
+	} else {
+		// Windows positive OS prevention: no replacement ever existed.
+		// Cleanup still never removes what it cannot prove: the pinned
+		// original (now delete-pending through the test's own removal) is
+		// either reported retained with the staging directory kept, or —
+		// if the platform let cleanup re-verify it — fully cleaned with
+		// the empty staging directory removed.
+		switch {
+		case len(retained) == 1 && retained[0] == "keep":
+			if !keepStage {
+				t.Error("a retained unprovable member must keep the staging directory in place")
+			}
+		case len(retained) == 0:
+			if keepStage {
+				t.Error("expected the fully cleaned staging directory to be removed")
+			}
+		default:
+			t.Errorf("retained = %v, want the prevented member [\"keep\"] reported or nothing retained", retained)
+		}
 	}
-	if !keepStage {
-		t.Error("a retained replacement must keep the staging directory in place")
-	}
-	if got, err := os.ReadFile(p); err != nil || string(got) != body {
-		t.Errorf("the identical replacement file was removed or altered: %v %q", err, got)
-	}
-	if _, err := root.Lstat("partial"); err == nil {
-		t.Error("the genuinely created partial member must be removed by cleanup")
+	// The genuinely created partial member is removed on every OS (checked
+	// by absolute path: the confinement root handle may already be closed).
+	if _, err := os.Lstat(filepath.Join(stageDir, "partial")); !os.IsNotExist(err) {
+		t.Errorf("the genuinely created partial member must be removed by cleanup, got %v", err)
 	}
 }
 
 func TestCleanupRetainsIdenticalReplacementDirectory(t *testing.T) {
 	// A created directory whose path is re-occupied by an identical empty
 	// directory (same mode, empty) must be retained; the directory this
-	// staging still provably owns is removed.
+	// staging still provably owns is removed. This is the exact scenario
+	// where inode recycling bit before the creation handles were pinned:
+	// on Linux (native CI), tmpfs/ext4/overlayfs recycle inode numbers
+	// immediately after an rmdir, so the replacement directory carried the
+	// SAME device/inode identity as the removed original (the inode ABA
+	// problem) and a FileInfo-only proof deleted the replacement. The
+	// pinned creation handle keeps the original directory's inode alive,
+	// so its identity can never be recycled while staging holds it — the
+	// retention below is deterministic on every OS that allows the
+	// replacement. On Windows the pinned handle positively PREVENTS the
+	// replacement (the unlink of a pinned directory is refused), which the
+	// test asserts instead of skipping.
 	_, stageDir, stageDirInfo, root := newUnitStagingRoot(t)
 	ledger := newStageLedger()
 	s := &staging{
@@ -740,27 +791,161 @@ func TestCleanupRetainsIdenticalReplacementDirectory(t *testing.T) {
 	if err := s.ensureDir("ours"); err != nil {
 		t.Fatal(err)
 	}
+	swapped := true
 	if err := root.Remove("replaced"); err != nil {
-		t.Fatal(err)
-	}
-	if err := root.Mkdir("replaced", 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := root.Chmod("replaced", 0o755); err != nil { // identical policy mode
+		if runtime.GOOS != "windows" {
+			t.Fatalf("removing the pinned directory: %v", err)
+		}
+		swapped = false // positive OS prevention: the pinned creation handle refused the unlink
+	} else if err := root.Mkdir("replaced", 0o755); err != nil {
+		if runtime.GOOS != "windows" {
+			t.Fatalf("recreating the directory: %v", err)
+		}
+		swapped = false // the pinned handle keeps the name un-reusable
+	} else if err := root.Chmod("replaced", 0o755); err != nil { // identical policy mode
 		t.Fatal(err)
 	}
 	retained, keepStage := cleanupStaging(root, stageDir, stageDirInfo, ledger)
-	if len(retained) != 1 || retained[0] != "replaced" {
-		t.Errorf("retained = %v, want the identical replacement directory [\"replaced\"]", retained)
+	if swapped {
+		// The replacement directory is not our object, even though it is
+		// empty and mode-identical: retained, never removed — the pinned
+		// original's identity cannot have been recycled.
+		if len(retained) != 1 || retained[0] != "replaced" {
+			t.Errorf("retained = %v, want the identical replacement directory [\"replaced\"]", retained)
+		}
+		if !keepStage {
+			t.Error("a retained replacement directory must keep the staging directory in place")
+		}
+		if fi, err := os.Lstat(filepath.Join(stageDir, "replaced")); err != nil || !fi.IsDir() {
+			t.Errorf("the identical replacement directory was removed or altered: %v", err)
+		}
+		// The directory this staging still provably owns is removed.
+		if _, err := os.Lstat(filepath.Join(stageDir, "ours")); !os.IsNotExist(err) {
+			t.Errorf("the genuinely created empty directory must be removed by cleanup, got %v", err)
+		}
+	} else {
+		// Windows positive OS prevention: no replacement ever existed, so
+		// BOTH directories are still provably ours and empty — cleanup
+		// removes them and then the empty staging directory itself.
+		if len(retained) != 0 || keepStage {
+			t.Errorf("cleanup retained %v keepStage=%v, want the fully cleaned staging directory removed", retained, keepStage)
+		}
+		if _, err := os.Lstat(filepath.Join(stageDir, "replaced")); !os.IsNotExist(err) {
+			t.Errorf("the provably owned directory must be removed by cleanup, got %v", err)
+		}
+		if _, err := os.Lstat(stageDir); !os.IsNotExist(err) {
+			t.Errorf("the empty staging directory must be removed after its root handle is released, got %v", err)
+		}
+	}
+}
+
+// TestProbeInodeABACreationHandlePinsIdentity is the deterministic probe
+// for the inode ABA problem that broke CI (Linux native run,
+// TestCleanupRetainsIdenticalReplacementDirectory): after an unlink and a
+// recreate, a replacement object can carry the SAME device/inode identity
+// as the removed original — tmpfs, ext4 and overlayfs recycle inode
+// numbers immediately — so a FileInfo-only ownership proof could delete
+// a replacement it never created. The probe's first half reproduces that
+// evidence on an UNPINNED directory (logging, never asserting, whether
+// the current filesystem recycles: recycling is filesystem-specific and
+// the native CI evidence stands on its own). The second half asserts the
+// production protection deterministically on every OS: a directory this
+// staging created stays pinned by its open creation handle, so after an
+// rmdir/recreate the replacement can NEVER pass the original's
+// os.SameFile identity — or, on Windows, the pinned handle positively
+// prevents the replacement outright (the unlink is refused).
+func TestProbeInodeABACreationHandlePinsIdentity(t *testing.T) {
+	_, stageDir, stageDirInfo, root := newUnitStagingRoot(t)
+	ledger := newStageLedger()
+	s := &staging{
+		opts: Options{Bounds: testBounds()}, stage: stagePolicy(), root: root,
+		expected: map[string]Member{}, v: newValidator(Options{Bounds: testBounds()}), ledger: ledger,
+	}
+
+	// Evidence half (unpinned, informational): an unlink/recreate CAN
+	// hand the original identity to the replacement — the exact hazard
+	// the pinned handles defend against. Native CI on Linux observed
+	// this recycling deleting the replacement in
+	// TestCleanupRetainsIdenticalReplacementDirectory.
+	unpinned := filepath.Join(stageDir, "unpinned-evidence")
+	if err := os.Mkdir(unpinned, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Lstat(unpinned)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(unpinned); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(unpinned, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.Lstat(unpinned)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("inode ABA probe, unpinned remove+recreate recycled the original identity (true on tmpfs/ext4/overlayfs): %v", os.SameFile(before, after))
+	// The evidence directory is this test's own object: remove it so the
+	// protection half below reports only the pinned probe's replacement.
+	if err := os.Remove(unpinned); err != nil {
+		t.Fatal(err)
+	}
+
+	// Protection half (pinned, deterministic on every OS): through the
+	// production path (ensureDir) the created directory is pinned by an
+	// open creation handle held until cleanup.
+	if err := s.ensureDir("pinned"); err != nil {
+		t.Fatal(err)
+	}
+	var pinned *stagedDir
+	for i := range ledger.dirs {
+		if ledger.dirs[i].name == "pinned" {
+			pinned = &ledger.dirs[i]
+			break
+		}
+	}
+	if pinned == nil || pinned.identity == nil || pinned.handle == nil {
+		t.Fatal("ensureDir did not pin the created directory with its creation identity and handle")
+	}
+	prevented := false
+	if err := root.Remove("pinned"); err != nil {
+		if runtime.GOOS != "windows" {
+			t.Fatalf("removing the pinned probe directory: %v", err)
+		}
+		prevented = true // Windows positive OS prevention: the pin refused the unlink
+	} else if err := root.Mkdir("pinned", 0o755); err != nil {
+		if runtime.GOOS != "windows" {
+			t.Fatalf("recreating the probe directory: %v", err)
+		}
+		prevented = true // the pinned handle keeps the name un-reusable
+	}
+	if prevented {
+		// No replacement exists to recycle the identity: the OS itself
+		// enforced the pin. The original is untouched and still provably
+		// ours.
+		fi, err := root.Lstat("pinned")
+		if err != nil || !os.SameFile(pinned.identity, fi) {
+			t.Fatalf("the pinned original was altered: %v", err)
+		}
+		return
+	}
+	// The replacement exists, but the pin kept the original inode alive,
+	// so the replacement can NEVER carry the original identity.
+	fi, err := root.Lstat("pinned")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if os.SameFile(pinned.identity, fi) {
+		t.Fatal("inode ABA against a pinned object: the replacement carries the original creation identity — the creation handle failed to pin it")
+	}
+	// And cleanup keeps the replacement, never deleting it.
+	retained, keepStage := cleanupStaging(root, stageDir, stageDirInfo, ledger)
+	if len(retained) != 1 || retained[0] != "pinned" {
+		t.Errorf("retained = %v, want the pinned probe's replacement [\"pinned\"] retained", retained)
 	}
 	if !keepStage {
 		t.Error("a retained replacement directory must keep the staging directory in place")
-	}
-	if fi, err := os.Lstat(filepath.Join(stageDir, "replaced")); err != nil || !fi.IsDir() {
-		t.Errorf("the identical replacement directory was removed or altered: %v", err)
-	}
-	if _, err := root.Lstat("ours"); err == nil {
-		t.Error("the genuinely created empty directory must be removed by cleanup")
 	}
 }
 

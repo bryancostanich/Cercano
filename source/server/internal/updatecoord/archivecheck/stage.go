@@ -45,16 +45,26 @@
 //     acquisition boundary), no default paths and no default HOME.
 //   - No RemoveAll anywhere. If staging fails, cleanup removes ONLY the
 //     files and directories this staging itself created, and only while
-//     each object is still the SAME object it was at creation time:
-//     os.SameFile against the FileInfo identity captured at creation is
-//     the primary proof, followed by a Unix-only permission-mode check,
-//     the recorded byte count and — for completed files — a hash read
-//     bounded to the recorded byte count. A replaced object is retained
-//     even when its replacement is byte-identical or an identical empty
-//     directory. Unknown, injected and replaced objects are left
-//     untouched AND reported, the staging directory is left in place —
-//     and is itself removed only when empty and still the same directory
-//     (same file identity) this staging created — and the failure is
+//     each object is still the SAME object it was at creation time: every
+//     created object's creation handle stays open (pinning its inode) from
+//     creation until cleanup, so an original object's identifier can never
+//     be recycled by an unlink/recreate (the inode ABA problem — a
+//     replacement can otherwise carry the SAME device/inode identity,
+//     which native CI on Linux proved happens in practice), and
+//     os.SameFile against the FileInfo identity captured through that
+//     pinned handle at creation is the primary proof, followed by a
+//     Unix-only permission-mode check, the recorded byte count and — for
+//     completed files — a hash read bounded to the recorded byte count. A
+//     created object whose creation handle could not be opened is never
+//     removed: without the pin its identity is not provably stable. A
+//     replaced object is retained even when its replacement is
+//     byte-identical or an identical empty directory. Unknown, injected
+//     and replaced objects are left untouched AND reported, the staging
+//     directory is left in place — and is itself removed only when empty
+//     and still the same directory (same file identity) this staging
+//     created, with the confinement root handle released after the
+//     identity check and before the removal (on Windows an open root
+//     handle prevents the final directory removal) — and the failure is
 //     reported as a *StageError wrapping the original error and carrying
 //     the retained directory and the retained object paths. Caller files
 //     outside the staging directory are never touched.
@@ -254,6 +264,11 @@ func StageFile(ctx context.Context, archivePath, parentPath string, opts Options
 		}
 		return nil, fmt.Errorf("archivecheck: staging failed: %w", err)
 	}
+	// Success: release every pinned creation handle (files and
+	// directories) and the confinement root before handing the staged
+	// directory to the caller — on Windows an open handle would otherwise
+	// block the caller's own use of the staged tree.
+	ledger.closeAll()
 	root.Close()
 	return &Staged{Dir: stageDir, Manifest: man}, nil
 }
@@ -308,25 +323,41 @@ func validateStageOptions(opts Options, stage StageOptions) error {
 
 // stagedFile records the creation identity of one staged file: the policy
 // mode it was created with, the FileInfo identity captured through the
-// creation file handle, whether the staging actually created it, how many
-// bytes were verifiably written, and — once the member completed — the
-// SHA-256 of those bytes. Cleanup removes a file only while os.SameFile
-// still proves it is the same object this staging created.
+// creation file handle, the pinned creation handle itself (open from
+// creation until cleanup or success, so the file's inode cannot be
+// recycled by an unlink/recreate), whether the staging actually created
+// it, how many bytes were verifiably written, and — once the member
+// completed — the SHA-256 of those bytes. Cleanup removes a file only
+// while the pinned handle and os.SameFile still prove it is the same
+// object this staging created.
 type stagedFile struct {
 	perm     fs.FileMode
 	identity fs.FileInfo
+	handle   *os.File
 	created  bool
 	written  int64
 	complete bool
 	hash     string
 }
 
-// stagedDir records one staged directory: its member path and the FileInfo
-// identity captured at creation, so cleanup removes only that directory
-// object and never a replacement occupying the same path.
+// close releases the pinned creation handle, exactly once.
+func (r *stagedFile) close() {
+	if r.handle != nil {
+		r.handle.Close()
+		r.handle = nil
+	}
+}
+
+// stagedDir records one staged directory: its member path, the FileInfo
+// identity captured at creation, and the pinned directory handle held
+// open from creation until cleanup or success — the pin keeps the
+// directory's inode alive, so its identity cannot be recycled by an
+// rmdir/recreate and cleanup removes only that directory object, never a
+// replacement occupying the same path.
 type stagedDir struct {
 	name     string
 	identity fs.FileInfo
+	handle   *os.File
 }
 
 // stageLedger records everything this staging created inside the staging
@@ -350,9 +381,27 @@ func (l *stageLedger) addFile(name string, perm fs.FileMode) *stagedFile {
 	return rec
 }
 
-func (l *stageLedger) addDir(name string, identity fs.FileInfo) {
-	l.dirs = append(l.dirs, stagedDir{name: name, identity: identity})
+func (l *stageLedger) addDir(name string, identity fs.FileInfo, handle *os.File) {
+	l.dirs = append(l.dirs, stagedDir{name: name, identity: identity, handle: handle})
 	l.dirSet[name] = true
+}
+
+// closeAll releases every pinned creation handle this ledger still holds;
+// on success it runs before the staging result is returned, and in
+// cleanup it guarantees no handle leaks on any path. Closing an
+// already-closed (nil) record is a no-op.
+func (l *stageLedger) closeAll() {
+	for _, name := range l.fileOrd {
+		if rec := l.files[name]; rec != nil {
+			rec.close()
+		}
+	}
+	for i := range l.dirs {
+		if l.dirs[i].handle != nil {
+			l.dirs[i].handle.Close()
+			l.dirs[i].handle = nil
+		}
+	}
 }
 
 // staging carries one staging pass: the trusted options, the preflight
@@ -416,8 +465,11 @@ func (s *staging) ensureDir(name string) error {
 				return fmt.Errorf("archivecheck: staging: creating directory %q: %w", prefix, err)
 			}
 			// Capture the creation identity before the policy mode is
-			// applied, so cleanup can prove the object at this path is
-			// still this directory (os.SameFile), never a replacement.
+			// applied, then pin the directory with an open handle: the
+			// pin keeps the original inode alive until cleanup, so its
+			// identity can never be recycled by an rmdir/recreate, and
+			// cleanup can prove the object at this path is still this
+			// directory (os.SameFile), never a replacement.
 			id, ierr := s.root.Lstat(prefix)
 			if ierr != nil {
 				return fmt.Errorf("archivecheck: staging: identifying directory %q: %w", prefix, ierr)
@@ -427,7 +479,14 @@ func (s *staging) ensureDir(name string) error {
 			if err := s.root.Chmod(prefix, s.stage.DirMode); err != nil {
 				return fmt.Errorf("archivecheck: staging: setting directory %q mode: %w", prefix, err)
 			}
-			s.ledger.addDir(prefix, id)
+			h, oerr := s.root.Open(prefix)
+			if oerr != nil {
+				// Without the pin this directory's identity is not
+				// provably stable; refuse the staging rather than let
+				// cleanup reason over a forgable identity.
+				return fmt.Errorf("archivecheck: staging: pinning directory %q: %w", prefix, oerr)
+			}
+			s.ledger.addDir(prefix, id, h)
 		}
 		prefix += "/"
 	}
@@ -465,17 +524,25 @@ func (s *staging) copyMember(ctx context.Context, r io.Reader, name string, decl
 		return fmt.Errorf("archivecheck: staging: creating member file %q exclusively: %w", name, err)
 	}
 	rec.created = true
+	rec.handle = f // pinned from creation until cleanup or success
 	// Capture the creation identity through the open handle, so cleanup can
 	// prove the object at this path is still this file (os.SameFile) and
-	// never deletes an identical replacement.
+	// never deletes an identical replacement. The open handle pins the
+	// file's inode: it cannot be recycled by an unlink/recreate while the
+	// staging still holds it, which is exactly what makes the identity
+	// proof stable.
 	if rec.identity, err = f.Stat(); err != nil {
-		f.Close()
+		// Without a captured identity the file can never be proven ours;
+		// release the pin here — cleanup retains the path regardless.
+		rec.close()
 		return fmt.Errorf("archivecheck: staging: identifying member file %q: %w", name, err)
 	}
 	// Normalize past the process umask through the file handle, so the
 	// trusted policy — not the caller's environment — decides the mode.
+	// The handle stays open (pinned) on every later path: cleanup closes
+	// it after its identity decision, and a successful staging closes all
+	// ledger handles before returning.
 	if err := f.Chmod(perm); err != nil {
-		f.Close()
 		return fmt.Errorf("archivecheck: staging: setting member %q mode: %w", name, err)
 	}
 	h := sha256.New()
@@ -483,18 +550,15 @@ func (s *staging) copyMember(ctx context.Context, r io.Reader, name string, decl
 	var actual int64
 	for {
 		if err := ctx.Err(); err != nil {
-			f.Close()
 			return fmt.Errorf("archivecheck: staging: member %q: %w", name, err)
 		}
 		n, rerr := r.Read(buf)
 		if n > 0 {
 			// Check before accumulating so no sum can ever wrap.
 			if actual > b.MaxMemberBytes-int64(n) || b.MaxUncompressedBytes-s.v.total < int64(n) {
-				f.Close()
 				return fmt.Errorf("archivecheck: staging: member %q: content exceeds the member or total uncompressed bounds at %d bytes", name, actual+int64(n))
 			}
 			if _, werr := f.Write(buf[:n]); werr != nil {
-				f.Close()
 				return fmt.Errorf("archivecheck: staging: member %q: writing content: %w", name, werr)
 			}
 			h.Write(buf[:n])
@@ -506,26 +570,24 @@ func (s *staging) copyMember(ctx context.Context, r io.Reader, name string, decl
 			break
 		}
 		if rerr != nil {
-			f.Close()
 			return fmt.Errorf("archivecheck: staging: member %q: reading content: %w", name, rerr)
 		}
 	}
 	if actual != declared {
-		f.Close()
 		return fmt.Errorf("archivecheck: staging: member %q: copied %d bytes but the manifest recorded %d", name, actual, declared)
 	}
 	digest := hex.EncodeToString(h.Sum(nil))
 	if digest != exp.SHA256 {
-		f.Close()
 		return fmt.Errorf("archivecheck: staging: member %q: copied content SHA-256 %s does not match the preflight hash %s", name, digest, exp.SHA256)
 	}
 	if err := f.Sync(); err != nil {
-		f.Close()
 		return fmt.Errorf("archivecheck: staging: member %q: flushing: %w", name, err)
 	}
-	if err := f.Close(); err != nil {
-		return fmt.Errorf("archivecheck: staging: member %q: closing: %w", name, err)
-	}
+	// The file handle stays pinned in the ledger: a successful staging
+	// closes every ledger handle before returning, and a failed staging
+	// leaves the closing to cleanup after its identity decision. Every
+	// error path above likewise leaves the pinned handle to cleanup, so
+	// no path of this function leaks or reaps the handle early.
 	rec.complete = true
 	rec.hash = digest
 	return nil
@@ -684,24 +746,37 @@ func (s *staging) finish() error {
 }
 
 // cleanupStaging removes, on a failed staging, ONLY what this staging
-// itself created — and only while each object is still the SAME object
-// whose FileInfo identity was captured at creation time (os.SameFile is
-// the primary proof, so a replacement is retained even when it is
-// byte-identical or an identical empty directory). Files must also still
-// be regular and non-symlink, carry the recorded byte count, and — for
-// completed members — the recorded content hash, read bounded to the
-// recorded byte count so a file that grew after creation can never turn
-// cleanup into an unbounded read. The permission-mode comparison is
-// Unix-only: Windows permissions are ACLs and mode bits there never decide
-// a cleanup. Unknown, injected or replaced objects, and removals that
-// fail, are left untouched AND reported; there is no RemoveAll, and no
-// object outside the staging directory is ever touched. The staging
-// directory itself is removed only when empty and still the same directory
-// (os.SameFile against the identity captured right after its creation) —
-// never a renamed original's replacement at the same path. It returns the
-// member-relative retained paths (created-but-unremovable, replaced and
-// unknown objects alike) and whether the staging directory had to be kept.
+// itself created — and only while each object is still the SAME object it
+// was at creation: the pinned creation handle (open since creation) keeps
+// the original inode alive, so an unlink/recreate can never hand the
+// ORIGINAL identity to a replacement (the inode ABA problem), and
+// os.SameFile against the FileInfo captured at creation is the primary
+// proof, so a replacement is retained even when it is byte-identical or
+// an identical empty directory. A created object without a pinned handle
+// is never removed: without the pin its identity is not provably stable.
+// Files must also still be regular and non-symlink, carry the recorded
+// byte count, and — for completed members — the recorded content hash,
+// read bounded to the recorded byte count so a file that grew after
+// creation can never turn cleanup into an unbounded read. The
+// permission-mode comparison is Unix-only: Windows permissions are ACLs
+// and mode bits there never decide a cleanup. Unknown, injected or
+// replaced objects, and removals that fail, are left untouched AND
+// reported; there is no RemoveAll, and no object outside the staging
+// directory is ever touched. The staging directory itself is removed only
+// when empty and still the same directory (os.SameFile against the
+// identity captured right after its creation), with the confinement root
+// handle released after the identity check and before the removal — on
+// Windows an open root handle prevents the final directory removal —
+// never a renamed original's replacement at the same path. Every pinned
+// handle is reaped on every path (success of the loops here or the
+// closeAll sweep), and the caller's trusted-parent assumption covers the
+// non-atomic window between a handle release and the removal it enables:
+// no claim of protection against a hostile same-user race across
+// non-atomic path operations is made. It returns the member-relative
+// retained paths (created-but-unremovable, replaced and unknown objects
+// alike) and whether the staging directory had to be kept.
 func cleanupStaging(root *os.Root, stageDir string, stageDirInfo fs.FileInfo, ledger *stageLedger) (retained []string, keepStageDir bool) {
+	defer ledger.closeAll()
 	retain := func(path string) {
 		retained = append(retained, path)
 	}
@@ -714,55 +789,68 @@ func cleanupStaging(root *os.Root, stageDir string, stageDirInfo fs.FileInfo, le
 		switch {
 		case err == nil:
 		case errors.Is(err, fs.ErrNotExist):
+			rec.close()
 			continue // already gone; nothing of ours to remove
 		default:
+			rec.close()
 			retain(name)
 			continue
 		}
-		if !rec.created || rec.identity == nil {
+		if !rec.created || rec.identity == nil || rec.handle == nil {
 			// The path was occupied before staging could create the file
-			// (O_EXCL refused it), or its creation identity is missing:
-			// an object that is never provably ours to remove.
+			// (O_EXCL refused it), or its creation identity or pin is
+			// missing: an object that is never provably ours to remove
+			// (an unpinned identity can be forged by inode recycling).
+			rec.close()
 			retain(name)
 			continue
 		}
 		if fi.Mode()&fs.ModeSymlink != 0 || !fi.Mode().IsRegular() {
+			rec.close()
 			retain(name) // replaced by a non-regular object
 			continue
 		}
 		if !os.SameFile(rec.identity, fi) {
+			rec.close()
 			retain(name) // replaced: another object, even byte-identical
 			continue
 		}
 		if runtime.GOOS != "windows" && fi.Mode().Perm() != rec.perm.Perm() {
 			// Unix-only mode-bit check; Windows permissions are ACLs.
+			rec.close()
 			retain(name)
 			continue
 		}
 		if fi.Size() != rec.written {
+			rec.close()
 			retain(name) // rewritten in place since creation
 			continue
 		}
 		if rec.complete {
 			if digest, ok := hashInRoot(root, name, rec.written); !ok || digest != rec.hash {
+				rec.close()
 				retain(name) // modified in place since creation
 				continue
 			}
 		}
-		if err := root.Remove(name); err != nil {
-			retain(name) // never force a removal that failed
+		if err := removePinned(root, name, rec.handle); err != nil {
+			rec.handle = nil // reaped by removePinned on both paths
+			retain(name)     // never force a removal that failed
+			continue
 		}
+		rec.handle = nil // reaped by removePinned on both paths
 	}
 	// Directories, children first (creation order is parent-first), each
-	// removed only while os.SameFile still proves it is this staging's
-	// empty directory — never an identical-mode empty replacement.
+	// removed only while its pinned handle and os.SameFile still prove it
+	// is this staging's empty directory — never an identical-mode empty
+	// replacement whose inode was recycled after an rmdir/recreate.
 	for i := len(ledger.dirs) - 1; i >= 0; i-- {
-		d := ledger.dirs[i]
+		d := &ledger.dirs[i]
 		fi, err := root.Lstat(d.name)
 		switch {
 		case err == nil:
 		case errors.Is(err, fs.ErrNotExist):
-			continue
+			continue // already gone; the closeAll sweep reaps the handle
 		default:
 			retain(d.name)
 			continue
@@ -771,14 +859,16 @@ func cleanupStaging(root *os.Root, stageDir string, stageDirInfo fs.FileInfo, le
 			retain(d.name) // replaced by a non-directory object, or a link we never follow
 			continue
 		}
-		if d.identity == nil || !os.SameFile(d.identity, fi) {
-			retain(d.name) // replaced: another directory, even identical and empty
+		if d.identity == nil || d.handle == nil || !os.SameFile(d.identity, fi) {
+			retain(d.name) // replaced (or unpinned): another directory, even identical and empty
 			continue
 		}
-		if err := root.Remove(d.name); err != nil {
-			// Not an empty directory (or removal refused): preserve it.
-			retain(d.name)
+		if err := removePinned(root, d.name, d.handle); err != nil {
+			d.handle = nil // reaped by removePinned on both paths
+			retain(d.name) // not empty (or removal refused): preserve it
+			continue
 		}
+		d.handle = nil // reaped by removePinned on both paths
 	}
 	// Anything still present inside the staging root that this staging did
 	// not create is an unknown or injected object: never removed, but
@@ -790,8 +880,12 @@ func cleanupStaging(root *os.Root, stageDir string, stageDirInfo fs.FileInfo, le
 	// The staging directory itself: only when empty, and only while it is
 	// still the same directory this staging created (os.SameFile against
 	// the identity captured right after creation) — never a replacement
-	// occupying the path after a rename. This direct removal never
-	// recurses into the staging directory.
+	// occupying the path after a rename. The identity is checked BEFORE
+	// the confinement root handle is released; on Windows an open root
+	// handle prevents the final removal, so the handle must go first —
+	// while it was held no replacement could be created at the path, and
+	// the identity is re-checked after the release anyway. This direct
+	// removal never recurses into the staging directory.
 	sfi, err := os.Lstat(stageDir)
 	if err != nil {
 		return nil, !errors.Is(err, fs.ErrNotExist)
@@ -802,12 +896,41 @@ func cleanupStaging(root *os.Root, stageDir string, stageDirInfo fs.FileInfo, le
 	if stageDirInfo == nil || !os.SameFile(stageDirInfo, sfi) {
 		return nil, true // the name no longer names this staging's directory
 	}
+	root.Close()
+	sfi, err = os.Lstat(stageDir)
+	if err != nil {
+		return nil, !errors.Is(err, fs.ErrNotExist)
+	}
+	if sfi.Mode()&fs.ModeSymlink != 0 || !sfi.IsDir() || !os.SameFile(stageDirInfo, sfi) {
+		return nil, true // swapped between the handle release and here
+	}
 	if err := os.Remove(stageDir); err != nil {
 		// Removal failed (a race or a platform refusal): leave the
 		// directory for the caller to inspect and report.
 		return nil, true
 	}
 	return nil, false
+}
+
+// removePinned removes the object at name inside root that this staging
+// created and still pins with the open creation handle h (its identity
+// was proven through that pin by the caller). On Unix the removal happens
+// while the handle is open — an unlinked inode stays alive until the
+// handle is closed, so the pin also covers the removal — and the handle
+// is reaped right after. On Windows an open handle prevents directory
+// removal, so the handle is released first: while it was held no
+// replacement could occupy the path, and the caller's trusted-parent
+// assumption covers the non-atomic window between the release and the
+// removal. It never forces and never recurses; the handle is reaped on
+// both the success and the failure path.
+func removePinned(root *os.Root, name string, h *os.File) error {
+	if runtime.GOOS == "windows" {
+		h.Close()
+		return root.Remove(name)
+	}
+	err := root.Remove(name)
+	h.Close()
+	return err
 }
 
 // scanUnknownObjects reports, in lexical walk order, every object still

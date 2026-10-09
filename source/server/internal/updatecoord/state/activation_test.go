@@ -3,6 +3,7 @@ package state
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"sync"
@@ -468,5 +469,158 @@ func TestActivationJournalInsertRequiresPreparedIntent(t *testing.T) {
 		if _, _, err = s.LoadActivationJournal(ctx, snap.ID); !errors.Is(err, ErrRecordNotFound) {
 			t.Fatalf("refused creation left a row (%q): %v", cp, err)
 		}
+	}
+}
+
+// journalWithPrior returns a prepared journal carrying an explicit complete
+// prior selection — the form every rollback branch requires.
+func journalWithPrior(opID int64, target string) ActivationJournal {
+	j := journalFor(opID, target)
+	j.PriorSelectedVersion = "8.8.8"
+	j.PriorSelectionGeneration = 3
+	j.PriorSelectionDigest = strings.Repeat("b", 64)
+	return j
+}
+
+// rawJournalRow returns the stored journal payload bytes and revision.
+func rawJournalRow(t *testing.T, s *Store, opID int64) (string, int64) {
+	t.Helper()
+	var payload string
+	var rev int64
+	if err := s.db.QueryRow(`SELECT journal_json, revision FROM activation_journals WHERE op_id=?`, opID).Scan(&payload, &rev); err != nil {
+		t.Fatal(err)
+	}
+	return payload, rev
+}
+
+// journalAt creates a fresh current operation and its journal, then legally
+// advances the journal to cp (JournalPrepared needs no advance).
+func journalAt(t *testing.T, s *Store, cp JournalCheckpoint) (ActivationJournal, int64, int64) {
+	t.Helper()
+	snap := startCurrentOperation(t, s, "9.9.9")
+	j := journalWithPrior(snap.ID, "9.9.9")
+	rev, err := s.SaveActivationJournal(context.Background(), 0, j)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range map[JournalCheckpoint][]JournalCheckpoint{
+		JournalSwitchIntent:   {JournalSwitchIntent},
+		JournalSelected:       {JournalSwitchIntent, JournalSelected},
+		JournalHealthVerified: {JournalSwitchIntent, JournalSelected, JournalHealthVerified},
+		JournalCleanupPending: {JournalSwitchIntent, JournalSelected, JournalHealthVerified, JournalCleanupPending},
+		JournalComplete:       {JournalSwitchIntent, JournalSelected, JournalHealthVerified, JournalCleanupPending, JournalComplete},
+		JournalRollbackIntent: {JournalRollbackIntent},
+		JournalRestored:       {JournalRollbackIntent, JournalRestored},
+		JournalPrepared:       nil,
+	}[cp] {
+		j.Checkpoint = step
+		if rev, err = s.SaveActivationJournal(context.Background(), rev, j); err != nil {
+			t.Fatalf("advance to %q: %v", step, err)
+		}
+	}
+	return j, rev, snap.ID
+}
+
+// TestActivationJournalTransitionLegalityTable is the regression for the
+// explicit transition contract. Only the listed successors are legal; every
+// skip, downgrade, noop re-save, terminal move, or rollback after health
+// (HealthVerified/Complete have no rollback successor) is refused with
+// ErrInvalidRecord and leaves the stored bytes and revision untouched.
+func TestActivationJournalTransitionLegalityTable(t *testing.T) {
+	ctx := context.Background()
+	legal := map[JournalCheckpoint][]JournalCheckpoint{
+		JournalPrepared:        {JournalSwitchIntent, JournalRollbackIntent},
+		JournalSwitchIntent:   {JournalSelected, JournalRollbackIntent},
+		JournalSelected:       {JournalHealthVerified, JournalRollbackIntent},
+		JournalHealthVerified: {JournalCleanupPending, JournalComplete},
+		JournalCleanupPending: {JournalComplete},
+		JournalRollbackIntent: {JournalRestored},
+		JournalComplete:       {},
+		JournalRestored:       {},
+	}
+	all := []JournalCheckpoint{
+		JournalPrepared, JournalSwitchIntent, JournalSelected,
+		JournalHealthVerified, JournalCleanupPending, JournalComplete,
+		JournalRollbackIntent, JournalRestored,
+	}
+	for _, from := range all {
+		for _, to := range all {
+			t.Run(fmt.Sprintf("%s/%s", from, to), func(t *testing.T) {
+				s, err := Open(t.TempDir(), "test-install")
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer s.Close()
+				j, rev, opID := journalAt(t, s, from)
+				wantBytes, wantRev := rawJournalRow(t, s, opID)
+				if wantRev != rev {
+					t.Fatalf("helper revision drift: %d != %d", wantRev, rev)
+				}
+				next := j
+				next.Checkpoint = to
+				isLegal := false
+				for _, succ := range legal[from] {
+					if succ == to {
+						isLegal = true
+					}
+				}
+				_, err = s.SaveActivationJournal(ctx, rev, next)
+				if isLegal {
+					if err != nil {
+						t.Fatalf("legal transition %q -> %q refused: %v", from, to, err)
+					}
+					loaded, gotRev, err := s.LoadActivationJournal(ctx, opID)
+					if err != nil || gotRev != rev+1 || loaded.Checkpoint != to {
+						t.Fatalf("legal save not durable: %+v rev %d err %v", loaded, gotRev, err)
+					}
+				} else {
+					if !errors.Is(err, ErrInvalidRecord) {
+						t.Fatalf("illegal transition %q -> %q accepted: %v", from, to, err)
+					}
+					gotBytes, gotRev := rawJournalRow(t, s, opID)
+					if gotBytes != wantBytes || gotRev != wantRev {
+						t.Fatalf("refused save mutated row: rev %d -> %d", wantRev, gotRev)
+					}
+				}
+			})
+		}
+	}
+}
+
+// TestActivationJournalRollbackIntentRequiresPriorSelection: a first
+// activation (explicit prior-none) must not enter the rollback branch —
+// there is no prior version to restore and the model defines no separate
+// first-install cancellation checkpoint, so the save is rejected with
+// ErrInvalidRecord rather than pretending a prior selection exists. A
+// stored row of that impossible shape is corrupt on load, never reset.
+func TestActivationJournalRollbackIntentRequiresPriorSelection(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(t.TempDir(), "test-install")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	snap := startCurrentOperation(t, s, "9.9.9")
+	j := journalFor(snap.ID, "9.9.9") // explicit prior-none
+	if _, err = s.SaveActivationJournal(ctx, 0, j); err != nil {
+		t.Fatal(err)
+	}
+	wantBytes, wantRev := rawJournalRow(t, s, snap.ID)
+	rb := j
+	rb.Checkpoint = JournalRollbackIntent
+	if _, err = s.SaveActivationJournal(ctx, 1, rb); !errors.Is(err, ErrInvalidRecord) {
+		t.Fatalf("prior-none rollback allowed: %v", err)
+	}
+	gotBytes, gotRev := rawJournalRow(t, s, snap.ID)
+	if gotBytes != wantBytes || gotRev != wantRev {
+		t.Fatalf("refused prior-none rollback mutated row: rev %d -> %d", wantRev, gotRev)
+	}
+	// The impossible stored shape is refused on load, never treated as empty.
+	if _, err = s.db.Exec(`UPDATE activation_journals SET journal_json=? WHERE op_id=?`,
+		strings.Replace(gotBytes, `"checkpoint":"prepared"`, `"checkpoint":"rollback-intent"`, 1), snap.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = s.LoadActivationJournal(ctx, snap.ID); !errors.Is(err, ErrCorruptDatabase) {
+		t.Fatalf("prior-none rollback-intent row load %v", err)
 	}
 }

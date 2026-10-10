@@ -152,6 +152,13 @@ var (
 	// classification-driven write; a returned error aborts the
 	// transaction with nothing written by it.
 	testHookJournalLoaded func(j state.ActivationJournal, revision int64) error
+	// testHookAfterIntent, if non-nil, runs after the durable
+	// switch-intent checkpoint is recorded (or is already recorded on a
+	// switch-intent reentry) and BEFORE the guarded publication: the
+	// deterministic intent-before-effect boundary. A returned error
+	// aborts without publishing. The subprocess-fixture tests os.Exit
+	// here in the CHILD process only — never this host process.
+	testHookAfterIntent func() error
 	// testHookAfterPublish, if non-nil, runs after a confirmed
 	// publication but before the target readback and acknowledgement; a
 	// returned error aborts without acknowledging.
@@ -426,6 +433,11 @@ func expectedPrior(req Request, journal state.ActivationJournal) (selection.Expe
 // journal is already at switch-intent, so every failure below leaves a
 // reconcilable journal and never a fake completion.
 func publishAndAcknowledge(ctx context.Context, req Request, guard exclusion.GuardSession, journal state.ActivationJournal, revision int64, expected selection.Expected, target activation.Selection) (Result, error) {
+	if testHookAfterIntent != nil {
+		if herr := testHookAfterIntent(); herr != nil {
+			return Result{}, herr
+		}
+	}
 	pub, perr := selection.PublishGuarded(ctx, guard, req.Directory, expected, target)
 	if perr != nil {
 		// Pre-commit refusal: the destination is unchanged and the journal

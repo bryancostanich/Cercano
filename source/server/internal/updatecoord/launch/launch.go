@@ -109,15 +109,31 @@ type Options struct {
 	StderrPath string
 }
 
-// Process identifies one launched independent child. The launcher never
-// waits or supervises; Pid exists only for logging and caller-side
-// coordination (for example, test fixtures or an operator-facing status
-// display). Once the child has exited and been reaped the pid may be
-// recycled by the platform, so callers must never signal it.
-type Process struct{ pid int }
+// Process retains ownership of the launcher's single reaper. Pid is diagnostic
+// only; it must never be used to signal or adopt a process after it is reaped.
+type Process struct {
+	pid        int
+	executable string
+	done       chan struct{}
+	// Written only by the reaper, read only after done closes.
+	completed bool
+	exitCode  int
+}
 
-// Pid returns the launched child's process id.
-func (p *Process) Pid() int { return p.pid }
+func (p *Process) Pid() int {
+	if p == nil {
+		return 0
+	}
+	return p.pid
+}
+
+// Executable is the immutable path supplied to this launch, not publisher proof.
+func (p *Process) Executable() string {
+	if p == nil {
+		return ""
+	}
+	return p.executable
+}
 
 // Launch starts opts.Executable as an independent process and returns
 // immediately.
@@ -185,16 +201,19 @@ func Launch(opts Options) (*Process, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("launch: starting %s: %w", opts.Executable, err)
 	}
-	pid := cmd.Process.Pid
-	// Sole reaper: while the initiating parent is alive, an exited child
-	// would otherwise linger as an unreaped zombie (Process.Release drops
-	// the handle without reaping). This goroutine's ONLY job is to reap —
-	// its result is discarded; it never cancels, signals or supervises.
-	// If the parent exits first, the goroutine dies with the process and
-	// the kernel reparents the child, which the platform then reaps
-	// (init/launchd on Unix).
-	go func() { _ = cmd.Wait() }()
-	return &Process{pid: pid}, nil
+	p := &Process{pid: cmd.Process.Pid, executable: opts.Executable, done: make(chan struct{}), exitCode: -1}
+	// Only this goroutine calls Wait. It never signals or supervises. An exit
+	// status error still proves termination; other wait errors do not.
+	go func() {
+		err := cmd.Wait()
+		var exited *exec.ExitError
+		p.completed = cmd.ProcessState != nil && (err == nil || errors.As(err, &exited))
+		if p.completed {
+			p.exitCode = cmd.ProcessState.ExitCode()
+		}
+		close(p.done)
+	}()
+	return p, nil
 }
 
 // openOutputStream opens one child output stream: a caller-owned regular

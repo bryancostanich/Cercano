@@ -126,6 +126,10 @@ func ownedEchoMain() {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+	if err := checkOwnedCompletion(proc); err != nil {
+		writeResult("err completion: " + err.Error())
+		return
+	}
 	writeResult(fmt.Sprintf("ok pid=%d elapsed-ms=%d", proc.Pid(), time.Since(start).Milliseconds()))
 	os.Exit(0)
 }

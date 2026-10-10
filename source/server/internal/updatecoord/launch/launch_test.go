@@ -89,6 +89,9 @@ func launchEchoOnce(t *testing.T, stdoutPath, stderrPath string, extraBytes int)
 			// The exact OS answer observed: the child exited (and, on
 			// Unix, the launcher's reaper reaped it).
 			confirmedGone = true
+			if err := checkOwnedCompletion(proc); err != nil {
+				t.Fatal(err)
+			}
 			return pid
 		}
 		time.Sleep(10 * time.Millisecond)

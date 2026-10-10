@@ -310,13 +310,35 @@ func TestSafeStopCallbackOnceUnderConcurrentRepeats(t *testing.T) {
 	results := make(chan error, racers)
 	for i := 0; i < racers; i++ {
 		go func() {
-			_, err := f.client.ShutdownAgentWhenIdle(context.Background(), safeStopReq(pid))
+			resp, err := f.client.ShutdownAgentWhenIdle(context.Background(), safeStopReq(pid))
+			if err == nil && !resp.GetAccepted() {
+				err = errors.New("stop response not accepted")
+			}
 			results <- err
 		}()
 	}
+	accepted := 0
 	for i := 0; i < racers; i++ {
-		if err := <-results; err != nil {
+		err := <-results
+		if err == nil {
+			accepted++
+			continue
+		}
+		// Another owner may have sealed admission but not committed yet.
+		// Only this documented retryable response is allowed during the race.
+		if status.Code(err) != codes.Aborted {
 			t.Errorf("racing request: %v", err)
+		}
+	}
+	if accepted == 0 {
+		t.Fatal("no racing request committed")
+	}
+	// Once every racer has returned the winner is committed. Every repeat
+	// must now be accepted, without retries or duplicate shutdown callbacks.
+	for i := 0; i < racers; i++ {
+		resp, err := f.client.ShutdownAgentWhenIdle(context.Background(), safeStopReq(pid))
+		if err != nil || !resp.GetAccepted() {
+			t.Fatalf("committed repeat: %+v %v", resp, err)
 		}
 	}
 	if got := f.stop.invocations(); got != 1 {

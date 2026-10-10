@@ -97,6 +97,10 @@ const (
 	// returned solely for an explicit recorded prior selection and never
 	// licenses guessing a path or inventing a prior version.
 	ActionRestorePrior Action = "restore-prior-needed"
+	// These are recovery needs/observations, never deletion authorization.
+	// The executor must still prove candidate exit and exact selection ownership.
+	ActionRestoreAbsence  Action = "restore-absence-needed"
+	ActionAbsenceObserved Action = "absence-observed-await-confirmation"
 	// ActionCompleteConsistent: the journal is complete (or restored) and
 	// the observed selection agrees with its final state.
 	ActionCompleteConsistent Action = "complete-consistent"
@@ -109,32 +113,36 @@ const (
 type Reason string
 
 const (
-	ReasonFirstInstallBeforeSwitch        Reason = "first-install-before-switch"
-	ReasonPriorSelectionActive            Reason = "prior-selection-still-active"
-	ReasonTargetSelectedAwaitHealth       Reason = "target-selected-await-health"
-	ReasonHealthVerifiedCleanupPermitted  Reason = "health-verified-cleanup-permitted"
-	ReasonCleanupPendingRetry             Reason = "cleanup-pending-retry"
-	ReasonCompleteConsistent              Reason = "complete-consistent"
-	ReasonRestoredConsistent              Reason = "restored-consistent"
-	ReasonRestoreCommittedNotEffective    Reason = "restore-committed-not-effective"
-	ReasonRestoreEffective                Reason = "restore-already-effective"
-	ReasonHealthFailedRestorePrior        Reason = "health-failed-restore-prior"
-	ReasonJournalInvalid                  Reason = "journal-invalid"
-	ReasonObservationUnclassified         Reason = "observation-unclassified"
-	ReasonSelectionUnreadable             Reason = "selection-unreadable"
-	ReasonSelectionMalformed              Reason = "selection-malformed"
+	ReasonAbsenceRestored                Reason = "absence-restored-consistent"
+	ReasonAbsenceObserved                Reason = "absence-observed-await-confirmation"
+	ReasonAbsenceOutstanding             Reason = "absence-restoration-outstanding"
+	ReasonAbsenceContradicted            Reason = "absence-restored-but-target-present"
+	ReasonFirstInstallBeforeSwitch       Reason = "first-install-before-switch"
+	ReasonPriorSelectionActive           Reason = "prior-selection-still-active"
+	ReasonTargetSelectedAwaitHealth      Reason = "target-selected-await-health"
+	ReasonHealthVerifiedCleanupPermitted Reason = "health-verified-cleanup-permitted"
+	ReasonCleanupPendingRetry            Reason = "cleanup-pending-retry"
+	ReasonCompleteConsistent             Reason = "complete-consistent"
+	ReasonRestoredConsistent             Reason = "restored-consistent"
+	ReasonRestoreCommittedNotEffective   Reason = "restore-committed-not-effective"
+	ReasonRestoreEffective               Reason = "restore-already-effective"
+	ReasonHealthFailedRestorePrior       Reason = "health-failed-restore-prior"
+	ReasonJournalInvalid                 Reason = "journal-invalid"
+	ReasonObservationUnclassified        Reason = "observation-unclassified"
+	ReasonSelectionUnreadable            Reason = "selection-unreadable"
+	ReasonSelectionMalformed             Reason = "selection-malformed"
 	ReasonSelectionMissing               Reason = "selection-missing"
-	ReasonForeignInstallation             Reason = "foreign-installation"
-	ReasonSelectionUnrelated              Reason = "selection-unrelated"
-	ReasonTargetWithoutSwitchIntent       Reason = "target-selection-without-switch-intent"
-	ReasonFutureGeneration                Reason = "future-generation"
+	ReasonForeignInstallation            Reason = "foreign-installation"
+	ReasonSelectionUnrelated             Reason = "selection-unrelated"
+	ReasonTargetWithoutSwitchIntent      Reason = "target-selection-without-switch-intent"
+	ReasonFutureGeneration               Reason = "future-generation"
 	ReasonGenerationMismatch             Reason = "generation-mismatch"
-	ReasonDigestMismatch                  Reason = "digest-mismatch"
+	ReasonDigestMismatch                 Reason = "digest-mismatch"
 	ReasonStageIdentifierMismatch        Reason = "stage-identifier-mismatch"
-	ReasonSelectedNotEffective            Reason = "switch-recorded-but-not-effective"
-	ReasonRestoreRecordedButTargetActive  Reason = "restore-recorded-but-target-active"
-	ReasonHealthFailedNoPrior             Reason = "health-failed-no-prior-selection"
-	ReasonContradictoryFacts              Reason = "contradictory-facts"
+	ReasonSelectedNotEffective           Reason = "switch-recorded-but-not-effective"
+	ReasonRestoreRecordedButTargetActive Reason = "restore-recorded-but-target-active"
+	ReasonHealthFailedNoPrior            Reason = "health-failed-no-prior-selection"
+	ReasonContradictoryFacts             Reason = "contradictory-facts"
 )
 
 // Result is the typed decision: the next safe action and why.
@@ -242,6 +250,10 @@ func reconcileAbsent(j state.ActivationJournal) Result {
 		return ambiguous(ReasonSelectionMissing)
 	}
 	switch j.Checkpoint {
+	case state.JournalAbsenceIntent:
+		return Result{ActionAbsenceObserved, ReasonAbsenceObserved}
+	case state.JournalAbsenceRestored:
+		return Result{ActionCompleteConsistent, ReasonAbsenceRestored}
 	case state.JournalPrepared, state.JournalSwitchIntent:
 		// Explicit first install with no prior selection and no selection
 		// file yet: the switch has not happened. No rollback pretense.
@@ -318,7 +330,7 @@ func reconcileTarget(j state.ActivationJournal, facts ProvenFacts) Result {
 			if hasPrior(j) {
 				return Result{ActionRestorePrior, ReasonHealthFailedRestorePrior}
 			}
-			return ambiguous(ReasonHealthFailedNoPrior)
+			return Result{ActionRestoreAbsence, ReasonHealthFailedNoPrior}
 		}
 		// The file is the stronger evidence: the target is selected, so
 		// the next step is health verification (the journal may be
@@ -338,6 +350,10 @@ func reconcileTarget(j state.ActivationJournal, facts ProvenFacts) Result {
 		default:
 			return Result{ActionCompleteConsistent, ReasonCompleteConsistent}
 		}
+	case state.JournalAbsenceIntent:
+		return Result{ActionRestoreAbsence, ReasonAbsenceOutstanding}
+	case state.JournalAbsenceRestored:
+		return ambiguous(ReasonAbsenceContradicted)
 	case state.JournalRollbackIntent:
 		// The restore is committed but has not taken effect; the file
 		// proves the restore is still outstanding.

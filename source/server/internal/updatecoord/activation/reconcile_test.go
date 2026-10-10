@@ -263,10 +263,10 @@ func TestReconcileProvenHealthFailure(t *testing.T) {
 			wantNone:  Result{ActionAmbiguous, ReasonTargetWithoutSwitchIntent}},
 		{checkpoint: state.JournalSwitchIntent,
 			wantPrior: Result{ActionRestorePrior, ReasonHealthFailedRestorePrior},
-			wantNone:  Result{ActionAmbiguous, ReasonHealthFailedNoPrior}},
+			wantNone:  Result{ActionRestoreAbsence, ReasonHealthFailedNoPrior}},
 		{checkpoint: state.JournalSelected,
 			wantPrior: Result{ActionRestorePrior, ReasonHealthFailedRestorePrior},
-			wantNone:  Result{ActionAmbiguous, ReasonHealthFailedNoPrior}},
+			wantNone:  Result{ActionRestoreAbsence, ReasonHealthFailedNoPrior}},
 		// Durable verified-health records are not overridden by a later
 		// failure fact: manual recovery, never a silent contradiction.
 		{checkpoint: state.JournalHealthVerified,

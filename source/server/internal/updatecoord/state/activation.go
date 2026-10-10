@@ -23,8 +23,8 @@ package state
 //     journal is created only as prepared intent and moves only along
 //     legal successors. Same-checkpoint re-saves, skips, downgrades, and
 //     moves out of terminal checkpoints are refused with nothing written.
-//   - Rollback requires an explicit prior selection; a first activation
-//     (prior-none) cannot enter the rollback branch.
+//   - Prior-version rollback requires an explicit prior selection. First
+//     activation uses the separate, prior-none-only absence restoration branch.
 //   - Everything except Checkpoint is immutable after creation; corrupt
 //     rows are refused, never reset.
 
@@ -81,6 +81,11 @@ const (
 	JournalRollbackIntent JournalCheckpoint = "rollback-intent"
 	// JournalRestored records the restore was committed to. Terminal.
 	JournalRestored JournalCheckpoint = "restored"
+	// Absence restoration is distinct from restoring a previous version.
+	// These markers never authorize deletion without independently verified
+	// selection ownership and candidate-process completion.
+	JournalAbsenceIntent   JournalCheckpoint = "absence-intent"
+	JournalAbsenceRestored JournalCheckpoint = "absence-restored"
 )
 
 // journalCheckpointSuccessors is the complete transition-legality table.
@@ -91,14 +96,16 @@ const (
 // same-checkpoint re-saves are refused (the store is strictly forward, not
 // idempotent, at a checkpoint).
 var journalCheckpointSuccessors = map[JournalCheckpoint][]JournalCheckpoint{
-	JournalPrepared:       {JournalSwitchIntent, JournalRollbackIntent},
-	JournalSwitchIntent:   {JournalSelected, JournalRollbackIntent},
-	JournalSelected:       {JournalHealthVerified, JournalRollbackIntent},
-	JournalHealthVerified: {JournalCleanupPending, JournalComplete},
-	JournalCleanupPending: {JournalComplete},
-	JournalRollbackIntent: {JournalRestored},
-	JournalComplete:       nil, // terminal
-	JournalRestored:       nil, // terminal
+	JournalPrepared:        {JournalSwitchIntent, JournalRollbackIntent, JournalAbsenceIntent},
+	JournalSwitchIntent:    {JournalSelected, JournalRollbackIntent, JournalAbsenceIntent},
+	JournalSelected:        {JournalHealthVerified, JournalRollbackIntent, JournalAbsenceIntent},
+	JournalHealthVerified:  {JournalCleanupPending, JournalComplete},
+	JournalCleanupPending:  {JournalComplete},
+	JournalRollbackIntent:  {JournalRestored},
+	JournalComplete:        nil, // terminal
+	JournalRestored:        nil, // terminal
+	JournalAbsenceIntent:   {JournalAbsenceRestored},
+	JournalAbsenceRestored: nil,
 }
 
 // journalCheckpointLegal reports whether to is a legal successor of from.
@@ -448,11 +455,13 @@ func ValidateActivationJournal(j ActivationJournal, installID string) error {
 		return fmt.Errorf("%w: unknown journal checkpoint %q", ErrInvalidRecord, j.Checkpoint)
 	}
 	// Rollback intends to restore the prior complete selection; with no
-	// prior selection there is nothing to restore and this model defines
-	// no separate first-install cancellation checkpoint, so the record is
-	// refused rather than pretending a prior version exists.
+	// prior selection there is no prior version to restore. First activation
+	// instead uses the distinct absence-intent/absence-restored branch.
 	if (j.Checkpoint == JournalRollbackIntent || j.Checkpoint == JournalRestored) && j.PriorSelectedVersion == "" {
 		return fmt.Errorf("%w: rollback or restored state requires an explicit prior selection", ErrInvalidRecord)
+	}
+	if (j.Checkpoint == JournalAbsenceIntent || j.Checkpoint == JournalAbsenceRestored) && j.PriorSelectedVersion != "" {
+		return fmt.Errorf("%w: absence restoration requires explicit prior-none", ErrInvalidRecord)
 	}
 	return nil
 }

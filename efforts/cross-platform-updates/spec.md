@@ -106,6 +106,8 @@ If initial startup or health verification fails, restore the previous complete v
 
 The user approved extending the existing SQLite updater store for authoritative activation intent and recovery facts. Use additive, validated schema migrations that preserve existing operations and records; do not introduce a separate journal file. A small launcher-readable selection file remains separately reconciled against that journal. Database commits and filesystem selection changes are not one atomic operation. Migration approval covers implementation and isolated verification, not modifications to live installations.
 
+The user approved restoring explicit prior absence after a failed first activation: remove only the exact selection created by that operation, under installation exclusion and after proving the owned candidate has stopped. Do not delete version directories or user data. Record distinct absence-restoration intent and completion; mismatches or uncertain process ownership must refuse automatic removal.
+
 Power loss and process termination must leave a recoverable state. A selection file alone is not proof of a crash-safe transaction on Windows. Define durable journal/selection behavior, single-writer exclusion, startup reconciliation, and cleanup of abandoned stages, then verify them with fault injection and native tests.
 
 ## Trust model

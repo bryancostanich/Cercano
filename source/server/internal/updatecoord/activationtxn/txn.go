@@ -98,6 +98,8 @@ type PriorReceipt struct {
 
 // Request names every authority of one switch transaction explicitly.
 type Request struct {
+	// Images binds the journal target to verified staged executables. Required on all switch and resume paths.
+	Images *TargetImages
 	// Store is the open updater state store holding the operation record
 	// and the activation journal.
 	Store *state.Store
@@ -320,6 +322,9 @@ func runGuarded(ctx context.Context, req Request, guard exclusion.GuardSession) 
 		if err != nil {
 			return Result{}, err
 		}
+		if err := verifyTargetImages(ctx, req, journal); err != nil {
+			return Result{}, err
+		}
 		// Durable intent BEFORE any effect.
 		intent, intentRev, err := advance(ctx, req, journal, revision, state.JournalSwitchIntent)
 		if err != nil {
@@ -348,6 +353,9 @@ func runGuarded(ctx context.Context, req Request, guard exclusion.GuardSession) 
 
 	case state.JournalSelected:
 		if decision.Action == activation.ActionTargetAwaitHealth {
+			if err := verifyTargetImages(ctx, req, journal); err != nil {
+				return Result{}, err
+			}
 			// Idempotent reentry: nothing to write. The result names the
 			// next protocol step; it never claims health.
 			return Result{
@@ -438,6 +446,9 @@ func publishAndAcknowledge(ctx context.Context, req Request, guard exclusion.Gua
 			return Result{}, herr
 		}
 	}
+	if err := verifyTargetImages(ctx, req, journal); err != nil {
+		return Result{}, err
+	}
 	pub, perr := selection.PublishGuarded(ctx, guard, req.Directory, expected, target)
 	if perr != nil {
 		// Pre-commit refusal: the destination is unchanged and the journal
@@ -468,6 +479,9 @@ func publishAndAcknowledge(ctx context.Context, req Request, guard exclusion.Gua
 func acknowledge(ctx context.Context, req Request, journal state.ActivationJournal, revision int64, target activation.Selection, readback activation.Observed, published bool, digest string) (Result, error) {
 	if readback.State != activation.ObservedPresent || readback.Selection == nil || *readback.Selection != target {
 		return Result{}, fmt.Errorf("%w: readback is %s", ErrReadbackMismatch, readback.State)
+	}
+	if err := verifyTargetImages(ctx, req, journal); err != nil {
+		return Result{Target: target, Checkpoint: journal.Checkpoint, JournalRevision: revision, Published: published, SelectionDigest: digest}, err
 	}
 	_, rev, err := advance(ctx, req, journal, revision, state.JournalSelected)
 	if err != nil {

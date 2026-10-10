@@ -90,7 +90,7 @@ func TestSwitchSubprocessWorker(t *testing.T) {
 	// Reaching the return means the hook never fired: the boundary was
 	// not the one this fixture names, and the child must not silently
 	// complete the transaction.
-	res, err := Switch(ctx, Request{Store: store, Directory: dir, Lock: lock, OpID: opID})
+	res, err := Switch(ctx, Request{Store: store, Directory: dir, Lock: lock, OpID: opID, Images: fixtureImages(dir)})
 	t.Fatalf("subprocess fixture returned from Switch at phase %q (result %+v, err %v) instead of exiting at the boundary", phase, res, err)
 }
 
@@ -207,7 +207,7 @@ func TestSwitchSubprocessInterruptionRecovers(t *testing.T) {
 			}
 
 			// The recovery transaction itself.
-			res, err := Switch(ctx, Request{Store: store, Directory: f.dir, Lock: lock, OpID: f.opID})
+			res, err := Switch(ctx, Request{Store: store, Directory: f.dir, Lock: lock, OpID: f.opID, Images: fixtureImages(f.dir)})
 			if err != nil {
 				t.Fatalf("recovery Switch: %v", err)
 			}
@@ -258,7 +258,7 @@ func TestSwitchSubprocessInterruptionRecovers(t *testing.T) {
 			// acknowledged again, and health verification stays the
 			// named next step.
 			resumeBytes := afterBytes
-			res2, err := Switch(ctx, Request{Store: store, Directory: f.dir, Lock: lock, OpID: f.opID})
+			res2, err := Switch(ctx, Request{Store: store, Directory: f.dir, Lock: lock, OpID: f.opID, Images: fixtureImages(f.dir)})
 			if err != nil {
 				t.Fatalf("second resume Switch: %v", err)
 			}

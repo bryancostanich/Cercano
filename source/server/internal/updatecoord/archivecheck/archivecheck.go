@@ -238,8 +238,8 @@ func preflightSnapshot(ctx context.Context, ra io.ReaderAt, size int64, opts Opt
 	if err != nil {
 		return nil, nil, err
 	}
+	sum := sha256.Sum256(snap)
 	if id := opts.Identity; id != nil {
-		sum := sha256.Sum256(snap)
 		if !bytes.Equal(sum[:], id.SHA256) {
 			return nil, nil, errors.New("archivecheck: archive bytes do not match the SHA-256 of the verified receipt")
 		}
@@ -256,6 +256,7 @@ func preflightSnapshot(ctx context.Context, ra io.ReaderAt, size int64, opts Opt
 	if err != nil {
 		return nil, nil, err
 	}
+	man.ArchiveSHA256 = fmt.Sprintf("%x", sum)
 	return snap, man, nil
 }
 
@@ -305,7 +306,11 @@ type Member struct {
 
 // Manifest is the compact result of a fully validated archive.
 type Manifest struct {
-	Members []Member `json:"members"`
+	// ArchiveSHA256 is computed from the immutable compressed snapshot by
+	// PreflightFile/StageFile. Low-level Check has no complete snapshot and
+	// leaves it empty; a hash by itself is not publisher authentication.
+	ArchiveSHA256 string   `json:"archive_sha256,omitempty"`
+	Members       []Member `json:"members"`
 }
 
 // Check validates the archive's structure and content bounds and returns a

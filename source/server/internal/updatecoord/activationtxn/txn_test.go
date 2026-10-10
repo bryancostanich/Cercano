@@ -5,8 +5,7 @@ package activationtxn
 // verified private publication directory, and a real exclusion lease),
 // with no live default location, no process stop, no activation-version
 // rename, and no production keys. The staged version identifier is only
-// a recorded string: nothing installs, moves, or renames anything for it,
-// and the tests assert exactly that.
+// bound to inert executable fixtures, never installed or executed.
 
 import (
 	"context"
@@ -117,6 +116,7 @@ func newFixtureNoJournal(t *testing.T) *fixture {
 		_ = lock.Close()
 		_ = store.Close()
 	})
+	provisionFixtureImages(t, dir)
 	return f
 }
 
@@ -178,7 +178,7 @@ func (f *fixture) target() activation.Selection {
 }
 
 func (f *fixture) request() Request {
-	return Request{Store: f.store, Directory: f.dir, Lock: f.lock, OpID: f.opID}
+	return Request{Store: f.store, Directory: f.dir, Lock: f.lock, OpID: f.opID, Images: fixtureImages(f.dir)}
 }
 
 func (f *fixture) requestWithReceipt(sel activation.Selection, rawDigest string) Request {
@@ -289,8 +289,8 @@ func TestSwitchFirstInstallPublishesThenAcknowledges(t *testing.T) {
 	if raw := f.rawSelection(); rawDigest(t, raw) != res.SelectionDigest {
 		t.Fatalf("reported digest does not match the published bytes")
 	}
-	// The staged version directory is a recorded IDENTIFIER only: the
-	// switch never installs, creates, moves, or renames anything for it.
+	// Staged inert images were provisioned by the fixture. The switch
+	// only verifies them; it never installs, moves or creates a version.
 	// (The store's own state database and the exclusion lease's own
 	// update.lock also live in this directory.)
 	entries, err := os.ReadDir(f.dir)
@@ -299,7 +299,7 @@ func TestSwitchFirstInstallPublishesThenAcknowledges(t *testing.T) {
 	}
 	for _, e := range entries {
 		switch {
-		case e.Name() == selection.FileName, e.Name() == "update.lock",
+		case e.Name() == "versions", e.Name() == selection.FileName, e.Name() == "update.lock",
 			e.Name() == "state.db", e.Name() == "state.db-wal", e.Name() == "state.db-shm":
 		default:
 			t.Fatalf("unexpected publication directory entry %q", e.Name())
@@ -816,7 +816,7 @@ func TestSwitchConcurrentReentriesSerializeOnOneGuard(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			// Each goroutine reuses its own copy of the request.
-			r := Request{Store: f.store, Directory: f.dir, Lock: f.lock, OpID: f.opID}
+			r := Request{Store: f.store, Directory: f.dir, Lock: f.lock, OpID: f.opID, Images: fixtureImages(f.dir)}
 			_, err := Switch(context.Background(), r)
 			errs <- err
 		}()

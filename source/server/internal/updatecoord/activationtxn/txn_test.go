@@ -79,10 +79,24 @@ type fixture struct {
 func newFixtureNoJournal(t *testing.T) *fixture {
 	t.Helper()
 	root := t.TempDir()
+	// Provision only this newly owned fixture tree before SQLite opens it.
+	// Existing unsafe ACLs are never repaired by production verification.
+	org := "Cercano"
+	if runtime.GOOS == "linux" {
+		org = "cercano"
+	}
+	parent := root
+	for _, part := range []string{org, "updater", testInstall} {
+		parent = filepath.Join(parent, part)
+		if _, err := privdir.Ensure(parent); err != nil {
+			t.Fatal(err)
+		}
+	}
 	store, err := state.Open(root, testInstall)
 	if err != nil {
 		t.Fatalf("state.Open: %v", err)
 	}
+	t.Cleanup(func() { _ = store.Close() })
 	// The publication directory is the STORE's own directory — the same
 	// strict store==lease==publication identity the oneshot architecture
 	// acquires its lease on. The transaction refuses any other directory.

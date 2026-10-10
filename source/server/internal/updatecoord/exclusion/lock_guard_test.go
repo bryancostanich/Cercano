@@ -272,7 +272,7 @@ func TestClosePendingRefusesQueuedGuardWaiters(t *testing.T) {
 		waiterDone <- h.GuardUpdate(root, func() error { return nil })
 	}()
 	<-waiterStarted
-	time.Sleep(10 * time.Millisecond) // let the waiter reach the queue behind the live guard
+	// Refusal must depend on the real closing state, not scheduling delay.
 
 	closeStarted := make(chan struct{})
 	closeDone := make(chan error, 1)
@@ -281,7 +281,20 @@ func TestClosePendingRefusesQueuedGuardWaiters(t *testing.T) {
 		closeDone <- h.Close()
 	}()
 	<-closeStarted
-
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		h.mu.Lock()
+		pending := h.closeWait
+		h.mu.Unlock()
+		if pending {
+			break
+		}
+		if time.Now().After(deadline) {
+			close(release)
+			t.Fatal("Close did not enter pending state")
+		}
+		runtime.Gosched()
+	}
 	close(release)
 	if err := <-guardDone; err != nil {
 		t.Fatalf("live guarded use err = %v; want nil", err)
